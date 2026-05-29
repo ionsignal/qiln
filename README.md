@@ -25,7 +25,7 @@ One YAML blueprint. Isolated Incus workspaces. ZFS clones. Leased GPUs. HTTPS.
 
 Qiln turns a bare-metal GPU server into isolated, per-user AI workspaces. Define a workload with a YAML blueprint — ComfyUI, vLLM, JupyterLab, Ollama, or your own app — and Qiln handles the container, storage, GPU access, and HTTPS routing.
 
-The goal is simple: own the GPUs, keep control of your data, and avoid running Kubernetes for a box or two with 4–16 GPUs.
+The goal is simple: own the GPUs, keep control of your data, and stop running Kubernetes for a 4–16 GPU deployment.
 
 Qiln is developed by [IonSignal, Inc.](https://ionsignal.com).
 
