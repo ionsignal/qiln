@@ -10,21 +10,13 @@
 </p>
 
 <p align="center">
-  <a href="./LICENSE">
-    <img alt="License: Apache 2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue">
-  </a>
-  <a href="#status">
-    <img alt="Status: pre-release alpha" src="https://img.shields.io/badge/status-pre--release_alpha-orange">
-  </a>
-  <a href="#first-release-scope">
-    <img alt="Scope: single node first" src="https://img.shields.io/badge/scope-single--node_first-7c3aed">
-  </a>
-  <a href="#license">
-    <img alt="CLA: none" src="https://img.shields.io/badge/CLA-none-brightgreen">
-  </a>
-  <a href="https://qiln.com">
-    <img alt="Join the waitlist" src="https://img.shields.io/badge/join-waitlist-white">
-  </a>
+
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](./LICENSE)
+[![Status: pre-release alpha](https://img.shields.io/badge/status-pre--release%20alpha-orange)](#status)
+[![Scope: single node first](https://img.shields.io/badge/scope-single--node%20first-7c3aed)](#first-release-scope)
+[![CLA: none](https://img.shields.io/badge/CLA-none-brightgreen)](#license)
+[![Join the waitlist](https://img.shields.io/badge/join-waitlist-white)](https://qiln.com)
+
 </p>
 
 <p align="center">
