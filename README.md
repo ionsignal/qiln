@@ -1,22 +1,18 @@
-<p align="center">
-  <img src="./assets/brand/qiln-readme.png" alt="Qiln — self-hosted GPU workspaces on hardware you own" width="900">
-</p>
+<img src="./assets/brand/qiln-readme.png" alt="Qiln — self-hosted GPU workspaces on hardware you own" width="900">
 
-<p>
-  <strong>Self-hosted GPU workspaces on hardware you own.</strong><br>
-  One YAML blueprint. Isolated Incus workspaces. ZFS clones. Leased GPUs. HTTPS.
-</p>
+**Self-hosted GPU workspaces on hardware you own.**  
+One YAML blueprint. Isolated Incus workspaces. ZFS clones. Leased GPUs. HTTPS.
 
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](./LICENSE)
 [![Status: pre-release alpha](https://img.shields.io/badge/status-pre--release%20alpha-orange)](#status)
 [![Scope: single node first](https://img.shields.io/badge/scope-single--node%20first-7c3aed)](#first-release-scope)
 [![CLA: none](https://img.shields.io/badge/CLA-none-brightgreen)](#license)
-[![Join the waitlist](https://img.shields.io/badge/join-waitlist-white)](https://qiln.com)
+[![Join the waitlist](https://img.shields.io/badge/join-waitlist-7c3aed)](https://qiln.com)
 
 <p>
   <a href="https://qiln.com"><strong>Join the waitlist</strong></a>
   ·
-  <a href="https://discord.gg/eNaxauuyZ6"><strong>Discord</strong></a>
+  <a href="https://discord.gg/eNaxauuyZ6">Discord</a>
   ·
   <a href="#status">Status</a>
   ·
