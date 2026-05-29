@@ -1,6 +1,45 @@
-# Qiln
+<p align="center">
+  <img src="./assets/brand/qiln-readme.png" alt="Qiln — self-hosted GPU workspaces on hardware you own" width="900">
+</p>
 
-**Self-hosted GPU workspaces on hardware you own.**
+<h1 align="center">Qiln</h1>
+
+<p align="center">
+  <strong>Self-hosted GPU workspaces on hardware you own.</strong><br>
+  One YAML blueprint. Isolated Incus workspaces. ZFS clones. Leased GPUs. HTTPS.
+</p>
+
+<p align="center">
+  <a href="./LICENSE">
+    <img alt="License: Apache 2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue">
+  </a>
+  <a href="#status">
+    <img alt="Status: pre-release alpha" src="https://img.shields.io/badge/status-pre--release_alpha-orange">
+  </a>
+  <a href="#first-release-scope">
+    <img alt="Scope: single node first" src="https://img.shields.io/badge/scope-single--node_first-7c3aed">
+  </a>
+  <a href="#license">
+    <img alt="CLA: none" src="https://img.shields.io/badge/CLA-none-brightgreen">
+  </a>
+  <a href="https://qiln.com">
+    <img alt="Join the waitlist" src="https://img.shields.io/badge/join-waitlist-white">
+  </a>
+</p>
+
+<p align="center">
+  <a href="https://qiln.com"><strong>Join the waitlist</strong></a>
+  ·
+  <a href="https://discord.gg/eNaxauuyZ6"><strong>Discord</strong></a>
+  ·
+  <a href="#status">Status</a>
+  ·
+  <a href="#how-it-works">How it works</a>
+  ·
+  <a href="#first-release-scope">First release scope</a>
+  ·
+  <a href="#license">License</a>
+</p>
 
 Qiln turns a bare-metal GPU server into isolated, per-user AI workspaces. Define a workload with a YAML blueprint — ComfyUI, vLLM, JupyterLab, Ollama, or your own app — and Qiln handles the container, storage, GPU access, and HTTPS routing.
 
@@ -8,17 +47,31 @@ The goal is simple: own the GPUs, keep control of your data, and avoid running K
 
 Qiln is developed by [IonSignal, Inc.](https://ionsignal.com).
 
+## Contents
+
+- [Status](#status)
+- [Who Qiln is for](#who-qiln-is-for)
+- [What Qiln does](#what-qiln-does)
+- [How it works](#how-it-works)
+- [What Qiln is not](#what-qiln-is-not)
+- [First release scope](#first-release-scope)
+- [Planned repository layout](#planned-repository-layout)
+- [Documentation](#documentation)
+- [Stack](#stack)
+- [License](#license)
+- [Security](#security)
+
 ## Status
 
 Qiln is pre-release infrastructure.
 
 The public source will open here for the first usable alpha, `v0.1.0`. Until then, this repository is intentionally minimal and serves as the future public source home for Qiln.
 
-The private development branch currently includes the core single-node engine, including:
+The private development branch currently includes core primitives for:
 
 - Incus-based per-user workspace provisioning
 - YAML blueprint loading and validation
-- ZFS-backed storage volume creation and cloning primitives
+- ZFS-backed storage volume creation and cloning
 - GPU lease lifecycle for supported workloads
 - automatic HTTPS routing through Caddy
 - NATS-based internal eventing
@@ -35,9 +88,7 @@ The public `v0.1.0` release is gated on:
 - stable blueprint examples for common AI workloads
 - preparation of the source tree for external review and contribution
 
-Qiln is not publicly installable yet.
-
-If you own GPUs and want to help shape the alpha, [join the waitlist](https://qiln.com).
+Qiln is not publicly installable yet. If you own GPUs and want to help shape the alpha, [join the waitlist](https://qiln.com).
 
 We are prioritizing:
 
@@ -121,7 +172,7 @@ The first public alpha is expected to support:
 - Incus for container isolation
 - ZFS for copy-on-write vaults
 - Caddy for HTTPS routing
-- NATS for internal eventing, preparation for larger incus cluster support
+- NATS for internal eventing and preparation for Incus cluster support
 - Postgres for state
 - browser-based admin UI
 - official blueprints for common AI workloads
