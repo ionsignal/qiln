@@ -1,0 +1,23 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "rootDir": "./",
+    "outDir": "../dist/server",
+    "lib": ["es2025"],
+    "types": ["@types/node", "../types"],
+    "moduleResolution": "bundler",
+    "resolveJsonModule": true,
+    "allowSyntheticDefaultImports": true,
+    "incremental": true,
+    "paths": {
+      "@/*": ["../*"],
+      "@server/*": ["./*"]
+    }
+  },
+  "tsc-alias": {
+    "verbose": true
+  },
+  "include": ["./**/*.ts"],
+  "exclude": ["node_modules"]
+}
