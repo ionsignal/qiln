@@ -2,14 +2,10 @@
   <img src="./assets/brand/qiln-readme.png" alt="Qiln — self-hosted GPU workspaces on hardware you own" width="900">
 </p>
 
-<h1 align="center">Qiln</h1>
-
-<p align="center">
+<p>
   <strong>Self-hosted GPU workspaces on hardware you own.</strong><br>
   One YAML blueprint. Isolated Incus workspaces. ZFS clones. Leased GPUs. HTTPS.
 </p>
-
-<p align="center">
 
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-blue)](./LICENSE)
 [![Status: pre-release alpha](https://img.shields.io/badge/status-pre--release%20alpha-orange)](#status)
@@ -17,9 +13,7 @@
 [![CLA: none](https://img.shields.io/badge/CLA-none-brightgreen)](#license)
 [![Join the waitlist](https://img.shields.io/badge/join-waitlist-white)](https://qiln.com)
 
-</p>
-
-<p align="center">
+<p>
   <a href="https://qiln.com"><strong>Join the waitlist</strong></a>
   ·
   <a href="https://discord.gg/eNaxauuyZ6"><strong>Discord</strong></a>
