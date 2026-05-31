@@ -1,0 +1,17 @@
+{
+	"folders": [
+		{
+			"path": "."
+		},
+		{
+			"path": "../vike"
+		},
+		{
+			"path": "../trpc"
+		},
+		{
+			"path": "../dstack"
+		}
+	],
+	"settings": {}
+}

@@ -20,7 +20,7 @@ export interface SmartSentinelOptions {
 export function sentinel(options: SmartSentinelOptions = {}): Plugin {
   const chunkName = options.chunkName ?? 'server.js'
   const sentinelFile = options.sentinelFile ?? 'dist/.build-complete'
-  const hostTsConfig = options.hostTsConfig ?? '../../server/tsconfig.json'
+  const hostTsConfig = options.hostTsConfig ?? '../../app/server/tsconfig.json'
   let lastHash = ''
   return {
     name: 'qiln:smart-sentinel',

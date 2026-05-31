@@ -27,7 +27,7 @@ const rootUserData = [
 async function seed() {
   console.log('[Seed] Loading configuration...')
   const { config } = await loadConfig<EnvironmentConfig>({
-    configFile: 'dist/server/config',
+    configFile: 'app/dist/server/config',
     dotenv: true,
   })
   if (!config || !config.database?.url) {

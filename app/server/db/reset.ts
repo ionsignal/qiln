@@ -8,7 +8,7 @@ import type { EnvironmentConfig } from '@/types'
 async function reset() {
   console.log('[Reset] Loading configuration...')
   const { config } = await loadConfig<EnvironmentConfig>({
-    configFile: 'dist/server/config',
+    configFile: 'app/dist/server/config',
     dotenv: true,
   })
   if (!config || !config.database?.url) {

@@ -17,7 +17,7 @@ const closeListeners = grace(graceOptions, async (callback: any) => {
 
 let fastifyServer: Server
 let config: EnvironmentConfig
-let options = { configFile: 'dist/server/config', dotenv: true }
+let options = { configFile: 'app/dist/server/config', dotenv: true }
 loadConfig<EnvironmentConfig>(options).then(async resolved => {
   if (!resolved.config) {
     throw Error('application environment configuration missing')

@@ -1,0 +1,22 @@
+{
+  "extends": "../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "ESNext",
+    "lib": ["DOM", "ESNext"]
+  },
+  "include": [
+    "./vite.config.ts",
+    "./*.d.ts",
+    "./types/**/*.ts",
+    "./types/**/*.d.ts",
+    "./pages/**/*.ts",
+    "./pages/**/*.vue",
+    "./components/**/*.ts",
+    "./components/**/*.vue",
+    "./renderer/**/*.ts",
+    "./renderer/**/*.vue",
+    "./store/**/*.ts",
+    "./composables/**/*.ts"
+  ],
+  "exclude": ["node_modules", "dist", "server"]
+}

@@ -1,21 +1,13 @@
+// tsconfig.json
 {
   "extends": "./tsconfig.base.json",
   "compilerOptions": {
     "module": "ESNext",
-    "lib": ["DOM", "ESNext"]
+    "moduleResolution": "Bundler",
+    "lib": ["ES2025"],
+    "types": ["node"],
+    "noEmit": true
   },
-  "include": [
-    "./vite.config.ts",
-    "./*.d.ts",
-    "./types/**/*.ts",
-    "./pages/**/*.ts",
-    "./pages/**/*.vue",
-    "./components/**/*.ts",
-    "./components/**/*.vue",
-    "./renderer/**/*.ts",
-    "./renderer/**/*.vue",
-    "./store/**/*.ts",
-    "./composables/**/*.ts"
-  ],
-  "exclude": ["node_modules", "dist", "server"]
+  "include": ["./*.ts"],
+  "exclude": ["node_modules", "dist", "app", "packages"]
 }
