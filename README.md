@@ -84,7 +84,6 @@ The private development branch currently includes core primitives for:
 
 The public `v0.1.0` release is gated on:
 
-- a repeatable one-command installer
 - finalized admin and user UI flows
 - a usable vault/file browser with image previews and file editing
 - model import flows, including Hugging Face integration
