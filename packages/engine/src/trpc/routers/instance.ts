@@ -66,7 +66,7 @@ export const instanceRouter = router({
     .input(
       z.object({
         name: ContainerNameSchema,
-        definition: z.string().trim().min(1, 'Definition name cannot be empty.').default('papermc'),
+        definition: z.string().trim().min(1, 'Definition name cannot be empty.').default('qiln-n8n-comfyui'),
         cpu: z.string().default('4'),
         memory: z.string().default('4GB'),
       }),

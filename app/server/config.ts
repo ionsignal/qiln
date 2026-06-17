@@ -32,7 +32,7 @@ export default {
   ssl: process.env.VITE_ENABLE_SSL ?? 'false',
   path: appPath,
   definitions: {
-    path: process.env.APP_DEFINITIONS_PATH ?? path.join(appPath, 'configs/applications'),
+    path: process.env.APP_DEFINITIONS_PATH ?? path.join(appPath, 'catalog/blueprints'),
   },
   cookies: {
     name: process.env.COOKIE_NAME ?? 'runemind_session',

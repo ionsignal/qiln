@@ -1,0 +1,227 @@
+image:
+  distribution: ubuntu
+  release: noble
+  architecture: amd64
+  description: 'Qiln Base AI Workflow Capsule (Python 3.13 / Node v22)'
+
+source:
+  downloader: debootstrap
+  url: http://archive.ubuntu.com/ubuntu
+  keyserver: keyserver.ubuntu.com
+  keys:
+    - 0xF6ECB3762474EDA9D21B7022871920D1991BC93C # Ubuntu Archive Automatic Signing Key (2018)
+
+packages:
+  manager: apt
+  update: true
+  cleanup: true
+  sets:
+    # Early Packages
+    - packages:
+        - ca-certificates
+        - wget
+        - gnupg
+      action: install
+      early: true
+    # Standard Packages
+    - packages:
+        # Base System Utilities & Networking
+        - tzdata
+        - tar
+        - vim
+        - systemd
+        - systemd-sysv
+        - netplan.io
+        - iproute2
+        - locales
+        - curl
+        - rsync
+        - cloud-init
+        # Toolchains & Compilers
+        - build-essential
+        - g++
+        - git
+        - cmake
+        # Compression & Extraction Primitives
+        - unzip
+        - zstd
+        - gzip
+        # Media & Hardware Interface Codecs
+        - libgl1
+        - libglx-mesa0
+        - libglib2.0-0
+        - ffmpeg
+        # Runtimes
+        - python3.13
+        - python3.13-dev
+        - python3.13-venv
+        - nodejs
+      action: install
+
+  repositories:
+    # Standard Ubuntu Repositories
+    - name: sources.list
+      url: |-
+        deb http://archive.ubuntu.com/ubuntu {{ image.release }} main restricted universe multiverse
+        deb http://archive.ubuntu.com/ubuntu {{ image.release }}-updates main restricted universe multiverse
+        deb http://security.ubuntu.com/ubuntu {{ image.release }}-security main restricted universe multiverse
+    # Python 3.13 Deadsnakes Repository
+    - name: deadsnakes.list
+      url: |-
+        deb [signed-by=/etc/apt/keyrings/deadsnakes.gpg] https://ppa.launchpadcontent.net/deadsnakes/ppa/ubuntu {{ image.release }} main
+    # NodeSource Node.js v22 Repository
+    - name: nodesource.list
+      url: |-
+        deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main
+
+actions:
+  # Bootstrap GPG Keyrings securely prior to APT catalog execution
+  - trigger: post-unpack
+    action: |-
+      #!/bin/sh
+      set -eux
+
+      # Ensure isolated, strict-permission keyring directories exist
+      mkdir -p /etc/apt/keyrings
+      chmod 755 /etc/apt/keyrings
+
+      # NodeSource GPG signing key
+      wget -qO- https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
+      chmod 644 /etc/apt/keyrings/nodesource.gpg
+
+      # Deadsnakes PPA signing key
+      gpg --homedir /tmp --no-default-keyring --keyring /etc/apt/keyrings/deadsnakes.gpg --keyserver hkps://keyserver.ubuntu.com --recv-keys F23C5A6CF475977595C89F51BA6932366A755776
+      chmod 644 /etc/apt/keyrings/deadsnakes.gpg
+  # User provisioning, filesystem layout, and virtual environments
+  - trigger: post-packages
+    action: |-
+      #!/bin/sh
+      set -ex
+
+      # Enforce correct UTF-8 locales inside the image compilation context
+      locale-gen en_US.UTF-8
+      update-locale LANG=en_US.UTF-8
+
+      # Provision the unprivileged qiln system runtime user (UID/GID 1000)
+      groupadd -g 1000 qiln
+      useradd -u 1000 -g 1000 -m -s /bin/bash -d /home/qiln qiln
+
+      # Create bin/config storage paths for Qiln engine internal tasks
+      mkdir -p /opt/qiln
+      mkdir -p /opt/qiln/bin
+
+      # Bootstrap and isolate the Python 3.13 Global Virtual Environment
+      python3.13 -m venv /opt/qiln/venv
+      /opt/qiln/venv/bin/pip install --no-cache-dir --upgrade pip setuptools wheel
+
+      # Bootstrap Node.js PM defaults
+      npm install -g pnpm
+
+      # Apply recursive ownership limits to the qiln unprivileged user
+      chown -R qiln:qiln /opt/qiln
+      chown -R qiln:qiln /home/qiln
+  # # Final boot initialization and service hooks
+  # - trigger: post-files
+  #   action: |-
+  #     #!/bin/sh
+  #     set -e
+  #     # Ensure the dynamic entrypoint script is executable
+  #     chmod +x /opt/qiln/bin/entrypoint.sh
+  #     chown qiln:qiln /opt/qiln/bin/entrypoint.sh
+  #     # Enable the systemd service so it executes automatically on instance creation
+  #     ln -sf /etc/systemd/system/qiln-capsule.service /etc/systemd/system/multi-user.target.wants/qiln-capsule.service
+
+files:
+  # Add cloud-init
+  - name: meta-data
+    generator: cloud-init
+  - name: network-config
+    generator: cloud-init
+  - name: user-data
+    generator: cloud-init
+  - name: vendor-data
+    generator: cloud-init
+  # Prevent container machine-id overlapping
+  - path: /etc/machine-id
+    generator: dump
+    content: ''
+  - path: /var/lib/dbus/machine-id
+    generator: remove
+  # Systemd Network configuration
+  - path: /etc/netplan/10-incus.yaml
+    generator: dump
+    content: |-
+      network:
+        version: 2
+        ethernets:
+          eth0:
+            dhcp4: true
+            dhcp-identifier: mac
+  # Pin NodeSource Node.js packages to prevent upstream APT repository pollution
+  - path: /etc/apt/preferences.d/nodejs
+    generator: dump
+    content: |-
+      Package: nodejs
+      Pin: origin deb.nodesource.com
+      Pin-Priority: 600
+  # # Standby Runtime Entrypoint Loader
+  # - path: /opt/qiln/bin/entrypoint.sh
+  #   generator: dump
+  #   content: |-
+  #     #!/bin/bash
+  #     # Standby initialization loader inside the capsule sandbox.
+  #     # If a dynamic bootstrap script exists (injected during workspace setup),
+  #     # execute it; otherwise, enter a holding pattern awaiting engine command injection.
+
+  #     set -eo pipefail
+
+  #     LOG_FILE="/workspace/logs/capsule-init.log"
+  #     mkdir -p "$(dirname "$LOG_FILE")"
+
+  #     exec > >(tee -a "$LOG_FILE") 2>&1
+
+  #     echo "========================================="
+  #     echo "Starting Qiln Capsule Initialization..."
+  #     echo "Timestamp: $(date)"
+  #     echo "System: Python $(/opt/qiln/venv/bin/python --version) | Node $(node -v)"
+  #     echo "========================================="
+
+  #     # Check for dynamically injected entrypoint/bootstrap scripts inside the workflow mount
+  #     DYNAMIC_BOOTSTRAP="/workspace/workflows/bootstrap.sh"
+
+  #     if [ -f "$DYNAMIC_BOOTSTRAP" ]; then
+  #       echo "Found dynamic workspace bootstrap hook at: $DYNAMIC_BOOTSTRAP"
+  #       echo "Executing workspace bootstrap..."
+  #       chmod +x "$DYNAMIC_BOOTSTRAP"
+  #       exec "$DYNAMIC_BOOTSTRAP"
+  #     else
+  #       echo "No dynamic bootstrap scripts found. Entering standby server mode..."
+  #       # Idle loop to keep the container running if no default task is provided
+  #       while true; do
+  #         sleep 3600
+  #       done
+  #     fi
+  # # Systemd Configuration for Capsule Services
+  # - path: /etc/systemd/system/qiln-capsule.service
+  #   generator: dump
+  #   mode: '0644'
+  #   content: |-
+  #     [Unit]
+  #     Description=Qiln AI Workflow Capsule Daemon
+  #     After=network.target
+
+  #     [Service]
+  #     Type=simple
+  #     User=qiln
+  #     Group=qiln
+  #     WorkingDirectory=/workspace
+  #     Environment="PATH=/opt/qiln/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+  #     ExecStart=/opt/qiln/bin/entrypoint.sh
+  #     Restart=always
+  #     RestartSec=5
+  #     StandardOutput=journal
+  #     StandardError=journal
+  #     TimeoutStopSec=60
+
+  #     [Install]
+  #     WantedBy=multi-user.target

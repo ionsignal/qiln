@@ -1,9 +1,12 @@
+import path from 'node:path'
+import { parseDocument, isMap, isSeq, isScalar, YAMLMap, YAMLSeq } from 'yaml'
 import { eq, and, inArray } from 'drizzle-orm'
 import { extractIpv4 } from '../incus/utils'
 import { librarySchema, type HostDbContract } from '../db'
 import { IncusError, isUniqueConstraintViolation } from '../errors'
 import { HostEventType } from '../schemas/constants'
 import { interpolate } from '../utils/template'
+import type { Node, ParsedNode } from 'yaml'
 import type { IncusClient } from '../incus/client/index'
 import type { HostEventBroker } from '../types'
 import type { IncusDeviceMap } from '../schemas/incus'
@@ -24,14 +27,11 @@ export class InstanceService {
   ) {}
 
   /**
-   * Helper to safely strip the 'B' from 'GB'/'MB' to prevent JVM crashes.
-   */
-  private formatJavaMemory(memory: string): string {
-    return memory.replace(/B$/i, '')
-  }
-
-  /**
    * Helper to safely transition an instance's state.
+   *
+   * TODO: Look into potentially removing this, instance state should be requested directly from
+   * incus using its event system and api, why are we persiting this into the database? Do we
+   * really need to track this in the database?
    */
   private async transitionState(
     ownerId: string,
@@ -52,6 +52,66 @@ export class InstanceService {
         status,
       })
       .catch(err => console.warn(`[InstanceService] Failed to publish state '${status}' for ${name}:`, err.message))
+  }
+
+  /**
+   * Evaluates a file path against a sorted list of managed volumes to determine
+   * if the file should be routed to an offline ZFS volume instead of the rootfs.
+   */
+  private resolveFileTarget(
+    filePath: string,
+    managedVolumes: { pool: string; volumeName: string; mountPath: string }[],
+  ): { target: 'volume'; pool: string; volumeName: string; internalPath: string } | { target: 'instance' } {
+    const normalizedFilePath = path.posix.normalize(filePath)
+    for (const vol of managedVolumes) {
+      const normalizedMountPath = path.posix.normalize(vol.mountPath)
+      const rel = path.posix.relative(normalizedMountPath, normalizedFilePath)
+      if (rel === '' || (!rel.startsWith('..') && !path.posix.isAbsolute(rel))) {
+        return {
+          target: 'volume',
+          pool: vol.pool,
+          volumeName: vol.volumeName,
+          internalPath: path.posix.join('/', rel),
+        }
+      }
+    }
+    return { target: 'instance' }
+  }
+
+  /**
+   * Safely merges new commands into the cloud-init bootcmd array using the YAML AST.
+   * This preserves all user comments, formatting, and surrounding structure.
+   */
+  private mergeCloudInit(existingData: string | undefined, commands: string[][]): string {
+    if (existingData?.trimStart().startsWith('#!')) {
+      throw new IncusError('Cannot merge cloud-init commands into a raw shell script.', 'VALIDATION_ERROR')
+    }
+    const cleanYaml = existingData ? existingData.replace(/^#cloud-config\s*\n/, '') : ''
+    const doc = parseDocument(cleanYaml)
+    if (!doc.contents || !isMap(doc.contents)) {
+      doc.contents = doc.createNode({}) as unknown as ParsedNode
+    }
+    const rootMap = doc.contents as YAMLMap<unknown, unknown>
+    if (isMap(rootMap)) {
+      const rawBootcmd = rootMap.get('bootcmd', true)
+      let seqNode: YAMLSeq<Node>
+      if (!rawBootcmd) {
+        seqNode = doc.createNode([]) as YAMLSeq<Node>
+        rootMap.set('bootcmd', seqNode)
+      } else if (isScalar(rawBootcmd)) {
+        seqNode = doc.createNode([rawBootcmd.value]) as YAMLSeq<Node>
+        rootMap.set('bootcmd', seqNode)
+      } else if (isSeq(rawBootcmd)) {
+        seqNode = rawBootcmd as YAMLSeq<Node>
+      } else {
+        seqNode = doc.createNode([]) as YAMLSeq<Node>
+        rootMap.set('bootcmd', seqNode)
+      }
+      for (const cmd of commands) {
+        seqNode.items.push(doc.createNode(cmd) as Node)
+      }
+    }
+    return `#cloud-config\n${String(doc)}`
   }
 
   /**
@@ -93,7 +153,7 @@ export class InstanceService {
   public async create(
     ownerId: string,
     name: string,
-    definition: string = 'papermc',
+    definition: string = 'qiln-n8n-comfyui',
     cpu: string = '4',
     memory: string = '4GB',
   ): Promise<{ success: boolean }> {
@@ -119,37 +179,68 @@ export class InstanceService {
     const namespace = this.project.getNamespace(ownerId)
     const project = this.incus.UseProject(namespace)
     const rollbackStack: Array<() => Promise<void>> = []
+    const managedVolumes: { pool: string; volumeName: string; mountPath: string }[] = []
     try {
       await this.project.ensureNamespace(ownerId)
       const dynamicDevices: IncusDeviceMap = {}
       for (const vol of blueprint.provisioning.volumes) {
         const volName = `${name}-${vol.name}`
-        const config: Record<string, string> = {}
-        if (vol.shifted) {
-          config['security.shifted'] = 'true'
-        }
-        if (vol.type === 'clone') {
-          if (!vol.source_vault) throw new IncusError(`Volume clone requires 'source_vault'`, 'VALIDATION_ERROR')
-          await project.storage.clone(vol.pool, vol.source_vault, volName, config, SOURCE_PROJECT)
-        } else if (vol.type === 'empty') {
-          await project.storage.create(vol.pool, volName, config)
-        }
-        rollbackStack.push(async () => {
-          await project.storage.delete(vol.pool, volName)
-        })
-        dynamicDevices[vol.name] = {
-          type: 'disk',
-          pool: vol.pool,
-          source: volName,
-          path: vol.mount_path,
+        switch (vol.type) {
+          case 'bind':
+            dynamicDevices[vol.name] = {
+              type: 'disk',
+              source: vol.host_path,
+              path: vol.mount_path,
+              readonly: vol.readonly ? 'true' : 'false',
+              shift: vol.shifted ? 'true' : 'false',
+            }
+            break
+          case 'empty':
+          case 'clone': {
+            const config: Record<string, string> = {}
+            if (vol.shifted) {
+              config['security.shifted'] = 'true'
+            }
+            if (vol.type === 'clone') {
+              await project.storage.clone(vol.pool, vol.source_volume, volName, config, SOURCE_PROJECT)
+            } else {
+              await project.storage.create(vol.pool, volName, config)
+            }
+            rollbackStack.push(async () => {
+              await project.storage.delete(vol.pool, volName)
+            })
+            dynamicDevices[vol.name] = {
+              type: 'disk',
+              pool: vol.pool,
+              source: volName,
+              path: vol.mount_path,
+              readonly: vol.readonly ? 'true' : 'false',
+            }
+            managedVolumes.push({
+              pool: vol.pool,
+              volumeName: volName,
+              mountPath: vol.mount_path,
+            })
+            break
+          }
         }
       }
+
+      // Sort managed volumes by mountPath length descending for Longest-Prefix Match
+      managedVolumes.sort((a, b) => b.mountPath.length - a.mountPath.length)
+
       const env: Record<string, string> = {
         ...blueprint.instance_template.config,
         'environment.QILN_TENANT_ID': name,
         'limits.cpu': cpu,
         'limits.memory': memory,
       }
+
+      if (managedVolumes.length > 0) {
+        const chownCommands = managedVolumes.map(vol => ['chown', '1000:1000', vol.mountPath])
+        env['user.vendor-data'] = this.mergeCloudInit(env['user.vendor-data'], chownCommands)
+      }
+
       const devices: IncusDeviceMap = {
         ...blueprint.instance_template.devices,
         ...dynamicDevices,
@@ -170,17 +261,26 @@ export class InstanceService {
           cpu,
           memory: {
             raw: memory,
-            java: this.formatJavaMemory(memory),
           },
         },
       }
       for (const file of blueprint.provisioning.files) {
-        const content = interpolate(file.content, context)
-        await project.files.write(name, file.path, content, {
+        let content = ''
+        if (file.content !== undefined) {
+          content = interpolate(file.content, context)
+        }
+        const route = this.resolveFileTarget(file.path, managedVolumes)
+        const pushOptions = {
           uid: file.uid,
           gid: file.gid,
           mode: file.mode,
-        })
+          type: file.type,
+        }
+        if (route.target === 'volume') {
+          await project.storage.files.write(route.pool, route.volumeName, route.internalPath, content, pushOptions)
+        } else {
+          await project.files.write(name, file.path, content, pushOptions)
+        }
       }
       await this.transitionState(ownerId, name, 'offline')
       return { success: true }

@@ -1,3 +1,4 @@
+import path from 'node:path'
 import { IncusClient } from './incus/client/index'
 import { InstanceService } from './services/instance'
 import { FileService } from './services/file'
@@ -35,8 +36,9 @@ export class QilnEngineController {
   }
 
   public async start() {
-    const path = this.config.definitions?.path || `${process.cwd()}/configs/applications`
-    await this.registry.load(path)
+    const configuredPath = this.config.definitions?.path
+    const definitionsPath = configuredPath ? path.resolve(configuredPath) : path.resolve(process.cwd(), 'catalog', 'blueprints')
+    await this.registry.load(definitionsPath)
     await this.incus.init()
     await this.broker.start()
     registerNatsRouters(this)

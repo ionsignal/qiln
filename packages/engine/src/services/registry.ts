@@ -13,8 +13,10 @@ export class DefinitionRegistryService {
    */
   public async load(directory: string): Promise<void> {
     try {
-      const files = await fs.readdir(directory)
-      const yamlFiles = files.filter(f => f.endsWith('.yaml') || f.endsWith('.yml'))
+      const entries = await fs.readdir(directory, { withFileTypes: true })
+      const yamlFiles = entries
+        .filter(dirent => dirent.isFile() && (dirent.name.endsWith('.yaml') || dirent.name.endsWith('.yml')))
+        .map(dirent => dirent.name)
       for (const file of yamlFiles) {
         const filePath = path.join(directory, file)
         const content = await fs.readFile(filePath, 'utf-8')
@@ -31,7 +33,11 @@ export class DefinitionRegistryService {
         this.cache.set(definition.name, definition)
       }
       console.log(`[QilnEngine Registry] Successfully loaded ${this.cache.size} app definitions.`)
-    } catch (error) {
+    } catch (error: unknown) {
+      if (typeof error === 'object' && error !== null && 'code' in error && (error as NodeJS.ErrnoException).code === 'ENOENT') {
+        console.error(`[QilnEngine Registry] FATAL: Blueprint directory not found at '${directory}'. Please ensure the catalog exists.`)
+        throw error
+      }
       console.error(`[QilnEngine Registry] FATAL: Failed to load app definitions from ${directory}`, error)
       throw error // Ensure the Fastify boot sequence halts
     }

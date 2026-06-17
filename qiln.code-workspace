@@ -1,17 +1,62 @@
 {
 	"folders": [
 		{
+			"name": "qiln-stealth",
 			"path": "."
 		},
 		{
-			"path": "../vike"
+			"name": "runemind-infrastructure",
+			"path": "../runemind-infrastructure"
 		},
 		{
+			"name": "iondocs",
+			"path": "../iondocs"
+		},
+		{
+			"name": "caddydocs",
+			"path": "../caddydocs"
+		},
+		{
+			"name": "n8n",
+			"path": "../n8n"
+		},
+		{
+			"name": "qiln",
+			"path": "../qiln"
+		},
+		{
+			"name": "trpc",
 			"path": "../trpc"
 		},
 		{
-			"path": "../dstack"
+			"name": "vike",
+			"path": "../vike"
+		},
+		{
+			"name": "zod",
+			"path": "../zod"
+		},
+		{
+			"name": "yaml",
+			"path": "../yaml"
+		},
+		{
+			"name": "incus",
+			"path": "../incus"
+		},
+		{
+			"name": "distrobuilder",
+			"path": "../distrobuilder"
 		}
 	],
-	"settings": {}
+	"settings": {
+		"[vue]": {
+			"editor.defaultFormatter": "esbenp.prettier-vscode",
+			"editor.formatOnSave": true
+		},
+		"[typescript]": {
+			"editor.defaultFormatter": "esbenp.prettier-vscode",
+			"editor.formatOnSave": true
+		},
+	}
 }
