@@ -19,7 +19,7 @@
           <n-text depth="2">{{ instance.memory }}</n-text>
         </n-flex>
       </n-flex>
-      <n-text depth="3" style="font-size: 12px">Blueprint: {{ instance.definition }}</n-text>
+      <n-text depth="3" style="font-size: 12px">Blueprint: {{ instance.blueprint }}</n-text>
     </n-flex>
     <template #action>
       <n-flex justify="space-between" align="center">
@@ -49,7 +49,7 @@
               <template #icon><icon :path="mdiDelete" :size="16" /></template>
             </n-button>
           </template>
-          Are you sure you want to permanently delete this instance and its data?
+          Are you sure you want to permanently delete this capsule branch and its data?
         </n-popconfirm>
       </n-flex>
     </template>
@@ -60,17 +60,17 @@
   import { computed } from 'vue'
   import { NCard, NText, NFlex, NTag, NButton, NButtonGroup, NPopconfirm, useMessage } from 'naive-ui'
   import { isTRPCClientError } from '@trpc/client'
-  import { useInstanceContext } from '../composables/useInstances'
+  import { useCapsuleContext } from '../composables/useCapsules'
   import { Icon } from './Icon'
   import { mdiPlay, mdiStop, mdiDelete, mdiCpu64Bit, mdiMemory } from '@mdi/js'
-  import type { HostInstanceItem } from '../types'
+  import type { CapsuleBranchItem } from '../types'
 
   const props = defineProps<{
-    instance: HostInstanceItem
+    instance: CapsuleBranchItem
   }>()
 
   const message = useMessage()
-  const { start, stop, delete: removeInstance } = useInstanceContext()
+  const { start, stop, delete: removeBranch } = useCapsuleContext()
 
   const isProcessing = computed(() => {
     return ['provisioning', 'starting', 'stopping'].includes(props.instance.status)
@@ -94,27 +94,27 @@
   async function handleStart() {
     try {
       await start(props.instance.name)
-      message.success('Instance starting...')
+      message.success('Capsule branch starting...')
     } catch (err: unknown) {
-      message.error(isTRPCClientError(err) ? err.message : 'Failed to start instance')
+      message.error(isTRPCClientError(err) ? err.message : 'Failed to start capsule branch')
     }
   }
 
   async function handleStop() {
     try {
       await stop(props.instance.name)
-      message.success('Instance stopping...')
+      message.success('Capsule branch stopping...')
     } catch (err: unknown) {
-      message.error(isTRPCClientError(err) ? err.message : 'Failed to stop instance')
+      message.error(isTRPCClientError(err) ? err.message : 'Failed to stop capsule branch')
     }
   }
 
   async function handleDelete() {
     try {
-      await removeInstance(props.instance.name)
-      message.success('Instance deleted')
+      await removeBranch(props.instance.name)
+      message.success('Capsule branch deleted')
     } catch (err: unknown) {
-      message.error(isTRPCClientError(err) ? err.message : 'Failed to delete instance')
+      message.error(isTRPCClientError(err) ? err.message : 'Failed to delete capsule branch')
     }
   }
 </script>

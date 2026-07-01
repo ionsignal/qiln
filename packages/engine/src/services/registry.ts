@@ -1,11 +1,11 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
 import yaml from 'yaml'
-import { AppDefinitionSchema, type AppDefinition } from '../schemas/definitions'
+import { CapsuleBlueprintSchema, type CapsuleBlueprint } from '@qiln/core/server'
 import { IncusError } from '../errors'
 
 export class DefinitionRegistryService {
-  private readonly cache = new Map<string, AppDefinition>()
+  private readonly cache = new Map<string, CapsuleBlueprint>()
 
   /**
    * Loads, parses, and strictly validates all YAML definitions in the given directory.
@@ -21,39 +21,36 @@ export class DefinitionRegistryService {
         const filePath = path.join(directory, file)
         const content = await fs.readFile(filePath, 'utf-8')
         const parsedYaml = yaml.parse(content)
-        const result = AppDefinitionSchema.safeParse(parsedYaml)
+        const result = CapsuleBlueprintSchema.safeParse(parsedYaml)
         if (!result.success) {
-          throw new IncusError(`Malformed App Blueprint: ${file}. Validation failed.`, 'VALIDATION_ERROR', result.error.format())
+          throw new IncusError(`Malformed Capsule Blueprint: ${file}. Validation failed.`, 'VALIDATION_ERROR', result.error.format())
         }
         const definition = result.data
-        //
-        // [DEBUG] Log the successfully parsed and validated YAML object
-        console.log(`[QilnEngine Registry] Successfully parsed ${file}:\n`, JSON.stringify(definition, null, 2))
-        //
+        console.log(`[QilnEngine Registry] Loaded capsule blueprint '${definition.name}' from ${file}.`)
         this.cache.set(definition.name, definition)
       }
-      console.log(`[QilnEngine Registry] Successfully loaded ${this.cache.size} app definitions.`)
+      console.log(`[QilnEngine Registry] Successfully loaded ${this.cache.size} capsule blueprints.`)
     } catch (error: unknown) {
       if (typeof error === 'object' && error !== null && 'code' in error && (error as NodeJS.ErrnoException).code === 'ENOENT') {
         console.error(`[QilnEngine Registry] FATAL: Blueprint directory not found at '${directory}'. Please ensure the catalog exists.`)
         throw error
       }
-      console.error(`[QilnEngine Registry] FATAL: Failed to load app definitions from ${directory}`, error)
-      throw error // Ensure the Fastify boot sequence halts
+      console.error(`[QilnEngine Registry] FATAL: Failed to load capsule blueprints from ${directory}`, error)
+      throw error // Ensure the engine boot sequence halts
     }
   }
 
   /**
    * Retrieves a validated definition by its name alias.
    */
-  public get(name: string): AppDefinition | undefined {
+  public get(name: string): CapsuleBlueprint | undefined {
     return this.cache.get(name)
   }
 
   /**
    * Returns all loaded definitions.
    */
-  public getAll(): AppDefinition[] {
+  public getAll(): CapsuleBlueprint[] {
     return Array.from(this.cache.values())
   }
 }

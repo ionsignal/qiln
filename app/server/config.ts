@@ -34,6 +34,10 @@ export default {
   definitions: {
     path: process.env.APP_DEFINITIONS_PATH ?? path.join(appPath, 'catalog/blueprints'),
   },
+  worker: {
+    embedded: process.env.QILN_EMBEDDED_WORKER_ENABLED === 'true',
+    reconcileOnStart: process.env.QILN_WORKER_RECONCILE_ON_START === 'true',
+  },
   cookies: {
     name: process.env.COOKIE_NAME ?? 'runemind_session',
     path: '/',

@@ -5,11 +5,30 @@ export class IncusError extends Error {
   constructor(
     message: string,
     public readonly code: 'TRANSPORT_ERROR' | 'API_ERROR' | 'VALIDATION_ERROR' | 'NOT_FOUND' | 'CONFLICT' | 'FORBIDDEN' = 'API_ERROR',
-    public readonly details?: Record<string, any>,
+    public readonly details?: unknown,
   ) {
     super(message)
     this.name = 'IncusError'
   }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function readStringProperty(value: unknown, key: string): string | undefined {
+  if (!isRecord(value)) {
+    return undefined
+  }
+  const property = value[key]
+  return typeof property === 'string' ? property : undefined
+}
+
+function readCause(value: unknown): unknown {
+  if (!isRecord(value)) {
+    return undefined
+  }
+  return value.cause
 }
 
 /**
@@ -19,15 +38,14 @@ export class IncusError extends Error {
  * @returns True if it's a 23505 violation matching the constraint.
  */
 export function isUniqueConstraintViolation(err: unknown, constraintName?: string): boolean {
-  if (!err || typeof err !== 'object') return false
-  const error = err as any
-  const code = error.code || error.cause?.code
-  const constraint = error.constraint_name || error.cause?.constraint_name
-  if (code === '23505') {
-    if (constraintName) {
-      return constraint === constraintName
-    }
-    return true
+  const cause = readCause(err)
+  const code = readStringProperty(err, 'code') ?? readStringProperty(cause, 'code')
+  const constraint = readStringProperty(err, 'constraint_name') ?? readStringProperty(cause, 'constraint_name')
+  if (code !== '23505') {
+    return false
   }
-  return false
+  if (constraintName) {
+    return constraint === constraintName
+  }
+  return true
 }

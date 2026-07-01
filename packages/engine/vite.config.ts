@@ -42,11 +42,10 @@ export default defineConfig(({ mode }) => {
           'drizzle-orm/postgres-js',
           '@trpc/server',
           'zod',
-          'undici',
-          'ws',
           '@nats-io/transport-node',
           'fastify',
           'fastify-plugin',
+          'yaml',
           // Externalize internal monorepo packages to prevent duplicate bundling
           /^@qiln\//,
           // Node.js built-in modules (with node: prefix)

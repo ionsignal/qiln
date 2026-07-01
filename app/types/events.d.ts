@@ -1,23 +1,23 @@
-import type { HostEvent } from '@qiln/engine/client'
+import type { CapsuleEvent } from '@qiln/core/client'
 
 /**
  * The base requirement for ANY event flowing through the system.
  */
 export interface BaseEvent {
   type: string
-  [key: string]: any
-}
-
-/**
- * The universal envelope used by the Fastify Dispatcher.
- */
-export interface DispatcherEnvelope<TEvent extends BaseEvent = BaseEvent> {
-  target: string
-  event: TEvent
 }
 
 /**
  * The ultimate union of all possible events in the application.
  * The Vue frontend will receive this type from the tRPC subscription.
  */
-export type AppEvent = HostEvent
+export type AppEvent = CapsuleEvent
+
+/**
+ * Compatibility envelope type retained for call sites that still model targeted
+ * event delivery, even though Fastify no longer owns the dispatcher bridge.
+ */
+export interface DispatcherEnvelope<TEvent = AppEvent> {
+  target: string
+  event: TEvent
+}

@@ -1,7 +1,7 @@
-import type { EventEmitter } from 'node:events'
 import type { UserInputConfig } from 'c12'
 import type { FastifyInstance } from 'fastify'
 import type { QilnEngineController } from '@qiln/engine/server'
+import type { QilnWorkerRuntime } from '@qiln/worker/server'
 import type { Session } from '@server/plugins/session'
 import type { Database } from '@server/db'
 
@@ -43,6 +43,11 @@ type DefinitionConfig = {
   path: string
 }
 
+type WorkerConfig = {
+  embedded: boolean
+  reconcileOnStart: boolean
+}
+
 export interface IncusConfig {
   socketPath?: string
   url?: string
@@ -71,6 +76,7 @@ type Config = {
   path: string
   ssl: string
   definitions: DefinitionConfig
+  worker: WorkerConfig
   cookies: CookiesConfig
   multipart: MultipartConfig
   limit: LimitConfig
@@ -95,9 +101,9 @@ declare module 'fastify' {
   interface FastifyInstance {
     db: Database
     host: QilnEngineController
-    dispatcher: EventEmitter
+    worker: QilnWorkerRuntime | null
     config: EnvironmentConfig
   }
 }
 
-export type { EnvironmentConfig, Config, Server, CookiesConfig, MultipartConfig, MailgunConfig, NatsConfig, DatabaseConfig }
+export type { EnvironmentConfig, Config, Server, CookiesConfig, MultipartConfig, MailgunConfig, NatsConfig, DatabaseConfig, WorkerConfig }

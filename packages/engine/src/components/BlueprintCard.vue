@@ -23,7 +23,7 @@
       </n-flex>
     </n-flex>
     <template #action>
-      <n-button block type="primary" size="small" @click="$emit('deploy', blueprint.name)">Deploy Instance</n-button>
+      <n-button block type="primary" size="small" @click="$emit('deploy', blueprint.name)">Create Branch</n-button>
     </template>
   </n-card>
 </template>
@@ -32,10 +32,10 @@
   import { NCard, NText, NFlex, NTag, NButton } from 'naive-ui'
   import { Icon } from './Icon'
   import { mdiLayers, mdiHarddisk, mdiEthernet } from '@mdi/js'
-  import type { AppDefinition } from '../schemas/definitions'
+  import type { CapsuleBlueprint } from '@qiln/core/client'
 
   defineProps<{
-    blueprint: AppDefinition
+    blueprint: CapsuleBlueprint
   }>()
 
   defineEmits<{

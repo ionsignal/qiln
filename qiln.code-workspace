@@ -47,6 +47,12 @@
 		{
 			"name": "distrobuilder",
 			"path": "../distrobuilder"
+		},
+		{
+			"path": "../comfyui"
+		},
+		{
+			"path": "../pi-harness"
 		}
 	],
 	"settings": {

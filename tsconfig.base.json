@@ -15,10 +15,12 @@
     "paths": {
       "@/*": ["./app/*"],
       "@server/*": ["./app/server/*"],
-      "@qiln/core": ["./packages/core/src/index.ts"],
+      "@qiln/core": ["./packages/core/src/server.ts"],
       "@qiln/core/*": ["./packages/core/src/*"],
-      "@qiln/engine": ["./packages/engine/src/index.ts"],
-      "@qiln/engine/*": ["./packages/engine/src/*"]
+      "@qiln/engine": ["./packages/engine/src/server.ts"],
+      "@qiln/engine/*": ["./packages/engine/src/*"],
+      "@qiln/worker": ["./packages/worker/src/server.ts"],
+      "@qiln/worker/*": ["./packages/worker/src/*"]
     }
   }
 }

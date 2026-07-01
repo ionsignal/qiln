@@ -1,0 +1,32 @@
+{
+  "name": "@qiln/worker",
+  "version": "0.1.2",
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build --watch --mode development",
+    "type:check": "tsc --noEmit"
+  },
+  "exports": {
+    "./server": {
+      "types": "./dist/server.d.ts",
+      "import": "./dist/server.js"
+    }
+  },
+  "dependencies": {
+    "@nats-io/transport-node": "3.4.0",
+    "@qiln/core": "*",
+    "drizzle-orm": "1.0.0-rc.3",
+    "undici": "8.5.0",
+    "ws": "8.21.0",
+    "yaml": "2.9.0",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "26.0.1",
+    "@types/ws": "8.18.1",
+    "typescript": "6.0.3",
+    "vite": "8.1.0",
+    "vite-plugin-dts": "5.0.3"
+  }
+}

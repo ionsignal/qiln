@@ -1,4 +1,3 @@
-# Identity and base image
 name: n8n-comfyui-capsule
 display_name: AI Workflow Capsule (n8n & ComfyUI)
 description: Dual n8n and ComfyUI pipeline with isolated ZFS workspace and read-only host model vault.
@@ -6,7 +5,6 @@ image_alias: qiln-noble-python-node
 
 provisioning:
   volumes:
-    # The persistent, writeable workspace partition (ZFS)
     - name: workspace
       type: empty
       pool: is-nvme-pool
@@ -14,7 +12,6 @@ provisioning:
       shifted: true
       readonly: false
 
-    # Shared Read-Only model volume bind-mounted directly from host storage
     - name: shared-models
       type: bind
       host_path: /srv/qiln/shared/models
@@ -41,18 +38,6 @@ provisioning:
       gid: 1000
       mode: '0755'
 
-    # # Configure the writeable virtualenv symlink-overlay
-    # - path: /workspace/.venv/pyvenv.cfg
-    #   uid: 1000
-    #   gid: 1000
-    #   mode: '0644'
-    #   content: |
-    #     home = /opt/qiln/venv/bin
-    #     include-system-site-packages = true
-    #     version = 3.13.0
-    #     executable = /opt/qiln/venv/bin/python3
-
-    # Dynamic environment variables configuration file for runtime apps
     # - path: /workspace/workflows/app.env
     #   uid: 1000
     #   gid: 1000
@@ -62,7 +47,6 @@ provisioning:
     #     N8N_ENCRYPTION_KEY={{ secrets.n8n_encryption_key }}
     #     N8N_DATABASE_PROVIDER=sqlite
     #     N8N_DATABASE_PATH=/workspace/n8n/database.sqlite
-
     #     # ComfyUI environment paths
     #     COMFYUI_EXTRA_MODEL_PATHS=/workspace/extra_model_paths.yaml
 
@@ -78,33 +62,13 @@ provisioning:
           loras: loras/
           vae: vae/
 
-    # Bootstrap startup routine executed by systemd inside the capsule
-    - path: /workspace/workflows/bootstrap.sh
-      uid: 1000
-      gid: 1000
-      mode: '0755'
-      content: |
-        #!/bin/bash
-        set -eo pipefail
-        source /workspace/workflows/app.env
-
-        echo "[Bootstrap] Aligning virtual environment and installing local extensions..."
-        # If any custom node requirements exist, install them into the writeable overlay
-        if [ -f "/workspace/custom_nodes/requirements.txt" ]; then
-          /workspace/.venv/bin/pip install --no-cache-dir -r /workspace/custom_nodes/requirements.txt
-        fi
-
-        echo "[Bootstrap] Spawning background services..."
-        pnpm --dir /usr/lib/node_modules/n8n start &
-        /workspace/.venv/bin/python3 /opt/comfyui/main.py --listen 127.0.0.1 --port 8188 --extra-model-paths-config /workspace/extra_model_paths.yaml &
-
-        wait -n
-
 instance_template:
   config:
     security.privileged: 'false'
     security.nesting: 'false'
+    nvidia.runtime: 'true'
     boot.autostart: 'false'
+    limits.kernel.memlock: unlimited
 
   devices:
     eth0:
@@ -128,7 +92,3 @@ application:
       port: 8188
       protocol: tcp
       exposure: internal
-  editable_files:
-    - path: /workspace/workflows/app.env
-      format: properties
-      schema: WorkflowEnvSchema

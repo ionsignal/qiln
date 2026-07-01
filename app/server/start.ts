@@ -17,8 +17,10 @@ async function createFastifyServer(config: EnvironmentConfig) {
     loggerInstance: logger,
     disableRequestLogging: true,
   })
+
   // Decorate Server Instance
   server.decorate('config', config)
+
   // Register Plugins & Routes
   const distPath = path.resolve(config.path, 'dist/server')
   await server.register(autoload, {
@@ -31,6 +33,7 @@ async function createFastifyServer(config: EnvironmentConfig) {
     dir: path.join(distPath, 'routes'),
     options: {},
   })
+
   // Configure Static Assets / Dev Middleware
   if (!server.config.dev) {
     await server.register(serve, {
@@ -48,11 +51,11 @@ async function createFastifyServer(config: EnvironmentConfig) {
     })
     await server.use(dev.devMiddleware)
   }
+
   // Vike (SSR) Handler
   server.get('*', async (request: FastifyRequest, reply: FastifyReply) => {
     const db = server.db
     const host = server.host
-    const dispatcher = server.dispatcher
     const user = request.session.user
     const trpc = createTRPCClient<typeof appRouter>({
       links: [
@@ -64,19 +67,20 @@ async function createFastifyServer(config: EnvironmentConfig) {
               res: reply,
               db,
               host,
-              dispatcher,
               user,
             }),
           transformer: superjson,
         }),
       ],
     })
+
     const pageContext = await renderPage({
       trpc,
       user,
       redirectTo: null,
       urlOriginal: request.raw.url ?? '/',
     })
+
     if (!pageContext.httpResponse) {
       reply.callNotFound()
     } else {

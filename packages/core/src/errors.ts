@@ -20,7 +20,7 @@ export class GlobalError extends Error {
   constructor(
     message: string,
     public readonly code: GlobalErrorCode = GlobalErrorCode.INTERNAL_ERROR,
-    public readonly details?: any,
+    public readonly details?: unknown,
   ) {
     super(message)
     this.name = 'GlobalError'

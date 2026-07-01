@@ -1,10 +1,8 @@
 import type { ComputedRef, Ref } from 'vue'
 import type { HostDbContract } from './db'
 import type { inferRouterOutputs } from '@trpc/server'
-import type { ZodType, output } from 'zod'
 import type { QilnEngineController } from './controller'
 import type { HostRouter } from './trpc'
-import type { HostEvent } from './schemas/events'
 
 export interface HostNatsConfig {
   servers: string | string[]
@@ -16,30 +14,6 @@ export interface HostLibraryConfig {
   definitions?: {
     path: string
   }
-  incus?: {
-    socketPath?: string
-    url?: string
-    cert?: string
-    key?: string
-    authToken?: string
-    rejectUnauthorized?: boolean
-    project?: string
-  }
-}
-
-export interface HostEventBroker {
-  start(): Promise<void>
-  shutdown(): Promise<void>
-  publish(target: string, event: HostEvent): Promise<void>
-  request<TOutput extends ZodType>(subject: string, payload: unknown, responseSchema: TOutput, timeoutMs?: number): Promise<output<TOutput>>
-  serve(subject: string, handler: (subject: string, data: unknown) => Promise<unknown>, opts?: { queue?: string }): void
-  subscribe(filter: (event: HostEvent) => boolean): AsyncIterable<HostEventEnvelope>
-}
-
-export interface HostEventEnvelope {
-  target: string
-  event: HostEvent
-  routing: { type: 'broadcast' } | { type: 'unicast'; userId: string }
 }
 
 export interface HostPluginOptions {
@@ -58,10 +32,16 @@ export interface HostLibraryContext {
   host: QilnEngineController
 }
 
-export type { HostEvent }
-
 type HostRouterOutputs = inferRouterOutputs<HostRouter>
-export type HostInstanceItem = HostRouterOutputs['instance']['list'][number]
+
+export type CapsuleBranchItem = HostRouterOutputs['capsule']['list'][number]
+
+/**
+ * Compatibility alias for legacy UI components during the capsule migration.
+ *
+ * New code should prefer `CapsuleBranchItem`.
+ */
+export type HostInstanceItem = CapsuleBranchItem
 
 /**
  * Stubbed Types
@@ -201,5 +181,3 @@ export interface FileBrowserState {
   deleteEntries: (paths: string[]) => Promise<void>
   init: () => void
 }
-
-/********************************************************/

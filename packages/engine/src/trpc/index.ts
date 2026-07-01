@@ -1,12 +1,12 @@
 import { t } from './init'
-import { instanceRouter } from './routers/instance'
+import { capsuleRouter } from './routers/capsule'
 import { registryRouter } from './routers/registry'
 
 export const hostRouter = t.router({
   status: t.procedure.query(() => {
-    return { status: 'QilnEngine Infrastructure Operational', version: '0.0.1' }
+    return { status: 'QilnEngine Capsule Channel Operational', version: '0.0.1' }
   }),
-  instance: instanceRouter,
+  capsule: capsuleRouter,
   registry: registryRouter,
 })
 

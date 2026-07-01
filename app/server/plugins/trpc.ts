@@ -16,7 +16,6 @@ export default fp(
           createContext(opts, {
             db: fastify.db,
             host: fastify.host,
-            dispatcher: fastify.dispatcher,
           }),
         onError: ({ path, error, type }) => {
           if (error.code === 'INTERNAL_SERVER_ERROR') {
@@ -39,6 +38,6 @@ export default fp(
   },
   {
     name: 'trpc',
-    dependencies: ['socket', 'db', 'middleware', 'host', 'session', 'bridge'],
+    dependencies: ['socket', 'db', 'middleware', 'host', 'worker', 'session'],
   },
 )

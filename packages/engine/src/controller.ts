@@ -1,20 +1,15 @@
 import path from 'node:path'
-import { IncusClient } from './incus/client/index'
-import { InstanceService } from './services/instance'
-import { FileService } from './services/file'
-import { ProjectService } from './services/project'
+import { CapsuleNatsChannel } from '@qiln/core/server'
+import { CapsuleService } from './services/capsule'
+import { CapsuleEventHub } from './events/capsule'
 import { DefinitionRegistryService } from './services/registry'
-import { NatsBroker } from './broker'
-import { registerNatsRouters } from './nats'
 import type { HostDbContract } from './db'
 import type { HostLibraryConfig } from './types'
 
 export class QilnEngineController {
-  public readonly project: ProjectService
-  public readonly instance: InstanceService
-  public readonly file: FileService
-  public readonly incus: IncusClient
-  public readonly broker: NatsBroker
+  public readonly events: CapsuleEventHub
+  public readonly capsule: CapsuleService
+  public readonly channel: CapsuleNatsChannel
   public readonly registry: DefinitionRegistryService
 
   private readonly config: HostLibraryConfig
@@ -26,26 +21,49 @@ export class QilnEngineController {
     if (!config.nats) {
       throw new Error('[QilnEngine] Missing required configuration: config.nats is required.')
     }
+
     this.config = config
-    this.incus = new IncusClient(config.incus)
-    this.broker = new NatsBroker(config.nats)
-    this.project = new ProjectService(this.incus)
+    this.channel = new CapsuleNatsChannel(config.nats, {
+      loggerPrefix: '[QilnEngine CapsuleChannel]',
+    })
     this.registry = new DefinitionRegistryService()
-    this.instance = new InstanceService(this.db, this.incus, this.broker, this.project, this.registry)
-    this.file = new FileService(this.db, this.incus, this.project)
+    this.events = new CapsuleEventHub(this.channel)
+    this.capsule = new CapsuleService(this.db, this.channel)
   }
 
-  public async start() {
+  public async start(): Promise<void> {
     const configuredPath = this.config.definitions?.path
     const definitionsPath = configuredPath ? path.resolve(configuredPath) : path.resolve(process.cwd(), 'catalog', 'blueprints')
-    await this.registry.load(definitionsPath)
-    await this.incus.init()
-    await this.broker.start()
-    registerNatsRouters(this)
+
+    let channelStarted = false
+
+    try {
+      await this.registry.load(definitionsPath)
+      await this.channel.start()
+      channelStarted = true
+      this.events.start()
+    } catch (error: unknown) {
+      this.events.stop()
+
+      if (channelStarted) {
+        try {
+          await this.channel.shutdown()
+        } catch (shutdownError: unknown) {
+          console.error('[QilnEngine] Failed to shut down Capsule Channel after startup failure.', shutdownError)
+        }
+      }
+
+      throw error
+    }
   }
 
   public async stop(): Promise<void> {
-    this.incus.destroy()
-    await this.broker.shutdown()
+    this.events.stop()
+
+    try {
+      await this.channel.shutdown()
+    } finally {
+      await this.events.waitForStop()
+    }
   }
 }

@@ -44,11 +44,14 @@
   import { Icon } from '@/components/Icon'
   import { mdiPlus } from '@mdi/js'
   import { useData } from '@/composables/useData'
-  import { trpc } from '@/renderer/api/trpc'
+  import { usePageContext } from '@/composables/usePageContext'
+  import { useTRPC } from '@/composables/useTRPC'
   import { InstanceCard, BlueprintCard, InstanceEditor, provideInstances } from '@qiln/engine/client'
   import type { Data } from './+data'
 
   const data = useData<Data>()
+  const pageContext = usePageContext()
+  const trpc = useTRPC(pageContext.value)
   const instancesRef = ref(data.value.instances)
   const showDrawer = ref(false)
   const selectedBlueprint = ref<string | undefined>(undefined)
@@ -92,7 +95,7 @@
   }
 
   provideInstances({
-    client: trpc.host.instance,
+    client: trpc.host.capsule,
     instances: instancesRef,
     onError: err => console.error('[Qiln Admin] Instance sync error:', err),
     onEventStream: registerStreamHandler,

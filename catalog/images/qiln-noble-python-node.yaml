@@ -2,7 +2,7 @@ image:
   distribution: ubuntu
   release: noble
   architecture: amd64
-  description: 'Qiln Base AI Workflow Capsule (Python 3.13 / Node v22)'
+  description: 'Qiln Base Capsule Image (Python 3.13 / Node v22)'
 
 source:
   downloader: debootstrap
@@ -16,14 +16,14 @@ packages:
   update: true
   cleanup: true
   sets:
-    # Early Packages
     - packages:
+        # Early Packages
         - ca-certificates
         - wget
         - gnupg
       action: install
       early: true
-    # Standard Packages
+
     - packages:
         # Base System Utilities & Networking
         - tzdata
@@ -92,6 +92,7 @@ actions:
       # Deadsnakes PPA signing key
       gpg --homedir /tmp --no-default-keyring --keyring /etc/apt/keyrings/deadsnakes.gpg --keyserver hkps://keyserver.ubuntu.com --recv-keys F23C5A6CF475977595C89F51BA6932366A755776
       chmod 644 /etc/apt/keyrings/deadsnakes.gpg
+
   # User provisioning, filesystem layout, and virtual environments
   - trigger: post-packages
     action: |-
@@ -120,16 +121,6 @@ actions:
       # Apply recursive ownership limits to the qiln unprivileged user
       chown -R qiln:qiln /opt/qiln
       chown -R qiln:qiln /home/qiln
-  # # Final boot initialization and service hooks
-  # - trigger: post-files
-  #   action: |-
-  #     #!/bin/sh
-  #     set -e
-  #     # Ensure the dynamic entrypoint script is executable
-  #     chmod +x /opt/qiln/bin/entrypoint.sh
-  #     chown qiln:qiln /opt/qiln/bin/entrypoint.sh
-  #     # Enable the systemd service so it executes automatically on instance creation
-  #     ln -sf /etc/systemd/system/qiln-capsule.service /etc/systemd/system/multi-user.target.wants/qiln-capsule.service
 
 files:
   # Add cloud-init
@@ -141,12 +132,15 @@ files:
     generator: cloud-init
   - name: vendor-data
     generator: cloud-init
+
   # Prevent container machine-id overlapping
   - path: /etc/machine-id
     generator: dump
     content: ''
+
   - path: /var/lib/dbus/machine-id
     generator: remove
+
   # Systemd Network configuration
   - path: /etc/netplan/10-incus.yaml
     generator: dump
@@ -157,6 +151,7 @@ files:
           eth0:
             dhcp4: true
             dhcp-identifier: mac
+
   # Pin NodeSource Node.js packages to prevent upstream APT repository pollution
   - path: /etc/apt/preferences.d/nodejs
     generator: dump
@@ -164,64 +159,3 @@ files:
       Package: nodejs
       Pin: origin deb.nodesource.com
       Pin-Priority: 600
-  # # Standby Runtime Entrypoint Loader
-  # - path: /opt/qiln/bin/entrypoint.sh
-  #   generator: dump
-  #   content: |-
-  #     #!/bin/bash
-  #     # Standby initialization loader inside the capsule sandbox.
-  #     # If a dynamic bootstrap script exists (injected during workspace setup),
-  #     # execute it; otherwise, enter a holding pattern awaiting engine command injection.
-
-  #     set -eo pipefail
-
-  #     LOG_FILE="/workspace/logs/capsule-init.log"
-  #     mkdir -p "$(dirname "$LOG_FILE")"
-
-  #     exec > >(tee -a "$LOG_FILE") 2>&1
-
-  #     echo "========================================="
-  #     echo "Starting Qiln Capsule Initialization..."
-  #     echo "Timestamp: $(date)"
-  #     echo "System: Python $(/opt/qiln/venv/bin/python --version) | Node $(node -v)"
-  #     echo "========================================="
-
-  #     # Check for dynamically injected entrypoint/bootstrap scripts inside the workflow mount
-  #     DYNAMIC_BOOTSTRAP="/workspace/workflows/bootstrap.sh"
-
-  #     if [ -f "$DYNAMIC_BOOTSTRAP" ]; then
-  #       echo "Found dynamic workspace bootstrap hook at: $DYNAMIC_BOOTSTRAP"
-  #       echo "Executing workspace bootstrap..."
-  #       chmod +x "$DYNAMIC_BOOTSTRAP"
-  #       exec "$DYNAMIC_BOOTSTRAP"
-  #     else
-  #       echo "No dynamic bootstrap scripts found. Entering standby server mode..."
-  #       # Idle loop to keep the container running if no default task is provided
-  #       while true; do
-  #         sleep 3600
-  #       done
-  #     fi
-  # # Systemd Configuration for Capsule Services
-  # - path: /etc/systemd/system/qiln-capsule.service
-  #   generator: dump
-  #   mode: '0644'
-  #   content: |-
-  #     [Unit]
-  #     Description=Qiln AI Workflow Capsule Daemon
-  #     After=network.target
-
-  #     [Service]
-  #     Type=simple
-  #     User=qiln
-  #     Group=qiln
-  #     WorkingDirectory=/workspace
-  #     Environment="PATH=/opt/qiln/venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
-  #     ExecStart=/opt/qiln/bin/entrypoint.sh
-  #     Restart=always
-  #     RestartSec=5
-  #     StandardOutput=journal
-  #     StandardError=journal
-  #     TimeoutStopSec=60
-
-  #     [Install]
-  #     WantedBy=multi-user.target
