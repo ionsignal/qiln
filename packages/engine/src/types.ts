@@ -1,4 +1,3 @@
-import type { ComputedRef, Ref } from 'vue'
 import type { HostDbContract } from './db'
 import type { inferRouterOutputs } from '@trpc/server'
 import type { QilnEngineController } from './controller'
@@ -34,88 +33,6 @@ export interface HostLibraryContext {
 
 type HostRouterOutputs = inferRouterOutputs<HostRouter>
 
-export type CapsuleBranchItem = HostRouterOutputs['capsule']['list'][number]
-
-/**
- * Compatibility alias for legacy UI components during the capsule migration.
- *
- * New code should prefer `CapsuleBranchItem`.
- */
-export type HostInstanceItem = CapsuleBranchItem
-
-/**
- * Stubbed Types
- * TODO: stubbed types must be finalized and integrated (eventually)
- */
-export interface WorkspaceLease {
-  id: string
-  gpuType: string
-  efficiency: number
-  vramUsed: number
-  vramTotal: number
-  temp: number
-  timeRemaining: string
-}
-
-export interface GpuLeaseInfo {
-  gpuType: string
-  count: number
-  vramUsedGB: number
-  vramTotalGB: number
-  tempCelsius: number
-  utilization: number
-  leasedSince: string
-}
-
-export type GpuLeaseState =
-  | { status: 'none' }
-  | { status: 'requesting' }
-  | { status: 'attached'; lease: GpuLeaseInfo }
-  | { status: 'releasing' }
-  | { status: 'ineligible' }
-
-export interface GpuPoolAvailability {
-  gpuType: string
-  vramGB: number
-  totalCount: number
-  availableCount: number
-}
-
-export interface VesselTelemetry {
-  cpu: number[]
-  memory: number[]
-  network: number[]
-  gpu?: number[]
-}
-
-export interface WorkspaceVessel {
-  id: string
-  name: string
-  blueprint: string
-  status: 'provisioning' | 'offline' | 'starting' | 'online' | 'stopping' | 'archived' | 'error'
-  ports: { name: string; port: number; protocol: 'tcp' | 'udp' }[]
-  cpu?: number
-  memory?: string
-  gpu?: string
-  telemetry?: VesselTelemetry
-  volumes?: { name: string; size: string }[]
-  gpuLease?: GpuLeaseState
-}
-
-export interface WorkspaceVault {
-  id: string
-  name: string
-  type: 'clone' | 'empty'
-  status: 'healthy' | 'degraded' | 'error' | 'creating' | 'snapshotting'
-  usedGB: number
-  totalGB: number
-  attachedVessel: { name: string; id: string } | null
-  mountPath: string | null
-  pool: string
-  lastSnapshotAt: string | null
-  createdAt: string
-}
-
 export type FileType = 'text' | 'image' | 'config' | 'archive' | 'binary' | 'unknown'
 
 export type FileEntry =
@@ -131,8 +48,18 @@ export interface MockFsNode {
   children?: Record<string, MockFsNode>
 }
 
-export interface MockVaultDetail extends WorkspaceVault {
+/**
+ * Narrow retained type for the mock file browser surface.
+ *
+ * Extra metadata is intentionally modeled as unknown so the retained demo vault
+ * fixtures can keep their old shape without reintroducing broad workspace/vault
+ * product concepts into the capsule API boundary.
+ */
+export interface FileBrowserVault {
+  id: string
+  name: string
   root: MockFsNode
+  [key: string]: unknown
 }
 
 export type FileSortKey = 'name' | 'size' | 'modified' | 'type'
@@ -150,34 +77,4 @@ export type FileInspectorTarget =
   | { type: 'file'; path: string; name: string; size: number; modified: string; extension: string; content: string | null; fileType: FileType }
   | { type: 'directory'; path: string; name: string; modified: string; childCount: number }
 
-export interface FileBrowserState {
-  currentPath: Ref<string>
-  currentEntries: Ref<FileEntry[]>
-  selectedKeys: Ref<string[]>
-  focusedKey: Ref<string | null>
-  isInspectorOpen: Ref<boolean>
-  sortKey: Ref<FileSortKey>
-  sortOrder: Ref<FileSortOrder>
-  inspectorTarget: ComputedRef<FileInspectorTarget | null>
-  mode: Ref<FileBrowserMode>
-  openFiles: Ref<EditorTab[]>
-  activeEditorTab: Ref<string | null>
-  statusBarInfo: ComputedRef<{ label: string; detail: string }>
-  treeExpandedKeys: Ref<string[]>
-  fetchDirectory: (path?: string) => Promise<void>
-  navigateTo: (path: string) => Promise<void>
-  navigateUp: () => Promise<void>
-  focusEntry: (path: string) => void
-  clearFocus: () => void
-  copyPath: () => Promise<void>
-  closeInspector: () => void
-  openEditor: (file: FileInspectorTarget & { type: 'file' }) => void
-  closeEditor: () => void
-  selectAll: () => void
-  clearSelection: () => void
-  updateSort: (key: FileSortKey, order: FileSortOrder) => void
-  createFolder: (name: string) => Promise<void>
-  renameEntry: (oldPath: string, newName: string) => Promise<void>
-  deleteEntries: (paths: string[]) => Promise<void>
-  init: () => void
-}
+export type CapsuleBranchItem = HostRouterOutputs['capsule']['list'][number]

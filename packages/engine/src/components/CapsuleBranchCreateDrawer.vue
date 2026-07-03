@@ -5,19 +5,23 @@
         <n-form-item label="Branch Name" path="name">
           <n-input v-model:value="form.name" placeholder="e.g. sdxl-campaign-branch" :disabled="isSubmitting" />
         </n-form-item>
+
         <n-form-item label="Capsule Blueprint" path="blueprint">
           <n-select
             v-model:value="form.blueprint"
             :options="blueprintOptions"
-            placeholder="Select a Capsule Blueprint"
+            placeholder="Select a capsule blueprint"
             :disabled="isSubmitting" />
         </n-form-item>
-        <n-form-item label="CPU Cores" path="cpu">
+
+        <n-form-item label="Branch CPU Limit" path="cpu">
           <n-slider v-model:value="form.cpu" :min="1" :max="16" :marks="{ 1: '1', 4: '4', 8: '8', 16: '16' }" :disabled="isSubmitting" />
         </n-form-item>
-        <n-form-item label="Memory (GB)" path="memory">
+
+        <n-form-item label="Branch Memory Limit (GB)" path="memory">
           <n-slider v-model:value="form.memory" :min="1" :max="32" :marks="{ 1: '1', 8: '8', 16: '16', 32: '32' }" :disabled="isSubmitting" />
         </n-form-item>
+
         <n-button block type="primary" attr-type="submit" :loading="isSubmitting" style="margin-top: 24px">Create Branch</n-button>
       </n-form>
     </n-drawer-content>
@@ -53,9 +57,9 @@
   })
 
   const blueprintOptions = computed(() => {
-    return props.blueprints.map(bp => ({
-      label: bp.display_name,
-      value: bp.name,
+    return props.blueprints.map(blueprint => ({
+      label: blueprint.display_name,
+      value: blueprint.name,
     }))
   })
 
@@ -75,17 +79,18 @@
     },
   )
 
-  function handleUpdateShow(val: boolean) {
-    emit('update:show', val)
+  function handleUpdateShow(value: boolean) {
+    emit('update:show', value)
   }
 
   async function handleSubmit() {
     if (!form.value.name.trim() || !form.value.blueprint) {
-      message.warning('Please fill out all required fields.')
+      message.warning('Please provide a branch name and capsule blueprint.')
       return
     }
 
     isSubmitting.value = true
+
     try {
       await create(form.value.name.trim(), form.value.blueprint, form.value.cpu.toString(), `${form.value.memory}GB`)
       message.success('Capsule branch creation started.')

@@ -14,24 +14,24 @@
         </n-tag>
         <n-tag v-if="blueprint.provisioning.volumes.length" size="small" :bordered="false">
           <template #icon><icon :path="mdiHarddisk" :size="14" /></template>
-          {{ blueprint.provisioning.volumes.length }} Vol
+          {{ blueprint.provisioning.volumes.length }} Mount
         </n-tag>
         <n-tag v-if="blueprint.application?.ports.length" size="small" :bordered="false">
           <template #icon><icon :path="mdiEthernet" :size="14" /></template>
-          {{ blueprint.application.ports.length }} Port
+          {{ blueprint.application.ports.length }} Endpoint
         </n-tag>
       </n-flex>
     </n-flex>
     <template #action>
-      <n-button block type="primary" size="small" @click="$emit('deploy', blueprint.name)">Create Branch</n-button>
+      <n-button block type="primary" size="small" @click="$emit('create-branch', blueprint.name)">Create Branch</n-button>
     </template>
   </n-card>
 </template>
 
 <script setup lang="ts">
   import { NCard, NText, NFlex, NTag, NButton } from 'naive-ui'
-  import { Icon } from './Icon'
   import { mdiLayers, mdiHarddisk, mdiEthernet } from '@mdi/js'
+  import { Icon } from './Icon'
   import type { CapsuleBlueprint } from '@qiln/core/client'
 
   defineProps<{
@@ -39,6 +39,6 @@
   }>()
 
   defineEmits<{
-    (e: 'deploy', blueprintName: string): void
+    (e: 'create-branch', blueprintName: string): void
   }>()
 </script>

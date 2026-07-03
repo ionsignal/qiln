@@ -1,17 +1,52 @@
-import { ref, shallowRef, computed, provide, inject, watch, type InjectionKey, type Ref } from 'vue'
+import { ref, shallowRef, computed, provide, inject, watch, type ComputedRef, type InjectionKey, type Ref } from 'vue'
 import { resolveDirectory, resolveFileMetadata } from '../utils/mockFilesystem'
 import { getFileType, formatFileSize } from '../utils/fileUtils'
 import { useMessage } from 'naive-ui'
-import type {
-  FileEntry,
-  FileSortKey,
-  FileSortOrder,
-  MockVaultDetail,
-  FileInspectorTarget,
-  FileBrowserMode,
-  EditorTab,
-  FileBrowserState,
-} from '../types'
+import type { EditorTab, FileBrowserMode, FileBrowserVault, FileEntry, FileInspectorTarget, FileSortKey, FileSortOrder } from '../types'
+
+export interface FileBrowserStatusBarInfo {
+  label: string
+  detail: string
+}
+
+type FileBrowserEditableTarget = Extract<FileInspectorTarget, { type: 'file' }>
+
+export interface FileBrowserProviderOptions {
+  vault: Ref<FileBrowserVault>
+  initialPath?: string
+}
+
+export interface FileBrowserState {
+  currentPath: Ref<string>
+  currentEntries: Ref<FileEntry[]>
+  selectedKeys: Ref<string[]>
+  focusedKey: Ref<string | null>
+  isInspectorOpen: Ref<boolean>
+  sortKey: Ref<FileSortKey>
+  sortOrder: Ref<FileSortOrder>
+  treeExpandedKeys: Ref<string[]>
+  mode: Ref<FileBrowserMode>
+  openFiles: Ref<EditorTab[]>
+  activeEditorTab: Ref<string | null>
+  inspectorTarget: ComputedRef<FileInspectorTarget | null>
+  statusBarInfo: ComputedRef<FileBrowserStatusBarInfo>
+  fetchDirectory: (path?: string) => Promise<void>
+  navigateTo: (path: string) => Promise<void>
+  navigateUp: () => Promise<void>
+  focusEntry: (path: string) => void
+  clearFocus: () => void
+  copyPath: () => Promise<void>
+  closeInspector: () => void
+  openEditor: (file: FileBrowserEditableTarget) => void
+  closeEditor: () => void
+  selectAll: () => void
+  clearSelection: () => void
+  updateSort: (key: FileSortKey, order: FileSortOrder) => void
+  createFolder: (name: string) => Promise<void>
+  renameEntry: (oldPath: string, newName: string) => Promise<void>
+  deleteEntries: (paths: string[]) => Promise<void>
+  init: () => void
+}
 
 const FileBrowserInjectionKey: InjectionKey<FileBrowserState> = Symbol('QilnFileBrowser')
 
@@ -37,7 +72,7 @@ function sortEntries(entries: FileEntry[], key: FileSortKey, order: FileSortOrde
   })
 }
 
-export function provideFileBrowser(options: { vault: Ref<MockVaultDetail>; initialPath?: string }): FileBrowserState {
+export function provideFileBrowser(options: FileBrowserProviderOptions): FileBrowserState {
   const message = useMessage()
   const currentPath = ref(options.initialPath ?? '/')
   const currentEntries = shallowRef<FileEntry[]>([])
@@ -53,7 +88,7 @@ export function provideFileBrowser(options: { vault: Ref<MockVaultDetail>; initi
 
   const inspectorTarget = computed<FileInspectorTarget | null>(() => {
     if (!focusedKey.value) return null
-    const entry = currentEntries.value.find(e => e.path === focusedKey.value)
+    const entry = currentEntries.value.find(fileEntry => fileEntry.path === focusedKey.value)
     if (!entry) return null
     const node = resolveFileMetadata(options.vault.value, entry.path)
     if (!node) return null
@@ -68,22 +103,21 @@ export function provideFileBrowser(options: { vault: Ref<MockVaultDetail>; initi
         content: node.content ?? null,
         fileType: getFileType(entry.name),
       }
-    } else {
-      return {
-        type: 'directory',
-        path: entry.path,
-        name: entry.name,
-        modified: entry.modified,
-        childCount: entry.childCount,
-      }
+    }
+    return {
+      type: 'directory',
+      path: entry.path,
+      name: entry.name,
+      modified: entry.modified,
+      childCount: entry.childCount,
     }
   })
 
-  const statusBarInfo = computed(() => {
+  const statusBarInfo = computed<FileBrowserStatusBarInfo>(() => {
     const keys = selectedKeys.value
     if (keys.length === 0) {
       if (focusedKey.value) {
-        const entry = currentEntries.value.find(e => e.path === focusedKey.value)
+        const entry = currentEntries.value.find(fileEntry => fileEntry.path === focusedKey.value)
         if (entry) {
           const date = new Date(entry.modified).toLocaleString()
           if (entry.type === 'file') {
@@ -96,8 +130,11 @@ export function provideFileBrowser(options: { vault: Ref<MockVaultDetail>; initi
       return { label: `${count} item${count === 1 ? '' : 's'}`, detail: '' }
     }
     if (keys.length === 1) {
-      const entry = currentEntries.value.find(e => e.path === keys[0])
-      if (!entry) return { label: '1 item selected', detail: '' }
+      const entry = currentEntries.value.find(fileEntry => fileEntry.path === keys[0])
+
+      if (!entry) {
+        return { label: '1 item selected', detail: '' }
+      }
       const date = new Date(entry.modified).toLocaleString()
       if (entry.type === 'file') {
         return { label: entry.name, detail: `${formatFileSize(entry.size)} · ${date}` }
@@ -105,8 +142,8 @@ export function provideFileBrowser(options: { vault: Ref<MockVaultDetail>; initi
       return { label: entry.name, detail: date }
     }
     const totalSize = currentEntries.value
-      .filter(e => keys.includes(e.path) && e.type === 'file')
-      .reduce((acc, e) => acc + (e as Extract<FileEntry, { type: 'file' }>).size, 0)
+      .filter(entry => keys.includes(entry.path) && entry.type === 'file')
+      .reduce((acc, entry) => acc + (entry.type === 'file' ? entry.size : 0), 0)
     return { label: `${keys.length} items selected`, detail: formatFileSize(totalSize) }
   })
 
@@ -133,17 +170,17 @@ export function provideFileBrowser(options: { vault: Ref<MockVaultDetail>; initi
       selectedKeys.value = []
       clearFocus()
       treeExpandedKeys.value = ['/']
-      fetchDirectory()
+      fetchDirectory().catch(error => console.error('[FileBrowser] Failed to refresh after vault change:', error))
     },
   )
 
-  async function fetchDirectory(path: string = currentPath.value) {
-    await new Promise(r => setTimeout(r, 50))
+  async function fetchDirectory(path: string = currentPath.value): Promise<void> {
+    await new Promise(resolve => setTimeout(resolve, 50))
     const rawEntries = resolveDirectory(options.vault.value, path)
     currentEntries.value = sortEntries([...rawEntries], sortKey.value, sortOrder.value)
   }
 
-  async function navigateTo(path: string) {
+  async function navigateTo(path: string): Promise<void> {
     currentPath.value = path
     selectedKeys.value = []
     clearFocus()
@@ -158,77 +195,77 @@ export function provideFileBrowser(options: { vault: Ref<MockVaultDetail>; initi
     await fetchDirectory(path)
   }
 
-  async function navigateUp() {
+  async function navigateUp(): Promise<void> {
     if (currentPath.value === '/') return
     const segments = currentPath.value.split('/').filter(Boolean)
     segments.pop()
-    const parentPath = segments.length === 0 ? '/' : '/' + segments.join('/')
+    const parentPath = segments.length === 0 ? '/' : `/${segments.join('/')}`
     await navigateTo(parentPath)
   }
 
-  function focusEntry(path: string) {
+  function focusEntry(path: string): void {
     focusedKey.value = path
   }
 
-  function clearFocus() {
+  function clearFocus(): void {
     focusedKey.value = null
     isInspectorOpen.value = false
   }
 
-  async function copyPath() {
+  async function copyPath(): Promise<void> {
     if (!focusedKey.value) return
-    if (!navigator?.clipboard) {
+    if (typeof navigator === 'undefined' || !navigator.clipboard) {
       message.error('Clipboard API not available in this context')
       return
     }
     try {
       await navigator.clipboard.writeText(focusedKey.value)
       message.success('Path copied to clipboard')
-    } catch (err) {
+    } catch {
       message.error('Failed to copy path')
     }
   }
 
-  function closeInspector() {
+  function closeInspector(): void {
     clearFocus()
   }
 
-  function openEditor(file: FileInspectorTarget & { type: 'file' }) {
+  function openEditor(file: FileBrowserEditableTarget): void {
     console.log(`[FileBrowser] Editor stub: ${file.path}`)
     message.info('Editor mode coming soon.')
   }
 
-  function closeEditor() {
+  function closeEditor(): void {
     mode.value = 'browsing'
     openFiles.value = []
     activeEditorTab.value = null
   }
 
-  function selectAll() {
-    selectedKeys.value = currentEntries.value.map(e => e.path)
+  function selectAll(): void {
+    selectedKeys.value = currentEntries.value.map(entry => entry.path)
   }
 
-  function clearSelection() {
+  function clearSelection(): void {
     selectedKeys.value = []
   }
 
-  function updateSort(key: FileSortKey, order: FileSortOrder) {
+  function updateSort(key: FileSortKey, order: FileSortOrder): void {
     sortKey.value = key
     sortOrder.value = order
     currentEntries.value = sortEntries([...currentEntries.value], key, order)
   }
 
-  async function createFolder(name: string) {
+  async function createFolder(name: string): Promise<void> {
     console.log(`[Mock] Creating folder ${name} at ${currentPath.value}`)
     await fetchDirectory()
   }
 
-  async function renameEntry(oldPath: string, newName: string) {
+  async function renameEntry(oldPath: string, newName: string): Promise<void> {
     console.log(`[Mock] Renaming ${oldPath} to ${newName}`)
     await fetchDirectory()
   }
 
-  async function deleteEntries(paths: string[]) {
+  async function deleteEntries(paths: string[]): Promise<void> {
     console.log(`[Mock] Deleting ${paths.length} entries`)
     if (focusedKey.value && paths.includes(focusedKey.value)) {
       clearFocus()
@@ -237,8 +274,8 @@ export function provideFileBrowser(options: { vault: Ref<MockVaultDetail>; initi
     await fetchDirectory()
   }
 
-  function init() {
-    fetchDirectory().catch(e => console.error('[FileBrowser] Init fetch failed', e))
+  function init(): void {
+    fetchDirectory().catch(error => console.error('[FileBrowser] Init fetch failed', error))
   }
 
   const state: FileBrowserState = {
@@ -249,12 +286,12 @@ export function provideFileBrowser(options: { vault: Ref<MockVaultDetail>; initi
     isInspectorOpen,
     sortKey,
     sortOrder,
-    inspectorTarget,
+    treeExpandedKeys,
     mode,
     openFiles,
     activeEditorTab,
+    inspectorTarget,
     statusBarInfo,
-    treeExpandedKeys,
     fetchDirectory,
     navigateTo,
     navigateUp,
@@ -272,7 +309,6 @@ export function provideFileBrowser(options: { vault: Ref<MockVaultDetail>; initi
     deleteEntries,
     init,
   }
-
   provide(FileBrowserInjectionKey, state)
   return state
 }

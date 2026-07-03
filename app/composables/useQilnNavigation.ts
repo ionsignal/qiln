@@ -1,33 +1,21 @@
 import { computed, h, ref, watch, type VNodeChild } from 'vue'
+import { NText, type MenuOption } from 'naive-ui'
+import {
+  mdiCameraIris,
+  mdiChevronDown,
+  mdiChevronRight,
+  mdiCog,
+  mdiConsoleLine,
+  mdiHistory,
+  mdiProgressClock,
+  mdiRouterNetwork,
+  mdiViewDashboard,
+} from '@mdi/js'
 import { usePageContext } from '@/composables/usePageContext'
 import { ALink } from '@/components/ALink'
 import { Icon } from '@/components/Icon'
-import { NButton, type MenuOption } from 'naive-ui'
-import {
-  mdiViewDashboard,
-  mdiServerNetwork,
-  mdiDatabase,
-  mdiLan,
-  mdiExpansionCard,
-  mdiMemory,
-  mdiConsoleLine,
-  mdiFolder,
-  mdiChevronDown,
-  mdiChevronRight,
-  mdiShieldAccount,
-  mdiRouterNetwork,
-  mdiCog,
-  mdiHistory,
-  mdiCubeOutline,
-  mdiDotsHorizontal,
-  mdiPlus,
-  mdiSafe,
-  mdiChip,
-  mdiPackageVariantClosed,
-  mdiProgressClock,
-} from '@mdi/js'
 
-export type QilnContext = 'workspace' | 'forge' | 'operations'
+export type QilnContext = 'capsules' | 'operations'
 export type QilnMenuOption = MenuOption & {
   isCategoryGroup?: boolean
   isDefaultExpanded?: boolean
@@ -36,27 +24,6 @@ export type QilnMenuOption = MenuOption & {
 
 const renderLink = (label: string, href: string) => () => h(ALink, { href, style: 'text-decoration: none;' }, () => label)
 const renderIcon = (path: string) => () => h(Icon, { path, size: 14 })
-
-const renderColoredIcon = (path: string, color?: string) => {
-  if (!color) return renderIcon(path)
-  return () =>
-    h(
-      'div',
-      {
-        style: {
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: '20px',
-          height: '20px',
-          borderRadius: '4px',
-          backgroundColor: `${color}cc`,
-          color: '#fff',
-        },
-      },
-      [h(Icon, { path, size: 12 })],
-    )
-}
 
 const renderCategoryLabel = (label: string) => (): VNodeChild =>
   h(
@@ -73,28 +40,34 @@ const renderCategoryLabel = (label: string) => (): VNodeChild =>
     label,
   )
 
-const renderQuickProvision =
-  (moldId: string): (() => VNodeChild) =>
-  () =>
-    h(
-      NButton,
-      {
-        class: 'quick-provision-btn',
-        style: {
-          width: '20px',
-          height: '20px',
-          minWidth: '20px',
-          padding: 0,
-          borderRadius: '6px',
-        },
-        onClick: (e: MouseEvent) => {
-          e.stopPropagation()
-          e.preventDefault()
-          console.log(`Open quick provision modal for ${moldId}`)
-        },
+const renderComingSoonLabel = (label: string) => (): VNodeChild =>
+  h(
+    'div',
+    {
+      style: {
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: '8px',
+        width: '100%',
       },
-      { icon: renderIcon(mdiPlus) },
-    )
+    },
+    [
+      h('span', label),
+      h(
+        NText,
+        {
+          depth: 3,
+          style: {
+            fontSize: '10px',
+            textTransform: 'uppercase',
+            letterSpacing: '0.06em',
+          },
+        },
+        () => 'soon',
+      ),
+    ],
+  )
 
 const renderExpandIcon = (option: MenuOption) => {
   const qilnOption = option as QilnMenuOption
@@ -115,152 +88,47 @@ const menuNodeProps = (option: MenuOption) => {
   return {}
 }
 
-export interface PinnedResource {
-  id: string
-  name: string
-  type: 'folder' | 'vessel' | 'vault' | 'gpu'
-  url?: string
-  iconColor?: string
-  children?: PinnedResource[]
-  isDefaultExpanded?: boolean
-}
-
-function mapPinnedToMenuOptions(resources: PinnedResource[]): QilnMenuOption[] {
-  return resources.map(res => {
-    let iconPath = mdiFolder
-    if (res.type === 'vessel') iconPath = mdiServerNetwork
-    if (res.type === 'vault') iconPath = mdiSafe
-    if (res.type === 'gpu') iconPath = mdiChip
-    const option: QilnMenuOption = {
-      key: res.url || res.id,
-      label: res.url ? renderLink(res.name, res.url) : res.name,
-      icon: renderColoredIcon(iconPath, res.iconColor),
-      isDefaultExpanded: res.isDefaultExpanded,
-    }
-    if (res.children && res.children.length > 0) {
-      option.children = mapPinnedToMenuOptions(res.children)
-    }
-    return option
-  })
-}
-
-const forgeMenuOptions: QilnMenuOption[] = [
+const capsuleMenuOptions: QilnMenuOption[] = [
   {
-    label: renderLink('Forge Overview', '/admin/forge'),
-    key: '/admin/forge',
+    label: renderLink('Capsules', '/admin/capsules'),
+    key: '/admin/capsules',
     icon: renderIcon(mdiViewDashboard),
     isRootAction: true,
   },
   {
-    key: 'divider-forge',
+    key: 'divider-capsules',
     type: 'divider',
     props: { style: 'margin: 12px 18px;' },
   },
   {
-    label: renderCategoryLabel('Mold Registry'),
-    key: 'group-molds',
+    label: renderCategoryLabel('Capsule Lifecycle'),
+    key: 'group-capsule-lifecycle',
     isCategoryGroup: true,
+    isDefaultExpanded: true,
     children: [
       {
-        label: renderLink('vLLM Inference', '/admin/molds/vllm'),
-        key: '/admin/molds/vllm',
-        icon: renderIcon(mdiCubeOutline),
-        extra: renderQuickProvision('vllm'),
+        label: renderComingSoonLabel('Snapshots'),
+        key: 'future-snapshots',
+        disabled: true,
+        icon: renderIcon(mdiCameraIris),
       },
       {
-        label: renderLink('ComfyUI Workspace', '/admin/molds/comfyui'),
-        key: '/admin/molds/comfyui',
-        icon: renderIcon(mdiCubeOutline),
-        extra: renderQuickProvision('comfyui'),
-      },
-      {
-        label: renderLink('Jupyter Research', '/admin/molds/jupyter'),
-        key: '/admin/molds/jupyter',
-        icon: renderIcon(mdiCubeOutline),
-        extra: renderQuickProvision('jupyter'),
-      },
-      {
-        label: renderLink('More', '/admin/molds'),
-        key: '/admin/molds',
-        icon: renderIcon(mdiDotsHorizontal),
-      },
-    ],
-  },
-  {
-    label: renderCategoryLabel('Image Press'),
-    key: 'group-images',
-    isCategoryGroup: true,
-    children: [
-      {
-        label: renderLink('Published Images', '/admin/images'),
-        key: '/admin/images',
-        icon: renderIcon(mdiPackageVariantClosed),
-      },
-      {
-        label: renderLink('Build Queue', '/admin/images/builds'),
-        key: '/admin/images/builds',
+        label: renderComingSoonLabel('Golden Tests'),
+        key: 'future-golden-tests',
+        disabled: true,
         icon: renderIcon(mdiProgressClock),
       },
-    ],
-  },
-  {
-    label: renderCategoryLabel('Fleet & Shared Vaults'),
-    key: 'group-fleet',
-    isCategoryGroup: true,
-    children: [
       {
-        label: renderLink('All Vessels (Global)', '/admin/fleet'),
-        key: '/admin/fleet',
-        icon: renderIcon(mdiServerNetwork),
+        label: renderComingSoonLabel('Diff Review'),
+        key: 'future-diff-review',
+        disabled: true,
+        icon: renderIcon(mdiHistory),
       },
       {
-        label: renderLink('Global Vaults', '/admin/vaults'),
-        key: '/admin/vaults',
-        icon: renderIcon(mdiSafe),
-      },
-    ],
-  },
-  {
-    label: renderCategoryLabel('Tenant Management'),
-    key: 'group-tenants',
-    isCategoryGroup: true,
-    children: [
-      {
-        label: renderLink('Tenants & Quotas', '/admin/tenants'),
-        key: '/admin/tenants',
-        icon: renderIcon(mdiShieldAccount),
-      },
-    ],
-  },
-  {
-    label: renderCategoryLabel('Infrastructure'),
-    key: 'group-infrastructure',
-    isCategoryGroup: true,
-    children: [
-      {
-        label: renderLink('GPU Pool', '/admin/gpus'),
-        key: '/admin/gpus',
-        icon: renderIcon(mdiExpansionCard),
-      },
-      {
-        label: renderLink('Gateway (Proxy)', '/admin/gateway'),
-        key: '/admin/gateway',
+        label: renderComingSoonLabel('Route Aliases'),
+        key: 'future-route-aliases',
+        disabled: true,
         icon: renderIcon(mdiRouterNetwork),
-      },
-      {
-        label: renderLink('Network (Internal)', '/admin/network'),
-        key: '/admin/network',
-        icon: renderIcon(mdiLan),
-      },
-      {
-        label: renderLink('Storage Pools', '/admin/storage'),
-        key: '/admin/storage',
-        icon: renderIcon(mdiDatabase),
-      },
-      {
-        label: renderLink('Cluster Nodes', '/admin/host'),
-        key: '/admin/host',
-        icon: renderIcon(mdiMemory),
       },
     ],
   },
@@ -268,34 +136,38 @@ const forgeMenuOptions: QilnMenuOption[] = [
 
 const operationsMenuOptions: QilnMenuOption[] = [
   {
-    label: renderLink('Operations Center', '/admin/operations'),
+    label: renderLink('Operations', '/admin/operations'),
     key: '/admin/operations',
-    icon: renderIcon(mdiViewDashboard),
+    icon: renderIcon(mdiConsoleLine),
     isRootAction: true,
   },
   {
-    key: 'divider-ops',
+    key: 'divider-operations',
     type: 'divider',
     props: { style: 'margin: 12px 18px;' },
   },
   {
-    label: renderCategoryLabel('Operations'),
-    key: 'group-operations',
+    label: renderCategoryLabel('Capsule Operations'),
+    key: 'group-capsule-operations',
     isCategoryGroup: true,
+    isDefaultExpanded: true,
     children: [
       {
-        label: renderLink('Alerts & Audit Log', '/admin/audit'),
-        key: '/admin/audit',
+        label: renderComingSoonLabel('Audit Log'),
+        key: 'future-audit-log',
+        disabled: true,
         icon: renderIcon(mdiHistory),
       },
       {
-        label: renderLink('Event Stream', '/admin/events'),
-        key: '/admin/events',
+        label: renderComingSoonLabel('Event Stream'),
+        key: 'future-event-stream',
+        disabled: true,
         icon: renderIcon(mdiConsoleLine),
       },
       {
-        label: renderLink('Settings', '/admin/settings'),
-        key: '/admin/settings',
+        label: renderComingSoonLabel('Promotion Settings'),
+        key: 'future-promotion-settings',
+        disabled: true,
         icon: renderIcon(mdiCog),
       },
     ],
@@ -304,21 +176,32 @@ const operationsMenuOptions: QilnMenuOption[] = [
 
 const extractKeysByFlag = (options: QilnMenuOption[], flag: keyof QilnMenuOption): string[] => {
   const keys: string[] = []
-  for (const opt of options) {
-    if (opt[flag] && opt.key) keys.push(opt.key as string)
-    if (opt.children) keys.push(...extractKeysByFlag(opt.children as QilnMenuOption[], flag))
+  for (const option of options) {
+    if (option[flag] && typeof option.key === 'string') {
+      keys.push(option.key)
+    }
+
+    if (option.children) {
+      keys.push(...extractKeysByFlag(option.children as QilnMenuOption[], flag))
+    }
   }
   return keys
 }
 
 const findPathToKey = (options: QilnMenuOption[], targetKey: string | null): string[] | null => {
-  if (!targetKey) return null
-  for (const opt of options) {
-    if (opt.key === targetKey) return []
-    if (opt.children) {
-      const path = findPathToKey(opt.children as QilnMenuOption[], targetKey)
+  if (!targetKey) {
+    return null
+  }
+  for (const option of options) {
+    if (option.key === targetKey) {
+      return []
+    }
+    if (option.children) {
+      const path = findPathToKey(option.children as QilnMenuOption[], targetKey)
       if (path !== null) {
-        if (opt.key) path.unshift(opt.key as string)
+        if (typeof option.key === 'string') {
+          path.unshift(option.key)
+        }
         return path
       }
     }
@@ -327,156 +210,28 @@ const findPathToKey = (options: QilnMenuOption[], targetKey: string | null): str
 }
 
 export function useQilnNavigation() {
-  const mockPinnedData = ref<PinnedResource[]>([
-    {
-      id: 'folder-prod',
-      name: 'Production',
-      type: 'folder',
-      iconColor: '#10b981',
-      isDefaultExpanded: true,
-      children: [
-        { id: 'prod-vllm-01', name: 'prod-vllm-01', type: 'vessel', url: '/admin/vessels/prod-vllm-01', iconColor: '#6366f1' },
-        { id: 'auth-db-01', name: 'auth-db-01', type: 'vessel', url: '/admin/vessels/auth-db-01', iconColor: '#f59e0b' },
-      ],
-    },
-    {
-      id: 'folder-vaults',
-      name: 'Core Vaults',
-      type: 'folder',
-      iconColor: '#8b5cf6',
-      isDefaultExpanded: true,
-      children: [{ id: 'is-model-vault', name: 'is-model-vault', type: 'vault', url: '/admin/vaults/is-model-vault', iconColor: '#ec4899' }],
-    },
-  ])
-  const workspaceMenuOptions = computed<QilnMenuOption[]>(() => [
-    {
-      label: renderLink('My Vessels', '/admin/workspace/vessels'),
-      key: '/admin/workspace/vessels',
-      icon: renderIcon(mdiServerNetwork),
-      isRootAction: true,
-    },
-    {
-      label: renderLink('My Vaults', '/admin/workspace/vaults'),
-      key: '/admin/workspace/vaults',
-      icon: renderIcon(mdiSafe),
-      isRootAction: true,
-    },
-    {
-      key: 'divider-ws-pinned',
-      type: 'divider',
-      props: { style: 'margin: 12px 18px;' },
-    },
-    {
-      label: renderCategoryLabel('Pinned Resources'),
-      key: 'group-pinned',
-      isCategoryGroup: true,
-      children: mapPinnedToMenuOptions(mockPinnedData.value),
-    },
-  ])
   const pageContext = usePageContext()
   const activeContext = computed<QilnContext>(() => {
     const path = pageContext.value.urlPathname || ''
-    if (
-      path.startsWith('/admin/operations') ||
-      path.startsWith('/admin/audit') ||
-      path.startsWith('/admin/events') ||
-      path.startsWith('/admin/settings')
-    ) {
+    if (path.startsWith('/admin/operations')) {
       return 'operations'
     }
-    if (
-      path.startsWith('/admin/forge') ||
-      path.startsWith('/admin/molds') ||
-      path.startsWith('/admin/fleet') ||
-      path.startsWith('/admin/images') ||
-      path.startsWith('/admin/tenants') ||
-      path.startsWith('/admin/gpus') ||
-      path.startsWith('/admin/gateway') ||
-      path.startsWith('/admin/network') ||
-      path.startsWith('/admin/storage') ||
-      path.startsWith('/admin/host')
-    ) {
-      return 'forge'
-    }
-    return 'workspace'
+    return 'capsules'
   })
 
   const currentMenuTree = computed<QilnMenuOption[]>(() => {
-    switch (activeContext.value) {
-      case 'forge':
-        return forgeMenuOptions
-      case 'operations':
-        return operationsMenuOptions
-      case 'workspace':
-      default:
-        return workspaceMenuOptions.value
+    if (activeContext.value === 'operations') {
+      return operationsMenuOptions
     }
+    return capsuleMenuOptions
   })
 
-  const isPinned = (id: string) => {
-    const check = (resources: PinnedResource[]): boolean => {
-      for (const res of resources) {
-        if (res.id === id) return true
-        if (res.children && check(res.children)) return true
-      }
-      return false
-    }
-    return check(mockPinnedData.value)
-  }
-
-  const togglePin = (resource: PinnedResource) => {
-    if (isPinned(resource.id)) {
-      const remove = (resources: PinnedResource[]): PinnedResource[] => {
-        return resources.filter(r => r.id !== resource.id).map(r => ({ ...r, children: r.children ? remove(r.children) : undefined }))
-      }
-      mockPinnedData.value = remove(mockPinnedData.value)
-    } else {
-      mockPinnedData.value.push(resource)
-    }
-  }
-
-  const activeMenuKey = computed<string | null>(() => {
+  const activeMenuKey = computed<string>(() => {
     const path = pageContext.value.urlPathname || ''
-    if (path === '/admin/workspace/vessels') return '/admin/workspace/vessels'
-    if (path === '/admin/workspace/vaults') return '/admin/workspace/vaults'
-    if (path === '/admin/forge') return '/admin/forge'
-    if (path === '/admin/operations') return '/admin/operations'
-    const findUrl = (resources: PinnedResource[]): boolean => {
-      for (const res of resources) {
-        if (res.url === path) return true
-        if (res.children && findUrl(res.children)) return true
-      }
-      return false
+    if (path.startsWith('/admin/operations')) {
+      return '/admin/operations'
     }
-    if (activeContext.value === 'workspace' && findUrl(mockPinnedData.value)) {
-      return path
-    }
-    const keys = [
-      '/admin/workspace/vessels',
-      '/admin/workspace/vaults',
-      '/admin/forge',
-      '/admin/operations',
-      '/admin/leases',
-      '/admin/molds',
-      '/admin/images/builds',
-      '/admin/images',
-      '/admin/fleet',
-      '/admin/vaults',
-      '/admin/tenants',
-      '/admin/gpus',
-      '/admin/gateway',
-      '/admin/network',
-      '/admin/storage',
-      '/admin/host',
-      '/admin/audit',
-      '/admin/events',
-      '/admin/settings',
-    ]
-    const sorted = keys.sort((a, b) => b.length - a.length)
-    for (const key of sorted) {
-      if (path.startsWith(key)) return key
-    }
-    return null
+    return '/admin/capsules'
   })
 
   const immutableKeys = computed(() => extractKeysByFlag(currentMenuTree.value, 'isCategoryGroup'))
@@ -495,8 +250,8 @@ export function useQilnNavigation() {
     return Array.from(new Set([...immutableKeys.value, ...activePathKeys.value, ...userExpandedKeys.value]))
   })
 
-  const handleExpandedKeysChange = (keys: string[]) => {
-    userExpandedKeys.value = keys
+  const handleExpandedKeysChange = (keys: Array<string | number>) => {
+    userExpandedKeys.value = keys.map(key => String(key))
   }
 
   return {
@@ -507,7 +262,5 @@ export function useQilnNavigation() {
     handleExpandedKeysChange,
     renderExpandIcon,
     menuNodeProps,
-    isPinned,
-    togglePin,
   }
 }

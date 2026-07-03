@@ -29,9 +29,13 @@ const config = {
   },
   // set redirects
   redirects: {
-    '/': '/admin',
-    '/admin/workspace': '/admin/workspace/vessels',
-    '/admin/workspace/': '/admin/workspace/vessels',
+    '/': '/admin/capsules',
+    '/admin': '/admin/capsules',
+    '/admin/workspace': '/admin/capsules',
+    '/admin/workspace/': '/admin/capsules',
+    '/admin/workspace/vessels': '/admin/capsules',
+    '/admin/workspace/vaults': '/admin/capsules',
+    '/admin/forge': '/admin/capsules',
   },
 } satisfies Config
 

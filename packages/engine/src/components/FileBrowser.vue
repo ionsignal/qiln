@@ -13,10 +13,10 @@
   import { ref } from 'vue'
   import { FileToolbar, FileTable, FileStatusBar, FileInspector } from './index'
   import { useFileBrowser } from '../composables/useFileBrowser'
-  import type { MockVaultDetail } from '../types'
+  import type { FileBrowserVault } from '../types'
 
   defineProps<{
-    vault: MockVaultDetail
+    vault: FileBrowserVault
   }>()
 
   const browserRootRef = ref<HTMLElement | null>(null)
@@ -42,7 +42,7 @@
 
   function getFocusedIndex(): number {
     if (!focusedKey.value) return -1
-    return currentEntries.value.findIndex(e => e.path === focusedKey.value)
+    return currentEntries.value.findIndex(entry => entry.path === focusedKey.value)
   }
 
   function handleKeydown(e: KeyboardEvent) {
@@ -52,6 +52,7 @@
         deleteEntries(selectedKeys.value)
       }
     }
+
     if (e.key === 'Escape') {
       if (isInspectorOpen.value) {
         isInspectorOpen.value = false
@@ -63,35 +64,46 @@
         clearSelection()
       }
     }
+
     if (e.key === ' ' || e.key === 'Spacebar') {
       if (focusedKey.value) {
         e.preventDefault()
         isInspectorOpen.value = !isInspectorOpen.value
       }
     }
+
     if (e.key === 'Enter') {
       if (!focusedKey.value) return
+
       e.preventDefault()
-      const entry = currentEntries.value.find(c => c.path === focusedKey.value)
+
+      const entry = currentEntries.value.find(candidate => candidate.path === focusedKey.value)
       if (!entry) return
+
       if (entry.type === 'directory') {
         navigateTo(entry.path)
       } else {
         isInspectorOpen.value = true
       }
     }
+
     if (e.key === 'ArrowDown') {
       e.preventDefault()
+
       const entries = currentEntries.value
       if (entries.length === 0) return
+
       const idx = getFocusedIndex()
       const nextIdx = idx === -1 ? 0 : Math.min(idx + 1, entries.length - 1)
       focusEntry(entries[nextIdx].path)
     }
+
     if (e.key === 'ArrowUp') {
       e.preventDefault()
+
       const entries = currentEntries.value
       if (entries.length === 0) return
+
       const idx = getFocusedIndex()
       const prevIdx = idx === -1 ? entries.length - 1 : Math.max(idx - 1, 0)
       focusEntry(entries[prevIdx].path)

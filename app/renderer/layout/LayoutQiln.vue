@@ -8,23 +8,23 @@
             <TransitionDispatcher />
             <n-layout position="absolute" class="qiln-admin-root">
               <n-layout-header class="admin-header-grid">
-                <!-- Left: Logo -->
                 <div class="header-left">
                   <n-flex align="center" :size="16">
                     <n-text style="font-size: 18px; font-weight: 700; letter-spacing: 0.1em">Qiln</n-text>
                   </n-flex>
                 </div>
-                <!-- Center: Command Palette -->
+
                 <div class="header-center">
                   <n-auto-complete
                     ref="searchRef"
                     class="command-palette"
-                    placeholder="Search resources..."
+                    placeholder="Search capsules..."
                     size="small"
                     v-model:value="searchValue"
                     :options="searchOptions"
                     :render-label="renderSearchLabel"
                     :clear-after-select="true"
+                    @select="handleSearchSelect"
                     @focus="isSearchFocused = true"
                     @blur="isSearchFocused = false">
                     <template #prefix>
@@ -35,7 +35,7 @@
                     </template>
                   </n-auto-complete>
                 </div>
-                <!-- Right: Actions -->
+
                 <div class="header-right">
                   <n-flex align="center" :size="10">
                     <n-badge :value="3" :max="99">
@@ -54,6 +54,7 @@
                   </n-flex>
                 </div>
               </n-layout-header>
+
               <n-layout has-sider position="absolute" style="top: 48px; bottom: 0">
                 <qiln-rail />
                 <qiln-sidebar />
@@ -73,15 +74,8 @@
   import 'vfonts/Roboto.css'
   import 'vfonts/FiraCode.css'
   import { h, computed, ref, onMounted, onUnmounted, defineComponent } from 'vue'
-  import { Icon } from '@/components/Icon'
-  import { transitionBus } from '@/renderer/utils/transitions'
-  import { adminThemeOverrides } from '@/renderer/layout/adminThemeOverrides'
-
-  import QilnRail from '@/components/admin/QilnRail.vue'
-  import QilnSidebar from '@/components/admin/QilnSidebar.vue'
-
-  import { mdiChevronDown, mdiBellOutline, mdiCog, mdiLogout, mdiMagnify, mdiHome, mdiServerNetwork, mdiCubeOutline, mdiSafe } from '@mdi/js'
-
+  import { navigate } from 'vike/client/router'
+  import { mdiBellOutline, mdiChevronDown, mdiCog, mdiConsoleLine, mdiCubeOutline, mdiHome, mdiLogout, mdiMagnify } from '@mdi/js'
   import {
     NConfigProvider,
     NGlobalStyle,
@@ -108,10 +102,11 @@
     type AutoCompleteOption,
     type DropdownOption,
   } from 'naive-ui'
-
-  import { provideVaultSidebar } from '@/composables/useVaultSidebar'
-
-  provideVaultSidebar()
+  import { Icon } from '@/components/Icon'
+  import { transitionBus } from '@/renderer/utils/transitions'
+  import { adminThemeOverrides } from '@/renderer/layout/adminThemeOverrides'
+  import QilnRail from '@/components/admin/QilnRail.vue'
+  import QilnSidebar from '@/components/admin/QilnSidebar.vue'
 
   const TransitionDispatcher = defineComponent({
     name: 'TransitionDispatcher',
@@ -120,16 +115,19 @@
       const onStart = () => loadingBar.start()
       const onFinish = () => loadingBar.finish()
       const onError = () => loadingBar.error()
+
       onMounted(() => {
         transitionBus.on('start', onStart)
         transitionBus.on('finish', onFinish)
         transitionBus.on('error', onError)
       })
+
       onUnmounted(() => {
         transitionBus.off('start', onStart)
         transitionBus.off('finish', onFinish)
         transitionBus.off('error', onError)
       })
+
       return () => null
     },
   })
@@ -139,9 +137,9 @@
   const searchValue = ref('')
   const isSearchFocused = ref(false)
 
-  const handleKeydown = (e: KeyboardEvent) => {
-    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-      e.preventDefault()
+  const handleKeydown = (event: KeyboardEvent) => {
+    if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+      event.preventDefault()
       searchRef.value?.focus()
     }
   }
@@ -150,6 +148,7 @@
     if (typeof navigator !== 'undefined' && navigator.platform.toUpperCase().indexOf('MAC') >= 0) {
       searchShortcut.value = '⌘K'
     }
+
     window.addEventListener('keydown', handleKeydown)
   })
 
@@ -157,54 +156,59 @@
     window.removeEventListener('keydown', handleKeydown)
   })
 
-  type SearchOption = AutoCompleteOption & { resourceType?: 'vessel' | 'mold' | 'vault' }
+  type SearchOption = AutoCompleteOption & {
+    resourceType?: 'capsule' | 'operation'
+  }
 
-  const allMockOptions: AutoCompleteGroupOption[] = [
+  const allSearchOptions: AutoCompleteGroupOption[] = [
     {
       type: 'group',
-      label: 'Vessels',
-      key: 'vessels',
-      children: [
-        { label: 'prod-vllm-01', value: 'prod-vllm-01', resourceType: 'vessel' },
-        { label: 'auth-db-01', value: 'auth-db-01', resourceType: 'vessel' },
-      ] as SearchOption[],
+      label: 'Capsules',
+      key: 'capsules',
+      children: [{ label: 'Capsules', value: '/admin/capsules', resourceType: 'capsule' }] as SearchOption[],
     },
     {
       type: 'group',
-      label: 'Molds',
-      key: 'molds',
-      children: [
-        { label: 'vLLM Inference', value: 'mold-vllm', resourceType: 'mold' },
-        { label: 'ComfyUI Workspace', value: 'mold-comfy', resourceType: 'mold' },
-      ] as SearchOption[],
-    },
-    {
-      type: 'group',
-      label: 'Vaults',
-      key: 'vaults',
-      children: [{ label: 'is-model-vault', value: 'is-model-vault', resourceType: 'vault' }] as SearchOption[],
+      label: 'Operations',
+      key: 'operations',
+      children: [{ label: 'Operations', value: '/admin/operations', resourceType: 'operation' }] as SearchOption[],
     },
   ]
 
   const searchOptions = computed(() => {
-    if (!searchValue.value) return allMockOptions
+    if (!searchValue.value) {
+      return allSearchOptions
+    }
+
     const query = searchValue.value.toLowerCase()
-    return allMockOptions
+
+    return allSearchOptions
       .map(group => {
-        const filteredChildren = (group.children as SearchOption[]).filter(child => String(child.label).toLowerCase().includes(query))
+        const children = (group.children ?? []) as SearchOption[]
+        const filteredChildren = children.filter(child =>
+          String(child.label ?? '')
+            .toLowerCase()
+            .includes(query),
+        )
         return { ...group, children: filteredChildren }
       })
       .filter(group => group.children.length > 0)
   })
 
   const renderSearchLabel = (info: SearchOption) => {
-    let iconPath = mdiServerNetwork
-    if (info.resourceType === 'mold') iconPath = mdiCubeOutline
-    if (info.resourceType === 'vault') iconPath = mdiSafe
+    const iconPath = info.resourceType === 'operation' ? mdiConsoleLine : mdiCubeOutline
+
     return h('div', { style: { display: 'flex', alignItems: 'center', gap: '8px' } }, [
       h(Icon, { path: iconPath, size: 14, style: { opacity: 0.5 } }),
       h('span', info.label as string),
     ])
+  }
+
+  function handleSearchSelect(value: string | number) {
+    if (typeof value === 'string' && value.startsWith('/admin/')) {
+      navigate(value)
+      searchValue.value = ''
+    }
   }
 
   const renderIcon = (path: string) => () => h(Icon, { path, size: 14 })
@@ -231,7 +235,7 @@
     },
   ]
 
-  function handleUserMenuSelect(key: string) {
+  function handleUserMenuSelect(key: string | number) {
     switch (key) {
       case 'exit':
         window.location.href = '/'
@@ -312,43 +316,6 @@
   :deep(.n-badge-sup) {
     height: 14px;
     padding: 0 4px;
-  }
-
-  :deep(.qiln-category-header > .n-menu-item-content) {
-    height: 32px !important;
-  }
-
-  :deep(.qiln-category-header > .n-menu-item-content::before) {
-    display: none !important;
-  }
-
-  :deep(.n-menu-item-content-header) {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: center;
-    gap: 8px;
-    width: 100%;
-  }
-
-  :deep(.n-menu-item-content-header__extra) {
-    display: flex;
-  }
-
-  :deep(.quick-provision-btn) {
-    --n-color: rgba(255, 255, 255, 0.08) !important;
-    --n-text-color: rgba(255, 255, 255, 0.4) !important;
-    --n-border: 1px solid transparent !important;
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  }
-
-  :deep(.n-menu-item-content:hover .quick-provision-btn) {
-    --n-color: rgba(34, 197, 94, 0.2) !important;
-    --n-text-color: #4ade80 !important;
-  }
-
-  :deep(.n-menu-item-content:hover .quick-provision-btn:hover) {
-    --n-color: #22c55e !important;
-    --n-text-color: #fff !important;
   }
 </style>
 

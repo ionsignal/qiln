@@ -7,39 +7,22 @@
     content-style="height: 100%;"
     class="qiln-global-rail">
     <n-flex vertical align="center" :size="6" class="rail-floating-panel">
-      <!-- Workspace -->
       <n-tooltip placement="right">
         <template #trigger>
           <n-button
-            @click="navigate('/admin/workspace')"
+            @click="navigate('/admin/capsules')"
             class="rail-btn"
-            :type="activeContext === 'workspace' ? 'primary' : 'default'"
-            :quaternary="activeContext !== 'workspace'"
-            :secondary="activeContext === 'workspace'">
+            :type="activeContext === 'capsules' ? 'primary' : 'default'"
+            :quaternary="activeContext !== 'capsules'"
+            :secondary="activeContext === 'capsules'">
             <template #icon>
-              <icon :path="mdiMonitorDashboard" />
+              <icon :path="mdiCubeOutline" />
             </template>
           </n-button>
         </template>
-        Workspace
+        Capsules
       </n-tooltip>
-      <!-- Forge -->
-      <n-tooltip placement="right">
-        <template #trigger>
-          <n-button
-            @click="navigate('/admin/forge')"
-            class="rail-btn"
-            :type="activeContext === 'forge' ? 'primary' : 'default'"
-            :quaternary="activeContext !== 'forge'"
-            :secondary="activeContext === 'forge'">
-            <template #icon>
-              <icon :path="mdiAnvil" />
-            </template>
-          </n-button>
-        </template>
-        Forge
-      </n-tooltip>
-      <!-- Operations -->
+
       <n-tooltip placement="right">
         <template #trigger>
           <n-button
@@ -53,7 +36,7 @@
             </template>
           </n-button>
         </template>
-        Operations Center
+        Operations
       </n-tooltip>
     </n-flex>
   </n-layout-sider>
@@ -61,10 +44,10 @@
 
 <script setup lang="ts">
   import { NLayoutSider, NFlex, NTooltip, NButton } from 'naive-ui'
-  import { Icon } from '@/components/Icon'
-  import { mdiMonitorDashboard, mdiAnvil, mdiConsoleLine } from '@mdi/js'
-  import { useQilnNavigation } from '../../composables/useQilnNavigation'
+  import { mdiCubeOutline, mdiConsoleLine } from '@mdi/js'
   import { navigate } from 'vike/client/router'
+  import { Icon } from '@/components/Icon'
+  import { useQilnNavigation } from '../../composables/useQilnNavigation'
 
   const { activeContext } = useQilnNavigation()
 </script>

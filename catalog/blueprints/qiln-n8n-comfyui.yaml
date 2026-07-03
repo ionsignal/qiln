@@ -1,6 +1,6 @@
 name: n8n-comfyui-capsule
 display_name: AI Workflow Capsule (n8n & ComfyUI)
-description: Dual n8n and ComfyUI pipeline with isolated ZFS workspace and read-only host model vault.
+description: Dual n8n and ComfyUI capsule blueprint with durable branch storage and read-only shared model mount.
 image_alias: qiln-noble-python-node
 
 provisioning:

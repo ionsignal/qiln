@@ -7,11 +7,15 @@ import type { CapsuleBranchItem } from '../types'
 
 export type CapsuleBranchClient = TRPCClient<HostRouter>['capsule']
 
+export interface CapsuleEventStreamSubscription {
+  unsubscribe: () => void
+}
+
 export interface UseCapsulesOptions {
   client: CapsuleBranchClient
   branches: Ref<CapsuleBranchItem[]>
   onError?: (err: Error) => void
-  onEventStream: (handler: (rawEvent: unknown) => void) => { unsubscribe: () => void }
+  onEventStream: (handler: (rawEvent: unknown) => void) => CapsuleEventStreamSubscription
 }
 
 export interface CapsuleContext {
@@ -25,6 +29,7 @@ export interface CapsuleContext {
 const CapsuleContextKey: InjectionKey<CapsuleContext> = Symbol('CapsuleContext')
 
 export function provideCapsules(options: UseCapsulesOptions): CapsuleContext {
+  let eventSubscription: CapsuleEventStreamSubscription | null = null
   async function refresh() {
     try {
       const list = await options.client.list.query()
@@ -61,14 +66,12 @@ export function provideCapsules(options: UseCapsulesOptions): CapsuleContext {
   }
 
   onMounted(() => {
-    const subscription = options.onEventStream((rawData: unknown) => {
+    eventSubscription = options.onEventStream((rawData: unknown) => {
       const parsedEvent = CapsuleEventSchema.safeParse(rawData)
       if (!parsedEvent.success) {
         return
       }
-
       const event = parsedEvent.data
-
       if (event.type === CapsuleBranchEventName.BRANCH_STATE_CHANGED) {
         const target = options.branches.value.find(branch => branch.name === event.name)
         if (target) {
@@ -76,14 +79,17 @@ export function provideCapsules(options: UseCapsulesOptions): CapsuleContext {
         } else {
           refresh().catch(error => console.error('[provideCapsules] Background refresh failed:', error))
         }
-      } else if (event.type === CapsuleBranchEventName.BRANCH_DELETED) {
+        return
+      }
+      if (event.type === CapsuleBranchEventName.BRANCH_DELETED) {
         options.branches.value = options.branches.value.filter(branch => branch.name !== event.name)
       }
     })
+  })
 
-    onUnmounted(() => {
-      subscription.unsubscribe()
-    })
+  onUnmounted(() => {
+    eventSubscription?.unsubscribe()
+    eventSubscription = null
   })
 
   const context: CapsuleContext = {
@@ -104,6 +110,5 @@ export function useCapsuleContext(): CapsuleContext {
   if (!context) {
     throw new Error('[qiln-engine] useCapsuleContext must be used inside a component tree that calls provideCapsules()')
   }
-
   return context
 }

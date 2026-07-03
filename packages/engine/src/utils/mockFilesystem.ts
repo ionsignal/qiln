@@ -1,7 +1,7 @@
-import type { MockVaultDetail, FileEntry, MockFsNode } from '../types'
+import type { FileEntry, MockFsNode } from '../types'
 import { joinPath, getFileExtension } from './fileUtils'
 
-const mockVaults: MockVaultDetail[] = [
+const mockVaults: any[] = [
   {
     id: 'comfy-workspace-data',
     name: 'comfy-workspace-data',
@@ -272,7 +272,7 @@ const mockVaults: MockVaultDetail[] = [
   },
 ]
 
-export function getVaultById(id: string): MockVaultDetail | null {
+export function getVaultById(id: string): any | null {
   return mockVaults.find(v => v.id === id) || null
 }
 
@@ -289,11 +289,11 @@ function traversePath(root: MockFsNode, path: string): MockFsNode | null {
   return current
 }
 
-export function resolveFileMetadata(vault: MockVaultDetail, path: string): MockFsNode | null {
+export function resolveFileMetadata(vault: any, path: string): MockFsNode | null {
   return traversePath(vault.root, path)
 }
 
-export function resolveDirectory(vault: MockVaultDetail, path: string): FileEntry[] {
+export function resolveDirectory(vault: any, path: string): FileEntry[] {
   const node = traversePath(vault.root, path)
   if (!node || node.type !== 'directory' || !node.children) return []
   return Object.values(node.children).map(child => {
@@ -319,7 +319,7 @@ export function resolveDirectory(vault: MockVaultDetail, path: string): FileEntr
   })
 }
 
-export function resolveFileContent(vault: MockVaultDetail, path: string): string | null {
+export function resolveFileContent(vault: any, path: string): string | null {
   const node = traversePath(vault.root, path)
   if (!node || node.type !== 'file') return null
   return node.content || null
