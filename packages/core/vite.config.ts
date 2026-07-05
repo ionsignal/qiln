@@ -1,4 +1,3 @@
-// packages/core/vite.config.ts
 import dts from 'vite-plugin-dts'
 import { defineConfig } from 'vite'
 import { resolve } from 'path'
@@ -9,7 +8,6 @@ export default defineConfig(({ mode }) => {
     server: resolve(__dirname, 'src/server.ts'),
     sentinel: resolve(__dirname, 'src/sentinel.ts'),
   }
-  // Only include the client entry in production/build mode
   if (mode !== 'development') {
     entry.client = resolve(__dirname, 'src/client.ts')
   }
@@ -33,6 +31,7 @@ export default defineConfig(({ mode }) => {
         },
         external: [
           'zod',
+          'yaml',
           'drizzle-orm',
           'drizzle-orm/pg-core',
           'drizzle-orm/postgres-js',

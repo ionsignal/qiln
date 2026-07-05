@@ -77,4 +77,4 @@ export type FileInspectorTarget =
   | { type: 'file'; path: string; name: string; size: number; modified: string; extension: string; content: string | null; fileType: FileType }
   | { type: 'directory'; path: string; name: string; modified: string; childCount: number }
 
-export type CapsuleBranchItem = EngineRouterOutputs['capsule']['list'][number]
+export type CapsuleBranchItem = EngineRouterOutputs['capsules']['branch']['list'][number]

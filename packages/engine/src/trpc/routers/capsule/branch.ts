@@ -1,8 +1,8 @@
 import { z } from 'zod'
 import { TRPCError } from '@trpc/server'
 import { CapsuleBranchNameSchema, CapsuleBranchStatusSchema, CapsuleCommandAckSchema, DEFAULT_CAPSULE_BLUEPRINT_NAME } from '@qiln/core/server'
-import { router, protectedProcedure } from '../init'
-import { handleEngineError } from '../utils'
+import { router, protectedProcedure } from '../../init'
+import { handleEngineError } from '../../utils'
 
 export const CapsuleBranchItemSchema = z
   .object({
@@ -18,7 +18,7 @@ export const CapsuleBranchItemSchema = z
   })
   .strict()
 
-export const capsuleRouter = router({
+export const capsuleBranchRouter = router({
   list: protectedProcedure.output(z.array(CapsuleBranchItemSchema)).query(async ({ ctx }) => {
     try {
       return await ctx.engine.capsule.list(ctx.user.id)
@@ -42,7 +42,6 @@ export const capsuleRouter = router({
         if (!state) {
           throw new TRPCError({ code: 'NOT_FOUND', message: 'Capsule branch not found or access denied.' })
         }
-
         return state
       } catch (error: unknown) {
         handleEngineError(error)

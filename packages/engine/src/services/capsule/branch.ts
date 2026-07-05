@@ -48,7 +48,7 @@ interface CapsuleBranchRow {
  * to receive `blueprint` and `ip` while the read model stores
  * `blueprint_name` and `runtime_ip`.
  */
-export class CapsuleService {
+export class CapsuleBranchService {
   constructor(
     private readonly db: CapsuleBranchHostDbContract,
     private readonly channel: CapsuleChannel,

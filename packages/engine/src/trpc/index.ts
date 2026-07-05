@@ -1,13 +1,15 @@
 import { t } from './init'
-import { capsuleRouter } from './routers/capsule'
-import { registryRouter } from './routers/registry'
+import { capsuleBranchRouter } from './routers/capsule/branch'
+import { blueprintRouter } from './routers/blueprints'
 
 export const engineRouter = t.router({
   status: t.procedure.query(() => {
     return { status: 'QilnEngine Capsule Channel Operational', version: '0.0.1' }
   }),
-  capsule: capsuleRouter,
-  registry: registryRouter,
+  capsules: t.router({
+    branch: capsuleBranchRouter,
+  }),
+  blueprints: blueprintRouter,
 })
 
 export type EngineRouter = typeof engineRouter

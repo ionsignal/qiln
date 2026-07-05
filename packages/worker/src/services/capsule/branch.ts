@@ -5,20 +5,20 @@ import {
   CapsuleBranchEventName,
   DEFAULT_CAPSULE_BLUEPRINT_NAME,
   TargetType,
+  type CapsuleBlueprintRegistry,
   type CapsuleBranchStatus,
   type CapsuleChannel,
   type CapsuleCommandAck,
   type TargetOwner,
 } from '@qiln/core/server'
-import { extractIpv4 } from '../incus/utils'
+import { extractIpv4 } from '../../incus/utils'
 import { capsuleBranchLibrarySchema, type CapsuleBranchHostDbContract } from '@qiln/core/server'
-import { IncusError, isUniqueConstraintViolation, readIncusErrorDetailCode } from '../errors'
-import { interpolate } from '../utils/template'
+import { IncusError, isUniqueConstraintViolation, readIncusErrorDetailCode } from '../../errors'
+import { interpolate } from '../../utils/template'
 import type { Node, ParsedNode } from 'yaml'
-import type { IncusClient } from '../incus/client/index'
-import type { IncusDeviceMap } from '../schemas/incus'
-import type { ProjectService } from './project'
-import type { DefinitionRegistryService } from './registry'
+import type { IncusClient } from '../../incus/client/index'
+import type { IncusDeviceMap } from '../../schemas/incus'
+import type { ProjectService } from '../project'
 
 const SOURCE_PROJECT = 'default'
 
@@ -46,7 +46,7 @@ export class CapsuleBranchRuntimeService {
     private readonly incus: IncusClient,
     private readonly channel: CapsuleChannel,
     private readonly project: ProjectService,
-    private readonly registry: DefinitionRegistryService,
+    private readonly blueprints: CapsuleBlueprintRegistry,
   ) {}
 
   /**
@@ -67,13 +67,10 @@ export class CapsuleBranchRuntimeService {
     const branch = await this.db.query.capsuleBranches.findFirst({
       where: { name, ownerId },
     })
-
     if (!branch) {
       return null
     }
-
     let ip = branch.runtimeIp
-
     if (branch.status === 'online' || branch.status === 'starting') {
       try {
         const namespace = this.project.getNamespace(ownerId)
@@ -84,7 +81,6 @@ export class CapsuleBranchRuntimeService {
         console.warn(`[CapsuleBranchRuntimeService] Could not fetch live Incus state for branch '${name}'. Degrading gracefully.`)
       }
     }
-
     return { ...branch, runtimeIp: ip }
   }
 
@@ -98,12 +94,10 @@ export class CapsuleBranchRuntimeService {
     cpu: string = '4',
     memory: string = '4GB',
   ): Promise<CapsuleCommandAck> {
-    const blueprint = this.registry.get(blueprintName)
-
+    const blueprint = this.blueprints.get(blueprintName)
     if (!blueprint) {
       throw new IncusError(`Capsule blueprint '${blueprintName}' not found.`, 'NOT_FOUND')
     }
-
     try {
       await this.db.insert(capsuleBranchLibrarySchema.capsuleBranches).values({
         ownerId,
@@ -117,15 +111,12 @@ export class CapsuleBranchRuntimeService {
       if (isUniqueConstraintViolation(err)) {
         throw new IncusError(`Capsule branch '${name}' already exists.`, 'CONFLICT')
       }
-
       throw err
     }
-
     const namespace = this.project.getNamespace(ownerId)
     const project = this.incus.UseProject(namespace)
     const rollbackStack: Array<() => Promise<void>> = []
     const managedVolumes: ManagedVolume[] = []
-
     try {
       await this.project.ensureNamespace(ownerId)
       this.publishStateChanged(ownerId, name, 'provisioning')
@@ -148,21 +139,17 @@ export class CapsuleBranchRuntimeService {
           case 'empty':
           case 'clone': {
             const config: Record<string, string> = {}
-
             if (volume.shifted) {
               config['security.shifted'] = 'true'
             }
-
             if (volume.type === 'clone') {
               await project.storage.clone(volume.pool, volume.source_volume, volumeName, config, SOURCE_PROJECT)
             } else {
               await project.storage.create(volume.pool, volumeName, config)
             }
-
             rollbackStack.push(async () => {
               await project.storage.delete(volume.pool, volumeName)
             })
-
             dynamicDevices[volume.name] = {
               type: 'disk',
               pool: volume.pool,
@@ -170,7 +157,6 @@ export class CapsuleBranchRuntimeService {
               path: volume.mount_path,
               readonly: volume.readonly ? 'true' : 'false',
             }
-
             managedVolumes.push({
               pool: volume.pool,
               volumeName,

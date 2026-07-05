@@ -5,7 +5,7 @@ import type { TRPCClient } from '@trpc/client'
 import type { EngineRouter } from '../trpc'
 import type { CapsuleBranchItem } from '../types'
 
-export type CapsuleBranchClient = TRPCClient<EngineRouter>['capsule']
+export type CapsuleBranchClient = TRPCClient<EngineRouter>['capsules']
 
 export interface CapsuleEventStreamSubscription {
   unsubscribe: () => void
@@ -59,7 +59,7 @@ export function provideCapsules(options: UseCapsulesOptions): CapsuleContext {
   }
 
   async function refreshBranches(): Promise<void> {
-    const list = await options.client.list.query()
+    const list = await options.client.branch.list.query()
     options.branches.value = list ?? []
   }
 
@@ -78,7 +78,7 @@ export function provideCapsules(options: UseCapsulesOptions): CapsuleContext {
   }
 
   async function create(name: string, blueprint?: string, cpu?: string, memory?: string) {
-    await options.client.create.mutate({ name, blueprint, cpu, memory })
+    await options.client.branch.create.mutate({ name, blueprint, cpu, memory })
     await refresh()
   }
 
@@ -104,16 +104,16 @@ export function provideCapsules(options: UseCapsulesOptions): CapsuleContext {
   }
 
   async function start(name: string) {
-    await runLifecycleMutation(name, 'starting', 'online', () => options.client.start.mutate({ name }))
+    await runLifecycleMutation(name, 'starting', 'online', () => options.client.branch.start.mutate({ name }))
   }
 
   async function stop(name: string) {
-    await runLifecycleMutation(name, 'stopping', 'offline', () => options.client.stop.mutate({ name }))
+    await runLifecycleMutation(name, 'stopping', 'offline', () => options.client.branch.stop.mutate({ name }))
   }
 
   async function remove(name: string) {
     try {
-      await options.client.delete.mutate({ name })
+      await options.client.branch.delete.mutate({ name })
       options.branches.value = options.branches.value.filter(branch => branch.name !== name)
     } catch (err: unknown) {
       await refreshSafely()

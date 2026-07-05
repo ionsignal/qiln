@@ -1,5 +1,6 @@
 export * from './errors'
 export * from './schemas'
+export * from './blueprints'
 export * from './protocol/capsule'
 export * from './protocol/capsule/nats'
 export * from './db'

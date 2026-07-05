@@ -1,10 +1,9 @@
 import path from 'node:path'
-import { CapsuleNatsChannel } from '@qiln/core/server'
+import { CapsuleBlueprintRegistry, CapsuleNatsChannel } from '@qiln/core/server'
 import { IncusClient } from './incus/client/index'
-import { CapsuleBranchRuntimeService } from './services/capsule'
+import { CapsuleBranchRuntimeService } from './services/capsule/branch'
 import { FileService } from './services/file'
 import { ProjectService } from './services/project'
-import { DefinitionRegistryService } from './services/registry'
 import { registerCapsuleChannelHandlers } from './channel'
 import type { WorkerRuntimeConfig, WorkerRuntimeOptions } from './types'
 
@@ -42,7 +41,7 @@ export class QilnWorkerRuntime {
   public readonly file: FileService
   public readonly incus: IncusClient
   public readonly channel: CapsuleNatsChannel
-  public readonly registry: DefinitionRegistryService
+  public readonly blueprints: CapsuleBlueprintRegistry
 
   private readonly config: ResolvedWorkerRuntimeConfig
   private readonly reconcileOnStart: boolean
@@ -51,14 +50,15 @@ export class QilnWorkerRuntime {
   constructor(options: WorkerRuntimeOptions) {
     this.config = resolveWorkerRuntimeConfig(options.config)
     this.reconcileOnStart = options.reconcileOnStart ?? false
-
     this.incus = new IncusClient(this.config.incus)
     this.channel = new CapsuleNatsChannel(this.config.nats, {
       loggerPrefix: '[QilnWorker CapsuleChannel]',
     })
     this.project = new ProjectService(this.incus)
-    this.registry = new DefinitionRegistryService()
-    this.capsule = new CapsuleBranchRuntimeService(options.db, this.incus, this.channel, this.project, this.registry)
+    this.blueprints = new CapsuleBlueprintRegistry({
+      loggerPrefix: '[QilnWorker Blueprints]',
+    })
+    this.capsule = new CapsuleBranchRuntimeService(options.db, this.incus, this.channel, this.project, this.blueprints)
     this.file = new FileService(options.db, this.incus, this.project)
   }
 
@@ -70,7 +70,7 @@ export class QilnWorkerRuntime {
     try {
       const definitionsPath = this.resolveDefinitionsPath()
 
-      await this.registry.load(definitionsPath)
+      await this.blueprints.load(definitionsPath)
       await this.incus.init()
       await this.channel.start()
 
@@ -79,7 +79,6 @@ export class QilnWorkerRuntime {
       if (this.reconcileOnStart) {
         await this.capsule.reconcile()
       }
-
       this.started = true
       console.log('[QilnWorker] Runtime started.')
     } catch (error: unknown) {

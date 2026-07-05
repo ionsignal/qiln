@@ -21,6 +21,9 @@
       "import": "./dist/sentinel.js"
     }
   },
+  "dependencies": {
+    "yaml": "2.9.0"
+  },
   "peerDependencies": {
     "@nats-io/transport-node": "3.4.0",
     "drizzle-orm": "1.0.0-rc.3",

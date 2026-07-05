@@ -13,6 +13,6 @@ export default fp(
   },
   {
     name: 'engine',
-    dependencies: ['db'],
+    dependencies: ['db', 'worker'],
   },
 )
