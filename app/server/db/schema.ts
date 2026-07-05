@@ -1,6 +1,6 @@
 import { sql, defineRelations } from 'drizzle-orm'
 import { pgTable, uuid, text, timestamp } from 'drizzle-orm/pg-core'
-import { instanceStatusEnum, createHostSchema, defineHostRelations } from '@qiln/engine/server'
+import { capsuleBranchStatusEnum, createCapsuleBranchSchema, defineCapsuleBranchRelations } from '@qiln/core/server'
 
 export const users = pgTable('users', {
   id: uuid('id')
@@ -21,41 +21,40 @@ export const sessions = pgTable('sessions', {
   expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }).notNull(),
 })
 
-// Instantiate the host infrastructure tables, passing in the Host's user ID column.
-const hostTables = createHostSchema(users.id)
+// Instantiate the shared capsule branch read-model tables, passing in the `host` user ID column.
+const capsuleBranchTables = createCapsuleBranchSchema(users.id)
 
-// Export enum for drizzle
-export { instanceStatusEnum }
+// Export enum for drizzle.
+export { capsuleBranchStatusEnum }
 
-// Re-export for direct access if needed by routers/services
-export const { instances } = hostTables
+// Re-export for direct access if needed by routers/services.
+export const { capsuleBranches } = capsuleBranchTables
 
 /**
- * The unified schema object containing all tables from both the Host and the Engine.
+ * The unified schema object containing all tables from both the `engine` and shared `core` fragments.
  * This is the single source of truth passed to the `drizzle()` constructor.
  */
 export const schema = {
-  // Host Tables
+  // host
   users,
   sessions,
-  // Infrastructure Tables
-  instanceStatusEnum,
-  ...hostTables,
+  // capsule
+  capsuleBranchStatusEnum,
+  ...capsuleBranchTables,
 } as const
 
-// Export the type of the merged schema for use in other modules
+// Export the type of the merged schema for use in other modules.
 export type AppSchema = typeof schema
 
 /**
  * Defines ALL relations for the entire application using the Drizzle v1 API.
- * This merges Host-specific relations with Engine-provided relations.
+ * This merges Host-specific relations with Core-provided capsule branch relations.
  */
 export const relations = defineRelations(schema, helpers => ({
-  // Host Relations
+  // host relations
   users: {
     sessions: helpers.many.sessions(),
-    // One-to-many relation mapping users to their Incus instances
-    instances: helpers.many.instances(),
+    capsuleBranches: helpers.many.capsuleBranches(),
   },
   sessions: {
     user: helpers.one.users({
@@ -63,6 +62,6 @@ export const relations = defineRelations(schema, helpers => ({
       to: helpers.users.id,
     }),
   },
-  // Spread the host infrastructure relations
-  ...defineHostRelations(helpers),
+  // capsule branch relations
+  ...defineCapsuleBranchRelations(helpers),
 }))

@@ -10,7 +10,7 @@ export type Data = {
 
 export async function data(pageContext: PageContextServer | PageContextClient): Promise<Data> {
   const trpc = useTRPC(pageContext)
-  const [branches, blueprints] = await Promise.all([trpc.host.capsule.list.query(), trpc.host.registry.list.query()])
+  const [branches, blueprints] = await Promise.all([trpc.engine.capsule.list.query(), trpc.engine.registry.list.query()])
 
   return {
     branches: branches ?? [],

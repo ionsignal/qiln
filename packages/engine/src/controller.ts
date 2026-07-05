@@ -3,8 +3,8 @@ import { CapsuleNatsChannel } from '@qiln/core/server'
 import { CapsuleService } from './services/capsule'
 import { CapsuleEventHub } from './events/capsule'
 import { DefinitionRegistryService } from './services/registry'
-import type { HostDbContract } from './db'
-import type { HostLibraryConfig } from './types'
+import type { CapsuleBranchHostDbContract } from '@qiln/core/server'
+import type { EngineConfig } from './types'
 
 export class QilnEngineController {
   public readonly events: CapsuleEventHub
@@ -12,11 +12,11 @@ export class QilnEngineController {
   public readonly channel: CapsuleNatsChannel
   public readonly registry: DefinitionRegistryService
 
-  private readonly config: HostLibraryConfig
+  private readonly config: EngineConfig
 
   constructor(
-    private readonly db: HostDbContract,
-    config: HostLibraryConfig = {},
+    private readonly db: CapsuleBranchHostDbContract,
+    config: EngineConfig = {},
   ) {
     if (!config.nats) {
       throw new Error('[QilnEngine] Missing required configuration: config.nats is required.')

@@ -23,10 +23,12 @@
   },
   "peerDependencies": {
     "@nats-io/transport-node": "3.4.0",
+    "drizzle-orm": "1.0.0-rc.3",
     "zod": "4.4.3"
   },
   "devDependencies": {
     "@nats-io/transport-node": "3.4.0",
+    "drizzle-orm": "1.0.0-rc.3",
     "typescript": "6.0.3",
     "vite": "8.1.0",
     "vite-plugin-dts": "5.0.3",

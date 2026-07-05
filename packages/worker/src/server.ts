@@ -5,6 +5,5 @@
 export const QILN_WORKER_VERSION = '0.0.1'
 
 export * from './types'
-export * from './db'
 export * from './errors'
 export * from './runtime'

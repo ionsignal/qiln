@@ -1,12 +1,12 @@
 import fp from 'fastify-plugin'
 import { QilnEngineController } from './controller'
-import type { HostPluginOptions } from './types'
+import type { EnginePluginOptions } from './types'
 
-export const qilnEnginePlugin = fp(
-  async (fastify, options: HostPluginOptions) => {
+export const enginePlugin = fp(
+  async (fastify, options: EnginePluginOptions) => {
     fastify.log.debug('[QilnEngine] Initializing capsule engine module...')
     const controller = new QilnEngineController(options.db, options.config)
-    fastify.decorate('host', controller)
+    fastify.decorate('engine', controller)
     try {
       await controller.start()
       fastify.log.info('[QilnEngine] Capsule Channel connected.')

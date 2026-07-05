@@ -4,7 +4,7 @@ import { authRouter } from '@server/trpc/routers/auth'
 import { userRouter } from '@server/trpc/routers/user'
 import { discordRouter } from '@server/trpc/routers/discord'
 import { subscriptionRouter } from '@server/trpc/routers/subscription'
-import { hostRouter } from '@qiln/engine/server'
+import { engineRouter } from '@qiln/engine/server'
 
 // We merge the Host routers with the Library router.
 // The Context types must align for this to work.
@@ -15,7 +15,7 @@ export const appRouter = mergeRouters(
     user: userRouter,
     discord: discordRouter,
     stream: subscriptionRouter,
-    host: hostRouter,
+    engine: engineRouter,
   }),
 )
 

@@ -1,6 +1,5 @@
 export * from './errors'
 export * from './types'
-export * from './db'
 export * from './trpc'
 export * from './plugin'
 export * from './controller'

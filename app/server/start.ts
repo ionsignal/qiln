@@ -55,7 +55,7 @@ async function createFastifyServer(config: EnvironmentConfig) {
   // Vike (SSR) Handler
   server.get('*', async (request: FastifyRequest, reply: FastifyReply) => {
     const db = server.db
-    const host = server.host
+    const engine = server.engine
     const user = request.session.user
     const trpc = createTRPCClient<typeof appRouter>({
       links: [
@@ -66,7 +66,7 @@ async function createFastifyServer(config: EnvironmentConfig) {
               req: request,
               res: reply,
               db,
-              host,
+              engine,
               user,
             }),
           transformer: superjson,

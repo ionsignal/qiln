@@ -9,7 +9,7 @@ export interface InnerContextOptions {
   req: FastifyRequest | IncomingMessage
   res: FastifyReply | unknown
   db: Database
-  host: QilnEngineController
+  engine: QilnEngineController
   user: AuthenticatedUser | null
 }
 
@@ -21,22 +21,22 @@ export async function createContextInner(opts: InnerContextOptions) {
     },
     db: opts.db,
     user: opts.user,
-    host: opts.host,
+    engine: opts.engine,
   }
 }
 
 interface ContextDeps {
   db?: Database
-  host?: QilnEngineController
+  engine?: QilnEngineController
 }
 
 async function createContext(opts: CreateFastifyContextOptions, deps?: ContextDeps) {
   const db = (deps?.db || opts.req.server?.db) as Database
-  const host = (deps?.host || opts.req.server?.host) as QilnEngineController
+  const engine = (deps?.engine || opts.req.server?.engine) as QilnEngineController
   if (!db) {
     throw new Error('Database instance missing in tRPC context. Ensure it is injected or available on req.server.')
   }
-  if (!host) {
+  if (!engine) {
     throw new Error('QilnEngine services missing in tRPC context.')
   }
   let user = opts.req.session?.user ?? null
@@ -51,7 +51,7 @@ async function createContext(opts: CreateFastifyContextOptions, deps?: ContextDe
     res: opts.res,
     db,
     user,
-    host,
+    engine,
   })
 }
 

@@ -2,7 +2,7 @@ import { t } from './init'
 import { capsuleRouter } from './routers/capsule'
 import { registryRouter } from './routers/registry'
 
-export const hostRouter = t.router({
+export const engineRouter = t.router({
   status: t.procedure.query(() => {
     return { status: 'QilnEngine Capsule Channel Operational', version: '0.0.1' }
   }),
@@ -10,5 +10,5 @@ export const hostRouter = t.router({
   registry: registryRouter,
 })
 
-export type HostRouter = typeof hostRouter
+export type EngineRouter = typeof engineRouter
 export * from './utils'

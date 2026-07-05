@@ -57,7 +57,15 @@ export const CapsuleBranchNameSchema = z
     'Capsule branch name must be alphanumeric, can contain hyphens, but cannot start or end with a hyphen.',
   )
 
-export const CapsuleBranchStatusSchema = z.enum(['provisioning', 'offline', 'starting', 'online', 'stopping', 'archived', 'error'])
+/**
+ * Single source of truth for all capsule branch runtime states.
+ *
+ * The Drizzle enum in `@qiln/core/server` imports this tuple so protocol
+ * validation and the database read model cannot silently diverge.
+ */
+export const CapsuleBranchStatusValues = ['provisioning', 'offline', 'starting', 'online', 'stopping', 'archived', 'error'] as const
+
+export const CapsuleBranchStatusSchema = z.enum(CapsuleBranchStatusValues)
 
 export const CapsuleBranchCommandBaseSchema = z
   .object({

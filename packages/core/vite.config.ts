@@ -1,3 +1,4 @@
+// packages/core/vite.config.ts
 import dts from 'vite-plugin-dts'
 import { defineConfig } from 'vite'
 import { resolve } from 'path'
@@ -32,6 +33,9 @@ export default defineConfig(({ mode }) => {
         },
         external: [
           'zod',
+          'drizzle-orm',
+          'drizzle-orm/pg-core',
+          'drizzle-orm/postgres-js',
           '@nats-io/transport-node',
           // Externalize internal monorepo packages to prevent duplicate bundling
           /^@qiln\//,

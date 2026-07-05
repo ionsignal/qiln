@@ -11,7 +11,7 @@ import {
   type TargetOwner,
 } from '@qiln/core/server'
 import { extractIpv4 } from '../incus/utils'
-import { librarySchema, type HostDbContract } from '../db'
+import { capsuleBranchLibrarySchema, type CapsuleBranchHostDbContract } from '@qiln/core/server'
 import { IncusError, isUniqueConstraintViolation, readIncusErrorDetailCode } from '../errors'
 import { interpolate } from '../utils/template'
 import type { Node, ParsedNode } from 'yaml'
@@ -36,13 +36,13 @@ interface ReconcileBranch {
 /**
  * Privileged worker service for capsule branch runtime mutations.
  *
- * Incus still calls these things "instances" and Postgres still uses the
- * legacy `instances` read-model table, but this service exposes capsule branch
- * semantics at the worker boundary.
+ * Incus still calls these resources "instances", but the persistence boundary
+ * now uses capsule branch terminology. This service owns the translation between
+ * Qiln capsule branch semantics and privileged Incus/ZFS side effects.
  */
 export class CapsuleBranchRuntimeService {
   constructor(
-    private readonly db: HostDbContract,
+    private readonly db: CapsuleBranchHostDbContract,
     private readonly incus: IncusClient,
     private readonly channel: CapsuleChannel,
     private readonly project: ProjectService,
@@ -53,9 +53,9 @@ export class CapsuleBranchRuntimeService {
    * Fetches the list of capsule branches for a specific owner.
    */
   public async list(ownerId: string) {
-    return await this.db.query.instances.findMany({
+    return await this.db.query.capsuleBranches.findMany({
       where: { ownerId },
-      orderBy: (instances, { desc }) => [desc(instances.createdAt)],
+      orderBy: (capsuleBranches, { desc }) => [desc(capsuleBranches.createdAt)],
     })
   }
 
@@ -64,7 +64,7 @@ export class CapsuleBranchRuntimeService {
    * enriches it with the live Incus IPv4 address when the branch is active.
    */
   public async state(ownerId: string, name: string) {
-    const branch = await this.db.query.instances.findFirst({
+    const branch = await this.db.query.capsuleBranches.findFirst({
       where: { name, ownerId },
     })
 
@@ -72,7 +72,7 @@ export class CapsuleBranchRuntimeService {
       return null
     }
 
-    let ip = branch.ip
+    let ip = branch.runtimeIp
 
     if (branch.status === 'online' || branch.status === 'starting') {
       try {
@@ -85,7 +85,7 @@ export class CapsuleBranchRuntimeService {
       }
     }
 
-    return { ...branch, ip }
+    return { ...branch, runtimeIp: ip }
   }
 
   /**
@@ -105,10 +105,10 @@ export class CapsuleBranchRuntimeService {
     }
 
     try {
-      await this.db.insert(librarySchema.instances).values({
+      await this.db.insert(capsuleBranchLibrarySchema.capsuleBranches).values({
         ownerId,
         name,
-        definition: blueprintName,
+        blueprintName,
         cpu,
         memory,
         status: 'provisioning',
@@ -264,8 +264,10 @@ export class CapsuleBranchRuntimeService {
 
       try {
         await this.db
-          .delete(librarySchema.instances)
-          .where(and(eq(librarySchema.instances.ownerId, ownerId), eq(librarySchema.instances.name, name)))
+          .delete(capsuleBranchLibrarySchema.capsuleBranches)
+          .where(
+            and(eq(capsuleBranchLibrarySchema.capsuleBranches.ownerId, ownerId), eq(capsuleBranchLibrarySchema.capsuleBranches.name, name)),
+          )
       } catch (dbErr: unknown) {
         console.error(`[CRITICAL] Ghost Record Detected: Failed to remove DB provisioning lock for branch '${name}':`, dbErr)
       }
@@ -278,7 +280,7 @@ export class CapsuleBranchRuntimeService {
    * Starts an existing offline capsule branch.
    */
   public async start(ownerId: string, name: string): Promise<CapsuleCommandAck> {
-    const branch = await this.db.query.instances.findFirst({
+    const branch = await this.db.query.capsuleBranches.findFirst({
       where: { name, ownerId },
     })
 
@@ -321,7 +323,7 @@ export class CapsuleBranchRuntimeService {
    * Stops an active capsule branch.
    */
   public async stop(ownerId: string, name: string): Promise<CapsuleCommandAck> {
-    const branch = await this.db.query.instances.findFirst({
+    const branch = await this.db.query.capsuleBranches.findFirst({
       where: { name, ownerId },
     })
 
@@ -353,7 +355,7 @@ export class CapsuleBranchRuntimeService {
    * Permanently deletes a capsule branch and all associated managed ZFS volumes.
    */
   public async delete(ownerId: string, name: string): Promise<CapsuleCommandAck> {
-    const branch = await this.db.query.instances.findFirst({
+    const branch = await this.db.query.capsuleBranches.findFirst({
       where: { name, ownerId },
     })
 
@@ -423,8 +425,8 @@ export class CapsuleBranchRuntimeService {
     }
 
     await this.db
-      .delete(librarySchema.instances)
-      .where(and(eq(librarySchema.instances.ownerId, ownerId), eq(librarySchema.instances.name, name)))
+      .delete(capsuleBranchLibrarySchema.capsuleBranches)
+      .where(and(eq(capsuleBranchLibrarySchema.capsuleBranches.ownerId, ownerId), eq(capsuleBranchLibrarySchema.capsuleBranches.name, name)))
 
     this.publishDeleted(ownerId, name)
 
@@ -435,7 +437,7 @@ export class CapsuleBranchRuntimeService {
    * Boot-time self-healing to align Postgres with true Incus state.
    */
   public async reconcile(): Promise<void> {
-    const dbBranches = await this.db.query.instances.findMany({
+    const dbBranches = await this.db.query.capsuleBranches.findMany({
       columns: { name: true, ownerId: true, status: true },
     })
 
@@ -507,7 +509,7 @@ export class CapsuleBranchRuntimeService {
   private async transitionState(ownerId: string, name: string, status: CapsuleBranchStatus, ip?: string | null): Promise<void> {
     const updateData: {
       status: CapsuleBranchStatus
-      ip?: string | null
+      runtimeIp?: string | null
       updatedAt: Date
     } = {
       status,
@@ -515,13 +517,13 @@ export class CapsuleBranchRuntimeService {
     }
 
     if (ip !== undefined) {
-      updateData.ip = ip
+      updateData.runtimeIp = ip
     }
 
     await this.db
-      .update(librarySchema.instances)
+      .update(capsuleBranchLibrarySchema.capsuleBranches)
       .set(updateData)
-      .where(and(eq(librarySchema.instances.ownerId, ownerId), eq(librarySchema.instances.name, name)))
+      .where(and(eq(capsuleBranchLibrarySchema.capsuleBranches.ownerId, ownerId), eq(capsuleBranchLibrarySchema.capsuleBranches.name, name)))
 
     this.publishStateChanged(ownerId, name, status)
   }
@@ -537,19 +539,19 @@ export class CapsuleBranchRuntimeService {
     }
 
     const result = await this.db
-      .update(librarySchema.instances)
+      .update(capsuleBranchLibrarySchema.capsuleBranches)
       .set({
         status,
         updatedAt: new Date(),
       })
       .where(
         and(
-          eq(librarySchema.instances.ownerId, ownerId),
-          eq(librarySchema.instances.name, name),
-          inArray(librarySchema.instances.status, allowedStatuses),
+          eq(capsuleBranchLibrarySchema.capsuleBranches.ownerId, ownerId),
+          eq(capsuleBranchLibrarySchema.capsuleBranches.name, name),
+          inArray(capsuleBranchLibrarySchema.capsuleBranches.status, allowedStatuses),
         ),
       )
-      .returning({ id: librarySchema.instances.id })
+      .returning({ id: capsuleBranchLibrarySchema.capsuleBranches.id })
 
     if (result.length === 0) {
       return false

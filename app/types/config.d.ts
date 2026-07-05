@@ -100,7 +100,7 @@ declare module 'fastify' {
   }
   interface FastifyInstance {
     db: Database
-    host: QilnEngineController
+    engine: QilnEngineController
     worker: QilnWorkerRuntime | null
     config: EnvironmentConfig
   }

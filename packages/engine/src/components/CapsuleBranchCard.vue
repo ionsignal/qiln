@@ -94,7 +94,7 @@
   async function handleStart() {
     try {
       await start(props.branch.name)
-      message.success('Capsule branch starting...')
+      message.success('Capsule branch started')
     } catch (err: unknown) {
       message.error(isTRPCClientError(err) ? err.message : 'Failed to start capsule branch')
     }
@@ -103,7 +103,7 @@
   async function handleStop() {
     try {
       await stop(props.branch.name)
-      message.success('Capsule branch stopping...')
+      message.success('Capsule branch stopped')
     } catch (err: unknown) {
       message.error(isTRPCClientError(err) ? err.message : 'Failed to stop capsule branch')
     }

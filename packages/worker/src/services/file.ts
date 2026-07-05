@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { IncusError } from '../errors'
-import type { HostDbContract } from '../db'
+import type { CapsuleBranchHostDbContract } from '@qiln/core/server'
 import type { IncusClient } from '../incus/client/index'
 import type { IncusFilePushOptions } from '../incus/client/types'
 import type { ProjectService } from './project'
@@ -9,7 +9,7 @@ export class FileService {
   private readonly CHROOT_BASE = '/workspace'
 
   constructor(
-    private readonly db: HostDbContract,
+    private readonly db: CapsuleBranchHostDbContract,
     private readonly incus: IncusClient,
     private readonly project: ProjectService,
   ) {}
@@ -32,7 +32,7 @@ export class FileService {
    * Verifies the owner controls the capsule branch before allowing file operations.
    */
   private async verifyOwnership(ownerId: string, branchName: string): Promise<void> {
-    const branch = await this.db.query.instances.findFirst({
+    const branch = await this.db.query.capsuleBranches.findFirst({
       where: { name: branchName, ownerId },
       columns: { id: true },
     })

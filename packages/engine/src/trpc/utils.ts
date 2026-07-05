@@ -62,7 +62,7 @@ function handleCapsuleChannelError(error: CapsuleChannelError): never {
 /**
  * Centralized error handler for the QilnEngine tRPC boundary.
  */
-export function handleHostError(error: unknown): never {
+export function handleEngineError(error: unknown): never {
   if (error instanceof TRPCError) {
     throw error
   }
@@ -92,7 +92,7 @@ export function handleHostError(error: unknown): never {
       case 'TRANSPORT_ERROR':
         throw new TRPCError({
           code: 'INTERNAL_SERVER_ERROR',
-          message: 'Failed to communicate with the host infrastructure.',
+          message: 'Failed to communicate with the engine infrastructure.',
           cause: error,
         })
       default:

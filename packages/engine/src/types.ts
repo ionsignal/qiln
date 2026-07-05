@@ -1,37 +1,37 @@
-import type { HostDbContract } from './db'
+import type { CapsuleBranchHostDbContract } from '@qiln/core/server'
 import type { inferRouterOutputs } from '@trpc/server'
 import type { QilnEngineController } from './controller'
-import type { HostRouter } from './trpc'
+import type { EngineRouter } from './trpc'
 
-export interface HostNatsConfig {
+export interface EngineNatsConfig {
   servers: string | string[]
   token?: string
 }
 
-export interface HostLibraryConfig {
-  nats?: HostNatsConfig
+export interface EngineConfig {
+  nats?: EngineNatsConfig
   definitions?: {
     path: string
   }
 }
 
-export interface HostPluginOptions {
-  db: HostDbContract
-  config?: HostLibraryConfig
+export interface EnginePluginOptions {
+  db: CapsuleBranchHostDbContract
+  config?: EngineConfig
 }
 
 /**
  * The Context required by the QilnEngine tRPC router.
  */
-export interface HostLibraryContext {
+export interface EngineContext {
   user: {
     id: string
     username: string
   } | null
-  host: QilnEngineController
+  engine: QilnEngineController
 }
 
-type HostRouterOutputs = inferRouterOutputs<HostRouter>
+type EngineRouterOutputs = inferRouterOutputs<EngineRouter>
 
 export type FileType = 'text' | 'image' | 'config' | 'archive' | 'binary' | 'unknown'
 
@@ -77,4 +77,4 @@ export type FileInspectorTarget =
   | { type: 'file'; path: string; name: string; size: number; modified: string; extension: string; content: string | null; fileType: FileType }
   | { type: 'directory'; path: string; name: string; modified: string; childCount: number }
 
-export type CapsuleBranchItem = HostRouterOutputs['capsule']['list'][number]
+export type CapsuleBranchItem = EngineRouterOutputs['capsule']['list'][number]

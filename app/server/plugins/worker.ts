@@ -1,5 +1,6 @@
 import fp from 'fastify-plugin'
-import { QilnWorkerRuntime, type HostDbContract as WorkerHostDbContract } from '@qiln/worker/server'
+import { QilnWorkerRuntime } from '@qiln/worker/server'
+import type { CapsuleBranchHostDbContract } from '@qiln/core/server'
 
 export default fp(
   async fastify => {
@@ -12,7 +13,7 @@ export default fp(
       '[Worker] Embedded worker enabled. This is a dev/proof-of-life mode only and does not provide a production privilege boundary.',
     )
     const runtime = new QilnWorkerRuntime({
-      db: fastify.db as unknown as WorkerHostDbContract,
+      db: fastify.db as unknown as CapsuleBranchHostDbContract,
       config: fastify.config,
       reconcileOnStart: fastify.config.worker.reconcileOnStart,
     })

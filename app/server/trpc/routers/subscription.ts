@@ -9,7 +9,7 @@ export const subscriptionRouter = router({
     }
 
     try {
-      for await (const event of ctx.host.events.subscribeForOwner(ctx.user.id, signal)) {
+      for await (const event of ctx.engine.events.subscribeForOwner(ctx.user.id, signal)) {
         const parsedEvent = CapsuleEventSchema.safeParse(event)
         if (!parsedEvent.success) {
           console.warn('[Subscription] Dropped capsule event that failed validation:', parsedEvent.error.issues)

@@ -7,7 +7,7 @@ import {
   type CapsuleCommandAck,
   type TargetOwner,
 } from '@qiln/core/server'
-import type { HostDbContract } from '../db'
+import type { CapsuleBranchHostDbContract } from '@qiln/core/server'
 
 export interface CapsuleBranchServiceItem {
   id: string
@@ -34,8 +34,8 @@ interface CapsuleBranchRow {
   status: CapsuleBranchStatus
   cpu: string
   memory: string
-  definition: string
-  ip: string | null
+  blueprintName: string
+  runtimeIp: string | null
   createdAt: Date
   updatedAt: Date
 }
@@ -43,26 +43,27 @@ interface CapsuleBranchRow {
 /**
  * Public-engine capsule branch service.
  *
- * The table is still named `instances` as an internal read model. The service
- * translates that legacy persistence detail into capsule/branch terminology at
- * the API boundary.
+ * The database now uses capsule branch terminology directly. The service keeps
+ * the current API response shape stable so frontend and tRPC consumers continue
+ * to receive `blueprint` and `ip` while the read model stores
+ * `blueprint_name` and `runtime_ip`.
  */
 export class CapsuleService {
   constructor(
-    private readonly db: HostDbContract,
+    private readonly db: CapsuleBranchHostDbContract,
     private readonly channel: CapsuleChannel,
   ) {}
 
   public async list(ownerId: string): Promise<CapsuleBranchServiceItem[]> {
-    const rows = await this.db.query.instances.findMany({
+    const rows = await this.db.query.capsuleBranches.findMany({
       where: { ownerId },
-      orderBy: (instances, { desc }) => [desc(instances.createdAt)],
+      orderBy: (capsuleBranches, { desc }) => [desc(capsuleBranches.createdAt)],
     })
     return rows.map(row => this.mapBranchRow(row))
   }
 
   public async state(ownerId: string, name: string): Promise<CapsuleBranchServiceItem | null> {
-    const row = await this.db.query.instances.findFirst({
+    const row = await this.db.query.capsuleBranches.findFirst({
       where: { name, ownerId },
     })
     return row ? this.mapBranchRow(row) : null
@@ -113,8 +114,8 @@ export class CapsuleService {
       status: row.status,
       cpu: row.cpu,
       memory: row.memory,
-      blueprint: row.definition,
-      ip: row.ip,
+      blueprint: row.blueprintName,
+      ip: row.runtimeIp,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     }

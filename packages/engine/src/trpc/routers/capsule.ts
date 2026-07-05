@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { TRPCError } from '@trpc/server'
 import { CapsuleBranchNameSchema, CapsuleBranchStatusSchema, CapsuleCommandAckSchema, DEFAULT_CAPSULE_BLUEPRINT_NAME } from '@qiln/core/server'
 import { router, protectedProcedure } from '../init'
-import { handleHostError } from '../utils'
+import { handleEngineError } from '../utils'
 
 export const CapsuleBranchItemSchema = z
   .object({
@@ -21,9 +21,9 @@ export const CapsuleBranchItemSchema = z
 export const capsuleRouter = router({
   list: protectedProcedure.output(z.array(CapsuleBranchItemSchema)).query(async ({ ctx }) => {
     try {
-      return await ctx.host.capsule.list(ctx.user.id)
+      return await ctx.engine.capsule.list(ctx.user.id)
     } catch (error: unknown) {
-      handleHostError(error)
+      handleEngineError(error)
     }
   }),
 
@@ -38,14 +38,14 @@ export const capsuleRouter = router({
     .output(CapsuleBranchItemSchema.nullable())
     .query(async ({ ctx, input }) => {
       try {
-        const state = await ctx.host.capsule.state(ctx.user.id, input.name)
+        const state = await ctx.engine.capsule.state(ctx.user.id, input.name)
         if (!state) {
           throw new TRPCError({ code: 'NOT_FOUND', message: 'Capsule branch not found or access denied.' })
         }
 
         return state
       } catch (error: unknown) {
-        handleHostError(error)
+        handleEngineError(error)
       }
     }),
 
@@ -63,9 +63,9 @@ export const capsuleRouter = router({
     .output(CapsuleCommandAckSchema)
     .mutation(async ({ ctx, input }) => {
       try {
-        return await ctx.host.capsule.create(ctx.user.id, input)
+        return await ctx.engine.capsule.create(ctx.user.id, input)
       } catch (error: unknown) {
-        handleHostError(error)
+        handleEngineError(error)
       }
     }),
 
@@ -80,9 +80,9 @@ export const capsuleRouter = router({
     .output(CapsuleCommandAckSchema)
     .mutation(async ({ ctx, input }) => {
       try {
-        return await ctx.host.capsule.start(ctx.user.id, input.name)
+        return await ctx.engine.capsule.start(ctx.user.id, input.name)
       } catch (error: unknown) {
-        handleHostError(error)
+        handleEngineError(error)
       }
     }),
 
@@ -97,9 +97,9 @@ export const capsuleRouter = router({
     .output(CapsuleCommandAckSchema)
     .mutation(async ({ ctx, input }) => {
       try {
-        return await ctx.host.capsule.stop(ctx.user.id, input.name)
+        return await ctx.engine.capsule.stop(ctx.user.id, input.name)
       } catch (error: unknown) {
-        handleHostError(error)
+        handleEngineError(error)
       }
     }),
 
@@ -114,9 +114,9 @@ export const capsuleRouter = router({
     .output(CapsuleCommandAckSchema)
     .mutation(async ({ ctx, input }) => {
       try {
-        return await ctx.host.capsule.delete(ctx.user.id, input.name)
+        return await ctx.engine.capsule.delete(ctx.user.id, input.name)
       } catch (error: unknown) {
-        handleHostError(error)
+        handleEngineError(error)
       }
     }),
 })

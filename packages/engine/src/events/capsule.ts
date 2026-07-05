@@ -18,7 +18,7 @@ export interface CapsuleEventHubOptions {
 /**
  * Engine-local fanout layer for validated Capsule Channel events.
  *
- * This replaces the host Fastify dispatcher bridge. NATS payload validation and
+ * This replaces the engine Fastify dispatcher bridge. NATS payload validation and
  * subject/target validation happen in `CapsuleNatsChannel`; this hub only handles
  * owner-scoped subscription lifecycle and bounded per-client queues.
  */

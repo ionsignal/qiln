@@ -1,11 +1,11 @@
 import superjson from 'superjson'
 import { initTRPC, TRPCError } from '@trpc/server'
-import type { HostLibraryContext } from '../types'
+import type { EngineContext } from '../types'
 
 /**
  * Initialize tRPC with the Library's specific context requirement.
  */
-export const t = initTRPC.context<HostLibraryContext>().create({
+export const t = initTRPC.context<EngineContext>().create({
   transformer: superjson,
 })
 

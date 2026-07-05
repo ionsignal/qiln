@@ -119,7 +119,7 @@
   }
 
   provideCapsules({
-    client: trpc.host.capsule,
+    client: trpc.engine.capsule,
     branches: branchesRef,
     onError: err => console.error('[Qiln Admin] Capsule branch sync error:', err),
     onEventStream: registerStreamHandler,
