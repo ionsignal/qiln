@@ -104,6 +104,34 @@ export const CapsuleBlueprintSchema = z
   })
   .strict()
 
+/**
+ * Client-safe blueprint manifest schemas.
+ *
+ * The manifest intentionally exposes provisionable capsule blueprint summaries,
+ * not full runtime provisioning details. The worker remains authoritative for
+ * full blueprint contents and returns stable digests for later verification.
+ */
+export const CapsuleBlueprintDigestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/, {
+  message: "Capsule blueprint digests must use the format 'sha256:<64 lowercase hex characters>'.",
+})
+
+export const CapsuleBlueprintManifestItemSchema = z
+  .object({
+    name: z.string(),
+    displayName: z.string(),
+    description: z.string(),
+    digest: CapsuleBlueprintDigestSchema,
+  })
+  .strict()
+
+export const CapsuleBlueprintManifestSchema = z
+  .object({
+    schemaVersion: z.literal(1),
+    catalogDigest: CapsuleBlueprintDigestSchema,
+    blueprints: z.array(CapsuleBlueprintManifestItemSchema),
+  })
+  .strict()
+
 export type CapsuleBlueprintConfigMap = z.infer<typeof CapsuleBlueprintConfigMapSchema>
 export type CapsuleBlueprintDevice = z.infer<typeof CapsuleBlueprintDeviceSchema>
 export type CapsuleBlueprintDeviceMap = z.infer<typeof CapsuleBlueprintDeviceMapSchema>
@@ -115,3 +143,6 @@ export type CapsuleBlueprintVolumeDefinition = z.infer<typeof CapsuleBlueprintVo
 export type CapsuleBlueprintFileDefinition = z.infer<typeof CapsuleBlueprintFileDefinitionSchema>
 export type CapsuleBlueprintPortDefinition = z.infer<typeof CapsuleBlueprintPortDefinitionSchema>
 export type CapsuleBlueprint = z.infer<typeof CapsuleBlueprintSchema>
+export type CapsuleBlueprintDigest = z.infer<typeof CapsuleBlueprintDigestSchema>
+export type CapsuleBlueprintManifestItem = z.infer<typeof CapsuleBlueprintManifestItemSchema>
+export type CapsuleBlueprintManifest = z.infer<typeof CapsuleBlueprintManifestSchema>

@@ -1,24 +1,33 @@
 <template>
   <n-card bordered embedded size="small" class="blueprint-card">
     <template #header>
-      <n-text style="font-weight: 600; letter-spacing: 0.05em">{{ blueprint.display_name }}</n-text>
+      <n-flex vertical :size="4">
+        <n-text class="blueprint-title">{{ blueprint.displayName }}</n-text>
+        <n-text depth="3" class="blueprint-name">{{ blueprint.name }}</n-text>
+      </n-flex>
     </template>
-    <n-flex vertical :size="12">
-      <n-text depth="3" style="font-size: 13px; line-height: 1.4">
+    <n-flex vertical :size="14">
+      <n-text depth="3" class="blueprint-description">
         {{ blueprint.description }}
       </n-text>
       <n-flex :size="8" wrap>
         <n-tag size="small" :bordered="false" type="info">
-          <template #icon><icon :path="mdiLayers" :size="14" /></template>
-          {{ blueprint.image_alias }}
+          <template #icon>
+            <icon :path="mdiLayers" :size="14" />
+          </template>
+          Capsule Blueprint
         </n-tag>
-        <n-tag v-if="blueprint.provisioning.volumes.length" size="small" :bordered="false">
-          <template #icon><icon :path="mdiHarddisk" :size="14" /></template>
-          {{ blueprint.provisioning.volumes.length }} Mount
+        <n-tag size="small" :bordered="false" :title="blueprint.name">
+          <template #icon>
+            <icon :path="mdiTag" :size="14" />
+          </template>
+          {{ blueprint.name }}
         </n-tag>
-        <n-tag v-if="blueprint.application?.ports.length" size="small" :bordered="false">
-          <template #icon><icon :path="mdiEthernet" :size="14" /></template>
-          {{ blueprint.application.ports.length }} Endpoint
+        <n-tag size="small" :bordered="false" :title="blueprint.digest">
+          <template #icon>
+            <icon :path="mdiFingerprint" :size="14" />
+          </template>
+          {{ shortDigest }}
         </n-tag>
       </n-flex>
     </n-flex>
@@ -29,16 +38,24 @@
 </template>
 
 <script setup lang="ts">
+  import { computed } from 'vue'
   import { NCard, NText, NFlex, NTag, NButton } from 'naive-ui'
-  import { mdiLayers, mdiHarddisk, mdiEthernet } from '@mdi/js'
+  import { mdiFingerprint, mdiLayers, mdiTag } from '@mdi/js'
   import { Icon } from './Icon'
-  import type { CapsuleBlueprint } from '@qiln/core/client'
+  import type { CapsuleBlueprintManifestItem } from '@qiln/core/client'
 
-  defineProps<{
-    blueprint: CapsuleBlueprint
+  const props = defineProps<{
+    blueprint: CapsuleBlueprintManifestItem
   }>()
 
   defineEmits<{
     (e: 'create-branch', blueprintName: string): void
   }>()
+
+  const shortDigest = computed(() => {
+    const digest = props.blueprint.digest
+    const normalizedDigest = digest.startsWith('sha256:') ? digest.slice('sha256:'.length) : digest
+    const digestPreview = normalizedDigest.length > 12 ? `${normalizedDigest.slice(0, 12)}…` : normalizedDigest
+    return digest.startsWith('sha256:') ? `sha256:${digestPreview}` : digestPreview
+  })
 </script>

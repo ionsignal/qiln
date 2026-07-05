@@ -101,9 +101,9 @@
   const showDrawer = ref(false)
   const selectedBlueprint = ref<string | undefined>(undefined)
 
-  const blueprints = computed(() => data.value.blueprints)
+  const blueprints = computed(() => data.value.manifest.blueprints)
   const branchCount = computed(() => branchesRef.value.length)
-  const onlineBranchCount = computed(() => branchesRef.value.filter((branch: any) => branch.status === 'online').length)
+  const onlineBranchCount = computed(() => branchesRef.value.filter(branch => branch.status === 'online').length)
   const blueprintCount = computed(() => blueprints.value.length)
 
   const streamHandlers = new Set<(rawEvent: unknown) => void>()

@@ -1,6 +1,6 @@
-import path from 'node:path'
-import { CapsuleBlueprintRegistry, CapsuleNatsChannel } from '@qiln/core/server'
+import { CapsuleNatsChannel } from '@qiln/core/server'
 import { CapsuleBranchService } from './services/capsule/branch'
+import { CapsuleBlueprintService } from './services/capsule/blueprints'
 import { CapsuleEventHub } from './events/capsule'
 import type { CapsuleBranchHostDbContract } from '@qiln/core/server'
 import type { EngineConfig } from './types'
@@ -8,10 +8,8 @@ import type { EngineConfig } from './types'
 export class QilnEngineController {
   public readonly events: CapsuleEventHub
   public readonly channel: CapsuleNatsChannel
+  public readonly blueprints: CapsuleBlueprintService
   public readonly capsule: CapsuleBranchService
-  public readonly blueprints: CapsuleBlueprintRegistry
-
-  private readonly config: EngineConfig
 
   constructor(
     private readonly db: CapsuleBranchHostDbContract,
@@ -20,24 +18,17 @@ export class QilnEngineController {
     if (!config.nats) {
       throw new Error('[QilnEngine] Missing required configuration: config.nats is required.')
     }
-    this.config = config
     this.channel = new CapsuleNatsChannel(config.nats, {
       loggerPrefix: '[QilnEngine CapsuleChannel]',
     })
-    this.blueprints = new CapsuleBlueprintRegistry({
-      loggerPrefix: '[QilnEngine Blueprints]',
-    })
     this.events = new CapsuleEventHub(this.channel)
+    this.blueprints = new CapsuleBlueprintService(this.channel)
     this.capsule = new CapsuleBranchService(this.db, this.channel)
   }
 
   public async start(): Promise<void> {
-    const configuredPath = this.config.definitions?.path
-    const definitionsPath = configuredPath ? path.resolve(configuredPath) : path.resolve(process.cwd(), 'catalog', 'blueprints')
-
     let channelStarted = false
     try {
-      await this.blueprints.load(definitionsPath)
       await this.channel.start()
       channelStarted = true
       this.events.start()

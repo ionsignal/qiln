@@ -5,7 +5,6 @@
         <n-form-item label="Branch Name" path="name">
           <n-input v-model:value="form.name" placeholder="e.g. sdxl-campaign-branch" :disabled="isSubmitting" />
         </n-form-item>
-
         <n-form-item label="Capsule Blueprint" path="blueprint">
           <n-select
             v-model:value="form.blueprint"
@@ -13,15 +12,12 @@
             placeholder="Select a capsule blueprint"
             :disabled="isSubmitting" />
         </n-form-item>
-
         <n-form-item label="Branch CPU Limit" path="cpu">
           <n-slider v-model:value="form.cpu" :min="1" :max="16" :marks="{ 1: '1', 4: '4', 8: '8', 16: '16' }" :disabled="isSubmitting" />
         </n-form-item>
-
         <n-form-item label="Branch Memory Limit (GB)" path="memory">
           <n-slider v-model:value="form.memory" :min="1" :max="32" :marks="{ 1: '1', 8: '8', 16: '16', 32: '32' }" :disabled="isSubmitting" />
         </n-form-item>
-
         <n-button block type="primary" attr-type="submit" :loading="isSubmitting" style="margin-top: 24px">Create Branch</n-button>
       </n-form>
     </n-drawer-content>
@@ -33,11 +29,11 @@
   import { NDrawer, NDrawerContent, NForm, NFormItem, NInput, NSelect, NSlider, NButton, useMessage } from 'naive-ui'
   import { isTRPCClientError } from '@trpc/client'
   import { useCapsuleContext } from '../composables/useCapsules'
-  import type { CapsuleBlueprint } from '@qiln/core/client'
+  import type { CapsuleBlueprintManifestItem } from '@qiln/core/client'
 
   const props = defineProps<{
     show: boolean
-    blueprints: CapsuleBlueprint[]
+    blueprints: CapsuleBlueprintManifestItem[]
     preselectedBlueprint?: string
   }>()
 
@@ -58,7 +54,7 @@
 
   const blueprintOptions = computed(() => {
     return props.blueprints.map(blueprint => ({
-      label: blueprint.display_name,
+      label: blueprint.displayName,
       value: blueprint.name,
     }))
   })

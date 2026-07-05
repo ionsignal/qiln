@@ -1,11 +1,21 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
+import { createHash } from 'node:crypto'
 import { parse } from 'yaml'
 import { z, type ZodError } from 'zod'
 import { GlobalError, GlobalErrorCode } from '../errors'
-import { CapsuleBlueprintSchema, type CapsuleBlueprint } from '../schemas'
+import {
+  CapsuleBlueprintManifestSchema,
+  CapsuleBlueprintSchema,
+  type CapsuleBlueprint,
+  type CapsuleBlueprintDigest,
+  type CapsuleBlueprintManifest,
+  type CapsuleBlueprintManifestItem,
+} from '../schemas'
 
 const DEFAULT_LOGGER_PREFIX = '[CapsuleBlueprintRegistry]'
+
+type CanonicalJson = string | number | boolean | null | CanonicalJson[] | { [key: string]: CanonicalJson }
 
 export interface CapsuleBlueprintRegistryOptions {
   loggerPrefix?: string
@@ -41,6 +51,68 @@ function validationDetails(error: ZodError): Record<string, unknown> {
   return {
     validation: z.treeifyError(error),
   }
+}
+
+function compareStableString(left: string, right: string): number {
+  if (left < right) {
+    return -1
+  }
+  if (left > right) {
+    return 1
+  }
+  return 0
+}
+
+/**
+ * Converts a validated blueprint object into canonical JSON-compatible data.
+ *
+ * Digest stability matters because workers may be restarted or deployed in
+ * multiple processes. We canonicalize parsed schema output instead of raw YAML so
+ * comments and formatting cannot change user-facing digests.
+ */
+function toCanonicalJson(value: unknown, context = 'value'): CanonicalJson {
+  if (value === null) {
+    return null
+  }
+  if (typeof value === 'string' || typeof value === 'boolean') {
+    return value
+  }
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) {
+      throw new GlobalError(`Cannot create deterministic digest for non-finite number at '${context}'.`, GlobalErrorCode.INTERNAL_ERROR, {
+        context,
+        value,
+      })
+    }
+    return value
+  }
+  if (Array.isArray(value)) {
+    return value.map((item, index) => toCanonicalJson(item, `${context}[${index}]`))
+  }
+  if (isRecord(value)) {
+    const canonical: Record<string, CanonicalJson> = {}
+    const keys = Object.keys(value).sort(compareStableString)
+    for (const key of keys) {
+      const child = value[key]
+      if (child === undefined) {
+        continue
+      }
+      canonical[key] = toCanonicalJson(child, `${context}.${key}`)
+    }
+    return canonical
+  }
+  throw new GlobalError(`Cannot create deterministic digest for non-JSON blueprint value at '${context}'.`, GlobalErrorCode.INTERNAL_ERROR, {
+    context,
+    valueType: typeof value,
+  })
+}
+
+function digestCanonicalValue(value: unknown): CapsuleBlueprintDigest {
+  const canonicalJson = JSON.stringify(toCanonicalJson(value))
+  if (canonicalJson === undefined) {
+    throw new GlobalError('Failed to serialize canonical blueprint value for digest generation.', GlobalErrorCode.INTERNAL_ERROR)
+  }
+  return `sha256:${createHash('sha256').update(canonicalJson).digest('hex')}`
 }
 
 /**
@@ -132,6 +204,42 @@ export class CapsuleBlueprintRegistry {
    */
   public list(): CapsuleBlueprint[] {
     return Array.from(this.cache.values())
+  }
+
+  /**
+   * Returns a client-safe manifest of provisionable capsule blueprints.
+   *
+   * The manifest intentionally contains summaries and stable digests rather than
+   * full provisioning details. Branch creation can later use these digests to
+   * verify the selected worker blueprint before mutation.
+   */
+  public manifest(): CapsuleBlueprintManifest {
+    const blueprints = this.list()
+      .sort((left, right) => compareStableString(left.name, right.name))
+      .map<CapsuleBlueprintManifestItem>(blueprint => ({
+        name: blueprint.name,
+        displayName: blueprint.display_name,
+        description: blueprint.description,
+        digest: digestCanonicalValue(blueprint),
+      }))
+    const catalogDigest = digestCanonicalValue({
+      schemaVersion: 1,
+      blueprints,
+    })
+    const manifest = {
+      schemaVersion: 1,
+      catalogDigest,
+      blueprints,
+    }
+    const parsed = CapsuleBlueprintManifestSchema.safeParse(manifest)
+    if (!parsed.success) {
+      throw new GlobalError(
+        'Generated capsule blueprint manifest failed validation.',
+        GlobalErrorCode.INTERNAL_ERROR,
+        validationDetails(parsed.error),
+      )
+    }
+    return parsed.data
   }
 
   private parseBlueprintYaml(content: string, file: string, filePath: string): unknown {

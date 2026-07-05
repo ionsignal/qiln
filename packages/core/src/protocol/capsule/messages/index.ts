@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { CapsuleBlueprintCommandDefinitions, CapsuleBlueprintCommandName, CapsuleBlueprintCommandNameValues } from './blueprints'
 import {
   CapsuleBranchCommandDefinitions,
   CapsuleBranchCommandName,
@@ -20,16 +21,22 @@ import {
 import type { CapsuleCommandDefinition, CapsuleEventDefinition } from './definitions'
 
 export * from './definitions'
+export * from './blueprints'
 export * from './branch'
 
 export const CapsuleCommandName = {
   ...CapsuleBranchCommandName,
   ...CapsuleSnapshotCommandName,
+  ...CapsuleBlueprintCommandName,
 } as const
 
 export type CapsuleCommandName = (typeof CapsuleCommandName)[keyof typeof CapsuleCommandName]
 
-export const CapsuleCommandNameValues = [...CapsuleBranchCommandNameValues, ...CapsuleSnapshotCommandNameValues] as const
+export const CapsuleCommandNameValues = [
+  ...CapsuleBranchCommandNameValues,
+  ...CapsuleSnapshotCommandNameValues,
+  ...CapsuleBlueprintCommandNameValues,
+] as const
 export const CapsuleCommandNameSchema = z.enum(CapsuleCommandNameValues)
 
 export const CapsuleEventName = {
@@ -45,6 +52,7 @@ export const CapsuleEventNameSchema = z.enum(CapsuleEventNameValues)
 export const CapsuleCommandDefinitions = {
   ...CapsuleBranchCommandDefinitions,
   ...CapsuleSnapshotCommandDefinitions,
+  ...CapsuleBlueprintCommandDefinitions,
 } as const satisfies Record<CapsuleCommandName, CapsuleCommandDefinition>
 
 export type CapsuleCommandRegistry = typeof CapsuleCommandDefinitions

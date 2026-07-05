@@ -1,4 +1,5 @@
 import { registerCapsuleBranchHandlers } from './handlers/capsule'
+import { registerCapsuleBlueprintHandlers } from './handlers/blueprints'
 import type { QilnWorkerRuntime } from '../runtime'
 
 /**
@@ -6,4 +7,5 @@ import type { QilnWorkerRuntime } from '../runtime'
  */
 export function registerCapsuleChannelHandlers(worker: QilnWorkerRuntime): void {
   registerCapsuleBranchHandlers(worker)
+  registerCapsuleBlueprintHandlers(worker)
 }
