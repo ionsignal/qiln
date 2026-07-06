@@ -1,6 +1,6 @@
 import { sql, defineRelations } from 'drizzle-orm'
 import { pgTable, uuid, text, timestamp } from 'drizzle-orm/pg-core'
-import { capsuleBranchStatusEnum, createCapsuleBranchSchema, defineCapsuleBranchRelations } from '@qiln/core/server'
+import { capsuleBranchStatusEnum, createCapsuleBranchSchema, defineCapsuleBranchRelations, mergeRelationFragments } from '@qiln/core/server'
 
 export const users = pgTable('users', {
   id: uuid('id')
@@ -24,10 +24,7 @@ export const sessions = pgTable('sessions', {
 // Instantiate the shared capsule branch read-model tables, passing in the `host` user ID column.
 const capsuleBranchTables = createCapsuleBranchSchema(users.id)
 
-// Export enum for drizzle.
 export { capsuleBranchStatusEnum }
-
-// Re-export for direct access if needed by routers/services.
 export const { capsuleBranches } = capsuleBranchTables
 
 /**
@@ -50,18 +47,22 @@ export type AppSchema = typeof schema
  * Defines ALL relations for the entire application using the Drizzle v1 API.
  * This merges Host-specific relations with Core-provided capsule branch relations.
  */
-export const relations = defineRelations(schema, helpers => ({
-  // host relations
-  users: {
-    sessions: helpers.many.sessions(),
-    capsuleBranches: helpers.many.capsuleBranches(),
-  },
-  sessions: {
-    user: helpers.one.users({
-      from: helpers.sessions.userId,
-      to: helpers.users.id,
-    }),
-  },
-  // capsule branch relations
-  ...defineCapsuleBranchRelations(helpers),
-}))
+export const relations = defineRelations(schema, helpers =>
+  mergeRelationFragments(
+    {
+      // host relations
+      users: {
+        sessions: helpers.many.sessions(),
+        capsuleBranches: helpers.many.capsuleBranches(),
+      },
+      sessions: {
+        user: helpers.one.users({
+          from: helpers.sessions.userId,
+          to: helpers.users.id,
+        }),
+      },
+    },
+    // capsule branch relations
+    defineCapsuleBranchRelations(helpers),
+  ),
+)

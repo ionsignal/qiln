@@ -5,14 +5,15 @@ import {
   CapsuleBranchEventName,
   DEFAULT_CAPSULE_BLUEPRINT_NAME,
   TargetType,
+  capsuleBranchesTable,
   type CapsuleBlueprintRegistry,
   type CapsuleBranchStatus,
   type CapsuleChannel,
   type CapsuleCommandAck,
+  type CapsuleBranchHostDbContract,
   type TargetOwner,
 } from '@qiln/core/server'
 import { extractIpv4 } from '../../incus/utils'
-import { capsuleBranchLibrarySchema, type CapsuleBranchHostDbContract } from '@qiln/core/server'
 import { IncusError, isUniqueConstraintViolation, readIncusErrorDetailCode } from '../../errors'
 import { interpolate } from '../../utils/template'
 import type { Node, ParsedNode } from 'yaml'
@@ -99,7 +100,7 @@ export class CapsuleBranchRuntimeService {
       throw new IncusError(`Capsule blueprint '${blueprintName}' not found.`, 'NOT_FOUND')
     }
     try {
-      await this.db.insert(capsuleBranchLibrarySchema.capsuleBranches).values({
+      await this.db.insert(capsuleBranchesTable).values({
         ownerId,
         name,
         blueprintName,
@@ -249,11 +250,7 @@ export class CapsuleBranchRuntimeService {
       }
 
       try {
-        await this.db
-          .delete(capsuleBranchLibrarySchema.capsuleBranches)
-          .where(
-            and(eq(capsuleBranchLibrarySchema.capsuleBranches.ownerId, ownerId), eq(capsuleBranchLibrarySchema.capsuleBranches.name, name)),
-          )
+        await this.db.delete(capsuleBranchesTable).where(and(eq(capsuleBranchesTable.ownerId, ownerId), eq(capsuleBranchesTable.name, name)))
       } catch (dbErr: unknown) {
         console.error(`[CRITICAL] Ghost Record Detected: Failed to remove DB provisioning lock for branch '${name}':`, dbErr)
       }
@@ -378,18 +375,15 @@ export class CapsuleBranchRuntimeService {
 
       throw err
     }
-
     try {
       await project.instances.stop(name)
     } catch (err: unknown) {
       const detailCode = err instanceof IncusError ? readIncusErrorDetailCode(err) : undefined
-
       if (!(err instanceof IncusError && (err.code === 'NOT_FOUND' || detailCode === 400))) {
         await this.transitionState(ownerId, name, 'error')
         throw err
       }
     }
-
     try {
       await project.instances.delete(name)
     } catch (err: unknown) {
@@ -398,7 +392,6 @@ export class CapsuleBranchRuntimeService {
         throw err
       }
     }
-
     for (const volume of volumesToDelete) {
       try {
         await project.storage.delete(volume.pool, volume.source)
@@ -409,13 +402,8 @@ export class CapsuleBranchRuntimeService {
         }
       }
     }
-
-    await this.db
-      .delete(capsuleBranchLibrarySchema.capsuleBranches)
-      .where(and(eq(capsuleBranchLibrarySchema.capsuleBranches.ownerId, ownerId), eq(capsuleBranchLibrarySchema.capsuleBranches.name, name)))
-
+    await this.db.delete(capsuleBranchesTable).where(and(eq(capsuleBranchesTable.ownerId, ownerId), eq(capsuleBranchesTable.name, name)))
     this.publishDeleted(ownerId, name)
-
     return { ok: true }
   }
 
@@ -507,9 +495,9 @@ export class CapsuleBranchRuntimeService {
     }
 
     await this.db
-      .update(capsuleBranchLibrarySchema.capsuleBranches)
+      .update(capsuleBranchesTable)
       .set(updateData)
-      .where(and(eq(capsuleBranchLibrarySchema.capsuleBranches.ownerId, ownerId), eq(capsuleBranchLibrarySchema.capsuleBranches.name, name)))
+      .where(and(eq(capsuleBranchesTable.ownerId, ownerId), eq(capsuleBranchesTable.name, name)))
 
     this.publishStateChanged(ownerId, name, status)
   }
@@ -525,19 +513,19 @@ export class CapsuleBranchRuntimeService {
     }
 
     const result = await this.db
-      .update(capsuleBranchLibrarySchema.capsuleBranches)
+      .update(capsuleBranchesTable)
       .set({
         status,
         updatedAt: new Date(),
       })
       .where(
         and(
-          eq(capsuleBranchLibrarySchema.capsuleBranches.ownerId, ownerId),
-          eq(capsuleBranchLibrarySchema.capsuleBranches.name, name),
-          inArray(capsuleBranchLibrarySchema.capsuleBranches.status, allowedStatuses),
+          eq(capsuleBranchesTable.ownerId, ownerId),
+          eq(capsuleBranchesTable.name, name),
+          inArray(capsuleBranchesTable.status, allowedStatuses),
         ),
       )
-      .returning({ id: capsuleBranchLibrarySchema.capsuleBranches.id })
+      .returning({ id: capsuleBranchesTable.id })
 
     if (result.length === 0) {
       return false
