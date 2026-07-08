@@ -1,10 +1,11 @@
-import { eq } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import {
+  CapsuleBranchResourceStatus,
   capsuleBranchResourcesTable,
   type CapsuleBranchResourceStatus as CapsuleBranchResourceStatusValue,
   type CapsuleHostDbContract,
 } from '@qiln/core/server'
-import { IncusError } from '../../../errors'
+import { IncusError, isUniqueConstraintViolation } from '../../../errors'
 import { detailsFromUnknown } from './errorDetails'
 import { toJsonObject } from './jsonPersistence'
 import type { BranchResourceInput } from './types'
@@ -17,6 +18,61 @@ import type { BranchResourceInput } from './types'
  */
 export class CapsuleBranchResourceStore {
   constructor(private readonly db: CapsuleHostDbContract) {}
+
+  public async findBranchResourceByOperationKey(operationId: string, resourceKey: string) {
+    return await this.db.query.capsuleBranchResources.findFirst({
+      where: {
+        createdByOperationId: operationId,
+        resourceKey,
+      },
+    })
+  }
+
+  public async findBranchResourceByBranchKey(branchId: string, resourceKey: string) {
+    return await this.db.query.capsuleBranchResources.findFirst({
+      where: {
+        branchId,
+        resourceKey,
+      },
+    })
+  }
+
+  /**
+   * Ensures a branch resource row exists without duplicating durable ownership records.
+   *
+   * Recovery will later be able to replay deterministic steps safely because
+   * resource persistence is keyed by operation/resource and branch/resource identity.
+   */
+  public async ensureBranchResource(input: BranchResourceInput): Promise<string> {
+    const existingByOperation = await this.findBranchResourceByOperationKey(input.operationId, input.resourceKey)
+    if (existingByOperation) {
+      return existingByOperation.id
+    }
+    const existingByBranch = await this.findBranchResourceByBranchKey(input.branchId, input.resourceKey)
+    if (existingByBranch) {
+      return existingByBranch.id
+    }
+    try {
+      return await this.createBranchResource(input)
+    } catch (error: unknown) {
+      if (!isUniqueConstraintViolation(error)) {
+        throw error
+      }
+      const racedByOperation = await this.findBranchResourceByOperationKey(input.operationId, input.resourceKey)
+      if (racedByOperation) {
+        return racedByOperation.id
+      }
+      const racedByBranch = await this.findBranchResourceByBranchKey(input.branchId, input.resourceKey)
+      if (racedByBranch) {
+        return racedByBranch.id
+      }
+      throw new IncusError('Capsule branch resource was created concurrently but could not be reloaded.', 'API_ERROR', {
+        operationId: input.operationId,
+        branchId: input.branchId,
+        resourceKey: input.resourceKey,
+      })
+    }
+  }
 
   public async createBranchResource(input: BranchResourceInput): Promise<string> {
     const [resource] = await this.db
@@ -62,6 +118,18 @@ export class CapsuleBranchResourceStore {
     await this.db.update(capsuleBranchResourcesTable).set(updateData).where(eq(capsuleBranchResourcesTable.id, resourceId))
   }
 
+  public async markBranchResourceDeleting(resourceId: string): Promise<void> {
+    await this.transitionBranchResourceStatus(resourceId, CapsuleBranchResourceStatus.DELETING)
+  }
+
+  public async markBranchResourceDeleted(resourceId: string): Promise<void> {
+    await this.transitionBranchResourceStatus(resourceId, CapsuleBranchResourceStatus.DELETED)
+  }
+
+  public async markBranchResourceMissing(resourceId: string): Promise<void> {
+    await this.transitionBranchResourceStatus(resourceId, CapsuleBranchResourceStatus.MISSING)
+  }
+
   public async markBranchResourceError(resourceId: string, error: unknown): Promise<void> {
     const details = detailsFromUnknown(error)
     await this.db
@@ -86,6 +154,19 @@ export class CapsuleBranchResourceStore {
     })
   }
 
+  public async listBranchResourceInventory(ownerId: string, branchName: string) {
+    return await this.listBranchResources(ownerId, branchName)
+  }
+
+  public async listCleanupCandidateResources(ownerId: string, branchName: string) {
+    const resources = await this.listBranchResources(ownerId, branchName)
+    const terminalStatuses: ReadonlySet<CapsuleBranchResourceStatusValue> = new Set([
+      CapsuleBranchResourceStatus.DELETED,
+      CapsuleBranchResourceStatus.MISSING,
+    ])
+    return resources.filter(resource => !terminalStatuses.has(resource.status))
+  }
+
   public async listBranchResourcesByBranchId(branchId: string) {
     return await this.db.query.capsuleBranchResources.findMany({
       where: {
@@ -93,5 +174,24 @@ export class CapsuleBranchResourceStore {
       },
       orderBy: (capsuleBranchResources, { asc }) => [asc(capsuleBranchResources.createdAt)],
     })
+  }
+
+  public async listBranchResourcesByOperation(operationId: string) {
+    return await this.db.query.capsuleBranchResources.findMany({
+      where: {
+        createdByOperationId: operationId,
+      },
+      orderBy: (capsuleBranchResources, { asc }) => [asc(capsuleBranchResources.createdAt)],
+    })
+  }
+
+  public async updateLastOperation(resourceId: string, operationId: string): Promise<void> {
+    await this.db
+      .update(capsuleBranchResourcesTable)
+      .set({
+        lastOperationId: operationId,
+        updatedAt: new Date(),
+      })
+      .where(and(eq(capsuleBranchResourcesTable.id, resourceId), eq(capsuleBranchResourcesTable.lastOperationId, operationId)))
   }
 }

@@ -2,6 +2,14 @@ import type { IncusFilePushOptions } from '../../../incus/client/types'
 import type { IncusDeviceMap } from '../../../schemas/incus'
 import type { ProvisioningFileTarget } from '../provisioning/fileTargets'
 
+export type {
+  BindMountResourceMetadata,
+  InstanceResourceMetadata,
+  ProjectResourceMetadata,
+  ProvisioningFileResourceMetadata,
+  VolumeResourceMetadata,
+} from './metadata'
+
 export interface VolumeCreateInput {
   volumeType: 'empty' | 'clone'
   pool: string

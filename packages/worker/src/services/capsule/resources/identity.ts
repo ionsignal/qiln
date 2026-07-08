@@ -1,3 +1,9 @@
+import type { ProvisioningFileTarget } from '../provisioning/fileTargets'
+
+function encodeResourceKeySegment(value: string): string {
+  return encodeURIComponent(value)
+}
+
 export function branchVolumeName(branchName: string, volumeName: string): string {
   return `${branchName}-${volumeName}`
 }
@@ -16,4 +22,27 @@ export function volumeResourceKey(namespace: string, pool: string, volumeName: s
 
 export function bindMountResourceKey(namespace: string, hostPath: string, mountPath: string): string {
   return `incus:bind-mount:${namespace}:${hostPath}:${mountPath}`
+}
+
+export function provisioningFileResourceKey(namespace: string, branchName: string, filePath: string, target: ProvisioningFileTarget): string {
+  if (target.target === 'volume') {
+    return [
+      'incus',
+      'provisioning-file',
+      encodeResourceKeySegment(namespace),
+      'volume',
+      encodeResourceKeySegment(target.pool),
+      encodeResourceKeySegment(target.volumeName),
+      encodeResourceKeySegment(target.internalPath),
+    ].join(':')
+  }
+
+  return [
+    'incus',
+    'provisioning-file',
+    encodeResourceKeySegment(namespace),
+    'instance',
+    encodeResourceKeySegment(branchName),
+    encodeResourceKeySegment(filePath),
+  ].join(':')
 }

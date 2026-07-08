@@ -42,7 +42,11 @@ export interface PlannedInstanceResource extends PlannedBranchResource, Instance
   kind: 'instance'
 }
 
-export type PlannedProvisioningFile = ProvisioningFileWriteInput
+export interface PlannedProvisioningFileResource extends PlannedBranchResource, ProvisioningFileWriteInput {
+  kind: 'provisioningFile'
+}
+
+export type PlannedProvisioningFile = PlannedProvisioningFileResource
 
 export interface CapsuleBranchCreateResourcePlan {
   project: PlannedProjectResource

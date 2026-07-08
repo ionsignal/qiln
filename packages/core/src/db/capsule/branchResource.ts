@@ -75,6 +75,7 @@ export function createCapsuleBranchResourcesTable(ownerIdColumn?: PgColumn, bran
       index('capsule_branch_resources_last_operation_idx').on(table.lastOperationId),
       index('capsule_branch_resources_resource_key_idx').on(table.resourceKey),
       uniqueIndex('capsule_branch_resources_operation_key_unique_idx').on(table.createdByOperationId, table.resourceKey),
+      uniqueIndex('capsule_branch_resources_branch_key_unique_idx').on(table.branchId, table.resourceKey),
     ],
   )
 }

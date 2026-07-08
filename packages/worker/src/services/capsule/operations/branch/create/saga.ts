@@ -89,7 +89,6 @@ export class CapsuleBranchCreateSaga {
       branchName: input.name,
     }
     const rollbackStack: RollbackCallback[] = []
-
     try {
       const plan = await this.stepExecutor.run(
         {
@@ -113,7 +112,6 @@ export class CapsuleBranchCreateSaga {
             blueprint: pin.blueprint,
           }),
       )
-
       await this.stepExecutor.run(
         {
           ...operationContext,
@@ -124,7 +122,7 @@ export class CapsuleBranchCreateSaga {
           },
         },
         async () => {
-          const projectResourceId = await this.stores.resources.createBranchResource(this.withOperationContext(plan.project, resourceContext))
+          const projectResourceId = await this.stores.resources.ensureBranchResource(this.withOperationContext(plan.project, resourceContext))
           try {
             await this.driver.ensureNamespace(input.ownerId)
             await this.stores.resources.transitionBranchResourceStatus(projectResourceId, CapsuleBranchResourceStatus.CREATED)
@@ -134,9 +132,7 @@ export class CapsuleBranchCreateSaga {
           }
         },
       )
-
       this.events.publishStateChanged(input.ownerId, input.name, 'provisioning')
-
       await this.stepExecutor.run(
         {
           ...operationContext,
@@ -147,11 +143,10 @@ export class CapsuleBranchCreateSaga {
         },
         async () => {
           for (const bindMount of plan.bindMounts) {
-            await this.stores.resources.createBranchResource(this.withOperationContext(bindMount, resourceContext))
+            await this.stores.resources.ensureBranchResource(this.withOperationContext(bindMount, resourceContext))
           }
         },
       )
-
       await this.stepExecutor.run(
         {
           ...operationContext,
@@ -162,7 +157,7 @@ export class CapsuleBranchCreateSaga {
         },
         async () => {
           for (const volume of plan.volumes) {
-            const resourceId = await this.stores.resources.createBranchResource(this.withOperationContext(volume, resourceContext))
+            const resourceId = await this.stores.resources.ensureBranchResource(this.withOperationContext(volume, resourceContext))
             rollbackStack.push(() => this.rollbackVolume(namespace, resourceId, volume))
             try {
               await this.driver.createVolume(namespace, volume)
@@ -174,7 +169,6 @@ export class CapsuleBranchCreateSaga {
           }
         },
       )
-
       await this.stepExecutor.run(
         {
           ...operationContext,
@@ -186,7 +180,7 @@ export class CapsuleBranchCreateSaga {
           },
         },
         async () => {
-          const instanceResourceId = await this.stores.resources.createBranchResource(this.withOperationContext(plan.instance, resourceContext))
+          const instanceResourceId = await this.stores.resources.ensureBranchResource(this.withOperationContext(plan.instance, resourceContext))
           rollbackStack.push(() => this.rollbackInstance(namespace, instanceResourceId, plan.instance.instanceName))
           try {
             await this.driver.createInstance(namespace, plan.instance)
@@ -197,7 +191,6 @@ export class CapsuleBranchCreateSaga {
           }
         },
       )
-
       await this.stepExecutor.run(
         {
           ...operationContext,
@@ -208,11 +201,18 @@ export class CapsuleBranchCreateSaga {
         },
         async () => {
           for (const file of plan.files) {
-            await this.driver.writeProvisioningFile(namespace, input.name, file)
+            const resourceId = await this.stores.resources.ensureBranchResource(this.withOperationContext(file, resourceContext))
+            try {
+              await this.stores.resources.transitionBranchResourceStatus(resourceId, CapsuleBranchResourceStatus.CREATING)
+              await this.driver.writeProvisioningFile(namespace, input.name, file)
+              await this.stores.resources.transitionBranchResourceStatus(resourceId, CapsuleBranchResourceStatus.CREATED)
+            } catch (error: unknown) {
+              await this.markResourceErrorBestEffort(resourceId, error)
+              throw error
+            }
           }
         },
       )
-
       await this.stepExecutor.run(
         {
           ...operationContext,
@@ -226,7 +226,6 @@ export class CapsuleBranchCreateSaga {
           this.events.publishStateChanged(input.ownerId, input.name, 'offline')
         },
       )
-
       await this.stores.operations.transitionBranchOperationStatus(accepted.operationId, CapsuleBranchOperationStatus.COMPLETED)
       return this.stores.operations.createBranchCreateOutput(
         accepted.operationId,
@@ -250,6 +249,7 @@ export class CapsuleBranchCreateSaga {
       }
       try {
         await this.stores.branches.deleteBranch(input.ownerId, input.name)
+        this.events.publishDeleted(input.ownerId, input.name)
       } catch (dbErr: unknown) {
         console.error(`[CRITICAL] Ghost Record Detected: Failed to remove DB provisioning lock for branch '${input.name}':`, dbErr)
       }

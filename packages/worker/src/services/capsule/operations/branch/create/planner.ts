@@ -5,7 +5,15 @@ import {
   type CapsuleBlueprint,
 } from '@qiln/core/server'
 import { interpolate } from '../../../../../utils/template'
-import { bindMountResourceKey, branchVolumeName, instanceResourceKey, projectResourceKey, volumeResourceKey } from '../../../resources/identity'
+import {
+  bindMountResourceKey,
+  branchVolumeName,
+  instanceResourceKey,
+  projectResourceKey,
+  provisioningFileResourceKey,
+  volumeResourceKey,
+} from '../../../resources/identity'
+import { createProvisioningFileResourceMetadata } from '../../../resources/metadata'
 import { mergeCloudInit } from '../../../provisioning/cloudInit'
 import { resolveFileTarget, type ManagedVolume } from '../../../provisioning/fileTargets'
 import type {
@@ -120,6 +128,7 @@ export class CapsuleBranchCreatePlanner {
       ...dynamicDevices,
     }
     const files = this.planProvisioningFiles(blueprint, {
+      namespace,
       name,
       env,
       cpu,
@@ -164,6 +173,7 @@ export class CapsuleBranchCreatePlanner {
   private planProvisioningFiles(
     blueprint: CapsuleBlueprint,
     input: {
+      namespace: string
       name: string
       env: Record<string, string>
       cpu: string
@@ -183,16 +193,23 @@ export class CapsuleBranchCreatePlanner {
     }
     return blueprint.provisioning.files.map(file => {
       const content = file.content === undefined ? '' : interpolate(file.content, interpolationContext)
+      const target = resolveFileTarget(file.path, input.managedVolumes)
       return {
+        kind: 'provisioningFile',
         path: file.path,
         content,
-        target: resolveFileTarget(file.path, input.managedVolumes),
+        target,
         options: {
           uid: file.uid,
           gid: file.gid,
           mode: file.mode,
           type: file.type,
         },
+        resourceType: CapsuleBranchResourceType.PROVISIONING_FILE,
+        resourceKey: provisioningFileResourceKey(input.namespace, input.name, file.path, target),
+        cleanupPolicy: CapsuleBranchResourceCleanupPolicy.DELETE_ON_ROLLBACK,
+        status: CapsuleBranchResourceStatus.CREATING,
+        metadata: createProvisioningFileResourceMetadata(input.namespace, input.name, file.path, target),
       }
     })
   }
