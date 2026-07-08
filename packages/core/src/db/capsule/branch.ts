@@ -1,7 +1,6 @@
-import { sql, type ExtractTablesFromSchema, type ExtractTablesWithRelations, type RelationsBuilderColumnBase } from 'drizzle-orm'
+import { sql, type RelationsBuilderColumnBase } from 'drizzle-orm'
 import { pgTable, uuid, text, timestamp, pgEnum, index, uniqueIndex, type AnyPgTable, type PgColumn } from 'drizzle-orm/pg-core'
 import { CapsuleBranchStatusValues, DEFAULT_CAPSULE_BLUEPRINT_NAME } from '../../protocol/capsule/messages'
-import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import type { RelationFragmentOneFn } from '../relations'
 
 /**
@@ -77,12 +76,6 @@ export const capsuleBranchRuntimeSchema = {
 } as const
 
 /**
- * Compatibility alias retained for older call sites while removing the fake
- * PgColumn dependency that previously backed this symbol.
- */
-export const capsuleBranchLibrarySchema = capsuleBranchRuntimeSchema
-
-/**
  * Drizzle relation helpers read column availability from the table's internal
  * `_["columns"]` metadata, not just top-level table properties. This type keeps
  * that internal-column requirement explicit while preserving top-level column
@@ -138,14 +131,3 @@ export function defineCapsuleBranchRelations(helpers: CapsuleBranchRelationHelpe
     },
   }
 }
-
-type CapsuleBranchRuntimeRelations = ExtractTablesWithRelations<{}, ExtractTablesFromSchema<typeof capsuleBranchRuntimeSchema>>
-
-/**
- * Database contract expected by server-side consumers that use the capsule branch read model.
- *
- * The contract intentionally models only the capsule branch query surface needed by engine/worker
- * packages. The host remains free to compose additional tables and relations into its final
- * Drizzle database.
- */
-export type CapsuleBranchHostDbContract = PostgresJsDatabase<CapsuleBranchRuntimeRelations>

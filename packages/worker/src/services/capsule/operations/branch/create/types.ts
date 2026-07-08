@@ -1,27 +1,27 @@
 import type {
   CapsuleBlueprint,
   CapsuleBlueprintDigest,
-  CapsuleOperationCleanupPolicy,
-  CapsuleOperationResourceStatus,
-  CapsuleOperationResourceType,
+  CapsuleBranchResourceCleanupPolicy,
+  CapsuleBranchResourceStatus,
+  CapsuleBranchResourceType,
 } from '@qiln/core/server'
 import type { ManagedVolume } from '../../../provisioning/fileTargets'
 import type { InstanceCreateInput, ProvisioningFileWriteInput, VolumeCreateInput } from '../../../resources/types'
 
-export interface PlannedOperationResource {
-  resourceType: CapsuleOperationResourceType
+export interface PlannedBranchResource {
+  resourceType: CapsuleBranchResourceType
   resourceKey: string
-  cleanupPolicy: CapsuleOperationCleanupPolicy
-  status?: CapsuleOperationResourceStatus
+  cleanupPolicy: CapsuleBranchResourceCleanupPolicy
+  status?: CapsuleBranchResourceStatus
   metadata?: Record<string, unknown>
 }
 
-export interface PlannedProjectResource extends PlannedOperationResource {
+export interface PlannedProjectResource extends PlannedBranchResource {
   kind: 'project'
   namespace: string
 }
 
-export interface PlannedBindMountResource extends PlannedOperationResource {
+export interface PlannedBindMountResource extends PlannedBranchResource {
   kind: 'bindMount'
   deviceName: string
   hostPath: string
@@ -30,7 +30,7 @@ export interface PlannedBindMountResource extends PlannedOperationResource {
   shifted: boolean
 }
 
-export interface PlannedVolumeResource extends PlannedOperationResource, VolumeCreateInput {
+export interface PlannedVolumeResource extends PlannedBranchResource, VolumeCreateInput {
   kind: 'volume'
   deviceName: string
   mountPath: string
@@ -38,7 +38,7 @@ export interface PlannedVolumeResource extends PlannedOperationResource, VolumeC
   shifted: boolean
 }
 
-export interface PlannedInstanceResource extends PlannedOperationResource, InstanceCreateInput {
+export interface PlannedInstanceResource extends PlannedBranchResource, InstanceCreateInput {
   kind: 'instance'
 }
 

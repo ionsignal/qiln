@@ -1,2 +1,2 @@
-export * from './capsule/operations'
+export * from './capsule/branchOperations'
 export * from './blueprints'

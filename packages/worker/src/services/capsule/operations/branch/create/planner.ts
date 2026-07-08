@@ -1,7 +1,7 @@
 import {
-  CapsuleOperationCleanupPolicy,
-  CapsuleOperationResourceStatus,
-  CapsuleOperationResourceType,
+  CapsuleBranchResourceCleanupPolicy,
+  CapsuleBranchResourceStatus,
+  CapsuleBranchResourceType,
   type CapsuleBlueprint,
 } from '@qiln/core/server'
 import { interpolate } from '../../../../../utils/template'
@@ -44,10 +44,10 @@ export class CapsuleBranchCreatePlanner {
             mountPath: volume.mount_path,
             readonly: volume.readonly,
             shifted: volume.shifted,
-            resourceType: CapsuleOperationResourceType.BIND_MOUNT,
+            resourceType: CapsuleBranchResourceType.BIND_MOUNT,
             resourceKey: bindMountResourceKey(namespace, volume.host_path, volume.mount_path),
-            cleanupPolicy: CapsuleOperationCleanupPolicy.EXTERNAL,
-            status: CapsuleOperationResourceStatus.CREATED,
+            cleanupPolicy: CapsuleBranchResourceCleanupPolicy.EXTERNAL,
+            status: CapsuleBranchResourceStatus.CREATED,
             metadata: {
               namespace,
               hostPath: volume.host_path,
@@ -75,10 +75,10 @@ export class CapsuleBranchCreatePlanner {
             sourceVolume: volume.type === 'clone' ? volume.source_volume : null,
             sourceProject: volume.type === 'clone' ? SOURCE_PROJECT : undefined,
             config,
-            resourceType: CapsuleOperationResourceType.ZFS_VOLUME,
+            resourceType: CapsuleBranchResourceType.ZFS_VOLUME,
             resourceKey: volumeResourceKey(namespace, volume.pool, volumeName),
-            cleanupPolicy: CapsuleOperationCleanupPolicy.DELETE_ON_ROLLBACK,
-            status: CapsuleOperationResourceStatus.CREATING,
+            cleanupPolicy: CapsuleBranchResourceCleanupPolicy.DELETE_ON_ROLLBACK,
+            status: CapsuleBranchResourceStatus.CREATING,
             metadata: {
               namespace,
               pool: volume.pool,
@@ -130,10 +130,10 @@ export class CapsuleBranchCreatePlanner {
       project: {
         kind: 'project',
         namespace,
-        resourceType: CapsuleOperationResourceType.INCUS_PROJECT,
+        resourceType: CapsuleBranchResourceType.INCUS_PROJECT,
         resourceKey: projectResourceKey(namespace),
-        cleanupPolicy: CapsuleOperationCleanupPolicy.RETAIN,
-        status: CapsuleOperationResourceStatus.CREATING,
+        cleanupPolicy: CapsuleBranchResourceCleanupPolicy.RETAIN,
+        status: CapsuleBranchResourceStatus.CREATING,
         metadata: {
           namespace,
         },
@@ -146,10 +146,10 @@ export class CapsuleBranchCreatePlanner {
         imageAlias: blueprint.image_alias,
         config: env,
         devices,
-        resourceType: CapsuleOperationResourceType.INCUS_INSTANCE,
+        resourceType: CapsuleBranchResourceType.INCUS_INSTANCE,
         resourceKey: instanceResourceKey(namespace, name),
-        cleanupPolicy: CapsuleOperationCleanupPolicy.DELETE_ON_ROLLBACK,
-        status: CapsuleOperationResourceStatus.CREATING,
+        cleanupPolicy: CapsuleBranchResourceCleanupPolicy.DELETE_ON_ROLLBACK,
+        status: CapsuleBranchResourceStatus.CREATING,
         metadata: {
           namespace,
           instanceName: name,

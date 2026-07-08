@@ -6,7 +6,7 @@ import {
   CapsuleBranchNameSchema,
   CapsuleBranchStatusSchema,
   CapsuleCommandAckSchema,
-  CapsuleIdempotencyKeySchema,
+  CapsuleBranchIdempotencyKeySchema,
   DEFAULT_CAPSULE_BLUEPRINT_NAME,
 } from '@qiln/core/server'
 import { router, protectedProcedure } from '../../init'
@@ -62,7 +62,7 @@ export const capsuleBranchRouter = router({
       z
         .object({
           name: CapsuleBranchNameSchema,
-          idempotencyKey: CapsuleIdempotencyKeySchema,
+          idempotencyKey: CapsuleBranchIdempotencyKeySchema,
           blueprintName: z.string().trim().min(1, 'Capsule blueprint name cannot be empty.').default(DEFAULT_CAPSULE_BLUEPRINT_NAME),
           blueprintDigest: CapsuleBlueprintDigestSchema,
           cpu: z.string().trim().min(1, 'CPU limit cannot be empty.').default('4'),

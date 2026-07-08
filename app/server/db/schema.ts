@@ -1,12 +1,13 @@
 import { sql, defineRelations } from 'drizzle-orm'
 import { pgTable, uuid, text, timestamp } from 'drizzle-orm/pg-core'
 import {
+  capsuleBranchOperationStatusEnum,
+  capsuleBranchOperationStepStatusEnum,
+  capsuleBranchOperationTypeEnum,
+  capsuleBranchResourceCleanupPolicyEnum,
+  capsuleBranchResourceStatusEnum,
+  capsuleBranchResourceTypeEnum,
   capsuleBranchStatusEnum,
-  capsuleOperationCleanupPolicyEnum,
-  capsuleOperationResourceStatusEnum,
-  capsuleOperationResourceTypeEnum,
-  capsuleOperationStatusEnum,
-  capsuleOperationTypeEnum,
   createCapsuleSchema,
   defineCapsuleRelations,
   mergeRelationFragments,
@@ -35,15 +36,16 @@ export const sessions = pgTable('sessions', {
 const capsuleTables = createCapsuleSchema(users.id)
 
 export {
+  capsuleBranchOperationStatusEnum,
+  capsuleBranchOperationStepStatusEnum,
+  capsuleBranchOperationTypeEnum,
+  capsuleBranchResourceCleanupPolicyEnum,
+  capsuleBranchResourceStatusEnum,
+  capsuleBranchResourceTypeEnum,
   capsuleBranchStatusEnum,
-  capsuleOperationCleanupPolicyEnum,
-  capsuleOperationResourceStatusEnum,
-  capsuleOperationResourceTypeEnum,
-  capsuleOperationStatusEnum,
-  capsuleOperationTypeEnum,
 }
 
-export const { capsuleBranches, capsuleOperations, capsuleOperationResources } = capsuleTables
+export const { capsuleBranches, capsuleBranchOperations, capsuleBranchOperationSteps, capsuleBranchResources } = capsuleTables
 
 /**
  * The unified schema object containing all tables from both the host and shared core fragments.
@@ -55,11 +57,12 @@ export const schema = {
   sessions,
   // capsule enums
   capsuleBranchStatusEnum,
-  capsuleOperationTypeEnum,
-  capsuleOperationStatusEnum,
-  capsuleOperationResourceTypeEnum,
-  capsuleOperationResourceStatusEnum,
-  capsuleOperationCleanupPolicyEnum,
+  capsuleBranchOperationTypeEnum,
+  capsuleBranchOperationStatusEnum,
+  capsuleBranchOperationStepStatusEnum,
+  capsuleBranchResourceTypeEnum,
+  capsuleBranchResourceStatusEnum,
+  capsuleBranchResourceCleanupPolicyEnum,
   // capsule tables
   ...capsuleTables,
 } as const
@@ -78,8 +81,9 @@ export const relations = defineRelations(schema, helpers =>
       users: {
         sessions: helpers.many.sessions(),
         capsuleBranches: helpers.many.capsuleBranches(),
-        capsuleOperations: helpers.many.capsuleOperations(),
-        capsuleOperationResources: helpers.many.capsuleOperationResources(),
+        capsuleBranchOperations: helpers.many.capsuleBranchOperations(),
+        capsuleBranchOperationSteps: helpers.many.capsuleBranchOperationSteps(),
+        capsuleBranchResources: helpers.many.capsuleBranchResources(),
       },
       sessions: {
         user: helpers.one.users({

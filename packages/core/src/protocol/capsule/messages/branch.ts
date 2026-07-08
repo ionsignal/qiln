@@ -1,9 +1,9 @@
 import { z } from 'zod'
 import {
   CapsuleBlueprintDigestSchema,
-  CapsuleIdempotencyKeySchema,
-  CapsuleOperationReceiptSchema,
-  CapsuleOperationType,
+  CapsuleBranchIdempotencyKeySchema,
+  CapsuleBranchOperationReceiptSchema,
+  CapsuleBranchOperationType,
 } from '../../../schemas'
 import { TargetOwnerSchema, TargetType } from '../targets'
 import { CapsuleCommandAckSchema, defineCapsuleCommand, defineCapsuleEvent } from './definitions'
@@ -98,15 +98,15 @@ export const CapsuleBranchCommandBaseSchema = z
  * accidentally creating a second branch or receiving a misleading duplicate error.
  */
 export const CapsuleBranchCreateInputSchema = CapsuleBranchCommandBaseSchema.extend({
-  idempotencyKey: CapsuleIdempotencyKeySchema,
+  idempotencyKey: CapsuleBranchIdempotencyKeySchema,
   blueprintName: z.string().trim().min(1, 'Capsule blueprint name cannot be empty.').default(DEFAULT_CAPSULE_BLUEPRINT_NAME),
   blueprintDigest: CapsuleBlueprintDigestSchema,
   cpu: z.string().trim().min(1, 'CPU limit cannot be empty.').default('4'),
   memory: z.string().trim().min(1, 'Memory limit cannot be empty.').default('4GB'),
 }).strict()
 
-export const CapsuleBranchCreateOutputSchema = CapsuleOperationReceiptSchema.extend({
-  operationType: z.literal(CapsuleOperationType.BRANCH_CREATE),
+export const CapsuleBranchCreateOutputSchema = CapsuleBranchOperationReceiptSchema.extend({
+  operationType: z.literal(CapsuleBranchOperationType.CREATE),
   branchName: CapsuleBranchNameSchema,
   branchStatus: CapsuleBranchStatusSchema,
 }).strict()

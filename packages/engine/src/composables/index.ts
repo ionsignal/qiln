@@ -6,6 +6,12 @@ export { provideCapsules, useCapsuleContext } from './useCapsules'
 export { provideFileBrowser, useFileBrowser } from './useFileBrowser'
 
 export type { ConsoleTab, ConsoleState } from './useConsole'
-export type { CapsuleBranchClient, CapsuleContext, CapsuleEventStreamSubscription, UseCapsulesOptions } from './useCapsules'
+export type {
+  CapsuleBranchClient,
+  CapsuleBranchCreateClientInput,
+  CapsuleContext,
+  CapsuleEventStreamSubscription,
+  UseCapsulesOptions,
+} from './useCapsules'
 export type { FileBrowserProviderOptions, FileBrowserState, FileBrowserStatusBarInfo } from './useFileBrowser'
 export type { LogCategory } from '../utils/mockLog'

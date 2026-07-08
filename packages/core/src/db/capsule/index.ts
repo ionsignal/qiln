@@ -1,3 +1,5 @@
 export * from './branch'
-export * from './operation'
+export * from './branchOperation'
+export * from './branchOperationStep'
+export * from './branchResource'
 export * from './schema'

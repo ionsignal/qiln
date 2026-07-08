@@ -32,7 +32,7 @@
       </n-flex>
     </n-flex>
     <template #action>
-      <n-button block type="primary" size="small" @click="$emit('create-branch', blueprint.name)">Create Branch</n-button>
+      <n-button block type="primary" size="small" @click="$emit('create-branch', blueprint.name)">Create Capsule Branch</n-button>
     </template>
   </n-card>
 </template>

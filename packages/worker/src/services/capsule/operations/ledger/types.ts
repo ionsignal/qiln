@@ -2,10 +2,11 @@ import type {
   CapsuleBlueprint,
   CapsuleBlueprintDigest,
   CapsuleBranchCreateOutput,
+  CapsuleBranchOperationStatus,
+  CapsuleBranchResourceCleanupPolicy,
+  CapsuleBranchResourceStatus,
+  CapsuleBranchResourceType,
   CapsuleBranchStatus,
-  CapsuleOperationCleanupPolicy,
-  CapsuleOperationResourceStatus,
-  CapsuleOperationResourceType,
 } from '@qiln/core/server'
 
 export interface ReconcileBranch {
@@ -14,7 +15,7 @@ export interface ReconcileBranch {
   status: CapsuleBranchStatus
 }
 
-export interface AcceptCreateOperationInput {
+export interface AcceptBranchCreateOperationInput {
   ownerId: string
   name: string
   idempotencyKey: string
@@ -26,20 +27,22 @@ export interface AcceptCreateOperationInput {
   memory: string
 }
 
-export interface AcceptedCreateOperation {
+export interface AcceptedBranchCreateOperation {
   operationId: string
   branchId: string
   replayedReceipt?: CapsuleBranchCreateOutput
 }
 
-export interface OperationResourceInput {
+export interface BranchResourceInput {
   operationId: string
   ownerId: string
   branchId: string
   branchName: string
-  resourceType: CapsuleOperationResourceType
+  resourceType: CapsuleBranchResourceType
   resourceKey: string
-  cleanupPolicy: CapsuleOperationCleanupPolicy
-  status?: CapsuleOperationResourceStatus
+  cleanupPolicy: CapsuleBranchResourceCleanupPolicy
+  status?: CapsuleBranchResourceStatus
   metadata?: Record<string, unknown>
 }
+
+export type BranchOperationStatusValue = CapsuleBranchOperationStatus

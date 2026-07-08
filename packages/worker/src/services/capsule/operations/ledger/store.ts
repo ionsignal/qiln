@@ -1,30 +1,30 @@
 import { and, eq, inArray } from 'drizzle-orm'
 import {
   CapsuleBranchCreateOutputSchema,
-  CapsuleOperationStatus,
-  CapsuleOperationType,
+  CapsuleBranchOperationStatus,
+  CapsuleBranchOperationType,
   capsuleBranchesTable,
-  capsuleOperationResourcesTable,
-  capsuleOperationsTable,
+  capsuleBranchOperationsTable,
+  capsuleBranchResourcesTable,
   type CapsuleBranchCreateOutput,
+  type CapsuleBranchOperationStatus as CapsuleBranchOperationStatusValue,
+  type CapsuleBranchResourceStatus as CapsuleBranchResourceStatusValue,
   type CapsuleBranchStatus,
   type CapsuleHostDbContract,
-  type CapsuleOperationResourceStatus as CapsuleOperationResourceStatusValue,
-  type CapsuleOperationStatus as CapsuleOperationStatusValue,
 } from '@qiln/core/server'
 import { IncusError, isUniqueConstraintViolation } from '../../../../errors'
 import { detailsFromUnknown } from './errorDetails'
 import { toJsonObject } from './jsonPersistence'
-import type { AcceptedCreateOperation, AcceptCreateOperationInput, OperationResourceInput, ReconcileBranch } from './types'
+import type { AcceptedBranchCreateOperation, AcceptBranchCreateOperationInput, BranchResourceInput, ReconcileBranch } from './types'
 
 /**
- * Centralized durable operation/resource persistence for capsule branch mutations.
+ * Centralized durable branch operation/resource persistence.
  *
  * This store intentionally also owns the branch read-model transitions for now so
  * saga code cannot scatter raw Drizzle state-machine updates. A later recovery PR
  * can split the branch read model once recovery semantics are clearer.
  */
-export class CapsuleOperationLedgerStore {
+export class CapsuleBranchOperationLedgerStore {
   constructor(private readonly db: CapsuleHostDbContract) {}
 
   public async listBranches(ownerId: string) {
@@ -47,16 +47,16 @@ export class CapsuleOperationLedgerStore {
     return rows
   }
 
-  public async findExistingCreateOperationReceipt(
+  public async findExistingBranchCreateOperationReceipt(
     ownerId: string,
     idempotencyKey: string,
     requestHash: string,
   ): Promise<CapsuleBranchCreateOutput | null> {
-    const operation = await this.db.query.capsuleOperations.findFirst({
+    const operation = await this.db.query.capsuleBranchOperations.findFirst({
       where: {
         ownerId,
         idempotencyKey,
-        type: CapsuleOperationType.BRANCH_CREATE,
+        type: CapsuleBranchOperationType.CREATE,
       },
       columns: {
         id: true,
@@ -91,16 +91,16 @@ export class CapsuleOperationLedgerStore {
     )
   }
 
-  public async acceptCreateOperation(input: AcceptCreateOperationInput): Promise<AcceptedCreateOperation> {
+  public async acceptBranchCreateOperation(input: AcceptBranchCreateOperationInput): Promise<AcceptedBranchCreateOperation> {
     try {
       const now = new Date()
       return await this.db.transaction(async tx => {
         const [operation] = await tx
-          .insert(capsuleOperationsTable)
+          .insert(capsuleBranchOperationsTable)
           .values({
             ownerId: input.ownerId,
-            type: CapsuleOperationType.BRANCH_CREATE,
-            status: CapsuleOperationStatus.ACCEPTED,
+            type: CapsuleBranchOperationType.CREATE,
+            status: CapsuleBranchOperationStatus.ACCEPTED,
             idempotencyKey: input.idempotencyKey,
             requestHash: input.requestHash,
             branchName: input.name,
@@ -111,10 +111,10 @@ export class CapsuleOperationLedgerStore {
             updatedAt: now,
           })
           .returning({
-            id: capsuleOperationsTable.id,
+            id: capsuleBranchOperationsTable.id,
           })
         if (!operation) {
-          throw new IncusError('Failed to create durable capsule operation.', 'API_ERROR')
+          throw new IncusError('Failed to create durable capsule branch operation.', 'API_ERROR')
         }
         const [branch] = await tx
           .insert(capsuleBranchesTable)
@@ -136,19 +136,19 @@ export class CapsuleOperationLedgerStore {
           throw new IncusError('Failed to create capsule branch provisioning record.', 'API_ERROR')
         }
         const [runningOperation] = await tx
-          .update(capsuleOperationsTable)
+          .update(capsuleBranchOperationsTable)
           .set({
             branchId: branch.id,
-            status: CapsuleOperationStatus.RUNNING,
+            status: CapsuleBranchOperationStatus.RUNNING,
             startedAt: now,
             updatedAt: now,
           })
-          .where(eq(capsuleOperationsTable.id, operation.id))
+          .where(eq(capsuleBranchOperationsTable.id, operation.id))
           .returning({
-            id: capsuleOperationsTable.id,
+            id: capsuleBranchOperationsTable.id,
           })
         if (!runningOperation) {
-          throw new IncusError('Failed to mark capsule operation as running.', 'API_ERROR')
+          throw new IncusError('Failed to mark capsule branch operation as running.', 'API_ERROR')
         }
         return {
           operationId: runningOperation.id,
@@ -159,7 +159,7 @@ export class CapsuleOperationLedgerStore {
       if (!isUniqueConstraintViolation(error)) {
         throw error
       }
-      const replayedReceipt = await this.findExistingCreateOperationReceipt(input.ownerId, input.idempotencyKey, input.requestHash)
+      const replayedReceipt = await this.findExistingBranchCreateOperationReceipt(input.ownerId, input.idempotencyKey, input.requestHash)
       if (replayedReceipt) {
         return {
           operationId: replayedReceipt.operationId,
@@ -183,11 +183,12 @@ export class CapsuleOperationLedgerStore {
     }
   }
 
-  public async createOperationResource(input: OperationResourceInput): Promise<string> {
+  public async createBranchResource(input: BranchResourceInput): Promise<string> {
     const [resource] = await this.db
-      .insert(capsuleOperationResourcesTable)
+      .insert(capsuleBranchResourcesTable)
       .values({
-        operationId: input.operationId,
+        createdByOperationId: input.operationId,
+        lastOperationId: input.operationId,
         ownerId: input.ownerId,
         branchId: input.branchId,
         branchName: input.branchName,
@@ -195,25 +196,25 @@ export class CapsuleOperationLedgerStore {
         resourceKey: input.resourceKey,
         cleanupPolicy: input.cleanupPolicy,
         status: input.status ?? 'planned',
-        metadata: input.metadata === undefined ? undefined : toJsonObject(input.metadata, 'capsule operation resource metadata'),
+        metadata: input.metadata === undefined ? undefined : toJsonObject(input.metadata, 'capsule branch resource metadata'),
         updatedAt: new Date(),
       })
       .returning({
-        id: capsuleOperationResourcesTable.id,
+        id: capsuleBranchResourcesTable.id,
       })
     if (!resource) {
-      throw new IncusError('Failed to record capsule operation resource.', 'API_ERROR')
+      throw new IncusError('Failed to record capsule branch resource.', 'API_ERROR')
     }
     return resource.id
   }
 
-  public async transitionResourceStatus(
+  public async transitionBranchResourceStatus(
     resourceId: string,
-    status: CapsuleOperationResourceStatusValue,
+    status: CapsuleBranchResourceStatusValue,
     metadata?: Record<string, unknown>,
   ): Promise<void> {
     const updateData: {
-      status: CapsuleOperationResourceStatusValue
+      status: CapsuleBranchResourceStatusValue
       metadata?: Record<string, unknown>
       updatedAt: Date
     } = {
@@ -221,21 +222,29 @@ export class CapsuleOperationLedgerStore {
       updatedAt: new Date(),
     }
     if (metadata !== undefined) {
-      updateData.metadata = toJsonObject(metadata, 'capsule operation resource metadata')
+      updateData.metadata = toJsonObject(metadata, 'capsule branch resource metadata')
     }
-    await this.db.update(capsuleOperationResourcesTable).set(updateData).where(eq(capsuleOperationResourcesTable.id, resourceId))
+    await this.db.update(capsuleBranchResourcesTable).set(updateData).where(eq(capsuleBranchResourcesTable.id, resourceId))
   }
 
-  public async markResourceError(resourceId: string, error: unknown): Promise<void> {
-    await this.transitionResourceStatus(resourceId, 'error', {
-      error: detailsFromUnknown(error),
-    })
+  public async markBranchResourceError(resourceId: string, error: unknown): Promise<void> {
+    const details = detailsFromUnknown(error)
+    await this.db
+      .update(capsuleBranchResourcesTable)
+      .set({
+        status: 'error',
+        updatedAt: new Date(),
+        failureCode: error instanceof IncusError ? error.code : 'UNKNOWN',
+        failureMessage: error instanceof Error ? error.message : 'Unknown capsule branch resource failure.',
+        failureDetails: details === undefined ? undefined : toJsonObject(details, 'capsule branch resource failure details'),
+      })
+      .where(eq(capsuleBranchResourcesTable.id, resourceId))
   }
 
-  public async transitionOperationStatus(operationId: string, status: CapsuleOperationStatusValue): Promise<void> {
+  public async transitionBranchOperationStatus(operationId: string, status: CapsuleBranchOperationStatusValue): Promise<void> {
     const now = new Date()
     const updateData: {
-      status: CapsuleOperationStatusValue
+      status: CapsuleBranchOperationStatusValue
       updatedAt: Date
       completedAt?: Date
       failedAt?: Date
@@ -243,41 +252,41 @@ export class CapsuleOperationLedgerStore {
       status,
       updatedAt: now,
     }
-    if (status === CapsuleOperationStatus.COMPLETED) {
+    if (status === CapsuleBranchOperationStatus.COMPLETED) {
       updateData.completedAt = now
     }
-    if (status === CapsuleOperationStatus.FAILED || status === CapsuleOperationStatus.CLEANUP_REQUIRED) {
+    if (status === CapsuleBranchOperationStatus.FAILED || status === CapsuleBranchOperationStatus.CLEANUP_REQUIRED) {
       updateData.failedAt = now
     }
-    await this.db.update(capsuleOperationsTable).set(updateData).where(eq(capsuleOperationsTable.id, operationId))
+    await this.db.update(capsuleBranchOperationsTable).set(updateData).where(eq(capsuleBranchOperationsTable.id, operationId))
   }
 
-  public async markOperationFailure(operationId: string, status: CapsuleOperationStatusValue, error: unknown): Promise<void> {
+  public async markBranchOperationFailure(operationId: string, status: CapsuleBranchOperationStatusValue, error: unknown): Promise<void> {
     const details = detailsFromUnknown(error)
     const now = new Date()
     await this.db
-      .update(capsuleOperationsTable)
+      .update(capsuleBranchOperationsTable)
       .set({
         status,
         failedAt: now,
         updatedAt: now,
         failureCode: error instanceof IncusError ? error.code : 'UNKNOWN',
-        failureMessage: error instanceof Error ? error.message : 'Unknown capsule operation failure.',
-        failureDetails: details === undefined ? undefined : toJsonObject(details, 'capsule operation failure details'),
+        failureMessage: error instanceof Error ? error.message : 'Unknown capsule branch operation failure.',
+        failureDetails: details === undefined ? undefined : toJsonObject(details, 'capsule branch operation failure details'),
       })
-      .where(eq(capsuleOperationsTable.id, operationId))
+      .where(eq(capsuleBranchOperationsTable.id, operationId))
   }
 
   public createBranchCreateOutput(
     operationId: string,
-    operationStatus: CapsuleOperationStatusValue,
+    operationStatus: CapsuleBranchOperationStatusValue,
     branchName: string,
     branchStatus: CapsuleBranchStatus,
     replayed: boolean,
   ): CapsuleBranchCreateOutput {
     return CapsuleBranchCreateOutputSchema.parse({
       operationId,
-      operationType: CapsuleOperationType.BRANCH_CREATE,
+      operationType: CapsuleBranchOperationType.CREATE,
       operationStatus,
       branchName,
       branchStatus,
@@ -333,18 +342,18 @@ export class CapsuleOperationLedgerStore {
     await this.db.delete(capsuleBranchesTable).where(and(eq(capsuleBranchesTable.ownerId, ownerId), eq(capsuleBranchesTable.name, name)))
   }
 
-  private fallbackBranchStatusForOperation(status: CapsuleOperationStatusValue): CapsuleBranchStatus {
+  private fallbackBranchStatusForOperation(status: CapsuleBranchOperationStatusValue): CapsuleBranchStatus {
     switch (status) {
-      case CapsuleOperationStatus.COMPLETED:
+      case CapsuleBranchOperationStatus.COMPLETED:
         return 'offline'
-      case CapsuleOperationStatus.RECOVERING:
+      case CapsuleBranchOperationStatus.RECOVERING:
         return 'recovering'
-      case CapsuleOperationStatus.CLEANUP_REQUIRED:
+      case CapsuleBranchOperationStatus.CLEANUP_REQUIRED:
         return 'cleanup_required'
-      case CapsuleOperationStatus.FAILED:
+      case CapsuleBranchOperationStatus.FAILED:
         return 'error'
-      case CapsuleOperationStatus.ACCEPTED:
-      case CapsuleOperationStatus.RUNNING:
+      case CapsuleBranchOperationStatus.ACCEPTED:
+      case CapsuleBranchOperationStatus.RUNNING:
       default:
         return 'provisioning'
     }

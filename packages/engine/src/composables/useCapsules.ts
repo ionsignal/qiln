@@ -1,5 +1,12 @@
 import { onMounted, onUnmounted, provide, inject } from 'vue'
-import { CapsuleBranchEventName, CapsuleEventSchema, type CapsuleBranchStatus } from '@qiln/core/client'
+import {
+  CapsuleBranchEventName,
+  CapsuleEventSchema,
+  type CapsuleBlueprintDigest,
+  type CapsuleBranchIdempotencyKey,
+  type CapsuleBranchName,
+  type CapsuleBranchStatus,
+} from '@qiln/core/client'
 import type { InjectionKey, Ref } from 'vue'
 import type { TRPCClient } from '@trpc/client'
 import type { EngineRouter } from '../trpc'
@@ -11,6 +18,15 @@ export interface CapsuleEventStreamSubscription {
   unsubscribe: () => void
 }
 
+export interface CapsuleBranchCreateClientInput {
+  name: CapsuleBranchName
+  blueprintName: string
+  blueprintDigest: CapsuleBlueprintDigest
+  idempotencyKey: CapsuleBranchIdempotencyKey
+  cpu?: string
+  memory?: string
+}
+
 export interface UseCapsulesOptions {
   client: CapsuleBranchClient
   branches: Ref<CapsuleBranchItem[]>
@@ -20,7 +36,7 @@ export interface UseCapsulesOptions {
 
 export interface CapsuleContext {
   refresh: () => Promise<void>
-  create: (name: string, blueprint: string, cpu?: string, memory?: string) => Promise<void>
+  create: (input: CapsuleBranchCreateClientInput) => Promise<void>
   start: (name: string) => Promise<void>
   stop: (name: string) => Promise<void>
   delete: (name: string) => Promise<void>
@@ -77,8 +93,8 @@ export function provideCapsules(options: UseCapsulesOptions): CapsuleContext {
     await refreshSafely()
   }
 
-  async function create(name: string, blueprintDigest: string, cpu?: string, memory?: string) {
-    await options.client.branch.create.mutate({ name, idempotencyKey: '', blueprintDigest, cpu, memory })
+  async function create(input: CapsuleBranchCreateClientInput) {
+    await options.client.branch.create.mutate(input)
     await refresh()
   }
 

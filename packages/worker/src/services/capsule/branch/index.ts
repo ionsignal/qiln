@@ -9,7 +9,7 @@ import {
 } from '@qiln/core/server'
 import { extractIpv4 } from '../../../incus/utils'
 import { IncusError, readIncusErrorDetailCode } from '../../../errors'
-import { CapsuleOperationLedgerStore } from '../operations/ledger/store'
+import { CapsuleBranchOperationLedgerStore } from '../operations/ledger/store'
 import { CapsuleBranchEventPublisher } from './events'
 import { CapsuleBranchCreatePlanner } from '../operations/branch/create/planner'
 import { CapsuleResourceDriver } from '../resources/driver'
@@ -27,7 +27,7 @@ import type { ReconcileBranch } from '../operations/ledger/types.ts'
  * their own durable operation work is implemented.
  */
 export class CapsuleBranchRuntimeService {
-  private readonly store: CapsuleOperationLedgerStore
+  private readonly store: CapsuleBranchOperationLedgerStore
   private readonly events: CapsuleBranchEventPublisher
   private readonly saga: CapsuleBranchCreateSaga
 
@@ -38,7 +38,7 @@ export class CapsuleBranchRuntimeService {
     private readonly project: ProjectService,
     private readonly blueprints: CapsuleBlueprintRegistry,
   ) {
-    this.store = new CapsuleOperationLedgerStore(this.db)
+    this.store = new CapsuleBranchOperationLedgerStore(this.db)
     this.events = new CapsuleBranchEventPublisher(this.channel)
     const planner = new CapsuleBranchCreatePlanner()
     const driver = new CapsuleResourceDriver(this.incus, this.project)
