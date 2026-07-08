@@ -6,9 +6,17 @@ import {
   type CapsuleBranchResourceStatus as CapsuleBranchResourceStatusValue,
 } from '@qiln/core/server'
 import { IncusError } from '../../../../../errors'
+import { InlineOperationStepExecutor } from '../../inlineStepExecutor'
 import { createBranchCreateRequestHash } from './requestHash'
+import { CapsuleBranchCreateStepKey } from './steps'
 import type { CapsuleBranchEventPublisher } from '../../../branch/events'
-import type { BranchResourceInput, CapsuleBranchOperationStore, CapsuleBranchResourceStore, CapsuleBranchStore } from '../../../stores'
+import type {
+  BranchResourceInput,
+  CapsuleBranchOperationStepStore,
+  CapsuleBranchOperationStore,
+  CapsuleBranchResourceStore,
+  CapsuleBranchStore,
+} from '../../../stores'
 import type { CapsuleResourceDriver } from '../../../resources/driver'
 import type { CapsuleBranchCreatePlanner } from './planner'
 import type { CapsuleBranchCreateSagaInput, PlannedBranchResource, PlannedVolumeResource, RollbackCallback } from './types'
@@ -18,10 +26,13 @@ export type ResolveCapsuleOwnerNamespace = (ownerId: string) => string
 export interface CapsuleBranchCreateSagaStores {
   branches: CapsuleBranchStore
   operations: CapsuleBranchOperationStore
+  steps: CapsuleBranchOperationStepStore
   resources: CapsuleBranchResourceStore
 }
 
 export class CapsuleBranchCreateSaga {
+  private readonly stepExecutor: InlineOperationStepExecutor
+
   constructor(
     private readonly stores: CapsuleBranchCreateSagaStores,
     private readonly planner: CapsuleBranchCreatePlanner,
@@ -29,7 +40,9 @@ export class CapsuleBranchCreateSaga {
     private readonly events: CapsuleBranchEventPublisher,
     private readonly blueprints: CapsuleBlueprintRegistry,
     private readonly resolveNamespace: ResolveCapsuleOwnerNamespace,
-  ) {}
+  ) {
+    this.stepExecutor = new InlineOperationStepExecutor(this.stores.steps)
+  }
 
   public async execute(input: CapsuleBranchCreateSagaInput): Promise<CapsuleBranchCreateOutput> {
     const requestHash = createBranchCreateRequestHash({
@@ -63,81 +76,157 @@ export class CapsuleBranchCreateSaga {
       return accepted.replayedReceipt
     }
     const namespace = this.resolveNamespace(input.ownerId)
-    const plan = this.planner.createPlan({
+    const operationContext = {
+      operationId: accepted.operationId,
       ownerId: input.ownerId,
-      namespace,
-      name: input.name,
-      cpu: input.cpu,
-      memory: input.memory,
-      blueprint: pin.blueprint,
-    })
+      branchId: accepted.branchId,
+      branchName: input.name,
+    }
+    const resourceContext = {
+      operationId: accepted.operationId,
+      ownerId: input.ownerId,
+      branchId: accepted.branchId,
+      branchName: input.name,
+    }
     const rollbackStack: RollbackCallback[] = []
+
     try {
-      const projectResourceId = await this.stores.resources.createBranchResource(
-        this.withOperationContext(plan.project, {
-          operationId: accepted.operationId,
-          ownerId: input.ownerId,
-          branchId: accepted.branchId,
-          branchName: input.name,
-        }),
+      const plan = await this.stepExecutor.run(
+        {
+          ...operationContext,
+          stepKey: CapsuleBranchCreateStepKey.PLAN_RESOURCES,
+          metadata: {
+            blueprintName: pin.name,
+            blueprintDigest: pin.digest,
+            volumeDefinitionCount: pin.blueprint.provisioning.volumes.length,
+            bindMountDefinitionCount: pin.blueprint.provisioning.volumes.filter(volume => volume.type === 'bind').length,
+            provisioningFileDefinitionCount: pin.blueprint.provisioning.files.length,
+          },
+        },
+        () =>
+          this.planner.createPlan({
+            ownerId: input.ownerId,
+            namespace,
+            name: input.name,
+            cpu: input.cpu,
+            memory: input.memory,
+            blueprint: pin.blueprint,
+          }),
       )
-      try {
-        await this.driver.ensureNamespace(input.ownerId)
-        await this.stores.resources.transitionBranchResourceStatus(projectResourceId, CapsuleBranchResourceStatus.CREATED)
-      } catch (error: unknown) {
-        await this.markResourceErrorBestEffort(projectResourceId, error)
-        throw error
-      }
+
+      await this.stepExecutor.run(
+        {
+          ...operationContext,
+          stepKey: CapsuleBranchCreateStepKey.ENSURE_NAMESPACE,
+          metadata: {
+            namespace,
+            resourceKey: plan.project.resourceKey,
+          },
+        },
+        async () => {
+          const projectResourceId = await this.stores.resources.createBranchResource(this.withOperationContext(plan.project, resourceContext))
+          try {
+            await this.driver.ensureNamespace(input.ownerId)
+            await this.stores.resources.transitionBranchResourceStatus(projectResourceId, CapsuleBranchResourceStatus.CREATED)
+          } catch (error: unknown) {
+            await this.markResourceErrorBestEffort(projectResourceId, error)
+            throw error
+          }
+        },
+      )
+
       this.events.publishStateChanged(input.ownerId, input.name, 'provisioning')
-      for (const bindMount of plan.bindMounts) {
-        await this.stores.resources.createBranchResource(
-          this.withOperationContext(bindMount, {
-            operationId: accepted.operationId,
-            ownerId: input.ownerId,
-            branchId: accepted.branchId,
-            branchName: input.name,
-          }),
-        )
-      }
-      for (const volume of plan.volumes) {
-        const resourceId = await this.stores.resources.createBranchResource(
-          this.withOperationContext(volume, {
-            operationId: accepted.operationId,
-            ownerId: input.ownerId,
-            branchId: accepted.branchId,
-            branchName: input.name,
-          }),
-        )
-        rollbackStack.push(() => this.rollbackVolume(namespace, resourceId, volume))
-        try {
-          await this.driver.createVolume(namespace, volume)
-          await this.stores.resources.transitionBranchResourceStatus(resourceId, CapsuleBranchResourceStatus.CREATED)
-        } catch (error: unknown) {
-          await this.markResourceErrorBestEffort(resourceId, error)
-          throw error
-        }
-      }
-      const instanceResourceId = await this.stores.resources.createBranchResource(
-        this.withOperationContext(plan.instance, {
-          operationId: accepted.operationId,
-          ownerId: input.ownerId,
-          branchId: accepted.branchId,
-          branchName: input.name,
-        }),
+
+      await this.stepExecutor.run(
+        {
+          ...operationContext,
+          stepKey: CapsuleBranchCreateStepKey.RECORD_BIND_MOUNTS,
+          metadata: {
+            count: plan.bindMounts.length,
+          },
+        },
+        async () => {
+          for (const bindMount of plan.bindMounts) {
+            await this.stores.resources.createBranchResource(this.withOperationContext(bindMount, resourceContext))
+          }
+        },
       )
-      rollbackStack.push(() => this.rollbackInstance(namespace, instanceResourceId, plan.instance.instanceName))
-      try {
-        await this.driver.createInstance(namespace, plan.instance)
-        await this.stores.resources.transitionBranchResourceStatus(instanceResourceId, CapsuleBranchResourceStatus.CREATED)
-      } catch (error: unknown) {
-        await this.markResourceErrorBestEffort(instanceResourceId, error)
-        throw error
-      }
-      for (const file of plan.files) {
-        await this.driver.writeProvisioningFile(namespace, input.name, file)
-      }
-      await this.stores.branches.transitionBranchState(input.ownerId, input.name, 'offline')
-      this.events.publishStateChanged(input.ownerId, input.name, 'offline')
+
+      await this.stepExecutor.run(
+        {
+          ...operationContext,
+          stepKey: CapsuleBranchCreateStepKey.CREATE_VOLUMES,
+          metadata: {
+            count: plan.volumes.length,
+          },
+        },
+        async () => {
+          for (const volume of plan.volumes) {
+            const resourceId = await this.stores.resources.createBranchResource(this.withOperationContext(volume, resourceContext))
+            rollbackStack.push(() => this.rollbackVolume(namespace, resourceId, volume))
+            try {
+              await this.driver.createVolume(namespace, volume)
+              await this.stores.resources.transitionBranchResourceStatus(resourceId, CapsuleBranchResourceStatus.CREATED)
+            } catch (error: unknown) {
+              await this.markResourceErrorBestEffort(resourceId, error)
+              throw error
+            }
+          }
+        },
+      )
+
+      await this.stepExecutor.run(
+        {
+          ...operationContext,
+          stepKey: CapsuleBranchCreateStepKey.CREATE_INSTANCE,
+          metadata: {
+            instanceName: plan.instance.instanceName,
+            imageAlias: plan.instance.imageAlias,
+            resourceKey: plan.instance.resourceKey,
+          },
+        },
+        async () => {
+          const instanceResourceId = await this.stores.resources.createBranchResource(this.withOperationContext(plan.instance, resourceContext))
+          rollbackStack.push(() => this.rollbackInstance(namespace, instanceResourceId, plan.instance.instanceName))
+          try {
+            await this.driver.createInstance(namespace, plan.instance)
+            await this.stores.resources.transitionBranchResourceStatus(instanceResourceId, CapsuleBranchResourceStatus.CREATED)
+          } catch (error: unknown) {
+            await this.markResourceErrorBestEffort(instanceResourceId, error)
+            throw error
+          }
+        },
+      )
+
+      await this.stepExecutor.run(
+        {
+          ...operationContext,
+          stepKey: CapsuleBranchCreateStepKey.WRITE_PROVISIONING_FILES,
+          metadata: {
+            count: plan.files.length,
+          },
+        },
+        async () => {
+          for (const file of plan.files) {
+            await this.driver.writeProvisioningFile(namespace, input.name, file)
+          }
+        },
+      )
+
+      await this.stepExecutor.run(
+        {
+          ...operationContext,
+          stepKey: CapsuleBranchCreateStepKey.FINALIZE_BRANCH_OFFLINE,
+          metadata: {
+            status: 'offline',
+          },
+        },
+        async () => {
+          await this.stores.branches.transitionBranchState(input.ownerId, input.name, 'offline')
+          this.events.publishStateChanged(input.ownerId, input.name, 'offline')
+        },
+      )
+
       await this.stores.operations.transitionBranchOperationStatus(accepted.operationId, CapsuleBranchOperationStatus.COMPLETED)
       return this.stores.operations.createBranchCreateOutput(
         accepted.operationId,

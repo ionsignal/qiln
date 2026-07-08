@@ -13,7 +13,7 @@ import { CapsuleBranchEventPublisher } from './events'
 import { CapsuleBranchCreatePlanner } from '../operations/branch/create/planner'
 import { CapsuleResourceDriver } from '../resources/driver'
 import { CapsuleBranchCreateSaga } from '../operations/branch/create/saga'
-import { CapsuleBranchOperationStore, CapsuleBranchResourceStore, CapsuleBranchStore } from '../stores'
+import { CapsuleBranchOperationStepStore, CapsuleBranchOperationStore, CapsuleBranchResourceStore, CapsuleBranchStore } from '../stores'
 import type { IncusClient } from '../../../incus/client/index'
 import type { ProjectService } from '../../project'
 import type { ReconcileBranch } from '../stores/types'
@@ -29,6 +29,7 @@ import type { ReconcileBranch } from '../stores/types'
 export class CapsuleBranchRuntimeService {
   private readonly branches: CapsuleBranchStore
   private readonly operations: CapsuleBranchOperationStore
+  private readonly steps: CapsuleBranchOperationStepStore
   private readonly resources: CapsuleBranchResourceStore
   private readonly events: CapsuleBranchEventPublisher
   private readonly saga: CapsuleBranchCreateSaga
@@ -42,6 +43,7 @@ export class CapsuleBranchRuntimeService {
   ) {
     this.branches = new CapsuleBranchStore(this.db)
     this.operations = new CapsuleBranchOperationStore(this.db)
+    this.steps = new CapsuleBranchOperationStepStore(this.db)
     this.resources = new CapsuleBranchResourceStore(this.db)
     this.events = new CapsuleBranchEventPublisher(this.channel)
     const planner = new CapsuleBranchCreatePlanner()
@@ -50,6 +52,7 @@ export class CapsuleBranchRuntimeService {
       {
         branches: this.branches,
         operations: this.operations,
+        steps: this.steps,
         resources: this.resources,
       },
       planner,

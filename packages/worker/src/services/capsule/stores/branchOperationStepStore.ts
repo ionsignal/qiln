@@ -5,7 +5,7 @@ import {
   type CapsuleBranchOperationStepStatus as CapsuleBranchOperationStepStatusValue,
   type CapsuleHostDbContract,
 } from '@qiln/core/server'
-import { IncusError } from '../../../errors'
+import { IncusError, isUniqueConstraintViolation } from '../../../errors'
 import { detailsFromUnknown } from './errorDetails'
 import { toJsonObject } from './jsonPersistence'
 import type { BranchOperationStepInput } from './types'
@@ -38,6 +38,38 @@ export class CapsuleBranchOperationStepStore {
     })
   }
 
+  /**
+   * Ensures a deterministic step row exists for an operation.
+   *
+   * This is intentionally idempotent but not resumptive: callers still execute
+   * the inline step body every time they call the executor. Recovery semantics
+   * will decide later whether an existing completed step should be skipped.
+   */
+  public async ensureStep(input: BranchOperationStepInput): Promise<string> {
+    const existing = await this.findStep(input.operationId, input.stepKey)
+    if (existing) {
+      return existing.id
+    }
+
+    try {
+      return await this.createStep(input)
+    } catch (error: unknown) {
+      if (!isUniqueConstraintViolation(error)) {
+        throw error
+      }
+
+      const raced = await this.findStep(input.operationId, input.stepKey)
+      if (raced) {
+        return raced.id
+      }
+
+      throw new IncusError('Capsule branch operation step was created concurrently but could not be reloaded.', 'API_ERROR', {
+        operationId: input.operationId,
+        stepKey: input.stepKey,
+      })
+    }
+  }
+
   public async createStep(input: BranchOperationStepInput): Promise<string> {
     const [step] = await this.db
       .insert(capsuleBranchOperationStepsTable)
@@ -58,6 +90,14 @@ export class CapsuleBranchOperationStepStore {
       throw new IncusError('Failed to record capsule branch operation step.', 'API_ERROR')
     }
     return step.id
+  }
+
+  public async markStepRunning(stepId: string, metadata?: Record<string, unknown>): Promise<void> {
+    await this.transitionStepStatus(stepId, CapsuleBranchOperationStepStatus.RUNNING, metadata)
+  }
+
+  public async markStepCompleted(stepId: string, metadata?: Record<string, unknown>): Promise<void> {
+    await this.transitionStepStatus(stepId, CapsuleBranchOperationStepStatus.COMPLETED, metadata)
   }
 
   public async transitionStepStatus(
