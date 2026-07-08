@@ -1,0 +1,19 @@
+export function branchVolumeName(branchName: string, volumeName: string): string {
+  return `${branchName}-${volumeName}`
+}
+
+export function projectResourceKey(namespace: string): string {
+  return `incus:project:${namespace}`
+}
+
+export function instanceResourceKey(namespace: string, instanceName: string): string {
+  return `incus:instance:${namespace}:${instanceName}`
+}
+
+export function volumeResourceKey(namespace: string, pool: string, volumeName: string): string {
+  return `incus:storage-volume:${namespace}:${pool}:${volumeName}`
+}
+
+export function bindMountResourceKey(namespace: string, hostPath: string, mountPath: string): string {
+  return `incus:bind-mount:${namespace}:${hostPath}:${mountPath}`
+}
