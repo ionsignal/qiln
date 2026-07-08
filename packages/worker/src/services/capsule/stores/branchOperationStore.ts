@@ -1,51 +1,29 @@
-import { and, eq, inArray } from 'drizzle-orm'
+import { eq } from 'drizzle-orm'
 import {
   CapsuleBranchCreateOutputSchema,
   CapsuleBranchOperationStatus,
   CapsuleBranchOperationType,
   capsuleBranchesTable,
   capsuleBranchOperationsTable,
-  capsuleBranchResourcesTable,
   type CapsuleBranchCreateOutput,
   type CapsuleBranchOperationStatus as CapsuleBranchOperationStatusValue,
-  type CapsuleBranchResourceStatus as CapsuleBranchResourceStatusValue,
   type CapsuleBranchStatus,
   type CapsuleHostDbContract,
 } from '@qiln/core/server'
-import { IncusError, isUniqueConstraintViolation } from '../../../../errors'
+import { IncusError, isUniqueConstraintViolation } from '../../../errors'
 import { detailsFromUnknown } from './errorDetails'
 import { toJsonObject } from './jsonPersistence'
-import type { AcceptedBranchCreateOperation, AcceptBranchCreateOperationInput, BranchResourceInput, ReconcileBranch } from './types'
+import type { AcceptedBranchCreateOperation, AcceptBranchCreateOperationInput } from './types'
 
 /**
- * Centralized durable branch operation/resource persistence.
+ * Persistence boundary for durable capsule branch operations.
  *
- * This store intentionally also owns the branch read-model transitions for now so
- * saga code cannot scatter raw Drizzle state-machine updates. A later recovery PR
- * can split the branch read model once recovery semantics are clearer.
+ * This owns operation identity, idempotency replay, status transitions, and
+ * failure recording. It intentionally does not own resource inventory or general
+ * branch runtime transitions.
  */
-export class CapsuleBranchOperationLedgerStore {
+export class CapsuleBranchOperationStore {
   constructor(private readonly db: CapsuleHostDbContract) {}
-
-  public async listBranches(ownerId: string) {
-    return await this.db.query.capsuleBranches.findMany({
-      where: { ownerId },
-      orderBy: (capsuleBranches, { desc }) => [desc(capsuleBranches.createdAt)],
-    })
-  }
-
-  public async findBranch(ownerId: string, name: string) {
-    return await this.db.query.capsuleBranches.findFirst({
-      where: { name, ownerId },
-    })
-  }
-
-  public async listBranchesForReconcile(): Promise<ReconcileBranch[]> {
-    const rows = await this.db.query.capsuleBranches.findMany({
-      columns: { name: true, ownerId: true, status: true },
-    })
-    return rows
-  }
 
   public async findExistingBranchCreateOperationReceipt(
     ownerId: string,
@@ -183,64 +161,6 @@ export class CapsuleBranchOperationLedgerStore {
     }
   }
 
-  public async createBranchResource(input: BranchResourceInput): Promise<string> {
-    const [resource] = await this.db
-      .insert(capsuleBranchResourcesTable)
-      .values({
-        createdByOperationId: input.operationId,
-        lastOperationId: input.operationId,
-        ownerId: input.ownerId,
-        branchId: input.branchId,
-        branchName: input.branchName,
-        resourceType: input.resourceType,
-        resourceKey: input.resourceKey,
-        cleanupPolicy: input.cleanupPolicy,
-        status: input.status ?? 'planned',
-        metadata: input.metadata === undefined ? undefined : toJsonObject(input.metadata, 'capsule branch resource metadata'),
-        updatedAt: new Date(),
-      })
-      .returning({
-        id: capsuleBranchResourcesTable.id,
-      })
-    if (!resource) {
-      throw new IncusError('Failed to record capsule branch resource.', 'API_ERROR')
-    }
-    return resource.id
-  }
-
-  public async transitionBranchResourceStatus(
-    resourceId: string,
-    status: CapsuleBranchResourceStatusValue,
-    metadata?: Record<string, unknown>,
-  ): Promise<void> {
-    const updateData: {
-      status: CapsuleBranchResourceStatusValue
-      metadata?: Record<string, unknown>
-      updatedAt: Date
-    } = {
-      status,
-      updatedAt: new Date(),
-    }
-    if (metadata !== undefined) {
-      updateData.metadata = toJsonObject(metadata, 'capsule branch resource metadata')
-    }
-    await this.db.update(capsuleBranchResourcesTable).set(updateData).where(eq(capsuleBranchResourcesTable.id, resourceId))
-  }
-
-  public async markBranchResourceError(resourceId: string, error: unknown): Promise<void> {
-    const details = detailsFromUnknown(error)
-    await this.db
-      .update(capsuleBranchResourcesTable)
-      .set({
-        status: 'error',
-        updatedAt: new Date(),
-        failureCode: error instanceof IncusError ? error.code : 'UNKNOWN',
-        failureMessage: error instanceof Error ? error.message : 'Unknown capsule branch resource failure.',
-        failureDetails: details === undefined ? undefined : toJsonObject(details, 'capsule branch resource failure details'),
-      })
-      .where(eq(capsuleBranchResourcesTable.id, resourceId))
-  }
-
   public async transitionBranchOperationStatus(operationId: string, status: CapsuleBranchOperationStatusValue): Promise<void> {
     const now = new Date()
     const updateData: {
@@ -292,54 +212,6 @@ export class CapsuleBranchOperationLedgerStore {
       branchStatus,
       replayed,
     })
-  }
-
-  public async transitionBranchState(ownerId: string, name: string, status: CapsuleBranchStatus, ip?: string | null): Promise<void> {
-    const updateData: {
-      status: CapsuleBranchStatus
-      runtimeIp?: string | null
-      updatedAt: Date
-    } = {
-      status,
-      updatedAt: new Date(),
-    }
-    if (ip !== undefined) {
-      updateData.runtimeIp = ip
-    }
-    await this.db
-      .update(capsuleBranchesTable)
-      .set(updateData)
-      .where(and(eq(capsuleBranchesTable.ownerId, ownerId), eq(capsuleBranchesTable.name, name)))
-  }
-
-  public async transitionBranchStateWhereStatus(
-    ownerId: string,
-    name: string,
-    status: CapsuleBranchStatus,
-    allowedStatuses: CapsuleBranchStatus[],
-  ): Promise<boolean> {
-    if (allowedStatuses.length === 0) {
-      return false
-    }
-    const result = await this.db
-      .update(capsuleBranchesTable)
-      .set({
-        status,
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(capsuleBranchesTable.ownerId, ownerId),
-          eq(capsuleBranchesTable.name, name),
-          inArray(capsuleBranchesTable.status, allowedStatuses),
-        ),
-      )
-      .returning({ id: capsuleBranchesTable.id })
-    return result.length > 0
-  }
-
-  public async deleteBranch(ownerId: string, name: string): Promise<void> {
-    await this.db.delete(capsuleBranchesTable).where(and(eq(capsuleBranchesTable.ownerId, ownerId), eq(capsuleBranchesTable.name, name)))
   }
 
   private fallbackBranchStatusForOperation(status: CapsuleBranchOperationStatusValue): CapsuleBranchStatus {

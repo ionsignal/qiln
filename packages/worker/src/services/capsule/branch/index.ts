@@ -9,14 +9,14 @@ import {
 } from '@qiln/core/server'
 import { extractIpv4 } from '../../../incus/utils'
 import { IncusError, readIncusErrorDetailCode } from '../../../errors'
-import { CapsuleBranchOperationLedgerStore } from '../operations/ledger/store'
 import { CapsuleBranchEventPublisher } from './events'
 import { CapsuleBranchCreatePlanner } from '../operations/branch/create/planner'
 import { CapsuleResourceDriver } from '../resources/driver'
 import { CapsuleBranchCreateSaga } from '../operations/branch/create/saga'
+import { CapsuleBranchOperationStore, CapsuleBranchResourceStore, CapsuleBranchStore } from '../stores'
 import type { IncusClient } from '../../../incus/client/index'
 import type { ProjectService } from '../../project'
-import type { ReconcileBranch } from '../operations/ledger/types.ts'
+import type { ReconcileBranch } from '../stores/types'
 
 /**
  * Public worker service for capsule branch runtime mutations.
@@ -27,7 +27,9 @@ import type { ReconcileBranch } from '../operations/ledger/types.ts'
  * their own durable operation work is implemented.
  */
 export class CapsuleBranchRuntimeService {
-  private readonly store: CapsuleBranchOperationLedgerStore
+  private readonly branches: CapsuleBranchStore
+  private readonly operations: CapsuleBranchOperationStore
+  private readonly resources: CapsuleBranchResourceStore
   private readonly events: CapsuleBranchEventPublisher
   private readonly saga: CapsuleBranchCreateSaga
 
@@ -38,12 +40,23 @@ export class CapsuleBranchRuntimeService {
     private readonly project: ProjectService,
     private readonly blueprints: CapsuleBlueprintRegistry,
   ) {
-    this.store = new CapsuleBranchOperationLedgerStore(this.db)
+    this.branches = new CapsuleBranchStore(this.db)
+    this.operations = new CapsuleBranchOperationStore(this.db)
+    this.resources = new CapsuleBranchResourceStore(this.db)
     this.events = new CapsuleBranchEventPublisher(this.channel)
     const planner = new CapsuleBranchCreatePlanner()
     const driver = new CapsuleResourceDriver(this.incus, this.project)
-    this.saga = new CapsuleBranchCreateSaga(this.store, planner, driver, this.events, this.blueprints, ownerId =>
-      this.project.getNamespace(ownerId),
+    this.saga = new CapsuleBranchCreateSaga(
+      {
+        branches: this.branches,
+        operations: this.operations,
+        resources: this.resources,
+      },
+      planner,
+      driver,
+      this.events,
+      this.blueprints,
+      ownerId => this.project.getNamespace(ownerId),
     )
   }
 
@@ -51,7 +64,7 @@ export class CapsuleBranchRuntimeService {
    * Fetches the list of capsule branches for a specific owner.
    */
   public async list(ownerId: string) {
-    return await this.store.listBranches(ownerId)
+    return await this.branches.listBranches(ownerId)
   }
 
   /**
@@ -59,7 +72,7 @@ export class CapsuleBranchRuntimeService {
    * enriches it with the live Incus IPv4 address when the branch is active.
    */
   public async state(ownerId: string, name: string) {
-    const branch = await this.store.findBranch(ownerId, name)
+    const branch = await this.branches.findBranch(ownerId, name)
     if (!branch) {
       return null
     }
@@ -107,7 +120,7 @@ export class CapsuleBranchRuntimeService {
    * Starts an existing offline capsule branch.
    */
   public async start(ownerId: string, name: string): Promise<CapsuleCommandAck> {
-    const branch = await this.store.findBranch(ownerId, name)
+    const branch = await this.branches.findBranch(ownerId, name)
     if (!branch) {
       throw new IncusError('Capsule branch not found or access denied.', 'NOT_FOUND')
     }
@@ -140,7 +153,7 @@ export class CapsuleBranchRuntimeService {
    * Stops an active capsule branch.
    */
   public async stop(ownerId: string, name: string): Promise<CapsuleCommandAck> {
-    const branch = await this.store.findBranch(ownerId, name)
+    const branch = await this.branches.findBranch(ownerId, name)
     if (!branch) {
       throw new IncusError('Capsule branch not found or access denied.', 'NOT_FOUND')
     }
@@ -165,7 +178,7 @@ export class CapsuleBranchRuntimeService {
    * Permanently deletes a capsule branch and all associated managed ZFS volumes.
    */
   public async delete(ownerId: string, name: string): Promise<CapsuleCommandAck> {
-    const branch = await this.store.findBranch(ownerId, name)
+    const branch = await this.branches.findBranch(ownerId, name)
     if (!branch) {
       throw new IncusError('Capsule branch not found or access denied.', 'NOT_FOUND')
     }
@@ -219,7 +232,7 @@ export class CapsuleBranchRuntimeService {
         }
       }
     }
-    await this.store.deleteBranch(ownerId, name)
+    await this.branches.deleteBranch(ownerId, name)
     this.events.publishDeleted(ownerId, name)
     return { ok: true }
   }
@@ -228,7 +241,7 @@ export class CapsuleBranchRuntimeService {
    * Boot-time self-healing to align Postgres with true Incus state.
    */
   public async reconcile(): Promise<void> {
-    const dbBranches = await this.store.listBranchesForReconcile()
+    const dbBranches = await this.branches.listBranchesForReconcile()
     const activeBranches = dbBranches.filter(
       branch =>
         branch.status !== 'provisioning' && branch.status !== 'recovering' && branch.status !== 'error' && branch.status !== 'cleanup_required',
@@ -281,7 +294,7 @@ export class CapsuleBranchRuntimeService {
   }
 
   private async transitionBranchStateAndPublish(ownerId: string, name: string, status: CapsuleBranchStatus, ip?: string | null): Promise<void> {
-    await this.store.transitionBranchState(ownerId, name, status, ip)
+    await this.branches.transitionBranchState(ownerId, name, status, ip)
     this.events.publishStateChanged(ownerId, name, status)
   }
 
@@ -291,7 +304,7 @@ export class CapsuleBranchRuntimeService {
     status: CapsuleBranchStatus,
     allowedStatuses: CapsuleBranchStatus[],
   ): Promise<boolean> {
-    const transitioned = await this.store.transitionBranchStateWhereStatus(ownerId, name, status, allowedStatuses)
+    const transitioned = await this.branches.transitionBranchStateWhereStatus(ownerId, name, status, allowedStatuses)
     if (transitioned) {
       this.events.publishStateChanged(ownerId, name, status)
     }

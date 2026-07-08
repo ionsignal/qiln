@@ -8,17 +8,22 @@ import {
 import { IncusError } from '../../../../../errors'
 import { createBranchCreateRequestHash } from './requestHash'
 import type { CapsuleBranchEventPublisher } from '../../../branch/events'
-import type { CapsuleBranchOperationLedgerStore } from '../../ledger/store'
-import type { BranchResourceInput } from '../../ledger/types'
+import type { BranchResourceInput, CapsuleBranchOperationStore, CapsuleBranchResourceStore, CapsuleBranchStore } from '../../../stores'
 import type { CapsuleResourceDriver } from '../../../resources/driver'
 import type { CapsuleBranchCreatePlanner } from './planner'
 import type { CapsuleBranchCreateSagaInput, PlannedBranchResource, PlannedVolumeResource, RollbackCallback } from './types'
 
 export type ResolveCapsuleOwnerNamespace = (ownerId: string) => string
 
+export interface CapsuleBranchCreateSagaStores {
+  branches: CapsuleBranchStore
+  operations: CapsuleBranchOperationStore
+  resources: CapsuleBranchResourceStore
+}
+
 export class CapsuleBranchCreateSaga {
   constructor(
-    private readonly store: CapsuleBranchOperationLedgerStore,
+    private readonly stores: CapsuleBranchCreateSagaStores,
     private readonly planner: CapsuleBranchCreatePlanner,
     private readonly driver: CapsuleResourceDriver,
     private readonly events: CapsuleBranchEventPublisher,
@@ -34,12 +39,16 @@ export class CapsuleBranchCreateSaga {
       cpu: input.cpu,
       memory: input.memory,
     })
-    const existingReceipt = await this.store.findExistingBranchCreateOperationReceipt(input.ownerId, input.idempotencyKey, requestHash)
+    const existingReceipt = await this.stores.operations.findExistingBranchCreateOperationReceipt(
+      input.ownerId,
+      input.idempotencyKey,
+      requestHash,
+    )
     if (existingReceipt) {
       return existingReceipt
     }
     const pin = this.blueprints.pin(input.blueprintName, input.blueprintDigest)
-    const accepted = await this.store.acceptBranchCreateOperation({
+    const accepted = await this.stores.operations.acceptBranchCreateOperation({
       ownerId: input.ownerId,
       name: input.name,
       idempotencyKey: input.idempotencyKey,
@@ -64,7 +73,7 @@ export class CapsuleBranchCreateSaga {
     })
     const rollbackStack: RollbackCallback[] = []
     try {
-      const projectResourceId = await this.store.createBranchResource(
+      const projectResourceId = await this.stores.resources.createBranchResource(
         this.withOperationContext(plan.project, {
           operationId: accepted.operationId,
           ownerId: input.ownerId,
@@ -74,14 +83,14 @@ export class CapsuleBranchCreateSaga {
       )
       try {
         await this.driver.ensureNamespace(input.ownerId)
-        await this.store.transitionBranchResourceStatus(projectResourceId, CapsuleBranchResourceStatus.CREATED)
+        await this.stores.resources.transitionBranchResourceStatus(projectResourceId, CapsuleBranchResourceStatus.CREATED)
       } catch (error: unknown) {
         await this.markResourceErrorBestEffort(projectResourceId, error)
         throw error
       }
       this.events.publishStateChanged(input.ownerId, input.name, 'provisioning')
       for (const bindMount of plan.bindMounts) {
-        await this.store.createBranchResource(
+        await this.stores.resources.createBranchResource(
           this.withOperationContext(bindMount, {
             operationId: accepted.operationId,
             ownerId: input.ownerId,
@@ -91,7 +100,7 @@ export class CapsuleBranchCreateSaga {
         )
       }
       for (const volume of plan.volumes) {
-        const resourceId = await this.store.createBranchResource(
+        const resourceId = await this.stores.resources.createBranchResource(
           this.withOperationContext(volume, {
             operationId: accepted.operationId,
             ownerId: input.ownerId,
@@ -102,13 +111,13 @@ export class CapsuleBranchCreateSaga {
         rollbackStack.push(() => this.rollbackVolume(namespace, resourceId, volume))
         try {
           await this.driver.createVolume(namespace, volume)
-          await this.store.transitionBranchResourceStatus(resourceId, CapsuleBranchResourceStatus.CREATED)
+          await this.stores.resources.transitionBranchResourceStatus(resourceId, CapsuleBranchResourceStatus.CREATED)
         } catch (error: unknown) {
           await this.markResourceErrorBestEffort(resourceId, error)
           throw error
         }
       }
-      const instanceResourceId = await this.store.createBranchResource(
+      const instanceResourceId = await this.stores.resources.createBranchResource(
         this.withOperationContext(plan.instance, {
           operationId: accepted.operationId,
           ownerId: input.ownerId,
@@ -119,7 +128,7 @@ export class CapsuleBranchCreateSaga {
       rollbackStack.push(() => this.rollbackInstance(namespace, instanceResourceId, plan.instance.instanceName))
       try {
         await this.driver.createInstance(namespace, plan.instance)
-        await this.store.transitionBranchResourceStatus(instanceResourceId, CapsuleBranchResourceStatus.CREATED)
+        await this.stores.resources.transitionBranchResourceStatus(instanceResourceId, CapsuleBranchResourceStatus.CREATED)
       } catch (error: unknown) {
         await this.markResourceErrorBestEffort(instanceResourceId, error)
         throw error
@@ -127,29 +136,35 @@ export class CapsuleBranchCreateSaga {
       for (const file of plan.files) {
         await this.driver.writeProvisioningFile(namespace, input.name, file)
       }
-      await this.store.transitionBranchState(input.ownerId, input.name, 'offline')
+      await this.stores.branches.transitionBranchState(input.ownerId, input.name, 'offline')
       this.events.publishStateChanged(input.ownerId, input.name, 'offline')
-      await this.store.transitionBranchOperationStatus(accepted.operationId, CapsuleBranchOperationStatus.COMPLETED)
-      return this.store.createBranchCreateOutput(accepted.operationId, CapsuleBranchOperationStatus.COMPLETED, input.name, 'offline', false)
+      await this.stores.operations.transitionBranchOperationStatus(accepted.operationId, CapsuleBranchOperationStatus.COMPLETED)
+      return this.stores.operations.createBranchCreateOutput(
+        accepted.operationId,
+        CapsuleBranchOperationStatus.COMPLETED,
+        input.name,
+        'offline',
+        false,
+      )
     } catch (error: unknown) {
       console.error(`[CapsuleBranchRuntimeService] Provisioning failed for branch '${input.name}'. Initiating rollback...`, error)
       const rollbackHadFailure = await this.rollback(input.name, rollbackStack)
       if (rollbackHadFailure) {
         try {
-          await this.store.transitionBranchState(input.ownerId, input.name, 'cleanup_required')
+          await this.stores.branches.transitionBranchState(input.ownerId, input.name, 'cleanup_required')
           this.events.publishStateChanged(input.ownerId, input.name, 'cleanup_required')
         } catch (dbErr: unknown) {
           console.error(`[CRITICAL] Failed to mark branch '${input.name}' as cleanup_required:`, dbErr)
         }
-        await this.store.markBranchOperationFailure(accepted.operationId, CapsuleBranchOperationStatus.CLEANUP_REQUIRED, error)
+        await this.stores.operations.markBranchOperationFailure(accepted.operationId, CapsuleBranchOperationStatus.CLEANUP_REQUIRED, error)
         throw error
       }
       try {
-        await this.store.deleteBranch(input.ownerId, input.name)
+        await this.stores.branches.deleteBranch(input.ownerId, input.name)
       } catch (dbErr: unknown) {
         console.error(`[CRITICAL] Ghost Record Detected: Failed to remove DB provisioning lock for branch '${input.name}':`, dbErr)
       }
-      await this.store.markBranchOperationFailure(accepted.operationId, CapsuleBranchOperationStatus.FAILED, error)
+      await this.stores.operations.markBranchOperationFailure(accepted.operationId, CapsuleBranchOperationStatus.FAILED, error)
       throw error
     }
   }
@@ -228,7 +243,7 @@ export class CapsuleBranchCreateSaga {
 
   private async transitionResourceStatusBestEffort(resourceId: string, status: CapsuleBranchResourceStatusValue): Promise<void> {
     try {
-      await this.store.transitionBranchResourceStatus(resourceId, status)
+      await this.stores.resources.transitionBranchResourceStatus(resourceId, status)
     } catch (error: unknown) {
       console.error(`[CapsuleBranchRuntimeService] Failed to mark resource '${resourceId}' as '${status}' during rollback.`, error)
     }
@@ -236,7 +251,7 @@ export class CapsuleBranchCreateSaga {
 
   private async markResourceErrorBestEffort(resourceId: string, error: unknown): Promise<void> {
     try {
-      await this.store.markBranchResourceError(resourceId, error)
+      await this.stores.resources.markBranchResourceError(resourceId, error)
     } catch (dbError: unknown) {
       console.error(`[CapsuleBranchRuntimeService] Failed to persist resource error for '${resourceId}'.`, dbError)
     }

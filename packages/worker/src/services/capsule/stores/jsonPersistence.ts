@@ -1,4 +1,4 @@
-import { IncusError } from '../../../../errors'
+import { IncusError } from '../../../errors'
 
 type JsonPrimitive = string | number | boolean | null
 type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue }

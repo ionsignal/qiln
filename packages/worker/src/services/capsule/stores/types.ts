@@ -3,6 +3,7 @@ import type {
   CapsuleBlueprintDigest,
   CapsuleBranchCreateOutput,
   CapsuleBranchOperationStatus,
+  CapsuleBranchOperationStepStatus,
   CapsuleBranchResourceCleanupPolicy,
   CapsuleBranchResourceStatus,
   CapsuleBranchResourceType,
@@ -45,4 +46,15 @@ export interface BranchResourceInput {
   metadata?: Record<string, unknown>
 }
 
+export interface BranchOperationStepInput {
+  operationId: string
+  ownerId: string
+  branchId?: string | null
+  branchName: string
+  stepKey: string
+  status?: CapsuleBranchOperationStepStatus
+  metadata?: Record<string, unknown>
+}
+
 export type BranchOperationStatusValue = CapsuleBranchOperationStatus
+export type BranchOperationStepStatusValue = CapsuleBranchOperationStepStatus
