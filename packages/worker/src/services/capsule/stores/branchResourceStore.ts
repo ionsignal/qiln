@@ -6,7 +6,7 @@ import {
   type CapsuleHostDbContract,
 } from '@qiln/core/server'
 import { IncusError, isUniqueConstraintViolation } from '../../../errors'
-import { detailsFromUnknown } from './errorDetails'
+import { createFailureDetails, failureCodeFromUnknown, failureMessageFromUnknown } from './errorDetails'
 import { toJsonObject } from './jsonPersistence'
 import type { BranchResourceInput } from './types'
 
@@ -130,15 +130,15 @@ export class CapsuleBranchResourceStore {
     await this.transitionBranchResourceStatus(resourceId, CapsuleBranchResourceStatus.MISSING)
   }
 
-  public async markBranchResourceError(resourceId: string, error: unknown): Promise<void> {
-    const details = detailsFromUnknown(error)
+  public async markBranchResourceError(resourceId: string, error: unknown, context?: Record<string, unknown>): Promise<void> {
+    const details = createFailureDetails(error, context)
     await this.db
       .update(capsuleBranchResourcesTable)
       .set({
         status: 'error',
         updatedAt: new Date(),
-        failureCode: error instanceof IncusError ? error.code : 'UNKNOWN',
-        failureMessage: error instanceof Error ? error.message : 'Unknown capsule branch resource failure.',
+        failureCode: failureCodeFromUnknown(error),
+        failureMessage: failureMessageFromUnknown(error, 'Unknown capsule branch resource failure.'),
         failureDetails: details === undefined ? undefined : toJsonObject(details, 'capsule branch resource failure details'),
       })
       .where(eq(capsuleBranchResourcesTable.id, resourceId))

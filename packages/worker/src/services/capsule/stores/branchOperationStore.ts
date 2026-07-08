@@ -11,7 +11,7 @@ import {
   type CapsuleHostDbContract,
 } from '@qiln/core/server'
 import { IncusError, isUniqueConstraintViolation } from '../../../errors'
-import { detailsFromUnknown } from './errorDetails'
+import { createFailureDetails, failureCodeFromUnknown, failureMessageFromUnknown } from './errorDetails'
 import { toJsonObject } from './jsonPersistence'
 import type { AcceptedBranchCreateOperation, AcceptBranchCreateOperationInput } from './types'
 
@@ -181,8 +181,13 @@ export class CapsuleBranchOperationStore {
     await this.db.update(capsuleBranchOperationsTable).set(updateData).where(eq(capsuleBranchOperationsTable.id, operationId))
   }
 
-  public async markBranchOperationFailure(operationId: string, status: CapsuleBranchOperationStatusValue, error: unknown): Promise<void> {
-    const details = detailsFromUnknown(error)
+  public async markBranchOperationFailure(
+    operationId: string,
+    status: CapsuleBranchOperationStatusValue,
+    error: unknown,
+    context?: Record<string, unknown>,
+  ): Promise<void> {
+    const details = createFailureDetails(error, context)
     const now = new Date()
     await this.db
       .update(capsuleBranchOperationsTable)
@@ -190,8 +195,8 @@ export class CapsuleBranchOperationStore {
         status,
         failedAt: now,
         updatedAt: now,
-        failureCode: error instanceof IncusError ? error.code : 'UNKNOWN',
-        failureMessage: error instanceof Error ? error.message : 'Unknown capsule branch operation failure.',
+        failureCode: failureCodeFromUnknown(error),
+        failureMessage: failureMessageFromUnknown(error, 'Unknown capsule branch operation failure.'),
         failureDetails: details === undefined ? undefined : toJsonObject(details, 'capsule branch operation failure details'),
       })
       .where(eq(capsuleBranchOperationsTable.id, operationId))

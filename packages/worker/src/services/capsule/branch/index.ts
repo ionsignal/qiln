@@ -306,7 +306,10 @@ export class CapsuleBranchRuntimeService {
       if (err instanceof IncusError && err.code === 'NOT_FOUND') {
         instanceMissing = true
       } else if (!(err instanceof IncusError && detailCode === 400)) {
-        await this.markResourceErrorBestEffort(resourceId, err)
+        await this.markResourceErrorBestEffort(resourceId, err, {
+          action: 'stop_instance_before_delete',
+          instanceName,
+        })
         throw err
       }
     }
@@ -322,7 +325,10 @@ export class CapsuleBranchRuntimeService {
         await this.transitionResourceStatusBestEffort(resourceId, CapsuleBranchResourceStatus.MISSING)
         return
       }
-      await this.markResourceErrorBestEffort(resourceId, err)
+      await this.markResourceErrorBestEffort(resourceId, err, {
+        action: 'delete_instance',
+        instanceName,
+      })
       throw err
     }
   }
@@ -337,8 +343,23 @@ export class CapsuleBranchRuntimeService {
         await this.transitionResourceStatusBestEffort(volume.resourceId, CapsuleBranchResourceStatus.MISSING)
         return
       }
-      await this.markResourceErrorBestEffort(volume.resourceId, err)
+      await this.markResourceErrorBestEffort(volume.resourceId, err, {
+        action: 'delete_volume',
+        pool: volume.pool,
+        volumeName: volume.volumeName,
+      })
       throw err
+    }
+  }
+
+  private async markResourceErrorBestEffort(resourceId: string | null, error: unknown, context?: Record<string, unknown>): Promise<void> {
+    if (!resourceId) {
+      return
+    }
+    try {
+      await this.resources.markBranchResourceError(resourceId, error, context)
+    } catch (dbError: unknown) {
+      console.error(`[CapsuleBranchRuntimeService] Failed to persist resource error for '${resourceId}'.`, dbError)
     }
   }
 
@@ -393,17 +414,6 @@ export class CapsuleBranchRuntimeService {
       await this.resources.transitionBranchResourceStatus(resourceId, status)
     } catch (error: unknown) {
       console.error(`[CapsuleBranchRuntimeService] Failed to mark resource '${resourceId}' as '${status}'.`, error)
-    }
-  }
-
-  private async markResourceErrorBestEffort(resourceId: string | null, error: unknown): Promise<void> {
-    if (!resourceId) {
-      return
-    }
-    try {
-      await this.resources.markBranchResourceError(resourceId, error)
-    } catch (dbError: unknown) {
-      console.error(`[CapsuleBranchRuntimeService] Failed to persist resource error for '${resourceId}'.`, dbError)
     }
   }
 

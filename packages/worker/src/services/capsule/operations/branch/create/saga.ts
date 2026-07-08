@@ -3,10 +3,18 @@ import {
   CapsuleBranchResourceStatus,
   type CapsuleBlueprintRegistry,
   type CapsuleBranchCreateOutput,
+  type CapsuleBranchOperationStatus as CapsuleBranchOperationStatusValue,
   type CapsuleBranchResourceStatus as CapsuleBranchResourceStatusValue,
 } from '@qiln/core/server'
 import { IncusError } from '../../../../../errors'
 import { InlineOperationStepExecutor } from '../../inlineStepExecutor'
+import {
+  CapsuleBranchCreateFailurePhase,
+  CapsuleRollbackStatus,
+  createOperationFailureContext,
+  createRollbackFailureDetail,
+  type CapsuleRollbackResult,
+} from '../../errors'
 import { createBranchCreateRequestHash } from './requestHash'
 import { CapsuleBranchCreateStepKey } from './steps'
 import type { CapsuleBranchEventPublisher } from '../../../branch/events'
@@ -19,7 +27,7 @@ import type {
 } from '../../../stores'
 import type { CapsuleResourceDriver } from '../../../resources/driver'
 import type { CapsuleBranchCreatePlanner } from './planner'
-import type { CapsuleBranchCreateSagaInput, PlannedBranchResource, PlannedVolumeResource, RollbackCallback } from './types'
+import type { CapsuleBranchCreateSagaInput, PlannedBranchResource, PlannedVolumeResource } from './types'
 
 export type ResolveCapsuleOwnerNamespace = (ownerId: string) => string
 
@@ -28,6 +36,13 @@ export interface CapsuleBranchCreateSagaStores {
   operations: CapsuleBranchOperationStore
   steps: CapsuleBranchOperationStepStore
   resources: CapsuleBranchResourceStore
+}
+
+interface BranchCreateRollbackTask {
+  action: string
+  resourceId: string
+  resourceKey: string
+  run: () => Promise<void>
 }
 
 export class CapsuleBranchCreateSaga {
@@ -88,19 +103,38 @@ export class CapsuleBranchCreateSaga {
       branchId: accepted.branchId,
       branchName: input.name,
     }
-    const rollbackStack: RollbackCallback[] = []
-    try {
-      const plan = await this.stepExecutor.run(
+    const rollbackStack: BranchCreateRollbackTask[] = []
+
+    let currentPhase: CapsuleBranchCreateFailurePhase = CapsuleBranchCreateFailurePhase.PLAN_RESOURCES
+    let currentStepKey: CapsuleBranchCreateStepKey | null = null
+    let branchFinalized = false
+
+    const runStep = async <TResult>(
+      stepKey: CapsuleBranchCreateStepKey,
+      metadata: Record<string, unknown>,
+      action: () => Promise<TResult> | TResult,
+    ): Promise<TResult> => {
+      currentPhase = stepKey
+      currentStepKey = stepKey
+      return await this.stepExecutor.run(
         {
           ...operationContext,
-          stepKey: CapsuleBranchCreateStepKey.PLAN_RESOURCES,
-          metadata: {
-            blueprintName: pin.name,
-            blueprintDigest: pin.digest,
-            volumeDefinitionCount: pin.blueprint.provisioning.volumes.length,
-            bindMountDefinitionCount: pin.blueprint.provisioning.volumes.filter(volume => volume.type === 'bind').length,
-            provisioningFileDefinitionCount: pin.blueprint.provisioning.files.length,
-          },
+          stepKey,
+          metadata,
+        },
+        action,
+      )
+    }
+
+    try {
+      const plan = await runStep(
+        CapsuleBranchCreateStepKey.PLAN_RESOURCES,
+        {
+          blueprintName: pin.name,
+          blueprintDigest: pin.digest,
+          volumeDefinitionCount: pin.blueprint.provisioning.volumes.length,
+          bindMountDefinitionCount: pin.blueprint.provisioning.volumes.filter(volume => volume.type === 'bind').length,
+          provisioningFileDefinitionCount: pin.blueprint.provisioning.files.length,
         },
         () =>
           this.planner.createPlan({
@@ -112,14 +146,11 @@ export class CapsuleBranchCreateSaga {
             blueprint: pin.blueprint,
           }),
       )
-      await this.stepExecutor.run(
+      await runStep(
+        CapsuleBranchCreateStepKey.ENSURE_NAMESPACE,
         {
-          ...operationContext,
-          stepKey: CapsuleBranchCreateStepKey.ENSURE_NAMESPACE,
-          metadata: {
-            namespace,
-            resourceKey: plan.project.resourceKey,
-          },
+          namespace,
+          resourceKey: plan.project.resourceKey,
         },
         async () => {
           const projectResourceId = await this.stores.resources.ensureBranchResource(this.withOperationContext(plan.project, resourceContext))
@@ -127,19 +158,28 @@ export class CapsuleBranchCreateSaga {
             await this.driver.ensureNamespace(input.ownerId)
             await this.stores.resources.transitionBranchResourceStatus(projectResourceId, CapsuleBranchResourceStatus.CREATED)
           } catch (error: unknown) {
-            await this.markResourceErrorBestEffort(projectResourceId, error)
+            await this.markResourceErrorBestEffort(
+              projectResourceId,
+              error,
+              createOperationFailureContext({
+                operationId: accepted.operationId,
+                branchName: input.name,
+                phase: currentPhase,
+                stepKey: currentStepKey,
+                action: 'ensure_namespace',
+                resourceId: projectResourceId,
+                resourceKey: plan.project.resourceKey,
+              }),
+            )
             throw error
           }
         },
       )
       this.events.publishStateChanged(input.ownerId, input.name, 'provisioning')
-      await this.stepExecutor.run(
+      await runStep(
+        CapsuleBranchCreateStepKey.RECORD_BIND_MOUNTS,
         {
-          ...operationContext,
-          stepKey: CapsuleBranchCreateStepKey.RECORD_BIND_MOUNTS,
-          metadata: {
-            count: plan.bindMounts.length,
-          },
+          count: plan.bindMounts.length,
         },
         async () => {
           for (const bindMount of plan.bindMounts) {
@@ -147,57 +187,108 @@ export class CapsuleBranchCreateSaga {
           }
         },
       )
-      await this.stepExecutor.run(
+      await runStep(
+        CapsuleBranchCreateStepKey.CREATE_VOLUMES,
         {
-          ...operationContext,
-          stepKey: CapsuleBranchCreateStepKey.CREATE_VOLUMES,
-          metadata: {
-            count: plan.volumes.length,
-          },
+          count: plan.volumes.length,
         },
         async () => {
           for (const volume of plan.volumes) {
             const resourceId = await this.stores.resources.ensureBranchResource(this.withOperationContext(volume, resourceContext))
-            rollbackStack.push(() => this.rollbackVolume(namespace, resourceId, volume))
+            rollbackStack.push({
+              action: 'rollback_delete_volume',
+              resourceId,
+              resourceKey: volume.resourceKey,
+              run: () =>
+                this.rollbackVolume(
+                  namespace,
+                  resourceId,
+                  volume,
+                  createOperationFailureContext({
+                    operationId: accepted.operationId,
+                    branchName: input.name,
+                    phase: CapsuleBranchCreateFailurePhase.ROLLBACK,
+                    action: 'rollback_delete_volume',
+                    resourceId,
+                    resourceKey: volume.resourceKey,
+                  }),
+                ),
+            })
             try {
               await this.driver.createVolume(namespace, volume)
               await this.stores.resources.transitionBranchResourceStatus(resourceId, CapsuleBranchResourceStatus.CREATED)
             } catch (error: unknown) {
-              await this.markResourceErrorBestEffort(resourceId, error)
+              await this.markResourceErrorBestEffort(
+                resourceId,
+                error,
+                createOperationFailureContext({
+                  operationId: accepted.operationId,
+                  branchName: input.name,
+                  phase: currentPhase,
+                  stepKey: currentStepKey,
+                  action: volume.volumeType === 'clone' ? 'clone_volume' : 'create_volume',
+                  resourceId,
+                  resourceKey: volume.resourceKey,
+                }),
+              )
               throw error
             }
           }
         },
       )
-      await this.stepExecutor.run(
+      await runStep(
+        CapsuleBranchCreateStepKey.CREATE_INSTANCE,
         {
-          ...operationContext,
-          stepKey: CapsuleBranchCreateStepKey.CREATE_INSTANCE,
-          metadata: {
-            instanceName: plan.instance.instanceName,
-            imageAlias: plan.instance.imageAlias,
-            resourceKey: plan.instance.resourceKey,
-          },
+          instanceName: plan.instance.instanceName,
+          imageAlias: plan.instance.imageAlias,
+          resourceKey: plan.instance.resourceKey,
         },
         async () => {
           const instanceResourceId = await this.stores.resources.ensureBranchResource(this.withOperationContext(plan.instance, resourceContext))
-          rollbackStack.push(() => this.rollbackInstance(namespace, instanceResourceId, plan.instance.instanceName))
+          rollbackStack.push({
+            action: 'rollback_delete_instance',
+            resourceId: instanceResourceId,
+            resourceKey: plan.instance.resourceKey,
+            run: () =>
+              this.rollbackInstance(
+                namespace,
+                instanceResourceId,
+                plan.instance.instanceName,
+                createOperationFailureContext({
+                  operationId: accepted.operationId,
+                  branchName: input.name,
+                  phase: CapsuleBranchCreateFailurePhase.ROLLBACK,
+                  action: 'rollback_delete_instance',
+                  resourceId: instanceResourceId,
+                  resourceKey: plan.instance.resourceKey,
+                }),
+              ),
+          })
           try {
             await this.driver.createInstance(namespace, plan.instance)
             await this.stores.resources.transitionBranchResourceStatus(instanceResourceId, CapsuleBranchResourceStatus.CREATED)
           } catch (error: unknown) {
-            await this.markResourceErrorBestEffort(instanceResourceId, error)
+            await this.markResourceErrorBestEffort(
+              instanceResourceId,
+              error,
+              createOperationFailureContext({
+                operationId: accepted.operationId,
+                branchName: input.name,
+                phase: currentPhase,
+                stepKey: currentStepKey,
+                action: 'create_instance',
+                resourceId: instanceResourceId,
+                resourceKey: plan.instance.resourceKey,
+              }),
+            )
             throw error
           }
         },
       )
-      await this.stepExecutor.run(
+      await runStep(
+        CapsuleBranchCreateStepKey.WRITE_PROVISIONING_FILES,
         {
-          ...operationContext,
-          stepKey: CapsuleBranchCreateStepKey.WRITE_PROVISIONING_FILES,
-          metadata: {
-            count: plan.files.length,
-          },
+          count: plan.files.length,
         },
         async () => {
           for (const file of plan.files) {
@@ -207,25 +298,37 @@ export class CapsuleBranchCreateSaga {
               await this.driver.writeProvisioningFile(namespace, input.name, file)
               await this.stores.resources.transitionBranchResourceStatus(resourceId, CapsuleBranchResourceStatus.CREATED)
             } catch (error: unknown) {
-              await this.markResourceErrorBestEffort(resourceId, error)
+              await this.markResourceErrorBestEffort(
+                resourceId,
+                error,
+                createOperationFailureContext({
+                  operationId: accepted.operationId,
+                  branchName: input.name,
+                  phase: currentPhase,
+                  stepKey: currentStepKey,
+                  action: 'write_provisioning_file',
+                  resourceId,
+                  resourceKey: file.resourceKey,
+                }),
+              )
               throw error
             }
           }
         },
       )
-      await this.stepExecutor.run(
+      await runStep(
+        CapsuleBranchCreateStepKey.FINALIZE_BRANCH_OFFLINE,
         {
-          ...operationContext,
-          stepKey: CapsuleBranchCreateStepKey.FINALIZE_BRANCH_OFFLINE,
-          metadata: {
-            status: 'offline',
-          },
+          status: 'offline',
         },
         async () => {
           await this.stores.branches.transitionBranchState(input.ownerId, input.name, 'offline')
           this.events.publishStateChanged(input.ownerId, input.name, 'offline')
+          branchFinalized = true
         },
       )
+      currentPhase = CapsuleBranchCreateFailurePhase.COMPLETE_OPERATION
+      currentStepKey = null
       await this.stores.operations.transitionBranchOperationStatus(accepted.operationId, CapsuleBranchOperationStatus.COMPLETED)
       return this.stores.operations.createBranchCreateOutput(
         accepted.operationId,
@@ -235,16 +338,51 @@ export class CapsuleBranchCreateSaga {
         false,
       )
     } catch (error: unknown) {
+      if (branchFinalized) {
+        console.error(
+          `[CapsuleBranchRuntimeService] Branch '${input.name}' finalized but operation failed during '${currentPhase}'. Leaving branch resources intact for recovery visibility.`,
+          error,
+        )
+        await this.markOperationFailureBestEffort(
+          accepted.operationId,
+          CapsuleBranchOperationStatus.FAILED,
+          error,
+          createOperationFailureContext({
+            operationId: accepted.operationId,
+            branchName: input.name,
+            phase: currentPhase,
+            stepKey: currentStepKey,
+            branchFinalized,
+            action: currentPhase === CapsuleBranchCreateFailurePhase.COMPLETE_OPERATION ? 'mark_operation_completed' : undefined,
+            rollbackStatus: CapsuleRollbackStatus.SKIPPED,
+          }),
+        )
+        throw error
+      }
+
       console.error(`[CapsuleBranchRuntimeService] Provisioning failed for branch '${input.name}'. Initiating rollback...`, error)
-      const rollbackHadFailure = await this.rollback(input.name, rollbackStack)
-      if (rollbackHadFailure) {
+      const rollbackResult = await this.rollback(input.name, rollbackStack)
+      if (rollbackResult.hadFailure) {
         try {
           await this.stores.branches.transitionBranchState(input.ownerId, input.name, 'cleanup_required')
           this.events.publishStateChanged(input.ownerId, input.name, 'cleanup_required')
         } catch (dbErr: unknown) {
           console.error(`[CRITICAL] Failed to mark branch '${input.name}' as cleanup_required:`, dbErr)
         }
-        await this.stores.operations.markBranchOperationFailure(accepted.operationId, CapsuleBranchOperationStatus.CLEANUP_REQUIRED, error)
+        await this.stores.operations.markBranchOperationFailure(
+          accepted.operationId,
+          CapsuleBranchOperationStatus.CLEANUP_REQUIRED,
+          error,
+          createOperationFailureContext({
+            operationId: accepted.operationId,
+            branchName: input.name,
+            phase: currentPhase,
+            stepKey: currentStepKey,
+            branchFinalized,
+            rollbackStatus: CapsuleRollbackStatus.FAILED,
+            rollbackFailures: rollbackResult.failures,
+          }),
+        )
         throw error
       }
       try {
@@ -253,7 +391,19 @@ export class CapsuleBranchCreateSaga {
       } catch (dbErr: unknown) {
         console.error(`[CRITICAL] Ghost Record Detected: Failed to remove DB provisioning lock for branch '${input.name}':`, dbErr)
       }
-      await this.stores.operations.markBranchOperationFailure(accepted.operationId, CapsuleBranchOperationStatus.FAILED, error)
+      await this.stores.operations.markBranchOperationFailure(
+        accepted.operationId,
+        CapsuleBranchOperationStatus.FAILED,
+        error,
+        createOperationFailureContext({
+          operationId: accepted.operationId,
+          branchName: input.name,
+          phase: currentPhase,
+          stepKey: currentStepKey,
+          branchFinalized,
+          rollbackStatus: CapsuleRollbackStatus.COMPLETED,
+        }),
+      )
       throw error
     }
   }
@@ -280,27 +430,42 @@ export class CapsuleBranchCreateSaga {
     }
   }
 
-  private async rollback(branchName: string, rollbackStack: RollbackCallback[]): Promise<boolean> {
-    let rollbackHadFailure = false
+  private async rollback(branchName: string, rollbackStack: BranchCreateRollbackTask[]): Promise<CapsuleRollbackResult> {
+    const failures: CapsuleRollbackResult['failures'] = []
     while (rollbackStack.length > 0) {
-      const rollbackFn = rollbackStack.pop()
-      if (!rollbackFn) {
+      const rollbackTask = rollbackStack.pop()
+      if (!rollbackTask) {
         continue
       }
       try {
-        await rollbackFn()
+        await rollbackTask.run()
       } catch (rollbackErr: unknown) {
-        rollbackHadFailure = true
         if (rollbackErr instanceof IncusError && rollbackErr.code === 'NOT_FOUND') {
           continue
         }
+        failures.push(
+          createRollbackFailureDetail({
+            action: rollbackTask.action,
+            resourceId: rollbackTask.resourceId,
+            resourceKey: rollbackTask.resourceKey,
+            error: rollbackErr,
+          }),
+        )
         console.error(`[CRITICAL] Zombie Resource Detected: Failed during rollback for branch '${branchName}':`, rollbackErr)
       }
     }
-    return rollbackHadFailure
+    return {
+      hadFailure: failures.length > 0,
+      failures,
+    }
   }
 
-  private async rollbackVolume(namespace: string, resourceId: string, volume: PlannedVolumeResource): Promise<void> {
+  private async rollbackVolume(
+    namespace: string,
+    resourceId: string,
+    volume: PlannedVolumeResource,
+    failureContext: Record<string, unknown>,
+  ): Promise<void> {
     await this.transitionResourceStatusBestEffort(resourceId, CapsuleBranchResourceStatus.DELETING)
     try {
       await this.driver.deleteVolume(namespace, volume)
@@ -310,12 +475,17 @@ export class CapsuleBranchCreateSaga {
         await this.transitionResourceStatusBestEffort(resourceId, CapsuleBranchResourceStatus.MISSING)
         return
       }
-      await this.markResourceErrorBestEffort(resourceId, rollbackErr)
+      await this.markResourceErrorBestEffort(resourceId, rollbackErr, failureContext)
       throw rollbackErr
     }
   }
 
-  private async rollbackInstance(namespace: string, resourceId: string, instanceName: string): Promise<void> {
+  private async rollbackInstance(
+    namespace: string,
+    resourceId: string,
+    instanceName: string,
+    failureContext: Record<string, unknown>,
+  ): Promise<void> {
     await this.transitionResourceStatusBestEffort(resourceId, CapsuleBranchResourceStatus.DELETING)
     try {
       await this.driver.deleteInstance(namespace, instanceName)
@@ -325,7 +495,7 @@ export class CapsuleBranchCreateSaga {
         await this.transitionResourceStatusBestEffort(resourceId, CapsuleBranchResourceStatus.MISSING)
         return
       }
-      await this.markResourceErrorBestEffort(resourceId, rollbackErr)
+      await this.markResourceErrorBestEffort(resourceId, rollbackErr, failureContext)
       throw rollbackErr
     }
   }
@@ -338,11 +508,24 @@ export class CapsuleBranchCreateSaga {
     }
   }
 
-  private async markResourceErrorBestEffort(resourceId: string, error: unknown): Promise<void> {
+  private async markResourceErrorBestEffort(resourceId: string, error: unknown, context?: Record<string, unknown>): Promise<void> {
     try {
-      await this.stores.resources.markBranchResourceError(resourceId, error)
+      await this.stores.resources.markBranchResourceError(resourceId, error, context)
     } catch (dbError: unknown) {
       console.error(`[CapsuleBranchRuntimeService] Failed to persist resource error for '${resourceId}'.`, dbError)
+    }
+  }
+
+  private async markOperationFailureBestEffort(
+    operationId: string,
+    status: CapsuleBranchOperationStatusValue,
+    error: unknown,
+    context: Record<string, unknown>,
+  ): Promise<void> {
+    try {
+      await this.stores.operations.markBranchOperationFailure(operationId, status, error, context)
+    } catch (dbError: unknown) {
+      console.error(`[CapsuleBranchRuntimeService] Failed to persist operation failure for '${operationId}'.`, dbError)
     }
   }
 }
