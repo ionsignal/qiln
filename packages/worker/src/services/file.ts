@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { IncusError } from '../errors'
-import type { CapsuleBranchHostDbContract } from '@qiln/core/server'
+import type { CapsuleHostDbContract } from '@qiln/core/server'
 import type { IncusClient } from '../incus/client/index'
 import type { IncusFilePushOptions } from '../incus/client/types'
 import type { ProjectService } from './project'
@@ -9,7 +9,7 @@ export class FileService {
   private readonly CHROOT_BASE = '/workspace'
 
   constructor(
-    private readonly db: CapsuleBranchHostDbContract,
+    private readonly db: CapsuleHostDbContract,
     private readonly incus: IncusClient,
     private readonly project: ProjectService,
   ) {}

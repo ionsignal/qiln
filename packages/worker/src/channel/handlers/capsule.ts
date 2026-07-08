@@ -15,7 +15,15 @@ export function registerCapsuleBranchHandlers(worker: QilnWorkerRuntime): void {
   worker.channel.handle(
     CapsuleBranchCommandName.BRANCH_CREATE,
     async input => {
-      return await worker.capsule.create(input.target.id, input.name, input.blueprint, input.cpu, input.memory)
+      return await worker.capsule.create(
+        input.target.id,
+        input.name,
+        input.blueprintName,
+        input.blueprintDigest,
+        input.idempotencyKey,
+        input.cpu,
+        input.memory,
+      )
     },
     handlerOptions,
   )

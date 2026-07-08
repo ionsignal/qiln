@@ -20,7 +20,7 @@ export interface UseCapsulesOptions {
 
 export interface CapsuleContext {
   refresh: () => Promise<void>
-  create: (name: string, blueprint?: string, cpu?: string, memory?: string) => Promise<void>
+  create: (name: string, blueprint: string, cpu?: string, memory?: string) => Promise<void>
   start: (name: string) => Promise<void>
   stop: (name: string) => Promise<void>
   delete: (name: string) => Promise<void>
@@ -77,8 +77,8 @@ export function provideCapsules(options: UseCapsulesOptions): CapsuleContext {
     await refreshSafely()
   }
 
-  async function create(name: string, blueprint?: string, cpu?: string, memory?: string) {
-    await options.client.branch.create.mutate({ name, blueprint, cpu, memory })
+  async function create(name: string, blueprintDigest: string, cpu?: string, memory?: string) {
+    await options.client.branch.create.mutate({ name, idempotencyKey: '', blueprintDigest, cpu, memory })
     await refresh()
   }
 

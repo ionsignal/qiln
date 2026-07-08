@@ -1,4 +1,4 @@
-import type { CapsuleBranchHostDbContract } from '@qiln/core/server'
+import type { CapsuleHostDbContract } from '@qiln/core/server'
 import type { inferRouterOutputs } from '@trpc/server'
 import type { QilnEngineController } from './controller'
 import type { EngineRouter } from './trpc'
@@ -16,7 +16,7 @@ export interface EngineConfig {
 }
 
 export interface EnginePluginOptions {
-  db: CapsuleBranchHostDbContract
+  db: CapsuleHostDbContract
   config?: EngineConfig
 }
 

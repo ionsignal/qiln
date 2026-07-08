@@ -1,4 +1,4 @@
-import { CapsuleChannelErrorCode, toCapsuleCommandFailure, type CapsuleCommandFailure } from '@qiln/core/server'
+import { CapsuleChannelErrorCode, GlobalError, GlobalErrorCode, toCapsuleCommandFailure, type CapsuleCommandFailure } from '@qiln/core/server'
 import { IncusError } from '../errors'
 
 function incusErrorDetails(error: IncusError): Record<string, unknown> {
@@ -9,6 +9,37 @@ function incusErrorDetails(error: IncusError): Record<string, unknown> {
     details.details = error.details
   }
   return details
+}
+
+function globalErrorDetails(error: GlobalError): Record<string, unknown> {
+  const details: Record<string, unknown> = {
+    message: error.message,
+    code: error.code,
+  }
+  if (error.details !== undefined) {
+    details.details = error.details
+  }
+  return details
+}
+
+function mapGlobalErrorCode(code: GlobalErrorCode): CapsuleChannelErrorCode {
+  switch (code) {
+    case GlobalErrorCode.BAD_REQUEST:
+      return CapsuleChannelErrorCode.BAD_REQUEST
+    case GlobalErrorCode.UNAUTHORIZED:
+      return CapsuleChannelErrorCode.UNAUTHORIZED
+    case GlobalErrorCode.FORBIDDEN:
+      return CapsuleChannelErrorCode.FORBIDDEN
+    case GlobalErrorCode.NOT_FOUND:
+      return CapsuleChannelErrorCode.NOT_FOUND
+    case GlobalErrorCode.CONFLICT:
+      return CapsuleChannelErrorCode.CONFLICT
+    case GlobalErrorCode.TIMEOUT:
+      return CapsuleChannelErrorCode.TIMEOUT
+    case GlobalErrorCode.INTERNAL_ERROR:
+    default:
+      return CapsuleChannelErrorCode.INTERNAL_ERROR
+  }
 }
 
 /**
@@ -58,6 +89,13 @@ export function mapWorkerCapsuleCommandError(error: unknown): CapsuleCommandFail
           message: error.message,
           details: incusErrorDetails(error),
         }
+    }
+  }
+  if (error instanceof GlobalError) {
+    return {
+      code: mapGlobalErrorCode(error.code),
+      message: error.message,
+      details: globalErrorDetails(error),
     }
   }
   return toCapsuleCommandFailure(error, 'Internal capsule branch runtime error.')

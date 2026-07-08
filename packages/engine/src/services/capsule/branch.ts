@@ -2,12 +2,14 @@ import {
   CapsuleBranchCommandName,
   DEFAULT_CAPSULE_BLUEPRINT_NAME,
   TargetType,
+  type CapsuleBlueprintDigest,
+  type CapsuleBranchCreateOutput,
   type CapsuleBranchStatus,
   type CapsuleChannel,
   type CapsuleCommandAck,
   type TargetOwner,
 } from '@qiln/core/server'
-import type { CapsuleBranchHostDbContract } from '@qiln/core/server'
+import type { CapsuleHostDbContract } from '@qiln/core/server'
 
 export interface CapsuleBranchServiceItem {
   id: string
@@ -16,14 +18,17 @@ export interface CapsuleBranchServiceItem {
   cpu: string
   memory: string
   blueprint: string
+  blueprintDigest: CapsuleBlueprintDigest
   ip: string | null
   createdAt: Date
   updatedAt: Date
 }
 
 export interface CapsuleBranchCreateRequest {
+  idempotencyKey: string
   name: string
-  blueprint?: string
+  blueprintName?: string
+  blueprintDigest: CapsuleBlueprintDigest
   cpu?: string
   memory?: string
 }
@@ -35,6 +40,7 @@ interface CapsuleBranchRow {
   cpu: string
   memory: string
   blueprintName: string
+  blueprintDigest: CapsuleBlueprintDigest
   runtimeIp: string | null
   createdAt: Date
   updatedAt: Date
@@ -43,14 +49,12 @@ interface CapsuleBranchRow {
 /**
  * Public-engine capsule branch service.
  *
- * The database now uses capsule branch terminology directly. The service keeps
- * the current API response shape stable so frontend and tRPC consumers continue
- * to receive `blueprint` and `ip` while the read model stores
- * `blueprint_name` and `runtime_ip`.
+ * Branch creation is now operation-oriented: callers provide an idempotency key and reviewed blueprint
+ * digest, and the worker returns a durable operation receipt instead of a bare acknowledgement.
  */
 export class CapsuleBranchService {
   constructor(
-    private readonly db: CapsuleBranchHostDbContract,
+    private readonly db: CapsuleHostDbContract,
     private readonly channel: CapsuleChannel,
   ) {}
 
@@ -69,11 +73,13 @@ export class CapsuleBranchService {
     return row ? this.mapBranchRow(row) : null
   }
 
-  public async create(ownerId: string, input: CapsuleBranchCreateRequest): Promise<CapsuleCommandAck> {
+  public async create(ownerId: string, input: CapsuleBranchCreateRequest): Promise<CapsuleBranchCreateOutput> {
     return await this.channel.command(CapsuleBranchCommandName.BRANCH_CREATE, {
-      target: this.ownerTarget(ownerId),
       name: input.name,
-      blueprint: input.blueprint ?? DEFAULT_CAPSULE_BLUEPRINT_NAME,
+      target: this.ownerTarget(ownerId),
+      idempotencyKey: input.idempotencyKey,
+      blueprintName: input.blueprintName ?? DEFAULT_CAPSULE_BLUEPRINT_NAME,
+      blueprintDigest: input.blueprintDigest,
       cpu: input.cpu ?? '4',
       memory: input.memory ?? '4GB',
     })
@@ -115,6 +121,7 @@ export class CapsuleBranchService {
       cpu: row.cpu,
       memory: row.memory,
       blueprint: row.blueprintName,
+      blueprintDigest: row.blueprintDigest,
       ip: row.runtimeIp,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,

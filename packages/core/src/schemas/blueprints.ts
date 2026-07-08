@@ -132,6 +132,22 @@ export const CapsuleBlueprintManifestSchema = z
   })
   .strict()
 
+/**
+ * Server-side resolved blueprint pin.
+ *
+ * This shape is intentionally produced by `CapsuleBlueprintRegistry` after digest
+ * verification. The full blueprint contents are stored on durable operation rows
+ * so an accepted operation can be recovered even if the mutable YAML catalog later
+ * changes.
+ */
+export const CapsuleBlueprintPinSchema = z
+  .object({
+    name: z.string(),
+    digest: CapsuleBlueprintDigestSchema,
+    blueprint: CapsuleBlueprintSchema,
+  })
+  .strict()
+
 export type CapsuleBlueprintConfigMap = z.infer<typeof CapsuleBlueprintConfigMapSchema>
 export type CapsuleBlueprintDevice = z.infer<typeof CapsuleBlueprintDeviceSchema>
 export type CapsuleBlueprintDeviceMap = z.infer<typeof CapsuleBlueprintDeviceMapSchema>
@@ -146,3 +162,4 @@ export type CapsuleBlueprint = z.infer<typeof CapsuleBlueprintSchema>
 export type CapsuleBlueprintDigest = z.infer<typeof CapsuleBlueprintDigestSchema>
 export type CapsuleBlueprintManifestItem = z.infer<typeof CapsuleBlueprintManifestItemSchema>
 export type CapsuleBlueprintManifest = z.infer<typeof CapsuleBlueprintManifestSchema>
+export type CapsuleBlueprintPin = z.infer<typeof CapsuleBlueprintPinSchema>

@@ -1,6 +1,6 @@
 import fp from 'fastify-plugin'
 import { QilnWorkerRuntime } from '@qiln/worker/server'
-import type { CapsuleBranchHostDbContract } from '@qiln/core/server'
+import type { CapsuleHostDbContract } from '@qiln/core/server'
 
 export default fp(
   async fastify => {
@@ -12,18 +12,20 @@ export default fp(
     fastify.log.warn(
       '[Worker] Embedded worker enabled. This is a dev/proof-of-life mode only and does not provide a production privilege boundary.',
     )
-    const runtime = new QilnWorkerRuntime({
-      db: fastify.db as unknown as CapsuleBranchHostDbContract,
+    const db = fastify.db as unknown as CapsuleHostDbContract
+    const worker = new QilnWorkerRuntime({
+      db,
       config: fastify.config,
       reconcileOnStart: fastify.config.worker.reconcileOnStart,
     })
-    await runtime.start()
-    fastify.worker = runtime
+    await worker.start()
+    // asign to fastify
+    fastify.worker = worker
     fastify.addHook('onClose', async () => {
-      if (fastify.worker !== runtime) return
+      if (fastify.worker !== worker) return
       fastify.log.info('[Worker] Stopping embedded worker runtime...')
       try {
-        await runtime.stop()
+        await worker.stop()
       } catch (error: unknown) {
         fastify.log.error({ err: error }, '[Worker] Error while stopping embedded worker runtime')
       } finally {

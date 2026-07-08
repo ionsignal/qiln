@@ -1,4 +1,10 @@
 import { z } from 'zod'
+import {
+  CapsuleBlueprintDigestSchema,
+  CapsuleIdempotencyKeySchema,
+  CapsuleOperationReceiptSchema,
+  CapsuleOperationType,
+} from '../../../schemas'
 import { TargetOwnerSchema, TargetType } from '../targets'
 import { CapsuleCommandAckSchema, defineCapsuleCommand, defineCapsuleEvent } from './definitions'
 import type { input, output } from 'zod'
@@ -63,7 +69,17 @@ export const CapsuleBranchNameSchema = z
  * The Drizzle enum in `@qiln/core/server` imports this tuple so protocol
  * validation and the database read model cannot silently diverge.
  */
-export const CapsuleBranchStatusValues = ['provisioning', 'offline', 'starting', 'online', 'stopping', 'archived', 'error'] as const
+export const CapsuleBranchStatusValues = [
+  'provisioning',
+  'recovering',
+  'offline',
+  'starting',
+  'online',
+  'stopping',
+  'archived',
+  'error',
+  'cleanup_required',
+] as const
 
 export const CapsuleBranchStatusSchema = z.enum(CapsuleBranchStatusValues)
 
@@ -77,16 +93,27 @@ export const CapsuleBranchCommandBaseSchema = z
 /**
  * Create branch command.
  *
- * The blueprint default must stay aligned with `catalog/blueprints/qiln-n8n-comfyui.yaml`.
+ * The blueprint digest pins the exact manifest item reviewed by a user/agent.
+ * The idempotency key lets callers safely retry after transport timeouts without
+ * accidentally creating a second branch or receiving a misleading duplicate error.
  */
 export const CapsuleBranchCreateInputSchema = CapsuleBranchCommandBaseSchema.extend({
-  blueprint: z.string().trim().min(1, 'Capsule blueprint name cannot be empty.').default(DEFAULT_CAPSULE_BLUEPRINT_NAME),
+  idempotencyKey: CapsuleIdempotencyKeySchema,
+  blueprintName: z.string().trim().min(1, 'Capsule blueprint name cannot be empty.').default(DEFAULT_CAPSULE_BLUEPRINT_NAME),
+  blueprintDigest: CapsuleBlueprintDigestSchema,
   cpu: z.string().trim().min(1, 'CPU limit cannot be empty.').default('4'),
   memory: z.string().trim().min(1, 'Memory limit cannot be empty.').default('4GB'),
 }).strict()
 
+export const CapsuleBranchCreateOutputSchema = CapsuleOperationReceiptSchema.extend({
+  operationType: z.literal(CapsuleOperationType.BRANCH_CREATE),
+  branchName: CapsuleBranchNameSchema,
+  branchStatus: CapsuleBranchStatusSchema,
+}).strict()
+
 export type CapsuleBranchCreateInput = input<typeof CapsuleBranchCreateInputSchema>
 export type CapsuleBranchCreate = output<typeof CapsuleBranchCreateInputSchema>
+export type CapsuleBranchCreateOutput = output<typeof CapsuleBranchCreateOutputSchema>
 
 /**
  * Start branch command.
@@ -149,7 +176,7 @@ export const CapsuleBranchCommandDefinitions = {
     kind: 'capsule.command',
     name: CapsuleBranchCommandName.BRANCH_CREATE,
     inputSchema: CapsuleBranchCreateInputSchema,
-    outputSchema: CapsuleCommandAckSchema,
+    outputSchema: CapsuleBranchCreateOutputSchema,
     timeoutMs: CAPSULE_BRANCH_CREATE_TIMEOUT_MS,
     target: {
       type: TargetType.OWNER,

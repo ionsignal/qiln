@@ -7,6 +7,10 @@ import { ProjectService } from './services/project'
 import { registerCapsuleChannelHandlers } from './channel'
 import type { WorkerRuntimeConfig, WorkerRuntimeOptions } from './types'
 
+const WORKER_LOG_PREFIX = '[QilnWorker]'
+const CHANNEL_LOG_PREFIX = '[QilnWorker CapsuleChannel]'
+const BLUEPRINT_LOG_PREFIX = '[QilnWorker Blueprints]'
+
 type ResolvedWorkerRuntimeConfig = WorkerRuntimeConfig & {
   nats: NonNullable<WorkerRuntimeConfig['nats']>
   incus: NonNullable<WorkerRuntimeConfig['incus']>
@@ -14,13 +18,11 @@ type ResolvedWorkerRuntimeConfig = WorkerRuntimeConfig & {
 
 function resolveWorkerRuntimeConfig(config?: WorkerRuntimeConfig): ResolvedWorkerRuntimeConfig {
   if (!config?.nats) {
-    throw new Error('[QilnWorker] Missing required configuration: config.nats is required.')
+    throw new Error(`${WORKER_LOG_PREFIX} Missing required configuration: config.nats is required.`)
   }
-
   if (!config.incus) {
-    throw new Error('[QilnWorker] Missing required configuration: config.incus is required.')
+    throw new Error(`${WORKER_LOG_PREFIX} Missing required configuration: config.incus is required.`)
   }
-
   return {
     ...config,
     nats: config.nats,
@@ -45,32 +47,71 @@ export class QilnWorkerRuntime {
 
   private readonly config: ResolvedWorkerRuntimeConfig
   private readonly reconcileOnStart: boolean
+
   private started = false
+  private disposed = false
+  private booting: Promise<void> | null = null
 
   constructor(options: WorkerRuntimeOptions) {
     this.config = resolveWorkerRuntimeConfig(options.config)
     this.reconcileOnStart = options.reconcileOnStart ?? false
     this.incus = new IncusClient(this.config.incus)
     this.channel = new CapsuleNatsChannel(this.config.nats, {
-      loggerPrefix: '[QilnWorker CapsuleChannel]',
+      loggerPrefix: CHANNEL_LOG_PREFIX,
     })
     this.project = new ProjectService(this.incus)
     this.blueprints = new CapsuleBlueprintRegistry({
-      loggerPrefix: '[QilnWorker Blueprints]',
+      loggerPrefix: BLUEPRINT_LOG_PREFIX,
     })
     this.capsule = new CapsuleBranchRuntimeService(options.db, this.incus, this.channel, this.project, this.blueprints)
     this.file = new FileService(options.db, this.incus, this.project)
   }
 
   public async start(): Promise<void> {
+    if (this.disposed) {
+      throw new Error(`${WORKER_LOG_PREFIX} Cannot start a disposed worker runtime. Create a new runtime instance instead.`)
+    }
     if (this.started) {
       return
     }
-
+    if (this.booting) {
+      await this.booting
+      return
+    }
+    this.booting = this.boot()
     try {
-      const definitionsPath = this.resolveDefinitionsPath()
+      await this.booting
+    } finally {
+      this.booting = null
+    }
+  }
 
-      await this.blueprints.load(definitionsPath)
+  public async stop(): Promise<void> {
+    if (this.disposed) {
+      return
+    }
+    if (this.booting && !this.started) {
+      try {
+        await this.booting
+      } catch {
+        // Failed startup owns its own cleanup path and marks the runtime disposed.
+        return
+      }
+    }
+    try {
+      await this.shutdown()
+    } finally {
+      this.started = false
+      this.disposed = true
+      console.log(`${WORKER_LOG_PREFIX} Runtime stopped.`)
+    }
+  }
+
+  private async boot(): Promise<void> {
+    try {
+      const blueprintDir = this.resolveBlueprintDirectory()
+
+      await this.blueprints.load(blueprintDir)
       await this.incus.init()
       await this.channel.start()
 
@@ -80,29 +121,33 @@ export class QilnWorkerRuntime {
         await this.capsule.reconcile()
       }
       this.started = true
-      console.log('[QilnWorker] Runtime started.')
+      console.log(`${WORKER_LOG_PREFIX} Runtime started.`)
     } catch (error: unknown) {
-      try {
-        await this.stop()
-      } catch (cleanupError: unknown) {
-        console.error('[QilnWorker] Startup failed and cleanup also failed:', cleanupError)
-      }
-
+      await this.dispose()
       throw error
     }
   }
 
-  public async stop(): Promise<void> {
+  private async dispose(): Promise<void> {
+    try {
+      await this.shutdown()
+    } catch (cleanupError: unknown) {
+      console.error(`${WORKER_LOG_PREFIX} Startup failed and cleanup also failed:`, cleanupError)
+    } finally {
+      this.started = false
+      this.disposed = true
+    }
+  }
+
+  private async shutdown(): Promise<void> {
     try {
       await this.channel.shutdown()
     } finally {
       this.incus.destroy()
-      this.started = false
-      console.log('[QilnWorker] Runtime stopped.')
     }
   }
 
-  private resolveDefinitionsPath(): string {
+  private resolveBlueprintDirectory(): string {
     const configuredPath = this.config.definitions?.path
     return configuredPath ? path.resolve(configuredPath) : path.resolve(process.cwd(), 'catalog', 'blueprints')
   }

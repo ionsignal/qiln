@@ -1,6 +1,14 @@
 import { z } from 'zod'
 import { TRPCError } from '@trpc/server'
-import { CapsuleBranchNameSchema, CapsuleBranchStatusSchema, CapsuleCommandAckSchema, DEFAULT_CAPSULE_BLUEPRINT_NAME } from '@qiln/core/server'
+import {
+  CapsuleBlueprintDigestSchema,
+  CapsuleBranchCreateOutputSchema,
+  CapsuleBranchNameSchema,
+  CapsuleBranchStatusSchema,
+  CapsuleCommandAckSchema,
+  CapsuleIdempotencyKeySchema,
+  DEFAULT_CAPSULE_BLUEPRINT_NAME,
+} from '@qiln/core/server'
 import { router, protectedProcedure } from '../../init'
 import { handleEngineError } from '../../utils'
 
@@ -12,6 +20,7 @@ export const CapsuleBranchItemSchema = z
     cpu: z.string(),
     memory: z.string(),
     blueprint: z.string(),
+    blueprintDigest: CapsuleBlueprintDigestSchema,
     ip: z.string().nullable(),
     createdAt: z.date(),
     updatedAt: z.date(),
@@ -53,13 +62,15 @@ export const capsuleBranchRouter = router({
       z
         .object({
           name: CapsuleBranchNameSchema,
-          blueprint: z.string().trim().min(1, 'Capsule blueprint name cannot be empty.').default(DEFAULT_CAPSULE_BLUEPRINT_NAME),
+          idempotencyKey: CapsuleIdempotencyKeySchema,
+          blueprintName: z.string().trim().min(1, 'Capsule blueprint name cannot be empty.').default(DEFAULT_CAPSULE_BLUEPRINT_NAME),
+          blueprintDigest: CapsuleBlueprintDigestSchema,
           cpu: z.string().trim().min(1, 'CPU limit cannot be empty.').default('4'),
           memory: z.string().trim().min(1, 'Memory limit cannot be empty.').default('4GB'),
         })
         .strict(),
     )
-    .output(CapsuleCommandAckSchema)
+    .output(CapsuleBranchCreateOutputSchema)
     .mutation(async ({ ctx, input }) => {
       try {
         return await ctx.engine.capsule.create(ctx.user.id, input)

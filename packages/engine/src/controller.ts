@@ -2,8 +2,11 @@ import { CapsuleNatsChannel } from '@qiln/core/server'
 import { CapsuleBranchService } from './services/capsule/branch'
 import { CapsuleBlueprintService } from './services/capsule/blueprints'
 import { CapsuleEventHub } from './events/capsule'
-import type { CapsuleBranchHostDbContract } from '@qiln/core/server'
+import type { CapsuleHostDbContract } from '@qiln/core/server'
 import type { EngineConfig } from './types'
+
+const LOGGER_PREFIX = '[QilnEngine]'
+const CHANNEL_LOGGER_PREFIX = `${LOGGER_PREFIX} CapsuleChannel`
 
 export class QilnEngineController {
   public readonly events: CapsuleEventHub
@@ -11,45 +14,88 @@ export class QilnEngineController {
   public readonly blueprints: CapsuleBlueprintService
   public readonly capsule: CapsuleBranchService
 
-  constructor(
-    private readonly db: CapsuleBranchHostDbContract,
-    config: EngineConfig = {},
-  ) {
-    if (!config.nats) {
-      throw new Error('[QilnEngine] Missing required configuration: config.nats is required.')
+  private started = false
+  private starting: Promise<void> | null = null
+  private stopping: Promise<void> | null = null
+
+  constructor(db: CapsuleHostDbContract, config: EngineConfig = {}) {
+    const nats = config.nats
+    if (!nats) {
+      throw new Error(`${LOGGER_PREFIX} Missing required configuration: config.nats is required.`)
     }
-    this.channel = new CapsuleNatsChannel(config.nats, {
-      loggerPrefix: '[QilnEngine CapsuleChannel]',
+    this.channel = new CapsuleNatsChannel(nats, {
+      loggerPrefix: CHANNEL_LOGGER_PREFIX,
     })
     this.events = new CapsuleEventHub(this.channel)
     this.blueprints = new CapsuleBlueprintService(this.channel)
-    this.capsule = new CapsuleBranchService(this.db, this.channel)
+    this.capsule = new CapsuleBranchService(db, this.channel)
   }
 
   public async start(): Promise<void> {
-    let channelStarted = false
+    if (this.stopping) {
+      await this.stopping
+    }
+    if (this.started) {
+      return
+    }
+    if (!this.starting) {
+      this.starting = this.open()
+    }
+    try {
+      await this.starting
+    } finally {
+      this.starting = null
+    }
+  }
+
+  public async stop(): Promise<void> {
+    if (this.starting) {
+      try {
+        await this.starting
+      } catch {
+        return
+      }
+    }
+    if (!this.started) {
+      return
+    }
+    if (!this.stopping) {
+      this.stopping = this.close()
+    }
+    try {
+      await this.stopping
+    } finally {
+      this.stopping = null
+    }
+  }
+
+  private async open(): Promise<void> {
+    let opened = false
     try {
       await this.channel.start()
-      channelStarted = true
+      opened = true
       this.events.start()
+      this.started = true
     } catch (error: unknown) {
       this.events.stop()
-      if (channelStarted) {
+      this.started = false
+      if (opened) {
         try {
           await this.channel.shutdown()
-        } catch (shutdownError: unknown) {
-          console.error('[QilnEngine] Failed to shut down Capsule Channel after startup failure.', shutdownError)
+        } catch (shutdown: unknown) {
+          console.error(`${LOGGER_PREFIX} Failed to shut down Capsule Channel after startup failure.`, shutdown)
         }
       }
       throw error
     }
   }
 
-  public async stop(): Promise<void> {
+  private async close(): Promise<void> {
     this.events.stop()
     try {
       await this.channel.shutdown()
     } finally {
+      this.started = false
       await this.events.waitForStop()
     }
   }

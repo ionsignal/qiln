@@ -1,7 +1,8 @@
-import { sql, type ExtractTablesFromSchema, type ExtractTablesWithRelations, type One, type RelationsBuilderColumnBase } from 'drizzle-orm'
+import { sql, type ExtractTablesFromSchema, type ExtractTablesWithRelations, type RelationsBuilderColumnBase } from 'drizzle-orm'
 import { pgTable, uuid, text, timestamp, pgEnum, index, uniqueIndex, type AnyPgTable, type PgColumn } from 'drizzle-orm/pg-core'
 import { CapsuleBranchStatusValues, DEFAULT_CAPSULE_BLUEPRINT_NAME } from '../../protocol/capsule/messages'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
+import type { RelationFragmentOneFn } from '../relations'
 
 /**
  * Canonical database enum for capsule branch runtime state.
@@ -17,13 +18,12 @@ export const capsuleBranchStatusEnum = pgEnum('capsule_branch_status', CapsuleBr
  * The optional FK column keeps host schema composition authoritative while still giving engine/worker
  * packages a real Drizzle table object for DML typing without fabricating a fake users column.
  */
-function createCapsuleBranchesTable(ownerIdColumn?: PgColumn) {
+export function createCapsuleBranchesTable(ownerIdColumn?: PgColumn) {
   const ownerId = ownerIdColumn
     ? uuid('owner_id')
         .notNull()
         .references(() => ownerIdColumn, { onDelete: 'cascade' })
     : uuid('owner_id').notNull()
-
   return pgTable(
     'capsule_branches',
     {
@@ -36,6 +36,7 @@ function createCapsuleBranchesTable(ownerIdColumn?: PgColumn) {
       cpu: text('cpu').notNull().default('4'),
       memory: text('memory').notNull().default('4GB'),
       blueprintName: text('blueprint_name').notNull().default(DEFAULT_CAPSULE_BLUEPRINT_NAME),
+      blueprintDigest: text('blueprint_digest').notNull(),
       status: capsuleBranchStatusEnum('status').notNull().default('provisioning'),
       createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
       updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
@@ -108,25 +109,12 @@ export type CapsuleBranchPackageSchema = typeof capsuleBranchRuntimeSchema & {
   users: CapsuleBranchHostUsersTable
 }
 
-type RelationColumnInput = RelationsBuilderColumnBase | [RelationsBuilderColumnBase, ...RelationsBuilderColumnBase[]]
-
-interface CapsuleBranchOwnerRelationConfig<TOptional extends boolean = true> {
-  from?: RelationColumnInput
-  to?: RelationColumnInput
-  optional?: TOptional
-  alias?: string
-}
-
-interface CapsuleBranchOwnerRelationFn {
-  <TOptional extends boolean = true>(config?: CapsuleBranchOwnerRelationConfig<TOptional>): One<'users', TOptional>
-}
-
 /**
  * Narrow helper surface required by the capsule branch relation fragment.
  */
 export interface CapsuleBranchRelationHelpers {
   one: {
-    users: CapsuleBranchOwnerRelationFn
+    users: RelationFragmentOneFn<'users'>
   }
   users: {
     id: RelationsBuilderColumnBase<'users'>

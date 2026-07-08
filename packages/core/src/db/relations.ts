@@ -1,4 +1,18 @@
+import type { Many, ManyConfig, One, OneConfig, SchemaEntry } from 'drizzle-orm'
+
 export type RelationFragment = Record<string, Record<string, unknown>>
+
+/**
+ * Relation fragments describe FK topology across package boundaries.
+ *
+ * We intentionally omit relation-level `where` from the helper function contract because package-owned
+ * fragments should not constrain host-owned table filter shapes such as the final `users` table.
+ */
+export type RelationFragmentOneFn<TTableName extends string> = <TOptional extends boolean = true>(
+  config?: Omit<OneConfig<SchemaEntry, TOptional>, 'where'>,
+) => One<TTableName, TOptional>
+
+export type RelationFragmentManyFn<TTableName extends string> = (config?: Omit<ManyConfig<SchemaEntry>, 'where'>) => Many<TTableName>
 
 type UnionToIntersection<TValue> = [TValue] extends [never]
   ? {}

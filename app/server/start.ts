@@ -1,4 +1,4 @@
-import path from 'path'
+import path from 'node:path'
 import fastify from 'fastify'
 import autoload from '@fastify/autoload'
 import serve from '@fastify/static'
@@ -17,10 +17,8 @@ async function createFastifyServer(config: EnvironmentConfig) {
     loggerInstance: logger,
     disableRequestLogging: true,
   })
-
   // Decorate Server Instance
   server.decorate('config', config)
-
   // Register Plugins & Routes
   const distPath = path.resolve(config.path, 'dist/server')
   await server.register(autoload, {
@@ -33,7 +31,6 @@ async function createFastifyServer(config: EnvironmentConfig) {
     dir: path.join(distPath, 'routes'),
     options: {},
   })
-
   // Configure Static Assets / Dev Middleware
   if (!server.config.dev) {
     await server.register(serve, {
@@ -43,20 +40,19 @@ async function createFastifyServer(config: EnvironmentConfig) {
       root: path.join(config.path, 'dist/client'),
     })
   } else {
-    const dev = await createDevMiddleware({
+    const vike = await createDevMiddleware({
       root: config.path,
       viteConfig: {
         optimizeDeps: { force: false },
       },
     })
-    await server.use(dev.devMiddleware)
+    await server.use(vike.devMiddleware)
   }
-
   // Vike (SSR) Handler
   server.get('*', async (request: FastifyRequest, reply: FastifyReply) => {
     const db = server.db
     const engine = server.engine
-    const user = request.session.user
+    const user = request.session?.user ?? null
     const trpc = createTRPCClient<typeof appRouter>({
       links: [
         unstable_localLink({
@@ -73,23 +69,20 @@ async function createFastifyServer(config: EnvironmentConfig) {
         }),
       ],
     })
-
     const pageContext = await renderPage({
       trpc,
       user,
       redirectTo: null,
       urlOriginal: request.raw.url ?? '/',
     })
-
     if (!pageContext.httpResponse) {
-      reply.callNotFound()
-    } else {
-      const { statusCode, headers, getReadableNodeStream } = pageContext.httpResponse
-      headers.forEach(([name, value]) => reply.header(name, value))
-      reply.status(statusCode)
-      const stream = await getReadableNodeStream()
-      return reply.send(stream)
+      return reply.callNotFound()
     }
+    const { statusCode, headers, getReadableNodeStream } = pageContext.httpResponse
+    headers.forEach(([name, value]) => reply.header(name, value))
+    reply.status(statusCode)
+    const stream = await getReadableNodeStream()
+    return reply.send(stream)
   })
 
   async function start() {

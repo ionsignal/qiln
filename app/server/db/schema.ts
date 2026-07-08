@@ -1,6 +1,16 @@
 import { sql, defineRelations } from 'drizzle-orm'
 import { pgTable, uuid, text, timestamp } from 'drizzle-orm/pg-core'
-import { capsuleBranchStatusEnum, createCapsuleBranchSchema, defineCapsuleBranchRelations, mergeRelationFragments } from '@qiln/core/server'
+import {
+  capsuleBranchStatusEnum,
+  capsuleOperationCleanupPolicyEnum,
+  capsuleOperationResourceStatusEnum,
+  capsuleOperationResourceTypeEnum,
+  capsuleOperationStatusEnum,
+  capsuleOperationTypeEnum,
+  createCapsuleSchema,
+  defineCapsuleRelations,
+  mergeRelationFragments,
+} from '@qiln/core/server'
 
 export const users = pgTable('users', {
   id: uuid('id')
@@ -21,23 +31,37 @@ export const sessions = pgTable('sessions', {
   expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }).notNull(),
 })
 
-// Instantiate the shared capsule branch read-model tables, passing in the `host` user ID column.
-const capsuleBranchTables = createCapsuleBranchSchema(users.id)
+// Instantiate the shared capsule tables, passing in the `host` user ID column.
+const capsuleTables = createCapsuleSchema(users.id)
 
-export { capsuleBranchStatusEnum }
-export const { capsuleBranches } = capsuleBranchTables
+export {
+  capsuleBranchStatusEnum,
+  capsuleOperationCleanupPolicyEnum,
+  capsuleOperationResourceStatusEnum,
+  capsuleOperationResourceTypeEnum,
+  capsuleOperationStatusEnum,
+  capsuleOperationTypeEnum,
+}
+
+export const { capsuleBranches, capsuleOperations, capsuleOperationResources } = capsuleTables
 
 /**
- * The unified schema object containing all tables from both the `engine` and shared `core` fragments.
+ * The unified schema object containing all tables from both the host and shared core fragments.
  * This is the single source of truth passed to the `drizzle()` constructor.
  */
 export const schema = {
   // host
   users,
   sessions,
-  // capsule
+  // capsule enums
   capsuleBranchStatusEnum,
-  ...capsuleBranchTables,
+  capsuleOperationTypeEnum,
+  capsuleOperationStatusEnum,
+  capsuleOperationResourceTypeEnum,
+  capsuleOperationResourceStatusEnum,
+  capsuleOperationCleanupPolicyEnum,
+  // capsule tables
+  ...capsuleTables,
 } as const
 
 // Export the type of the merged schema for use in other modules.
@@ -45,7 +69,7 @@ export type AppSchema = typeof schema
 
 /**
  * Defines ALL relations for the entire application using the Drizzle v1 API.
- * This merges Host-specific relations with Core-provided capsule branch relations.
+ * This merges Host-specific relations with Core-provided capsule relations.
  */
 export const relations = defineRelations(schema, helpers =>
   mergeRelationFragments(
@@ -54,6 +78,8 @@ export const relations = defineRelations(schema, helpers =>
       users: {
         sessions: helpers.many.sessions(),
         capsuleBranches: helpers.many.capsuleBranches(),
+        capsuleOperations: helpers.many.capsuleOperations(),
+        capsuleOperationResources: helpers.many.capsuleOperationResources(),
       },
       sessions: {
         user: helpers.one.users({
@@ -62,7 +88,7 @@ export const relations = defineRelations(schema, helpers =>
         }),
       },
     },
-    // capsule branch relations
-    defineCapsuleBranchRelations(helpers),
+    // capsule relations
+    defineCapsuleRelations(helpers),
   ),
 )

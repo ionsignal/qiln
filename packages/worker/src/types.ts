@@ -1,4 +1,4 @@
-import type { CapsuleBranchHostDbContract } from '@qiln/core/server'
+import type { CapsuleHostDbContract } from '@qiln/core/server'
 
 export interface WorkerNatsConfig {
   servers: string | string[]
@@ -24,7 +24,7 @@ export interface WorkerRuntimeConfig {
 }
 
 export interface WorkerRuntimeOptions {
-  db: CapsuleBranchHostDbContract
+  db: CapsuleHostDbContract
   config?: WorkerRuntimeConfig
   reconcileOnStart?: boolean
 }

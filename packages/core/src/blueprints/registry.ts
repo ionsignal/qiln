@@ -5,12 +5,15 @@ import { parse } from 'yaml'
 import { z, type ZodError } from 'zod'
 import { GlobalError, GlobalErrorCode } from '../errors'
 import {
+  CapsuleBlueprintDigestSchema,
   CapsuleBlueprintManifestSchema,
+  CapsuleBlueprintPinSchema,
   CapsuleBlueprintSchema,
   type CapsuleBlueprint,
   type CapsuleBlueprintDigest,
   type CapsuleBlueprintManifest,
   type CapsuleBlueprintManifestItem,
+  type CapsuleBlueprintPin,
 } from '../schemas'
 
 const DEFAULT_LOGGER_PREFIX = '[CapsuleBlueprintRegistry]'
@@ -190,6 +193,51 @@ export class CapsuleBlueprintRegistry {
         error: detailsFromUnknown(error),
       })
     }
+  }
+
+  /**
+   * Resolves a caller-reviewed blueprint digest to a durable blueprint pin.
+   *
+   * The worker uses this before accepting branch creation. Once accepted, the
+   * operation stores the returned validated blueprint snapshot so recovery is not
+   * tied to mutable YAML catalog state.
+   */
+  public pin(name: string, digest: string): CapsuleBlueprintPin {
+    const parsedDigest = CapsuleBlueprintDigestSchema.safeParse(digest)
+    if (!parsedDigest.success) {
+      throw new GlobalError(`Invalid digest for capsule blueprint '${name}'.`, GlobalErrorCode.BAD_REQUEST, {
+        name,
+        ...validationDetails(parsedDigest.error),
+      })
+    }
+    const blueprint = this.get(name)
+    if (!blueprint) {
+      throw new GlobalError(`Capsule blueprint '${name}' not found.`, GlobalErrorCode.NOT_FOUND, {
+        name,
+      })
+    }
+    const actualDigest = digestCanonicalValue(blueprint)
+    if (actualDigest !== parsedDigest.data) {
+      throw new GlobalError(`Capsule blueprint '${name}' digest does not match the reviewed manifest item.`, GlobalErrorCode.CONFLICT, {
+        name,
+        expectedDigest: parsedDigest.data,
+        actualDigest,
+      })
+    }
+    const pin = {
+      name: blueprint.name,
+      digest: actualDigest,
+      blueprint,
+    }
+    const parsedPin = CapsuleBlueprintPinSchema.safeParse(pin)
+    if (!parsedPin.success) {
+      throw new GlobalError(
+        'Generated capsule blueprint pin failed validation.',
+        GlobalErrorCode.INTERNAL_ERROR,
+        validationDetails(parsedPin.error),
+      )
+    }
+    return parsedPin.data
   }
 
   /**
