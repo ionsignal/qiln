@@ -15,7 +15,6 @@ export const CapsuleBranchOperationStatus = {
   RUNNING: 'running',
   COMPLETED: 'completed',
   FAILED: 'failed',
-  RECOVERING: 'recovering',
   CLEANUP_REQUIRED: 'cleanup_required',
 } as const
 
@@ -26,7 +25,6 @@ export const CapsuleBranchOperationStatusValues = [
   CapsuleBranchOperationStatus.RUNNING,
   CapsuleBranchOperationStatus.COMPLETED,
   CapsuleBranchOperationStatus.FAILED,
-  CapsuleBranchOperationStatus.RECOVERING,
   CapsuleBranchOperationStatus.CLEANUP_REQUIRED,
 ] as const
 
@@ -101,7 +99,7 @@ export const CapsuleBranchResourceStatusValues = [
 export const CapsuleBranchResourceStatusSchema = z.enum(CapsuleBranchResourceStatusValues)
 
 export const CapsuleBranchResourceCleanupPolicy = {
-  DELETE_ON_ROLLBACK: 'delete_on_rollback',
+  DELETE_WITH_BRANCH: 'delete_with_branch',
   RETAIN: 'retain',
   EXTERNAL: 'external',
 } as const
@@ -109,7 +107,7 @@ export const CapsuleBranchResourceCleanupPolicy = {
 export type CapsuleBranchResourceCleanupPolicy = (typeof CapsuleBranchResourceCleanupPolicy)[keyof typeof CapsuleBranchResourceCleanupPolicy]
 
 export const CapsuleBranchResourceCleanupPolicyValues = [
-  CapsuleBranchResourceCleanupPolicy.DELETE_ON_ROLLBACK,
+  CapsuleBranchResourceCleanupPolicy.DELETE_WITH_BRANCH,
   CapsuleBranchResourceCleanupPolicy.RETAIN,
   CapsuleBranchResourceCleanupPolicy.EXTERNAL,
 ] as const

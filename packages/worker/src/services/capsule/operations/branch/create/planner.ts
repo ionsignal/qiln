@@ -85,7 +85,7 @@ export class CapsuleBranchCreatePlanner {
             config,
             resourceType: CapsuleBranchResourceType.ZFS_VOLUME,
             resourceKey: volumeResourceKey(namespace, volume.pool, volumeName),
-            cleanupPolicy: CapsuleBranchResourceCleanupPolicy.DELETE_ON_ROLLBACK,
+            cleanupPolicy: CapsuleBranchResourceCleanupPolicy.DELETE_WITH_BRANCH,
             status: CapsuleBranchResourceStatus.CREATING,
             metadata: {
               namespace,
@@ -157,7 +157,7 @@ export class CapsuleBranchCreatePlanner {
         devices,
         resourceType: CapsuleBranchResourceType.INCUS_INSTANCE,
         resourceKey: instanceResourceKey(namespace, name),
-        cleanupPolicy: CapsuleBranchResourceCleanupPolicy.DELETE_ON_ROLLBACK,
+        cleanupPolicy: CapsuleBranchResourceCleanupPolicy.DELETE_WITH_BRANCH,
         status: CapsuleBranchResourceStatus.CREATING,
         metadata: {
           namespace,
@@ -207,7 +207,7 @@ export class CapsuleBranchCreatePlanner {
         },
         resourceType: CapsuleBranchResourceType.PROVISIONING_FILE,
         resourceKey: provisioningFileResourceKey(input.namespace, input.name, file.path, target),
-        cleanupPolicy: CapsuleBranchResourceCleanupPolicy.DELETE_ON_ROLLBACK,
+        cleanupPolicy: CapsuleBranchResourceCleanupPolicy.DELETE_WITH_BRANCH,
         status: CapsuleBranchResourceStatus.CREATING,
         metadata: createProvisioningFileResourceMetadata(input.namespace, input.name, file.path, target),
       }

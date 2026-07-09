@@ -33,7 +33,7 @@ export function createBranchDeleteCleanupPlan(resources: readonly BranchDeleteRe
     if (TERMINAL_RESOURCE_STATUSES.has(resource.status)) {
       continue
     }
-    if (resource.cleanupPolicy !== CapsuleBranchResourceCleanupPolicy.DELETE_ON_ROLLBACK) {
+    if (resource.cleanupPolicy !== CapsuleBranchResourceCleanupPolicy.DELETE_WITH_BRANCH) {
       continue
     }
     switch (resource.resourceType) {

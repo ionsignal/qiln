@@ -13,9 +13,8 @@ import type { BranchOperationStepInput } from './types'
 /**
  * Persistence boundary for deterministic branch operation steps.
  *
- * PR 2 creates this seam without wiring step execution into the create saga yet.
- * PR 3 can add inline step execution on top of this store without reshaping DB
- * access again.
+ * Step rows are fail-closed inspection/accounting records for inline mutation progress.
+ * They are intentionally not a resumable job queue.
  */
 export class CapsuleBranchOperationStepStore {
   constructor(private readonly db: CapsuleHostDbContract) {}
@@ -41,9 +40,8 @@ export class CapsuleBranchOperationStepStore {
   /**
    * Ensures a deterministic step row exists for an operation.
    *
-   * This is intentionally idempotent but not resumptive: callers still execute
-   * the inline step body every time they call the executor. Recovery semantics
-   * will decide later whether an existing completed step should be skipped.
+   * This is idempotent for retry races and durable inspection. Callers still execute
+   * the inline step body every time they invoke the executor.
    */
   public async ensureStep(input: BranchOperationStepInput): Promise<string> {
     const existing = await this.findStep(input.operationId, input.stepKey)

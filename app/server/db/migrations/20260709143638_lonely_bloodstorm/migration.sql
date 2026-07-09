@@ -1,7 +1,7 @@
-CREATE TYPE "capsule_branch_operation_status" AS ENUM('accepted', 'running', 'completed', 'failed', 'recovering', 'cleanup_required');--> statement-breakpoint
+CREATE TYPE "capsule_branch_operation_status" AS ENUM('accepted', 'running', 'completed', 'failed', 'cleanup_required');--> statement-breakpoint
 CREATE TYPE "capsule_branch_operation_step_status" AS ENUM('pending', 'running', 'completed', 'failed', 'skipped');--> statement-breakpoint
 CREATE TYPE "capsule_branch_operation_type" AS ENUM('create');--> statement-breakpoint
-CREATE TYPE "capsule_branch_resource_cleanup_policy" AS ENUM('delete_on_rollback', 'retain', 'external');--> statement-breakpoint
+CREATE TYPE "capsule_branch_resource_cleanup_policy" AS ENUM('delete_with_branch', 'retain', 'external');--> statement-breakpoint
 CREATE TYPE "capsule_branch_resource_status" AS ENUM('planned', 'creating', 'created', 'deleting', 'deleted', 'adopted', 'missing', 'orphaned', 'error');--> statement-breakpoint
 CREATE TYPE "capsule_branch_resource_type" AS ENUM('incus_project', 'incus_instance', 'zfs_volume', 'bind_mount', 'provisioning_file');--> statement-breakpoint
 CREATE TYPE "capsule_branch_status" AS ENUM('provisioning', 'recovering', 'offline', 'starting', 'online', 'stopping', 'archived', 'error', 'cleanup_required');--> statement-breakpoint
@@ -109,6 +109,7 @@ CREATE INDEX "capsule_branch_resources_created_by_operation_idx" ON "capsule_bra
 CREATE INDEX "capsule_branch_resources_last_operation_idx" ON "capsule_branch_resources" ("last_operation_id");--> statement-breakpoint
 CREATE INDEX "capsule_branch_resources_resource_key_idx" ON "capsule_branch_resources" ("resource_key");--> statement-breakpoint
 CREATE UNIQUE INDEX "capsule_branch_resources_operation_key_unique_idx" ON "capsule_branch_resources" ("created_by_operation_id","resource_key");--> statement-breakpoint
+CREATE UNIQUE INDEX "capsule_branch_resources_branch_key_unique_idx" ON "capsule_branch_resources" ("branch_id","resource_key");--> statement-breakpoint
 CREATE INDEX "capsule_branches_owner_idx" ON "capsule_branches" ("owner_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "capsule_branches_owner_name_unique_idx" ON "capsule_branches" ("owner_id","name");--> statement-breakpoint
 ALTER TABLE "capsule_branch_operation_steps" ADD CONSTRAINT "capsule_branch_operation_steps_uNAmnvHp3YGG_fkey" FOREIGN KEY ("operation_id") REFERENCES "capsule_branch_operations"("id") ON DELETE CASCADE;--> statement-breakpoint

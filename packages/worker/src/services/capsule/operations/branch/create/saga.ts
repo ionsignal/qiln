@@ -1,8 +1,12 @@
 import {
+  CapsuleBranchOperationRequestHashSchema,
   CapsuleBranchOperationStatus,
   CapsuleBranchResourceStatus,
+  digestCanonicalJsonValue,
+  type CapsuleBlueprintDigest,
   type CapsuleBlueprintRegistry,
   type CapsuleBranchCreateOutput,
+  type CapsuleBranchOperationRequestHash,
   type CapsuleBranchOperationStatus as CapsuleBranchOperationStatusValue,
   type CapsuleBranchResourceStatus as CapsuleBranchResourceStatusValue,
 } from '@qiln/core/server'
@@ -10,12 +14,11 @@ import { IncusError } from '../../../../../errors'
 import { InlineOperationStepExecutor } from '../../inlineStepExecutor'
 import {
   CapsuleBranchCreateFailurePhase,
-  CapsuleRollbackStatus,
+  CapsuleCompensationStatus,
+  createCompensationFailureDetail,
   createOperationFailureContext,
-  createRollbackFailureDetail,
-  type CapsuleRollbackResult,
+  type CapsuleCompensationResult,
 } from '../../errors'
-import { createBranchCreateRequestHash } from './requestHash'
 import { CapsuleBranchCreateStepKey } from './steps'
 import type { CapsuleBranchEventPublisher } from '../../../branch/events'
 import type {
@@ -38,11 +41,26 @@ export interface CapsuleBranchCreateSagaStores {
   resources: CapsuleBranchResourceStore
 }
 
-interface BranchCreateRollbackTask {
+interface BranchCreateRequestHashInput {
+  name: string
+  blueprintName: string
+  blueprintDigest: CapsuleBlueprintDigest
+  cpu: string
+  memory: string
+}
+
+interface BranchCreateCompensationTask {
   action: string
   resourceId: string
   resourceKey: string
   run: () => Promise<void>
+}
+
+function createBranchCreateRequestHash(input: BranchCreateRequestHashInput): CapsuleBranchOperationRequestHash {
+  const digest = digestCanonicalJsonValue(input, {
+    context: 'capsule branch create request',
+  })
+  return CapsuleBranchOperationRequestHashSchema.parse(digest)
 }
 
 export class CapsuleBranchCreateSaga {
@@ -103,12 +121,10 @@ export class CapsuleBranchCreateSaga {
       branchId: accepted.branchId,
       branchName: input.name,
     }
-    const rollbackStack: BranchCreateRollbackTask[] = []
-
+    const compensationStack: BranchCreateCompensationTask[] = []
     let currentPhase: CapsuleBranchCreateFailurePhase = CapsuleBranchCreateFailurePhase.PLAN_RESOURCES
     let currentStepKey: CapsuleBranchCreateStepKey | null = null
     let branchFinalized = false
-
     const runStep = async <TResult>(
       stepKey: CapsuleBranchCreateStepKey,
       metadata: Record<string, unknown>,
@@ -125,7 +141,6 @@ export class CapsuleBranchCreateSaga {
         action,
       )
     }
-
     try {
       const plan = await runStep(
         CapsuleBranchCreateStepKey.PLAN_RESOURCES,
@@ -195,20 +210,20 @@ export class CapsuleBranchCreateSaga {
         async () => {
           for (const volume of plan.volumes) {
             const resourceId = await this.stores.resources.ensureBranchResource(this.withOperationContext(volume, resourceContext))
-            rollbackStack.push({
-              action: 'rollback_delete_volume',
+            compensationStack.push({
+              action: 'compensate_delete_volume',
               resourceId,
               resourceKey: volume.resourceKey,
               run: () =>
-                this.rollbackVolume(
+                this.compensateVolume(
                   namespace,
                   resourceId,
                   volume,
                   createOperationFailureContext({
                     operationId: accepted.operationId,
                     branchName: input.name,
-                    phase: CapsuleBranchCreateFailurePhase.ROLLBACK,
-                    action: 'rollback_delete_volume',
+                    phase: CapsuleBranchCreateFailurePhase.COMPENSATION,
+                    action: 'compensate_delete_volume',
                     resourceId,
                     resourceKey: volume.resourceKey,
                   }),
@@ -245,20 +260,20 @@ export class CapsuleBranchCreateSaga {
         },
         async () => {
           const instanceResourceId = await this.stores.resources.ensureBranchResource(this.withOperationContext(plan.instance, resourceContext))
-          rollbackStack.push({
-            action: 'rollback_delete_instance',
+          compensationStack.push({
+            action: 'compensate_delete_instance',
             resourceId: instanceResourceId,
             resourceKey: plan.instance.resourceKey,
             run: () =>
-              this.rollbackInstance(
+              this.compensateInstance(
                 namespace,
                 instanceResourceId,
                 plan.instance.instanceName,
                 createOperationFailureContext({
                   operationId: accepted.operationId,
                   branchName: input.name,
-                  phase: CapsuleBranchCreateFailurePhase.ROLLBACK,
-                  action: 'rollback_delete_instance',
+                  phase: CapsuleBranchCreateFailurePhase.COMPENSATION,
+                  action: 'compensate_delete_instance',
                   resourceId: instanceResourceId,
                   resourceKey: plan.instance.resourceKey,
                 }),
@@ -340,7 +355,7 @@ export class CapsuleBranchCreateSaga {
     } catch (error: unknown) {
       if (branchFinalized) {
         console.error(
-          `[CapsuleBranchRuntimeService] Branch '${input.name}' finalized but operation failed during '${currentPhase}'. Leaving branch resources intact for recovery visibility.`,
+          `[CapsuleBranchRuntimeService] Branch '${input.name}' finalized but operation failed during '${currentPhase}'. Leaving branch resources intact for cleanup visibility.`,
           error,
         )
         await this.markOperationFailureBestEffort(
@@ -354,15 +369,14 @@ export class CapsuleBranchCreateSaga {
             stepKey: currentStepKey,
             branchFinalized,
             action: currentPhase === CapsuleBranchCreateFailurePhase.COMPLETE_OPERATION ? 'mark_operation_completed' : undefined,
-            rollbackStatus: CapsuleRollbackStatus.SKIPPED,
+            compensationStatus: CapsuleCompensationStatus.SKIPPED,
           }),
         )
         throw error
       }
-
-      console.error(`[CapsuleBranchRuntimeService] Provisioning failed for branch '${input.name}'. Initiating rollback...`, error)
-      const rollbackResult = await this.rollback(input.name, rollbackStack)
-      if (rollbackResult.hadFailure) {
+      console.error(`[CapsuleBranchRuntimeService] Provisioning failed for branch '${input.name}'. Initiating compensation cleanup...`, error)
+      const compensationResult = await this.compensate(input.name, compensationStack)
+      if (compensationResult.hadFailure) {
         try {
           await this.stores.branches.transitionBranchState(input.ownerId, input.name, 'cleanup_required')
           this.events.publishStateChanged(input.ownerId, input.name, 'cleanup_required')
@@ -379,8 +393,8 @@ export class CapsuleBranchCreateSaga {
             phase: currentPhase,
             stepKey: currentStepKey,
             branchFinalized,
-            rollbackStatus: CapsuleRollbackStatus.FAILED,
-            rollbackFailures: rollbackResult.failures,
+            compensationStatus: CapsuleCompensationStatus.FAILED,
+            compensationFailures: compensationResult.failures,
           }),
         )
         throw error
@@ -401,7 +415,7 @@ export class CapsuleBranchCreateSaga {
           phase: currentPhase,
           stepKey: currentStepKey,
           branchFinalized,
-          rollbackStatus: CapsuleRollbackStatus.COMPLETED,
+          compensationStatus: CapsuleCompensationStatus.COMPLETED,
         }),
       )
       throw error
@@ -430,28 +444,28 @@ export class CapsuleBranchCreateSaga {
     }
   }
 
-  private async rollback(branchName: string, rollbackStack: BranchCreateRollbackTask[]): Promise<CapsuleRollbackResult> {
-    const failures: CapsuleRollbackResult['failures'] = []
-    while (rollbackStack.length > 0) {
-      const rollbackTask = rollbackStack.pop()
-      if (!rollbackTask) {
+  private async compensate(branchName: string, compensationStack: BranchCreateCompensationTask[]): Promise<CapsuleCompensationResult> {
+    const failures: CapsuleCompensationResult['failures'] = []
+    while (compensationStack.length > 0) {
+      const compensationTask = compensationStack.pop()
+      if (!compensationTask) {
         continue
       }
       try {
-        await rollbackTask.run()
-      } catch (rollbackErr: unknown) {
-        if (rollbackErr instanceof IncusError && rollbackErr.code === 'NOT_FOUND') {
+        await compensationTask.run()
+      } catch (compensationErr: unknown) {
+        if (compensationErr instanceof IncusError && compensationErr.code === 'NOT_FOUND') {
           continue
         }
         failures.push(
-          createRollbackFailureDetail({
-            action: rollbackTask.action,
-            resourceId: rollbackTask.resourceId,
-            resourceKey: rollbackTask.resourceKey,
-            error: rollbackErr,
+          createCompensationFailureDetail({
+            action: compensationTask.action,
+            resourceId: compensationTask.resourceId,
+            resourceKey: compensationTask.resourceKey,
+            error: compensationErr,
           }),
         )
-        console.error(`[CRITICAL] Zombie Resource Detected: Failed during rollback for branch '${branchName}':`, rollbackErr)
+        console.error(`[CRITICAL] Orphaned Resource Detected: Failed during compensation cleanup for branch '${branchName}':`, compensationErr)
       }
     }
     return {
@@ -460,7 +474,7 @@ export class CapsuleBranchCreateSaga {
     }
   }
 
-  private async rollbackVolume(
+  private async compensateVolume(
     namespace: string,
     resourceId: string,
     volume: PlannedVolumeResource,
@@ -470,17 +484,17 @@ export class CapsuleBranchCreateSaga {
     try {
       await this.driver.deleteVolume(namespace, volume)
       await this.transitionResourceStatusBestEffort(resourceId, CapsuleBranchResourceStatus.DELETED)
-    } catch (rollbackErr: unknown) {
-      if (rollbackErr instanceof IncusError && rollbackErr.code === 'NOT_FOUND') {
+    } catch (compensationErr: unknown) {
+      if (compensationErr instanceof IncusError && compensationErr.code === 'NOT_FOUND') {
         await this.transitionResourceStatusBestEffort(resourceId, CapsuleBranchResourceStatus.MISSING)
         return
       }
-      await this.markResourceErrorBestEffort(resourceId, rollbackErr, failureContext)
-      throw rollbackErr
+      await this.markResourceErrorBestEffort(resourceId, compensationErr, failureContext)
+      throw compensationErr
     }
   }
 
-  private async rollbackInstance(
+  private async compensateInstance(
     namespace: string,
     resourceId: string,
     instanceName: string,
@@ -490,13 +504,13 @@ export class CapsuleBranchCreateSaga {
     try {
       await this.driver.deleteInstance(namespace, instanceName)
       await this.transitionResourceStatusBestEffort(resourceId, CapsuleBranchResourceStatus.DELETED)
-    } catch (rollbackErr: unknown) {
-      if (rollbackErr instanceof IncusError && rollbackErr.code === 'NOT_FOUND') {
+    } catch (compensationErr: unknown) {
+      if (compensationErr instanceof IncusError && compensationErr.code === 'NOT_FOUND') {
         await this.transitionResourceStatusBestEffort(resourceId, CapsuleBranchResourceStatus.MISSING)
         return
       }
-      await this.markResourceErrorBestEffort(resourceId, rollbackErr, failureContext)
-      throw rollbackErr
+      await this.markResourceErrorBestEffort(resourceId, compensationErr, failureContext)
+      throw compensationErr
     }
   }
 
@@ -504,7 +518,7 @@ export class CapsuleBranchCreateSaga {
     try {
       await this.stores.resources.transitionBranchResourceStatus(resourceId, status)
     } catch (error: unknown) {
-      console.error(`[CapsuleBranchRuntimeService] Failed to mark resource '${resourceId}' as '${status}' during rollback.`, error)
+      console.error(`[CapsuleBranchRuntimeService] Failed to mark resource '${resourceId}' as '${status}' during compensation cleanup.`, error)
     }
   }
 

@@ -16,22 +16,22 @@ import { CapsuleBranchCreatePlanner } from '../operations/branch/create/planner'
 import { CapsuleResourceDriver } from '../resources/driver'
 import { CapsuleBranchCreateSaga } from '../operations/branch/create/saga'
 import { createBranchDeleteCleanupPlan } from '../operations/branch/delete/cleanupPlan'
+import { CapsuleAbandonedOperationError, CapsuleCompensationStatus, createOperationFailureContext } from '../operations/errors'
 import { detailsFromUnknown } from '../stores/errorDetails'
 import { CapsuleBranchOperationStepStore, CapsuleBranchOperationStore, CapsuleBranchResourceStore, CapsuleBranchStore } from '../stores'
 import type { IncusClient } from '../../../incus/client/index'
 import type { ProjectService } from '../../project'
 import type { BranchDeleteCleanupPlan, BranchDeleteVolumeTarget } from '../operations/branch/delete/types'
-import type { ReconcileBranch } from '../stores/types'
+import type { AbandonedBranchCreateOperationCandidate, ReconcileBranch } from '../stores/types'
 
 type ScopedIncusProject = ReturnType<IncusClient['UseProject']>
 
 /**
  * Public worker service for capsule branch runtime mutations.
  *
- * This façade keeps the command-handler surface stable while delegating the
- * create mutation to a durable-saga-shaped set of collaborators. Start, stop,
- * delete, and the old reconcile path intentionally remain mostly unchanged until
- * their own durable operation work is implemented.
+ * This façade keeps the command-handler surface stable while delegating the create mutation to an inline
+ * fail-closed operation ledger. Start, stop, delete, and runtime-state reconciliation remain direct
+ * service methods until their own durable operation work is implemented.
  */
 export class CapsuleBranchRuntimeService {
   private readonly branches: CapsuleBranchStore
@@ -103,8 +103,8 @@ export class CapsuleBranchRuntimeService {
   /**
    * Provisions a new capsule branch using a durable operation identity.
    *
-   * The saga still runs synchronously for now; this refactor creates the seams needed for a
-   * later background runner/recovery pass without changing the `capsule channel contract`
+   * The operation runs inline. Durable rows are used for idempotency, failure inspection,
+   * and fail-closed cleanup accounting; abandoned provisioning is not automatically resumed.
    */
   public async create(
     ownerId: string,
@@ -124,6 +124,26 @@ export class CapsuleBranchRuntimeService {
       cpu,
       memory,
     })
+  }
+
+  /**
+   * Marks branch-create operations left non-terminal by a previous worker process as cleanup_required.
+   *
+   * This is fail-closed accounting, not automatic recovery.
+   * The worker does not resume steps or attempt to infer whether side effects completed safely.
+   */
+  public async markAbandonedBranchCreateOperationsCleanupRequired(): Promise<void> {
+    const candidates = await this.operations.listAbandonedBranchCreateOperationCandidates()
+
+    if (candidates.length === 0) {
+      return
+    }
+    console.warn(
+      `[CapsuleBranchRuntimeService] Found ${candidates.length} abandoned branch create operation(s). Marking cleanup_required; automatic provisioning recovery is disabled.`,
+    )
+    for (const candidate of candidates) {
+      await this.markAbandonedBranchCreateOperationCleanupRequired(candidate)
+    }
   }
 
   /**
@@ -228,7 +248,9 @@ export class CapsuleBranchRuntimeService {
   }
 
   /**
-   * Boot-time self-healing to align Postgres with true Incus state.
+   * Boot-time runtime-state reconciliation for existing, non-provisioning branches.
+   *
+   * This intentionally does not recover or resume abandoned branch-create operations.
    */
   public async reconcile(): Promise<void> {
     const dbBranches = await this.branches.listBranchesForReconcile()
@@ -280,6 +302,42 @@ export class CapsuleBranchRuntimeService {
         console.warn(`[CapsuleBranchRuntimeService] Failed to reconcile owner namespace '${namespace}':`, err)
       }
     }
+  }
+
+  private async markAbandonedBranchCreateOperationCleanupRequired(candidate: AbandonedBranchCreateOperationCandidate): Promise<void> {
+    const branch = await this.branches.findBranch(candidate.ownerId, candidate.branchName)
+    const error = new CapsuleAbandonedOperationError('Capsule branch create operation was abandoned before completion.', {
+      operationId: candidate.id,
+      ownerId: candidate.ownerId,
+      branchId: candidate.branchId,
+      branchName: candidate.branchName,
+      previousOperationStatus: candidate.status,
+      branchExists: branch !== null,
+      previousBranchStatus: branch?.status ?? null,
+      policy: 'inline_fail_closed_ledger',
+    })
+    const markedOperation = await this.operations.markNonTerminalBranchOperationCleanupRequired(
+      candidate.id,
+      error,
+      createOperationFailureContext({
+        operationId: candidate.id,
+        branchName: candidate.branchName,
+        phase: 'startup_fail_closed_sweep',
+        action: 'mark_abandoned_branch_create_cleanup_required',
+        compensationStatus: CapsuleCompensationStatus.NOT_ATTEMPTED,
+      }),
+    )
+    if (!markedOperation) {
+      return
+    }
+    if (!branch) {
+      console.warn(
+        `[CapsuleBranchRuntimeService] Abandoned branch create operation '${candidate.id}' has no branch row for '${candidate.branchName}'. Operation marked cleanup_required.`,
+      )
+      return
+    }
+    await this.branches.transitionBranchState(candidate.ownerId, candidate.branchName, 'cleanup_required')
+    this.events.publishStateChanged(candidate.ownerId, candidate.branchName, 'cleanup_required')
   }
 
   private async deleteUsingBranchResourceInventory(

@@ -9,15 +9,14 @@ export type InlineOperationStepAction<TResult> = () => Promise<TResult> | TResul
 /**
  * Executes one deterministic operation step inline while persisting step state.
  *
- * This is deliberately not a runner, queue, scheduler, lease manager, or recovery engine.
- * It only wraps the current synchronous saga flow with durable step visibility so recovery can be layered on later.
+ * This is deliberately not a runner, queue, scheduler, lease manager, or recovery engine. Existing step rows are
+ * durable inspection/accounting records; the executor does not skip completed steps or resume abandoned provisioning.
  */
 export class InlineOperationStepExecutor {
   constructor(private readonly steps: CapsuleBranchOperationStepStore) {}
 
   public async run<TResult>(context: InlineOperationStepContext, action: InlineOperationStepAction<TResult>): Promise<TResult> {
     let stepId: string
-
     try {
       stepId = await this.steps.ensureStep(context)
     } catch (error: unknown) {
@@ -27,7 +26,6 @@ export class InlineOperationStepExecutor {
         error,
       })
     }
-
     try {
       await this.steps.markStepRunning(stepId, context.metadata)
     } catch (error: unknown) {
@@ -38,7 +36,6 @@ export class InlineOperationStepExecutor {
         error,
       })
     }
-
     let result: TResult
     try {
       result = await action()
@@ -46,7 +43,6 @@ export class InlineOperationStepExecutor {
       await this.markStepFailureBestEffort(stepId, context.stepKey, error)
       throw error
     }
-
     try {
       await this.steps.markStepCompleted(stepId)
     } catch (error: unknown) {
@@ -60,7 +56,6 @@ export class InlineOperationStepExecutor {
         },
       )
     }
-
     return result
   }
 

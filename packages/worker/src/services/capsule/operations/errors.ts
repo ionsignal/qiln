@@ -10,22 +10,22 @@ export const CapsuleBranchCreateFailurePhase = {
   WRITE_PROVISIONING_FILES: CapsuleBranchCreateStepKey.WRITE_PROVISIONING_FILES,
   FINALIZE_BRANCH_OFFLINE: CapsuleBranchCreateStepKey.FINALIZE_BRANCH_OFFLINE,
   COMPLETE_OPERATION: 'complete_operation',
-  ROLLBACK: 'rollback',
+  COMPENSATION: 'compensation',
 } as const
 
 export type CapsuleBranchCreateFailurePhase = (typeof CapsuleBranchCreateFailurePhase)[keyof typeof CapsuleBranchCreateFailurePhase]
 
-export const CapsuleRollbackStatus = {
+export const CapsuleCompensationStatus = {
   NOT_ATTEMPTED: 'not_attempted',
   SKIPPED: 'skipped',
   COMPLETED: 'completed',
   FAILED: 'failed',
 } as const
 
-export type CapsuleRollbackStatus = (typeof CapsuleRollbackStatus)[keyof typeof CapsuleRollbackStatus]
+export type CapsuleCompensationStatus = (typeof CapsuleCompensationStatus)[keyof typeof CapsuleCompensationStatus]
 
-export interface CapsuleRollbackFailureDetail {
-  phase: typeof CapsuleBranchCreateFailurePhase.ROLLBACK
+export interface CapsuleCompensationFailureDetail {
+  phase: typeof CapsuleBranchCreateFailurePhase.COMPENSATION
   action: string
   code: string
   message: string
@@ -34,9 +34,9 @@ export interface CapsuleRollbackFailureDetail {
   details?: Record<string, unknown>
 }
 
-export interface CapsuleRollbackResult {
+export interface CapsuleCompensationResult {
   hadFailure: boolean
-  failures: CapsuleRollbackFailureDetail[]
+  failures: CapsuleCompensationFailureDetail[]
 }
 
 export interface OperationFailureContextInput {
@@ -48,11 +48,11 @@ export interface OperationFailureContextInput {
   action?: string
   resourceId?: string
   resourceKey?: string
-  rollbackStatus?: CapsuleRollbackStatus
-  rollbackFailures?: readonly CapsuleRollbackFailureDetail[]
+  compensationStatus?: CapsuleCompensationStatus
+  compensationFailures?: readonly CapsuleCompensationFailureDetail[]
 }
 
-export interface RollbackFailureDetailInput {
+export interface CompensationFailureDetailInput {
   action: string
   error: unknown
   resourceId?: string
@@ -91,6 +91,16 @@ export class CapsuleOperationStepPersistenceError extends Error {
   }
 }
 
+export class CapsuleAbandonedOperationError extends Error {
+  public readonly code = 'ABANDONED_INLINE_OPERATION'
+  public readonly details: Record<string, unknown>
+  constructor(message: string, details: Record<string, unknown>) {
+    super(message)
+    this.name = 'CapsuleAbandonedOperationError'
+    this.details = details
+  }
+}
+
 function assignIfDefined(target: Record<string, unknown>, key: string, value: unknown): void {
   if (value !== undefined) {
     target[key] = value
@@ -113,19 +123,19 @@ export function createOperationFailureContext(input: OperationFailureContextInpu
   assignIfDefined(context, 'action', input.action)
   assignIfDefined(context, 'resourceId', input.resourceId)
   assignIfDefined(context, 'resourceKey', input.resourceKey)
-  assignIfDefined(context, 'rollbackStatus', input.rollbackStatus)
-  if (input.rollbackFailures && input.rollbackFailures.length > 0) {
-    context.rollbackFailures = input.rollbackFailures
+  assignIfDefined(context, 'compensationStatus', input.compensationStatus)
+  if (input.compensationFailures && input.compensationFailures.length > 0) {
+    context.compensationFailures = input.compensationFailures
   }
   return context
 }
 
-export function createRollbackFailureDetail(input: RollbackFailureDetailInput): CapsuleRollbackFailureDetail {
-  const detail: CapsuleRollbackFailureDetail = {
-    phase: CapsuleBranchCreateFailurePhase.ROLLBACK,
+export function createCompensationFailureDetail(input: CompensationFailureDetailInput): CapsuleCompensationFailureDetail {
+  const detail: CapsuleCompensationFailureDetail = {
+    phase: CapsuleBranchCreateFailurePhase.COMPENSATION,
     action: input.action,
     code: failureCodeFromUnknown(input.error),
-    message: failureMessageFromUnknown(input.error, 'Unknown rollback failure.'),
+    message: failureMessageFromUnknown(input.error, 'Unknown compensation failure.'),
   }
   if (input.resourceId !== undefined) {
     detail.resourceId = input.resourceId

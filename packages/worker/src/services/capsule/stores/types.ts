@@ -34,6 +34,16 @@ export interface AcceptedBranchCreateOperation {
   replayedReceipt?: CapsuleBranchCreateOutput
 }
 
+export interface AbandonedBranchCreateOperationCandidate {
+  id: string
+  ownerId: string
+  branchId: string | null
+  branchName: string
+  status: CapsuleBranchOperationStatus
+  createdAt: Date
+  updatedAt: Date
+}
+
 export interface BranchResourceInput {
   operationId: string
   ownerId: string
@@ -58,3 +68,4 @@ export interface BranchOperationStepInput {
 
 export type BranchOperationStatusValue = CapsuleBranchOperationStatus
 export type BranchOperationStepStatusValue = CapsuleBranchOperationStepStatus
+export type CompensationCallback = () => Promise<void>

@@ -1,9 +1,9 @@
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { createHash } from 'node:crypto'
 import { parse } from 'yaml'
 import { z, type ZodError } from 'zod'
 import { GlobalError, GlobalErrorCode } from '../errors'
+import { digestCanonicalJsonValue } from '../digest/canonical'
 import {
   CapsuleBlueprintDigestSchema,
   CapsuleBlueprintManifestSchema,
@@ -17,8 +17,6 @@ import {
 } from '../schemas'
 
 const DEFAULT_LOGGER_PREFIX = '[CapsuleBlueprintRegistry]'
-
-type CanonicalJson = string | number | boolean | null | CanonicalJson[] | { [key: string]: CanonicalJson }
 
 export interface CapsuleBlueprintRegistryOptions {
   loggerPrefix?: string
@@ -66,56 +64,18 @@ function compareStableString(left: string, right: string): number {
   return 0
 }
 
-/**
- * Converts a validated blueprint object into canonical JSON-compatible data.
- *
- * Digest stability matters because workers may be restarted or deployed in
- * multiple processes. We canonicalize parsed schema output instead of raw YAML so
- * comments and formatting cannot change user-facing digests.
- */
-function toCanonicalJson(value: unknown, context = 'value'): CanonicalJson {
-  if (value === null) {
-    return null
-  }
-  if (typeof value === 'string' || typeof value === 'boolean') {
-    return value
-  }
-  if (typeof value === 'number') {
-    if (!Number.isFinite(value)) {
-      throw new GlobalError(`Cannot create deterministic digest for non-finite number at '${context}'.`, GlobalErrorCode.INTERNAL_ERROR, {
-        context,
-        value,
-      })
-    }
-    return value
-  }
-  if (Array.isArray(value)) {
-    return value.map((item, index) => toCanonicalJson(item, `${context}[${index}]`))
-  }
-  if (isRecord(value)) {
-    const canonical: Record<string, CanonicalJson> = {}
-    const keys = Object.keys(value).sort(compareStableString)
-    for (const key of keys) {
-      const child = value[key]
-      if (child === undefined) {
-        continue
-      }
-      canonical[key] = toCanonicalJson(child, `${context}.${key}`)
-    }
-    return canonical
-  }
-  throw new GlobalError(`Cannot create deterministic digest for non-JSON blueprint value at '${context}'.`, GlobalErrorCode.INTERNAL_ERROR, {
-    context,
-    valueType: typeof value,
-  })
-}
-
 function digestCanonicalValue(value: unknown): CapsuleBlueprintDigest {
-  const canonicalJson = JSON.stringify(toCanonicalJson(value))
-  if (canonicalJson === undefined) {
-    throw new GlobalError('Failed to serialize canonical blueprint value for digest generation.', GlobalErrorCode.INTERNAL_ERROR)
+  const digest = digestCanonicalJsonValue(value, {
+    context: 'capsule blueprint digest input',
+  })
+  const parsedDigest = CapsuleBlueprintDigestSchema.safeParse(digest)
+  if (!parsedDigest.success) {
+    throw new GlobalError('Generated capsule blueprint digest failed validation.', GlobalErrorCode.INTERNAL_ERROR, {
+      digest,
+      ...validationDetails(parsedDigest.error),
+    })
   }
-  return `sha256:${createHash('sha256').update(canonicalJson).digest('hex')}`
+  return parsedDigest.data
 }
 
 /**
@@ -198,9 +158,8 @@ export class CapsuleBlueprintRegistry {
   /**
    * Resolves a caller-reviewed blueprint digest to a durable blueprint pin.
    *
-   * The worker uses this before accepting branch creation. Once accepted, the
-   * operation stores the returned validated blueprint snapshot so recovery is not
-   * tied to mutable YAML catalog state.
+   * The worker uses this before accepting branch creation. Once accepted, the operation stores the returned
+   * validated blueprint snapshot so later audit and cleanup accounting are not tied to mutable YAML catalog state.
    */
   public pin(name: string, digest: string): CapsuleBlueprintPin {
     const parsedDigest = CapsuleBlueprintDigestSchema.safeParse(digest)

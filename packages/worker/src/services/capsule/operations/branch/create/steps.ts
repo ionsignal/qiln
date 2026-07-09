@@ -11,10 +11,10 @@ export const CapsuleBranchCreateStepKey = {
 export type CapsuleBranchCreateStepKey = (typeof CapsuleBranchCreateStepKey)[keyof typeof CapsuleBranchCreateStepKey]
 
 /**
- * Stable branch-create step order for visibility and future recovery classification.
+ * Stable branch-create step order for visibility and fail-closed diagnostics.
  *
- * These keys intentionally remain worker-internal for now; the public capsule
- * protocol only needs operation receipts until we expose operation inspection.
+ * These keys intentionally remain worker-internal for now; the public capsule protocol only needs
+ * operation receipts until operation inspection is exposed.
  */
 export const CapsuleBranchCreateStepKeys = [
   CapsuleBranchCreateStepKey.PLAN_RESOURCES,

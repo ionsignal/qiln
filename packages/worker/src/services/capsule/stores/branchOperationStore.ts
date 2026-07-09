@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm'
+import { and, asc, eq, inArray } from 'drizzle-orm'
 import {
   CapsuleBranchCreateOutputSchema,
   CapsuleBranchOperationStatus,
@@ -13,14 +13,15 @@ import {
 import { IncusError, isUniqueConstraintViolation } from '../../../errors'
 import { createFailureDetails, failureCodeFromUnknown, failureMessageFromUnknown } from './errorDetails'
 import { toJsonObject } from './jsonPersistence'
-import type { AcceptedBranchCreateOperation, AcceptBranchCreateOperationInput } from './types'
+import type { AbandonedBranchCreateOperationCandidate, AcceptedBranchCreateOperation, AcceptBranchCreateOperationInput } from './types'
+
+const NON_TERMINAL_BRANCH_OPERATION_STATUSES = [CapsuleBranchOperationStatus.ACCEPTED, CapsuleBranchOperationStatus.RUNNING] as const
 
 /**
  * Persistence boundary for durable capsule branch operations.
  *
- * This owns operation identity, idempotency replay, status transitions, and
- * failure recording. It intentionally does not own resource inventory or general
- * branch runtime transitions.
+ * This owns operation identity, idempotency replay, status transitions, and failure recording.
+ * It intentionally does not own resource inventory or general branch runtime transitions.
  */
 export class CapsuleBranchOperationStore {
   constructor(private readonly db: CapsuleHostDbContract) {}
@@ -161,6 +162,31 @@ export class CapsuleBranchOperationStore {
     }
   }
 
+  /**
+   * Finds inline branch-create operations that were left non-terminal by a worker crash or shutdown.
+   * Startup marks them cleanup_required so operators can inspect and clean up uncertain resources.
+   */
+  public async listAbandonedBranchCreateOperationCandidates(): Promise<AbandonedBranchCreateOperationCandidate[]> {
+    return await this.db
+      .select({
+        id: capsuleBranchOperationsTable.id,
+        ownerId: capsuleBranchOperationsTable.ownerId,
+        branchId: capsuleBranchOperationsTable.branchId,
+        branchName: capsuleBranchOperationsTable.branchName,
+        status: capsuleBranchOperationsTable.status,
+        createdAt: capsuleBranchOperationsTable.createdAt,
+        updatedAt: capsuleBranchOperationsTable.updatedAt,
+      })
+      .from(capsuleBranchOperationsTable)
+      .where(
+        and(
+          eq(capsuleBranchOperationsTable.type, CapsuleBranchOperationType.CREATE),
+          inArray(capsuleBranchOperationsTable.status, NON_TERMINAL_BRANCH_OPERATION_STATUSES),
+        ),
+      )
+      .orderBy(asc(capsuleBranchOperationsTable.createdAt))
+  }
+
   public async transitionBranchOperationStatus(operationId: string, status: CapsuleBranchOperationStatusValue): Promise<void> {
     const now = new Date()
     const updateData: {
@@ -202,6 +228,35 @@ export class CapsuleBranchOperationStore {
       .where(eq(capsuleBranchOperationsTable.id, operationId))
   }
 
+  public async markNonTerminalBranchOperationCleanupRequired(
+    operationId: string,
+    error: unknown,
+    context?: Record<string, unknown>,
+  ): Promise<boolean> {
+    const details = createFailureDetails(error, context)
+    const now = new Date()
+    const result = await this.db
+      .update(capsuleBranchOperationsTable)
+      .set({
+        status: CapsuleBranchOperationStatus.CLEANUP_REQUIRED,
+        failedAt: now,
+        updatedAt: now,
+        failureCode: failureCodeFromUnknown(error),
+        failureMessage: failureMessageFromUnknown(error, 'Capsule branch operation was abandoned before completion.'),
+        failureDetails: details === undefined ? undefined : toJsonObject(details, 'capsule branch operation failure details'),
+      })
+      .where(
+        and(
+          eq(capsuleBranchOperationsTable.id, operationId),
+          inArray(capsuleBranchOperationsTable.status, NON_TERMINAL_BRANCH_OPERATION_STATUSES),
+        ),
+      )
+      .returning({
+        id: capsuleBranchOperationsTable.id,
+      })
+    return result.length > 0
+  }
+
   public createBranchCreateOutput(
     operationId: string,
     operationStatus: CapsuleBranchOperationStatusValue,
@@ -223,8 +278,6 @@ export class CapsuleBranchOperationStore {
     switch (status) {
       case CapsuleBranchOperationStatus.COMPLETED:
         return 'offline'
-      case CapsuleBranchOperationStatus.RECOVERING:
-        return 'recovering'
       case CapsuleBranchOperationStatus.CLEANUP_REQUIRED:
         return 'cleanup_required'
       case CapsuleBranchOperationStatus.FAILED:

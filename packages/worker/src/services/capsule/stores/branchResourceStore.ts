@@ -14,7 +14,7 @@ import type { BranchResourceInput } from './types'
  * Persistence boundary for branch-owned resources.
  *
  * Resource rows are the durable inventory of external/provider resources touched by branch operations.
- * Later delete/recovery work should prefer this store over rediscovering resources from live Incus state.
+ * Delete and fail-closed cleanup accounting should prefer this store over rediscovering resources from live Incus state.
  */
 export class CapsuleBranchResourceStore {
   constructor(private readonly db: CapsuleHostDbContract) {}
@@ -40,8 +40,7 @@ export class CapsuleBranchResourceStore {
   /**
    * Ensures a branch resource row exists without duplicating durable ownership records.
    *
-   * Recovery will later be able to replay deterministic steps safely because
-   * resource persistence is keyed by operation/resource and branch/resource identity.
+   * This is idempotent for retry races and fail-closed accounting; it does not imply automatic replay of abandoned provisioning.
    */
   public async ensureBranchResource(input: BranchResourceInput): Promise<string> {
     const existingByOperation = await this.findBranchResourceByOperationKey(input.operationId, input.resourceKey)

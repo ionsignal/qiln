@@ -115,6 +115,13 @@ export class QilnWorkerRuntime {
       await this.incus.init()
       await this.channel.start()
 
+      /**
+       * Fail closed before accepting new commands. In the MVP there is no lease
+       * or operation runner; a non-terminal inline create operation from a prior
+       * worker process is uncertain and must not be resumed automatically.
+       */
+      await this.capsule.markAbandonedBranchCreateOperationsCleanupRequired()
+
       registerCapsuleChannelHandlers(this)
 
       if (this.reconcileOnStart) {

@@ -1,7 +1,7 @@
 {
   "version": "8",
   "dialect": "postgres",
-  "id": "ac8dbf7f-aa33-43f3-a33a-19e406394a0c",
+  "id": "b233c3f9-1c66-475c-977d-832d9e9520ac",
   "prevIds": [
     "00000000-0000-0000-0000-000000000000"
   ],
@@ -12,7 +12,6 @@
         "running",
         "completed",
         "failed",
-        "recovering",
         "cleanup_required"
       ],
       "name": "capsule_branch_operation_status",
@@ -41,7 +40,7 @@
     },
     {
       "values": [
-        "delete_on_rollback",
+        "delete_with_branch",
         "retain",
         "external"
       ],
@@ -1397,6 +1396,34 @@
       "method": "btree",
       "concurrently": false,
       "name": "capsule_branch_resources_operation_key_unique_idx",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "capsule_branch_resources"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "branch_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        },
+        {
+          "value": "resource_key",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "capsule_branch_resources_branch_key_unique_idx",
       "entityType": "indexes",
       "schema": "public",
       "table": "capsule_branch_resources"
