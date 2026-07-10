@@ -76,6 +76,7 @@ export const CapsuleBranchStatusValues = [
   'starting',
   'online',
   'stopping',
+  'deleting',
   'archived',
   'error',
   'cleanup_required',
@@ -134,10 +135,20 @@ export type CapsuleBranchStop = output<typeof CapsuleBranchStopInputSchema>
 /**
  * Delete branch command.
  */
-export const CapsuleBranchDeleteInputSchema = CapsuleBranchCommandBaseSchema
+export const CapsuleBranchDeleteInputSchema = CapsuleBranchCommandBaseSchema.extend({
+  idempotencyKey: CapsuleBranchIdempotencyKeySchema,
+}).strict()
+
+export const CapsuleBranchDeleteOutputSchema = CapsuleBranchOperationReceiptSchema.extend({
+  ok: z.literal(true),
+  operationType: z.literal(CapsuleBranchOperationType.DELETE),
+  branchName: CapsuleBranchNameSchema,
+  branchDeleted: z.boolean(),
+}).strict()
 
 export type CapsuleBranchDeleteInput = input<typeof CapsuleBranchDeleteInputSchema>
 export type CapsuleBranchDelete = output<typeof CapsuleBranchDeleteInputSchema>
+export type CapsuleBranchDeleteOutput = output<typeof CapsuleBranchDeleteOutputSchema>
 
 export type CapsuleBranchName = z.infer<typeof CapsuleBranchNameSchema>
 export type CapsuleBranchStatus = z.infer<typeof CapsuleBranchStatusSchema>
@@ -215,7 +226,7 @@ export const CapsuleBranchCommandDefinitions = {
     kind: 'capsule.command',
     name: CapsuleBranchCommandName.BRANCH_DELETE,
     inputSchema: CapsuleBranchDeleteInputSchema,
-    outputSchema: CapsuleCommandAckSchema,
+    outputSchema: CapsuleBranchDeleteOutputSchema,
     timeoutMs: CAPSULE_BRANCH_DELETE_TIMEOUT_MS,
     target: {
       type: TargetType.OWNER,

@@ -18,6 +18,11 @@ export interface CapsuleEventStreamSubscription {
   unsubscribe: () => void
 }
 
+export interface CapsuleBranchDeleteClientInput {
+  name: CapsuleBranchName
+  idempotencyKey: CapsuleBranchIdempotencyKey
+}
+
 export interface CapsuleBranchCreateClientInput {
   name: CapsuleBranchName
   blueprintName: string
@@ -37,9 +42,9 @@ export interface UseCapsulesOptions {
 export interface CapsuleContext {
   refresh: () => Promise<void>
   create: (input: CapsuleBranchCreateClientInput) => Promise<void>
+  delete: (input: CapsuleBranchDeleteClientInput) => Promise<void>
   start: (name: string) => Promise<void>
   stop: (name: string) => Promise<void>
-  delete: (name: string) => Promise<void>
 }
 
 const CapsuleContextKey: InjectionKey<CapsuleContext> = Symbol('CapsuleContext')
@@ -93,11 +98,6 @@ export function provideCapsules(options: UseCapsulesOptions): CapsuleContext {
     await refreshSafely()
   }
 
-  async function create(input: CapsuleBranchCreateClientInput) {
-    await options.client.branch.create.mutate(input)
-    await refresh()
-  }
-
   async function runLifecycleMutation(
     name: string,
     pendingStatus: CapsuleBranchStatus,
@@ -119,6 +119,11 @@ export function provideCapsules(options: UseCapsulesOptions): CapsuleContext {
     }
   }
 
+  async function create(input: CapsuleBranchCreateClientInput) {
+    await options.client.branch.create.mutate(input)
+    await refresh()
+  }
+
   async function start(name: string) {
     await runLifecycleMutation(name, 'starting', 'online', () => options.client.branch.start.mutate({ name }))
   }
@@ -127,10 +132,10 @@ export function provideCapsules(options: UseCapsulesOptions): CapsuleContext {
     await runLifecycleMutation(name, 'stopping', 'offline', () => options.client.branch.stop.mutate({ name }))
   }
 
-  async function remove(name: string) {
+  async function remove(input: CapsuleBranchDeleteClientInput) {
     try {
-      await options.client.branch.delete.mutate({ name })
-      options.branches.value = options.branches.value.filter(branch => branch.name !== name)
+      await options.client.branch.delete.mutate(input)
+      options.branches.value = options.branches.value.filter(branch => branch.name !== input.name)
     } catch (err: unknown) {
       await refreshSafely()
       throw err

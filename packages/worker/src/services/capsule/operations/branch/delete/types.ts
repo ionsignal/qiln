@@ -1,5 +1,11 @@
 import type { CapsuleBranchResourceCleanupPolicy, CapsuleBranchResourceStatus, CapsuleBranchResourceType } from '@qiln/core/server'
 
+export interface BranchDeleteSagaInput {
+  ownerId: string
+  name: string
+  idempotencyKey: string
+}
+
 export interface BranchDeleteResourceRow {
   id: string
   resourceType: CapsuleBranchResourceType
@@ -20,10 +26,12 @@ export interface BranchDeleteVolumeTarget {
   volumeName: string
 }
 
-export interface BranchDeleteCleanupPlan {
+export interface BranchDeletePlan {
   instance: BranchDeleteInstanceTarget | null
   volumes: BranchDeleteVolumeTarget[]
   provisioningFileResourceIds: string[]
   retainedResourceIds: string[]
   externalResourceIds: string[]
 }
+
+export type BranchDeletePlanSelection = { mode: 'inventory'; plan: BranchDeletePlan } | { mode: 'live_discovery' }

@@ -4,6 +4,7 @@ import {
   TargetType,
   type CapsuleBlueprintDigest,
   type CapsuleBranchCreateOutput,
+  type CapsuleBranchDeleteOutput,
   type CapsuleBranchStatus,
   type CapsuleChannel,
   type CapsuleCommandAck,
@@ -49,8 +50,8 @@ interface CapsuleBranchRow {
 /**
  * Public-engine capsule branch service.
  *
- * Branch creation is now operation-oriented: callers provide an idempotency key and reviewed blueprint
- * digest, and the worker returns a durable operation receipt instead of a bare acknowledgement.
+ * Branch mutations are operation-oriented: callers provide idempotency keys and the worker
+ * returns durable operation receipts for retry-safe mutation requests.
  */
 export class CapsuleBranchService {
   constructor(
@@ -99,10 +100,11 @@ export class CapsuleBranchService {
     })
   }
 
-  public async delete(ownerId: string, name: string): Promise<CapsuleCommandAck> {
+  public async delete(ownerId: string, name: string, idempotencyKey: string): Promise<CapsuleBranchDeleteOutput> {
     return await this.channel.command(CapsuleBranchCommandName.BRANCH_DELETE, {
       target: this.ownerTarget(ownerId),
       name,
+      idempotencyKey,
     })
   }
 

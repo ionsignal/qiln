@@ -1,7 +1,7 @@
 {
   "version": "8",
   "dialect": "postgres",
-  "id": "b233c3f9-1c66-475c-977d-832d9e9520ac",
+  "id": "6f48b503-0a23-4cc5-9ada-50d964fa1c63",
   "prevIds": [
     "00000000-0000-0000-0000-000000000000"
   ],
@@ -32,7 +32,8 @@
     },
     {
       "values": [
-        "create"
+        "create",
+        "delete"
       ],
       "name": "capsule_branch_operation_type",
       "entityType": "enums",
@@ -84,6 +85,7 @@
         "starting",
         "online",
         "stopping",
+        "deleting",
         "archived",
         "error",
         "cleanup_required"
@@ -443,7 +445,7 @@
     {
       "type": "text",
       "typeSchema": null,
-      "notNull": true,
+      "notNull": false,
       "dimensions": 0,
       "default": null,
       "generated": null,
@@ -456,7 +458,7 @@
     {
       "type": "text",
       "typeSchema": null,
-      "notNull": true,
+      "notNull": false,
       "dimensions": 0,
       "default": null,
       "generated": null,
@@ -469,7 +471,7 @@
     {
       "type": "jsonb",
       "typeSchema": null,
-      "notNull": true,
+      "notNull": false,
       "dimensions": 0,
       "default": null,
       "generated": null,

@@ -1,11 +1,13 @@
 import { and, asc, eq, inArray } from 'drizzle-orm'
 import {
   CapsuleBranchCreateOutputSchema,
+  CapsuleBranchDeleteOutputSchema,
   CapsuleBranchOperationStatus,
   CapsuleBranchOperationType,
   capsuleBranchesTable,
   capsuleBranchOperationsTable,
   type CapsuleBranchCreateOutput,
+  type CapsuleBranchDeleteOutput,
   type CapsuleBranchOperationStatus as CapsuleBranchOperationStatusValue,
   type CapsuleBranchStatus,
   type CapsuleHostDbContract,
@@ -13,9 +15,24 @@ import {
 import { IncusError, isUniqueConstraintViolation } from '../../../errors'
 import { createFailureDetails, failureCodeFromUnknown, failureMessageFromUnknown } from './errorDetails'
 import { toJsonObject } from './jsonPersistence'
-import type { AbandonedBranchCreateOperationCandidate, AcceptedBranchCreateOperation, AcceptBranchCreateOperationInput } from './types'
+import type {
+  AbandonedBranchCreateOperationCandidate,
+  AbandonedBranchDeleteOperationCandidate,
+  AcceptedBranchCreateOperation,
+  AcceptedBranchDeleteOperation,
+  AcceptBranchCreateOperationInput,
+  AcceptBranchDeleteOperationInput,
+} from './types'
 
 const NON_TERMINAL_BRANCH_OPERATION_STATUSES = [CapsuleBranchOperationStatus.ACCEPTED, CapsuleBranchOperationStatus.RUNNING] as const
+
+const DELETE_BLOCKED_BRANCH_STATUSES: ReadonlySet<CapsuleBranchStatus> = new Set([
+  'provisioning',
+  'recovering',
+  'starting',
+  'stopping',
+  'deleting',
+])
 
 /**
  * Persistence boundary for durable capsule branch operations.
@@ -31,21 +48,16 @@ export class CapsuleBranchOperationStore {
     idempotencyKey: string,
     requestHash: string,
   ): Promise<CapsuleBranchCreateOutput | null> {
-    const operation = await this.db.query.capsuleBranchOperations.findFirst({
-      where: {
-        ownerId,
-        idempotencyKey,
-        type: CapsuleBranchOperationType.CREATE,
-      },
-      columns: {
-        id: true,
-        status: true,
-        requestHash: true,
-        branchName: true,
-      },
-    })
+    const operation = await this.findOperationByOwnerIdempotencyKey(ownerId, idempotencyKey)
     if (!operation) {
       return null
+    }
+    if (operation.type !== CapsuleBranchOperationType.CREATE) {
+      throw new IncusError('Idempotency key was already used with a different capsule branch operation type.', 'CONFLICT', {
+        idempotencyKey,
+        existingOperationType: operation.type,
+        requestedOperationType: CapsuleBranchOperationType.CREATE,
+      })
     }
     if (operation.requestHash !== requestHash) {
       throw new IncusError('Idempotency key was already used with different capsule branch create input.', 'CONFLICT', {
@@ -68,6 +80,39 @@ export class CapsuleBranchOperationStore {
       branch?.status ?? this.fallbackBranchStatusForOperation(operation.status),
       true,
     )
+  }
+
+  public async findExistingBranchDeleteOperationReceipt(
+    ownerId: string,
+    idempotencyKey: string,
+    requestHash: string,
+  ): Promise<CapsuleBranchDeleteOutput | null> {
+    const operation = await this.findOperationByOwnerIdempotencyKey(ownerId, idempotencyKey)
+    if (!operation) {
+      return null
+    }
+    if (operation.type !== CapsuleBranchOperationType.DELETE) {
+      throw new IncusError('Idempotency key was already used with a different capsule branch operation type.', 'CONFLICT', {
+        idempotencyKey,
+        existingOperationType: operation.type,
+        requestedOperationType: CapsuleBranchOperationType.DELETE,
+      })
+    }
+    if (operation.requestHash !== requestHash) {
+      throw new IncusError('Idempotency key was already used with different capsule branch delete input.', 'CONFLICT', {
+        idempotencyKey,
+      })
+    }
+    const branch = await this.db.query.capsuleBranches.findFirst({
+      where: {
+        ownerId,
+        name: operation.branchName,
+      },
+      columns: {
+        id: true,
+      },
+    })
+    return this.createBranchDeleteOutput(operation.id, operation.status, operation.branchName, !branch, true)
   }
 
   public async acceptBranchCreateOperation(input: AcceptBranchCreateOperationInput): Promise<AcceptedBranchCreateOperation> {
@@ -162,6 +207,99 @@ export class CapsuleBranchOperationStore {
     }
   }
 
+  public async acceptBranchDeleteOperation(input: AcceptBranchDeleteOperationInput): Promise<AcceptedBranchDeleteOperation> {
+    try {
+      const now = new Date()
+      return await this.db.transaction(async tx => {
+        const [operation] = await tx
+          .insert(capsuleBranchOperationsTable)
+          .values({
+            ownerId: input.ownerId,
+            type: CapsuleBranchOperationType.DELETE,
+            status: CapsuleBranchOperationStatus.ACCEPTED,
+            idempotencyKey: input.idempotencyKey,
+            requestHash: input.requestHash,
+            branchName: input.name,
+            createdAt: now,
+            updatedAt: now,
+          })
+          .returning({
+            id: capsuleBranchOperationsTable.id,
+          })
+
+        if (!operation) {
+          throw new IncusError('Failed to create durable capsule branch delete operation.', 'API_ERROR')
+        }
+        const [branch] = await tx
+          .select({
+            id: capsuleBranchesTable.id,
+            status: capsuleBranchesTable.status,
+          })
+          .from(capsuleBranchesTable)
+          .where(and(eq(capsuleBranchesTable.ownerId, input.ownerId), eq(capsuleBranchesTable.name, input.name)))
+          .limit(1)
+
+        if (!branch) {
+          throw new IncusError('Capsule branch not found or access denied.', 'NOT_FOUND')
+        }
+        if (DELETE_BLOCKED_BRANCH_STATUSES.has(branch.status)) {
+          throw new IncusError('Capsule branch cannot be deleted while another lifecycle transition is in progress.', 'CONFLICT', {
+            branchName: input.name,
+            status: branch.status,
+          })
+        }
+        const [transitionedBranch] = await tx
+          .update(capsuleBranchesTable)
+          .set({
+            status: 'deleting',
+            updatedAt: now,
+          })
+          .where(and(eq(capsuleBranchesTable.id, branch.id), eq(capsuleBranchesTable.status, branch.status)))
+          .returning({
+            id: capsuleBranchesTable.id,
+          })
+        if (!transitionedBranch) {
+          throw new IncusError('Capsule branch delete conflicted with a concurrent lifecycle transition.', 'CONFLICT', {
+            branchName: input.name,
+          })
+        }
+        const [runningOperation] = await tx
+          .update(capsuleBranchOperationsTable)
+          .set({
+            branchId: branch.id,
+            status: CapsuleBranchOperationStatus.RUNNING,
+            startedAt: now,
+            updatedAt: now,
+          })
+          .where(eq(capsuleBranchOperationsTable.id, operation.id))
+          .returning({
+            id: capsuleBranchOperationsTable.id,
+          })
+
+        if (!runningOperation) {
+          throw new IncusError('Failed to mark capsule branch delete operation as running.', 'API_ERROR')
+        }
+        return {
+          operationId: runningOperation.id,
+          branchId: branch.id,
+        }
+      })
+    } catch (error: unknown) {
+      if (!isUniqueConstraintViolation(error)) {
+        throw error
+      }
+      const replayedReceipt = await this.findExistingBranchDeleteOperationReceipt(input.ownerId, input.idempotencyKey, input.requestHash)
+      if (replayedReceipt) {
+        return {
+          operationId: replayedReceipt.operationId,
+          branchId: '',
+          replayedReceipt,
+        }
+      }
+      throw new IncusError('Capsule branch delete operation conflicts with an existing durable operation.', 'CONFLICT')
+    }
+  }
+
   /**
    * Finds inline branch-create operations that were left non-terminal by a worker crash or shutdown.
    * Startup marks them cleanup_required so operators can inspect and clean up uncertain resources.
@@ -181,6 +319,31 @@ export class CapsuleBranchOperationStore {
       .where(
         and(
           eq(capsuleBranchOperationsTable.type, CapsuleBranchOperationType.CREATE),
+          inArray(capsuleBranchOperationsTable.status, NON_TERMINAL_BRANCH_OPERATION_STATUSES),
+        ),
+      )
+      .orderBy(asc(capsuleBranchOperationsTable.createdAt))
+  }
+
+  /**
+   * Finds inline branch-delete operations that were left non-terminal by a worker crash or shutdown.
+   * Startup marks them cleanup_required. It does not replay destructive delete steps.
+   */
+  public async listAbandonedBranchDeleteOperationCandidates(): Promise<AbandonedBranchDeleteOperationCandidate[]> {
+    return await this.db
+      .select({
+        id: capsuleBranchOperationsTable.id,
+        ownerId: capsuleBranchOperationsTable.ownerId,
+        branchId: capsuleBranchOperationsTable.branchId,
+        branchName: capsuleBranchOperationsTable.branchName,
+        status: capsuleBranchOperationsTable.status,
+        createdAt: capsuleBranchOperationsTable.createdAt,
+        updatedAt: capsuleBranchOperationsTable.updatedAt,
+      })
+      .from(capsuleBranchOperationsTable)
+      .where(
+        and(
+          eq(capsuleBranchOperationsTable.type, CapsuleBranchOperationType.DELETE),
           inArray(capsuleBranchOperationsTable.status, NON_TERMINAL_BRANCH_OPERATION_STATUSES),
         ),
       )
@@ -271,6 +434,40 @@ export class CapsuleBranchOperationStore {
       branchName,
       branchStatus,
       replayed,
+    })
+  }
+
+  public createBranchDeleteOutput(
+    operationId: string,
+    operationStatus: CapsuleBranchOperationStatusValue,
+    branchName: string,
+    branchDeleted: boolean,
+    replayed: boolean,
+  ): CapsuleBranchDeleteOutput {
+    return CapsuleBranchDeleteOutputSchema.parse({
+      ok: true,
+      operationId,
+      operationType: CapsuleBranchOperationType.DELETE,
+      operationStatus,
+      branchName,
+      branchDeleted,
+      replayed,
+    })
+  }
+
+  private async findOperationByOwnerIdempotencyKey(ownerId: string, idempotencyKey: string) {
+    return await this.db.query.capsuleBranchOperations.findFirst({
+      where: {
+        ownerId,
+        idempotencyKey,
+      },
+      columns: {
+        id: true,
+        type: true,
+        status: true,
+        requestHash: true,
+        branchName: true,
+      },
     })
   }
 

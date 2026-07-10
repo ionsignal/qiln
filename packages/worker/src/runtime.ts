@@ -117,10 +117,10 @@ export class QilnWorkerRuntime {
 
       /**
        * Fail closed before accepting new commands. In the MVP there is no lease
-       * or operation runner; a non-terminal inline create operation from a prior
+       * or operation runner; a non-terminal inline branch operation from a prior
        * worker process is uncertain and must not be resumed automatically.
        */
-      await this.capsule.markAbandonedBranchCreateOperationsCleanupRequired()
+      await this.capsule.markAbandonedBranchOperationsCleanupRequired()
 
       registerCapsuleChannelHandlers(this)
 

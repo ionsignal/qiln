@@ -3,6 +3,7 @@ import { TRPCError } from '@trpc/server'
 import {
   CapsuleBlueprintDigestSchema,
   CapsuleBranchCreateOutputSchema,
+  CapsuleBranchDeleteOutputSchema,
   CapsuleBranchNameSchema,
   CapsuleBranchStatusSchema,
   CapsuleCommandAckSchema,
@@ -118,13 +119,14 @@ export const capsuleBranchRouter = router({
       z
         .object({
           name: CapsuleBranchNameSchema,
+          idempotencyKey: CapsuleBranchIdempotencyKeySchema,
         })
         .strict(),
     )
-    .output(CapsuleCommandAckSchema)
+    .output(CapsuleBranchDeleteOutputSchema)
     .mutation(async ({ ctx, input }) => {
       try {
-        return await ctx.engine.capsule.delete(ctx.user.id, input.name)
+        return await ctx.engine.capsule.delete(ctx.user.id, input.name, input.idempotencyKey)
       } catch (error: unknown) {
         handleEngineError(error)
       }

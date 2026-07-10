@@ -25,14 +25,12 @@ function createNullableBranchIdColumn(branchIdColumn?: PgColumn) {
 /**
  * Durable branch mutation operation table.
  *
- * This is intentionally branch-scoped. Snapshot, route alias promotion, rollback,
- * and future capsule-level mutations will get their own explicit durable models
- * instead of being hidden behind a generic operation table too early.
+ * Branch create and delete both use this fail-closed ledger. Create-specific blueprint columns are
+ * nullable because delete operations should not fabricate blueprint data.
  */
 export function createCapsuleBranchOperationsTable(ownerIdColumn?: PgColumn, branchIdColumn?: PgColumn) {
   const ownerId = createOwnerIdColumn(ownerIdColumn)
   const branchId = createNullableBranchIdColumn(branchIdColumn)
-
   return pgTable(
     'capsule_branch_operations',
     {
@@ -46,9 +44,9 @@ export function createCapsuleBranchOperationsTable(ownerIdColumn?: PgColumn, bra
       idempotencyKey: uuid('idempotency_key').notNull(),
       requestHash: text('request_hash').notNull(),
       branchName: text('branch_name').notNull(),
-      blueprintName: text('blueprint_name').notNull(),
-      blueprintDigest: text('blueprint_digest').notNull(),
-      blueprintSnapshot: jsonb('blueprint_snapshot').$type<CapsuleBlueprint>().notNull(),
+      blueprintName: text('blueprint_name'),
+      blueprintDigest: text('blueprint_digest'),
+      blueprintSnapshot: jsonb('blueprint_snapshot').$type<CapsuleBlueprint>(),
       startedAt: timestamp('started_at', { withTimezone: true, mode: 'date' }),
       completedAt: timestamp('completed_at', { withTimezone: true, mode: 'date' }),
       failedAt: timestamp('failed_at', { withTimezone: true, mode: 'date' }),

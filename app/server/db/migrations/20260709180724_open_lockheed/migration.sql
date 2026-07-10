@@ -1,10 +1,10 @@
 CREATE TYPE "capsule_branch_operation_status" AS ENUM('accepted', 'running', 'completed', 'failed', 'cleanup_required');--> statement-breakpoint
 CREATE TYPE "capsule_branch_operation_step_status" AS ENUM('pending', 'running', 'completed', 'failed', 'skipped');--> statement-breakpoint
-CREATE TYPE "capsule_branch_operation_type" AS ENUM('create');--> statement-breakpoint
+CREATE TYPE "capsule_branch_operation_type" AS ENUM('create', 'delete');--> statement-breakpoint
 CREATE TYPE "capsule_branch_resource_cleanup_policy" AS ENUM('delete_with_branch', 'retain', 'external');--> statement-breakpoint
 CREATE TYPE "capsule_branch_resource_status" AS ENUM('planned', 'creating', 'created', 'deleting', 'deleted', 'adopted', 'missing', 'orphaned', 'error');--> statement-breakpoint
 CREATE TYPE "capsule_branch_resource_type" AS ENUM('incus_project', 'incus_instance', 'zfs_volume', 'bind_mount', 'provisioning_file');--> statement-breakpoint
-CREATE TYPE "capsule_branch_status" AS ENUM('provisioning', 'recovering', 'offline', 'starting', 'online', 'stopping', 'archived', 'error', 'cleanup_required');--> statement-breakpoint
+CREATE TYPE "capsule_branch_status" AS ENUM('provisioning', 'recovering', 'offline', 'starting', 'online', 'stopping', 'deleting', 'archived', 'error', 'cleanup_required');--> statement-breakpoint
 CREATE TABLE "capsule_branch_operation_steps" (
 	"id" uuid PRIMARY KEY DEFAULT uuidv7(),
 	"operation_id" uuid NOT NULL,
@@ -33,9 +33,9 @@ CREATE TABLE "capsule_branch_operations" (
 	"idempotency_key" uuid NOT NULL,
 	"request_hash" text NOT NULL,
 	"branch_name" text NOT NULL,
-	"blueprint_name" text NOT NULL,
-	"blueprint_digest" text NOT NULL,
-	"blueprint_snapshot" jsonb NOT NULL,
+	"blueprint_name" text,
+	"blueprint_digest" text,
+	"blueprint_snapshot" jsonb,
 	"started_at" timestamp with time zone,
 	"completed_at" timestamp with time zone,
 	"failed_at" timestamp with time zone,

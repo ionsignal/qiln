@@ -3,11 +3,12 @@ import { CapsuleBlueprintDigestSchema } from '../blueprints'
 
 export const CapsuleBranchOperationType = {
   CREATE: 'create',
+  DELETE: 'delete',
 } as const
 
 export type CapsuleBranchOperationType = (typeof CapsuleBranchOperationType)[keyof typeof CapsuleBranchOperationType]
 
-export const CapsuleBranchOperationTypeValues = [CapsuleBranchOperationType.CREATE] as const
+export const CapsuleBranchOperationTypeValues = [CapsuleBranchOperationType.CREATE, CapsuleBranchOperationType.DELETE] as const
 export const CapsuleBranchOperationTypeSchema = z.enum(CapsuleBranchOperationTypeValues)
 
 export const CapsuleBranchOperationStatus = {

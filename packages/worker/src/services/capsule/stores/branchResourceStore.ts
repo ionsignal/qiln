@@ -103,18 +103,16 @@ export class CapsuleBranchResourceStore {
     status: CapsuleBranchResourceStatusValue,
     metadata?: Record<string, unknown>,
   ): Promise<void> {
-    const updateData: {
-      status: CapsuleBranchResourceStatusValue
-      metadata?: Record<string, unknown>
-      updatedAt: Date
-    } = {
-      status,
-      updatedAt: new Date(),
-    }
-    if (metadata !== undefined) {
-      updateData.metadata = toJsonObject(metadata, 'capsule branch resource metadata')
-    }
-    await this.db.update(capsuleBranchResourcesTable).set(updateData).where(eq(capsuleBranchResourcesTable.id, resourceId))
+    await this.transitionBranchResourceStatusInternal(resourceId, status, metadata)
+  }
+
+  public async transitionBranchResourceStatusForOperation(
+    resourceId: string,
+    operationId: string,
+    status: CapsuleBranchResourceStatusValue,
+    metadata?: Record<string, unknown>,
+  ): Promise<void> {
+    await this.transitionBranchResourceStatusInternal(resourceId, status, metadata, operationId)
   }
 
   public async markBranchResourceDeleting(resourceId: string): Promise<void> {
@@ -130,17 +128,16 @@ export class CapsuleBranchResourceStore {
   }
 
   public async markBranchResourceError(resourceId: string, error: unknown, context?: Record<string, unknown>): Promise<void> {
-    const details = createFailureDetails(error, context)
-    await this.db
-      .update(capsuleBranchResourcesTable)
-      .set({
-        status: 'error',
-        updatedAt: new Date(),
-        failureCode: failureCodeFromUnknown(error),
-        failureMessage: failureMessageFromUnknown(error, 'Unknown capsule branch resource failure.'),
-        failureDetails: details === undefined ? undefined : toJsonObject(details, 'capsule branch resource failure details'),
-      })
-      .where(eq(capsuleBranchResourcesTable.id, resourceId))
+    await this.markBranchResourceErrorInternal(resourceId, error, context)
+  }
+
+  public async markBranchResourceErrorForOperation(
+    resourceId: string,
+    operationId: string,
+    error: unknown,
+    context?: Record<string, unknown>,
+  ): Promise<void> {
+    await this.markBranchResourceErrorInternal(resourceId, error, context, operationId)
   }
 
   public async listBranchResources(ownerId: string, branchName: string) {
@@ -191,6 +188,65 @@ export class CapsuleBranchResourceStore {
         lastOperationId: operationId,
         updatedAt: new Date(),
       })
-      .where(and(eq(capsuleBranchResourcesTable.id, resourceId), eq(capsuleBranchResourcesTable.lastOperationId, operationId)))
+      .where(eq(capsuleBranchResourcesTable.id, resourceId))
+  }
+
+  private async transitionBranchResourceStatusInternal(
+    resourceId: string,
+    status: CapsuleBranchResourceStatusValue,
+    metadata?: Record<string, unknown>,
+    operationId?: string,
+  ): Promise<void> {
+    const updateData: {
+      status: CapsuleBranchResourceStatusValue
+      metadata?: Record<string, unknown>
+      lastOperationId?: string
+      updatedAt: Date
+    } = {
+      status,
+      updatedAt: new Date(),
+    }
+
+    if (metadata !== undefined) {
+      updateData.metadata = toJsonObject(metadata, 'capsule branch resource metadata')
+    }
+
+    if (operationId !== undefined) {
+      updateData.lastOperationId = operationId
+    }
+
+    await this.db.update(capsuleBranchResourcesTable).set(updateData).where(eq(capsuleBranchResourcesTable.id, resourceId))
+  }
+
+  private async markBranchResourceErrorInternal(
+    resourceId: string,
+    error: unknown,
+    context?: Record<string, unknown>,
+    operationId?: string,
+  ): Promise<void> {
+    const details = createFailureDetails(error, context)
+    const updateData: {
+      status: typeof CapsuleBranchResourceStatus.ERROR
+      updatedAt: Date
+      failureCode: string
+      failureMessage: string
+      failureDetails?: Record<string, unknown>
+      lastOperationId?: string
+    } = {
+      status: CapsuleBranchResourceStatus.ERROR,
+      updatedAt: new Date(),
+      failureCode: failureCodeFromUnknown(error),
+      failureMessage: failureMessageFromUnknown(error, 'Unknown capsule branch resource failure.'),
+    }
+    if (details !== undefined) {
+      updateData.failureDetails = toJsonObject(details, 'capsule branch resource failure details')
+    }
+    if (operationId !== undefined) {
+      updateData.lastOperationId = operationId
+    }
+    await this.db
+      .update(capsuleBranchResourcesTable)
+      .set(updateData)
+      .where(and(eq(capsuleBranchResourcesTable.id, resourceId)))
   }
 }

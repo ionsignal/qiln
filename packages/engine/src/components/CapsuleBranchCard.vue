@@ -111,7 +111,8 @@
 
   async function handleDelete() {
     try {
-      await removeBranch(props.branch.name)
+      await removeBranch({ name: props.branch.name, idempotencyKey: '' })
+      throw Error('we need to fix idempotencyKey to support delete')
       message.success('Capsule branch deleted')
     } catch (err: unknown) {
       message.error(isTRPCClientError(err) ? err.message : 'Failed to delete capsule branch')

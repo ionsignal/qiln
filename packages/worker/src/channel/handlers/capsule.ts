@@ -44,7 +44,7 @@ export function registerCapsuleBranchHandlers(worker: QilnWorkerRuntime): void {
   worker.channel.handle(
     CapsuleBranchCommandName.BRANCH_DELETE,
     async input => {
-      return await worker.capsule.delete(input.target.id, input.name)
+      return await worker.capsule.delete(input.target.id, input.name, input.idempotencyKey)
     },
     handlerOptions,
   )

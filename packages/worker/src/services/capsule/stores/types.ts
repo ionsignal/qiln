@@ -2,6 +2,7 @@ import type {
   CapsuleBlueprint,
   CapsuleBlueprintDigest,
   CapsuleBranchCreateOutput,
+  CapsuleBranchDeleteOutput,
   CapsuleBranchOperationStatus,
   CapsuleBranchOperationStepStatus,
   CapsuleBranchResourceCleanupPolicy,
@@ -34,7 +35,30 @@ export interface AcceptedBranchCreateOperation {
   replayedReceipt?: CapsuleBranchCreateOutput
 }
 
+export interface AcceptBranchDeleteOperationInput {
+  ownerId: string
+  name: string
+  idempotencyKey: string
+  requestHash: string
+}
+
+export interface AcceptedBranchDeleteOperation {
+  operationId: string
+  branchId: string
+  replayedReceipt?: CapsuleBranchDeleteOutput
+}
+
 export interface AbandonedBranchCreateOperationCandidate {
+  id: string
+  ownerId: string
+  branchId: string | null
+  branchName: string
+  status: CapsuleBranchOperationStatus
+  createdAt: Date
+  updatedAt: Date
+}
+
+export interface AbandonedBranchDeleteOperationCandidate {
   id: string
   ownerId: string
   branchId: string | null
