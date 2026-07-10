@@ -7,8 +7,8 @@ import {
   type CapsuleBlueprintRegistry,
   type CapsuleBranchCreateOutput,
   type CapsuleBranchOperationRequestHash,
-  type CapsuleBranchOperationStatus as CapsuleBranchOperationStatusValue,
-  type CapsuleBranchResourceStatus as CapsuleBranchResourceStatusValue,
+  type CapsuleBranchOperationStatusValue,
+  type CapsuleBranchResourceStatusValue,
 } from '@qiln/core/server'
 import { IncusError } from '../../../../../errors'
 import { InlineOperationStepExecutor } from '../../inlineStepExecutor'
@@ -20,6 +20,7 @@ import {
   type CapsuleCompensationResult,
 } from '../../errors'
 import { CapsuleBranchCreateStepKey } from './steps'
+import { createCapsuleBranchResourceInventoryDigest, type CapsuleBranchResourceInventoryEntry } from '../../../resources/inventory'
 import type { CapsuleBranchEventPublisher } from '../../../branch/events'
 import type {
   BranchResourceInput,
@@ -30,11 +31,11 @@ import type {
 } from '../../../stores'
 import type { CapsuleResourceDriver } from '../../../resources/driver'
 import type { CapsuleBranchCreatePlanner } from './planner'
-import type { CapsuleBranchCreateSagaInput, PlannedBranchResource, PlannedVolumeResource } from './types'
+import type { CapsuleBranchCreateResourcePlan, CapsuleBranchCreateOperationInput, PlannedBranchResource, PlannedVolumeResource } from './types'
 
 export type ResolveCapsuleOwnerNamespace = (ownerId: string) => string
 
-export interface CapsuleBranchCreateSagaStores {
+export interface CapsuleBranchCreateOperationStores {
   branches: CapsuleBranchStore
   operations: CapsuleBranchOperationStore
   steps: CapsuleBranchOperationStepStore
@@ -56,6 +57,16 @@ interface BranchCreateCompensationTask {
   run: () => Promise<void>
 }
 
+function createExpectedBranchResourceInventoryEntries(plan: CapsuleBranchCreateResourcePlan): CapsuleBranchResourceInventoryEntry[] {
+  return [plan.project, ...plan.bindMounts, ...plan.volumes, plan.instance, ...plan.files].map(resource => ({
+    provider: 'incus',
+    resourceType: resource.resourceType,
+    resourceKey: resource.resourceKey,
+    cleanupPolicy: resource.cleanupPolicy,
+    metadata: resource.metadata,
+  }))
+}
+
 function createBranchCreateRequestHash(input: BranchCreateRequestHashInput): CapsuleBranchOperationRequestHash {
   const digest = digestCanonicalJsonValue(input, {
     context: 'capsule branch create request',
@@ -63,11 +74,11 @@ function createBranchCreateRequestHash(input: BranchCreateRequestHashInput): Cap
   return CapsuleBranchOperationRequestHashSchema.parse(digest)
 }
 
-export class CapsuleBranchCreateSaga {
+export class CapsuleBranchProvisioningOperation {
   private readonly stepExecutor: InlineOperationStepExecutor
 
   constructor(
-    private readonly stores: CapsuleBranchCreateSagaStores,
+    private readonly stores: CapsuleBranchCreateOperationStores,
     private readonly planner: CapsuleBranchCreatePlanner,
     private readonly driver: CapsuleResourceDriver,
     private readonly events: CapsuleBranchEventPublisher,
@@ -77,7 +88,7 @@ export class CapsuleBranchCreateSaga {
     this.stepExecutor = new InlineOperationStepExecutor(this.stores.steps)
   }
 
-  public async execute(input: CapsuleBranchCreateSagaInput): Promise<CapsuleBranchCreateOutput> {
+  public async execute(input: CapsuleBranchCreateOperationInput): Promise<CapsuleBranchCreateOutput> {
     const requestHash = createBranchCreateRequestHash({
       name: input.name,
       blueprintName: input.blueprintName,
@@ -160,6 +171,20 @@ export class CapsuleBranchCreateSaga {
             memory: input.memory,
             blueprint: pin.blueprint,
           }),
+      )
+      const expectedInventoryEntries = createExpectedBranchResourceInventoryEntries(plan)
+      await runStep(
+        CapsuleBranchCreateStepKey.RECORD_RESOURCE_INVENTORY,
+        {
+          resourceCount: expectedInventoryEntries.length,
+        },
+        async () => {
+          const resourceInventoryDigest = createCapsuleBranchResourceInventoryDigest(
+            expectedInventoryEntries,
+            'capsule branch planned resource inventory',
+          )
+          await this.stores.branches.recordBranchResourceInventoryDigest(input.ownerId, input.name, resourceInventoryDigest)
+        },
       )
       await runStep(
         CapsuleBranchCreateStepKey.ENSURE_NAMESPACE,

@@ -8,7 +8,7 @@ import {
   capsuleBranchOperationsTable,
   type CapsuleBranchCreateOutput,
   type CapsuleBranchDeleteOutput,
-  type CapsuleBranchOperationStatus as CapsuleBranchOperationStatusValue,
+  type CapsuleBranchOperationStatusValue,
   type CapsuleBranchStatus,
   type CapsuleHostDbContract,
 } from '@qiln/core/server'
@@ -226,7 +226,6 @@ export class CapsuleBranchOperationStore {
           .returning({
             id: capsuleBranchOperationsTable.id,
           })
-
         if (!operation) {
           throw new IncusError('Failed to create durable capsule branch delete operation.', 'API_ERROR')
         }
@@ -234,11 +233,11 @@ export class CapsuleBranchOperationStore {
           .select({
             id: capsuleBranchesTable.id,
             status: capsuleBranchesTable.status,
+            resourceInventoryDigest: capsuleBranchesTable.resourceInventoryDigest,
           })
           .from(capsuleBranchesTable)
           .where(and(eq(capsuleBranchesTable.ownerId, input.ownerId), eq(capsuleBranchesTable.name, input.name)))
           .limit(1)
-
         if (!branch) {
           throw new IncusError('Capsule branch not found or access denied.', 'NOT_FOUND')
         }
@@ -275,13 +274,13 @@ export class CapsuleBranchOperationStore {
           .returning({
             id: capsuleBranchOperationsTable.id,
           })
-
         if (!runningOperation) {
           throw new IncusError('Failed to mark capsule branch delete operation as running.', 'API_ERROR')
         }
         return {
           operationId: runningOperation.id,
           branchId: branch.id,
+          resourceInventoryDigest: branch.resourceInventoryDigest,
         }
       })
     } catch (error: unknown) {
@@ -293,6 +292,7 @@ export class CapsuleBranchOperationStore {
         return {
           operationId: replayedReceipt.operationId,
           branchId: '',
+          resourceInventoryDigest: null,
           replayedReceipt,
         }
       }

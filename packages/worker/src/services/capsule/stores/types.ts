@@ -3,11 +3,12 @@ import type {
   CapsuleBlueprintDigest,
   CapsuleBranchCreateOutput,
   CapsuleBranchDeleteOutput,
-  CapsuleBranchOperationStatus,
-  CapsuleBranchOperationStepStatus,
-  CapsuleBranchResourceCleanupPolicy,
-  CapsuleBranchResourceStatus,
-  CapsuleBranchResourceType,
+  CapsuleBranchOperationStatusValue,
+  CapsuleBranchOperationStepStatusValue,
+  CapsuleBranchResourceCleanupPolicyValue,
+  CapsuleBranchResourceInventoryDigest,
+  CapsuleBranchResourceStatusValue,
+  CapsuleBranchResourceTypeValue,
   CapsuleBranchStatus,
 } from '@qiln/core/server'
 
@@ -45,6 +46,7 @@ export interface AcceptBranchDeleteOperationInput {
 export interface AcceptedBranchDeleteOperation {
   operationId: string
   branchId: string
+  resourceInventoryDigest: CapsuleBranchResourceInventoryDigest | null
   replayedReceipt?: CapsuleBranchDeleteOutput
 }
 
@@ -53,7 +55,7 @@ export interface AbandonedBranchCreateOperationCandidate {
   ownerId: string
   branchId: string | null
   branchName: string
-  status: CapsuleBranchOperationStatus
+  status: CapsuleBranchOperationStatusValue
   createdAt: Date
   updatedAt: Date
 }
@@ -63,7 +65,7 @@ export interface AbandonedBranchDeleteOperationCandidate {
   ownerId: string
   branchId: string | null
   branchName: string
-  status: CapsuleBranchOperationStatus
+  status: CapsuleBranchOperationStatusValue
   createdAt: Date
   updatedAt: Date
 }
@@ -73,10 +75,10 @@ export interface BranchResourceInput {
   ownerId: string
   branchId: string
   branchName: string
-  resourceType: CapsuleBranchResourceType
+  resourceType: CapsuleBranchResourceTypeValue
   resourceKey: string
-  cleanupPolicy: CapsuleBranchResourceCleanupPolicy
-  status?: CapsuleBranchResourceStatus
+  cleanupPolicy: CapsuleBranchResourceCleanupPolicyValue
+  status?: CapsuleBranchResourceStatusValue
   metadata?: Record<string, unknown>
 }
 
@@ -86,10 +88,10 @@ export interface BranchOperationStepInput {
   branchId?: string | null
   branchName: string
   stepKey: string
-  status?: CapsuleBranchOperationStepStatus
+  status?: CapsuleBranchOperationStepStatusValue
   metadata?: Record<string, unknown>
 }
 
-export type BranchOperationStatusValue = CapsuleBranchOperationStatus
-export type BranchOperationStepStatusValue = CapsuleBranchOperationStepStatus
+export type BranchOperationStatusValue = CapsuleBranchOperationStatusValue
+export type BranchOperationStepStatusValue = CapsuleBranchOperationStepStatusValue
 export type CompensationCallback = () => Promise<void>

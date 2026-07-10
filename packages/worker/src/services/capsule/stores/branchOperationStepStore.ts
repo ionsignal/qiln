@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm'
 import {
   CapsuleBranchOperationStepStatus,
   capsuleBranchOperationStepsTable,
-  type CapsuleBranchOperationStepStatus as CapsuleBranchOperationStepStatusValue,
+  type CapsuleBranchOperationStepStatusValue,
   type CapsuleHostDbContract,
 } from '@qiln/core/server'
 import { IncusError, isUniqueConstraintViolation } from '../../../errors'

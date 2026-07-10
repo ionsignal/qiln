@@ -3,6 +3,7 @@ import { detailsFromUnknown, failureCodeFromUnknown, failureMessageFromUnknown }
 
 export const CapsuleBranchCreateFailurePhase = {
   PLAN_RESOURCES: CapsuleBranchCreateStepKey.PLAN_RESOURCES,
+  RECORD_RESOURCE_INVENTORY: CapsuleBranchCreateStepKey.RECORD_RESOURCE_INVENTORY,
   ENSURE_NAMESPACE: CapsuleBranchCreateStepKey.ENSURE_NAMESPACE,
   RECORD_BIND_MOUNTS: CapsuleBranchCreateStepKey.RECORD_BIND_MOUNTS,
   CREATE_VOLUMES: CapsuleBranchCreateStepKey.CREATE_VOLUMES,

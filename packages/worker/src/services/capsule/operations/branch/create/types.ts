@@ -1,18 +1,18 @@
 import type {
   CapsuleBlueprint,
   CapsuleBlueprintDigest,
-  CapsuleBranchResourceCleanupPolicy,
-  CapsuleBranchResourceStatus,
-  CapsuleBranchResourceType,
+  CapsuleBranchResourceCleanupPolicyValue,
+  CapsuleBranchResourceStatusValue,
+  CapsuleBranchResourceTypeValue,
 } from '@qiln/core/server'
 import type { ManagedVolume } from '../../../provisioning/fileTargets'
 import type { InstanceCreateInput, ProvisioningFileWriteInput, VolumeCreateInput } from '../../../resources/types'
 
 export interface PlannedBranchResource {
-  resourceType: CapsuleBranchResourceType
   resourceKey: string
-  cleanupPolicy: CapsuleBranchResourceCleanupPolicy
-  status?: CapsuleBranchResourceStatus
+  resourceType: CapsuleBranchResourceTypeValue
+  cleanupPolicy: CapsuleBranchResourceCleanupPolicyValue
+  status?: CapsuleBranchResourceStatusValue
   metadata?: Record<string, unknown>
 }
 
@@ -66,7 +66,7 @@ export interface CapsuleBranchCreatePlanInput {
   blueprint: CapsuleBlueprint
 }
 
-export interface CapsuleBranchCreateSagaInput {
+export interface CapsuleBranchCreateOperationInput {
   ownerId: string
   name: string
   blueprintName: string

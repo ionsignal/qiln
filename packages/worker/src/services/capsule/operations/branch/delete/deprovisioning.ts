@@ -5,13 +5,14 @@ import {
   digestCanonicalJsonValue,
   type CapsuleBranchDeleteOutput,
   type CapsuleBranchOperationRequestHash,
-  type CapsuleBranchOperationStatus as CapsuleBranchOperationStatusValue,
-  type CapsuleBranchResourceStatus as CapsuleBranchResourceStatusValue,
+  type CapsuleBranchOperationStatusValue,
+  type CapsuleBranchResourceStatusValue,
 } from '@qiln/core/server'
 import { IncusError, readIncusErrorDetailCode } from '../../../../../errors'
 import { InlineOperationStepExecutor } from '../../inlineStepExecutor'
 import { createOperationFailureContext } from '../../errors'
 import { CapsuleBranchDeleteStepKey } from './steps'
+import { assertCapsuleBranchResourceInventoryMatches, type CapsuleBranchResourceInventoryEntry } from '../../../resources/inventory'
 import type { CapsuleBranchEventPublisher } from '../../../branch/events'
 import type {
   CapsuleBranchOperationStepStore,
@@ -21,11 +22,11 @@ import type {
 } from '../../../stores'
 import type { CapsuleBranchDeletePlanner } from './planner'
 import type { IncusClient } from '../../../../../incus/client/index'
-import type { BranchDeletePlanSelection, BranchDeleteSagaInput, BranchDeleteVolumeTarget } from './types'
+import type { BranchDeletePlan, BranchDeleteResourceRow, BranchDeleteOperationInput, BranchDeleteVolumeTarget } from './types'
 
 export type ResolveCapsuleOwnerNamespace = (ownerId: string) => string
 
-export interface CapsuleBranchDeleteSagaStores {
+export interface CapsuleBranchDeleteOperationStores {
   branches: CapsuleBranchStore
   operations: CapsuleBranchOperationStore
   steps: CapsuleBranchOperationStepStore
@@ -51,19 +52,24 @@ function createBranchDeleteRequestHash(input: BranchDeleteRequestHashInput): Cap
   return CapsuleBranchOperationRequestHashSchema.parse(digest)
 }
 
+function toInventoryEntries(resources: readonly BranchDeleteResourceRow[]): CapsuleBranchResourceInventoryEntry[] {
+  return resources.map(resource => ({
+    provider: resource.provider,
+    resourceType: resource.resourceType,
+    resourceKey: resource.resourceKey,
+    cleanupPolicy: resource.cleanupPolicy,
+    metadata: resource.metadata,
+  }))
+}
+
 /**
  * Inline durable branch delete operation.
- *
- * This saga does not recover or resume interrupted deletes. If execution fails while
- * active, it marks the branch/operation cleanup_required when completion cannot be
- * proven. Startup abandonment handling separately marks interrupted operations as
- * cleanup_required without replaying these steps.
  */
-export class CapsuleBranchDeleteSaga {
+export class CapsuleBranchDeprovisioningOperation {
   private readonly stepExecutor: InlineOperationStepExecutor
 
   constructor(
-    private readonly stores: CapsuleBranchDeleteSagaStores,
+    private readonly stores: CapsuleBranchDeleteOperationStores,
     private readonly planner: CapsuleBranchDeletePlanner,
     private readonly incus: IncusClient,
     private readonly events: CapsuleBranchEventPublisher,
@@ -72,11 +78,10 @@ export class CapsuleBranchDeleteSaga {
     this.stepExecutor = new InlineOperationStepExecutor(this.stores.steps)
   }
 
-  public async execute(input: BranchDeleteSagaInput): Promise<CapsuleBranchDeleteOutput> {
+  public async execute(input: BranchDeleteOperationInput): Promise<CapsuleBranchDeleteOutput> {
     const requestHash = createBranchDeleteRequestHash({
       name: input.name,
     })
-
     const existingReceipt = await this.stores.operations.findExistingBranchDeleteOperationReceipt(
       input.ownerId,
       input.idempotencyKey,
@@ -85,7 +90,6 @@ export class CapsuleBranchDeleteSaga {
     if (existingReceipt) {
       return existingReceipt
     }
-
     const accepted = await this.stores.operations.acceptBranchDeleteOperation({
       ownerId: input.ownerId,
       name: input.name,
@@ -121,88 +125,69 @@ export class CapsuleBranchDeleteSaga {
         action,
       )
     }
-
     try {
       this.events.publishStateChanged(input.ownerId, input.name, 'deleting')
-
-      const selection = await runStep(
+      const plan = await runStep(
         CapsuleBranchDeleteStepKey.PLAN_DELETE,
         {
-          branchName: input.name,
+          branchId: accepted.branchId,
+          hasResourceInventoryDigest: accepted.resourceInventoryDigest !== null,
         },
-        async (): Promise<BranchDeletePlanSelection> => {
-          const inventory = await this.stores.resources.listBranchResourceInventory(input.ownerId, input.name)
-          if (inventory.length === 0) {
-            console.warn(
-              `[CapsuleBranchDeleteSaga] Branch '${input.name}' has no durable resource inventory. Falling back to live Incus discovery.`,
-            )
-            return {
-              mode: 'live_discovery',
-            }
+        async (): Promise<BranchDeletePlan> => {
+          if (!accepted.resourceInventoryDigest) {
+            throw new IncusError('Capsule branch has no verified durable resource inventory. Manual review is required.', 'CONFLICT', {
+              operationId: accepted.operationId,
+              branchId: accepted.branchId,
+              branchName: input.name,
+              reason: 'missing_resource_inventory_digest',
+            })
+          }
+          const resources = await this.stores.resources.listBranchResourceInventoryByBranchId(accepted.branchId)
+          assertCapsuleBranchResourceInventoryMatches(accepted.resourceInventoryDigest, toInventoryEntries(resources))
+          return this.planner.createPlan({
+            branchName: input.name,
+            namespace,
+            resources,
+          })
+        },
+      )
+      const project = this.incus.UseProject(namespace)
+      await runStep(
+        CapsuleBranchDeleteStepKey.DELETE_INSTANCE,
+        {
+          resourceId: plan.instance?.resourceId ?? null,
+          instanceName: plan.instance?.instanceName ?? null,
+        },
+        async () => {
+          if (!plan.instance) {
+            return
           }
 
-          return {
-            mode: 'inventory',
-            plan: this.planner.createPlan(inventory),
+          await this.deleteBranchInstance(project, accepted.operationId, plan.instance.resourceId, plan.instance.instanceName)
+        },
+      )
+      await runStep(
+        CapsuleBranchDeleteStepKey.DELETE_VOLUMES,
+        {
+          count: plan.volumes.length,
+        },
+        async () => {
+          for (const volume of plan.volumes) {
+            await this.deleteBranchVolume(project, accepted.operationId, volume)
           }
         },
       )
-
-      const project = this.incus.UseProject(namespace)
-
-      if (selection.mode === 'inventory') {
-        await runStep(
-          CapsuleBranchDeleteStepKey.DELETE_INSTANCE,
-          {
-            branchName: input.name,
-            resourceId: selection.plan.instance?.resourceId ?? null,
-            instanceName: selection.plan.instance?.instanceName ?? input.name,
-          },
-          async () => {
-            await this.deleteBranchInstance(
-              project,
-              accepted.operationId,
-              selection.plan.instance?.resourceId ?? null,
-              selection.plan.instance?.instanceName ?? input.name,
-            )
-          },
-        )
-
-        await runStep(
-          CapsuleBranchDeleteStepKey.DELETE_VOLUMES,
-          {
-            count: selection.plan.volumes.length,
-          },
-          async () => {
-            for (const volume of selection.plan.volumes) {
-              await this.deleteBranchVolume(project, accepted.operationId, volume)
-            }
-          },
-        )
-
-        await runStep(
-          CapsuleBranchDeleteStepKey.MARK_PROVISIONING_FILES_DELETED,
-          {
-            count: selection.plan.provisioningFileResourceIds.length,
-          },
-          async () => {
-            for (const resourceId of selection.plan.provisioningFileResourceIds) {
-              await this.transitionResourceStatusBestEffort(resourceId, accepted.operationId, CapsuleBranchResourceStatus.DELETED)
-            }
-          },
-        )
-      } else {
-        await runStep(
-          CapsuleBranchDeleteStepKey.DELETE_DISCOVERED_RESOURCES,
-          {
-            branchName: input.name,
-          },
-          async () => {
-            await this.deleteUsingLiveIncusDiscovery(project, input.name)
-          },
-        )
-      }
-
+      await runStep(
+        CapsuleBranchDeleteStepKey.MARK_PROVISIONING_FILES_DELETED,
+        {
+          count: plan.provisioningFileResourceIds.length,
+        },
+        async () => {
+          for (const resourceId of plan.provisioningFileResourceIds) {
+            await this.transitionResourceStatusBestEffort(resourceId, accepted.operationId, CapsuleBranchResourceStatus.DELETED)
+          }
+        },
+      )
       await runStep(
         CapsuleBranchDeleteStepKey.DELETE_BRANCH_RECORD,
         {
@@ -214,12 +199,9 @@ export class CapsuleBranchDeleteSaga {
           this.events.publishDeleted(input.ownerId, input.name)
         },
       )
-
       currentPhase = 'complete_operation'
       currentStepKey = null
-
       await this.stores.operations.transitionBranchOperationStatus(accepted.operationId, CapsuleBranchOperationStatus.COMPLETED)
-
       return this.stores.operations.createBranchDeleteOutput(
         accepted.operationId,
         CapsuleBranchOperationStatus.COMPLETED,
@@ -229,11 +211,9 @@ export class CapsuleBranchDeleteSaga {
       )
     } catch (error: unknown) {
       const operationStatus = branchRecordDeleted ? CapsuleBranchOperationStatus.FAILED : CapsuleBranchOperationStatus.CLEANUP_REQUIRED
-
       if (!branchRecordDeleted) {
         await this.markBranchCleanupRequiredBestEffort(input.ownerId, input.name)
       }
-
       await this.markOperationFailureBestEffort(
         accepted.operationId,
         operationStatus,
@@ -247,7 +227,6 @@ export class CapsuleBranchDeleteSaga {
           action: currentPhase === 'complete_operation' ? 'mark_operation_completed' : undefined,
         }),
       )
-
       throw error
     }
   }
@@ -255,150 +234,86 @@ export class CapsuleBranchDeleteSaga {
   private async deleteBranchInstance(
     project: ScopedIncusProject,
     operationId: string,
-    resourceId: string | null,
+    resourceId: string,
     instanceName: string,
   ): Promise<void> {
     await this.transitionResourceStatusBestEffort(resourceId, operationId, CapsuleBranchResourceStatus.DELETING)
-
     let instanceMissing = false
     try {
       await project.instances.stop(instanceName)
-    } catch (err: unknown) {
-      const detailCode = err instanceof IncusError ? readIncusErrorDetailCode(err) : undefined
-      if (err instanceof IncusError && err.code === 'NOT_FOUND') {
+    } catch (error: unknown) {
+      const detailCode = error instanceof IncusError ? readIncusErrorDetailCode(error) : undefined
+      if (error instanceof IncusError && error.code === 'NOT_FOUND') {
         instanceMissing = true
-      } else if (!(err instanceof IncusError && detailCode === 400)) {
-        await this.markResourceErrorBestEffort(resourceId, operationId, err, {
+      } else if (!(error instanceof IncusError && detailCode === 400)) {
+        await this.markResourceErrorBestEffort(resourceId, operationId, error, {
           action: 'stop_instance_before_delete',
           instanceName,
         })
-        throw err
+        throw error
       }
     }
-
     if (instanceMissing) {
       await this.transitionResourceStatusBestEffort(resourceId, operationId, CapsuleBranchResourceStatus.MISSING)
       return
     }
-
     try {
       await project.instances.delete(instanceName)
       await this.transitionResourceStatusBestEffort(resourceId, operationId, CapsuleBranchResourceStatus.DELETED)
-    } catch (err: unknown) {
-      if (err instanceof IncusError && err.code === 'NOT_FOUND') {
+    } catch (error: unknown) {
+      if (error instanceof IncusError && error.code === 'NOT_FOUND') {
         await this.transitionResourceStatusBestEffort(resourceId, operationId, CapsuleBranchResourceStatus.MISSING)
         return
       }
-
-      await this.markResourceErrorBestEffort(resourceId, operationId, err, {
+      await this.markResourceErrorBestEffort(resourceId, operationId, error, {
         action: 'delete_instance',
         instanceName,
       })
-      throw err
+      throw error
     }
   }
 
   private async deleteBranchVolume(project: ScopedIncusProject, operationId: string, volume: BranchDeleteVolumeTarget): Promise<void> {
     await this.transitionResourceStatusBestEffort(volume.resourceId, operationId, CapsuleBranchResourceStatus.DELETING)
-
     try {
       await project.storage.delete(volume.pool, volume.volumeName)
       await this.transitionResourceStatusBestEffort(volume.resourceId, operationId, CapsuleBranchResourceStatus.DELETED)
-    } catch (err: unknown) {
-      if (err instanceof IncusError && err.code === 'NOT_FOUND') {
+    } catch (error: unknown) {
+      if (error instanceof IncusError && error.code === 'NOT_FOUND') {
         await this.transitionResourceStatusBestEffort(volume.resourceId, operationId, CapsuleBranchResourceStatus.MISSING)
         return
       }
-
-      await this.markResourceErrorBestEffort(volume.resourceId, operationId, err, {
+      await this.markResourceErrorBestEffort(volume.resourceId, operationId, error, {
         action: 'delete_volume',
         pool: volume.pool,
         volumeName: volume.volumeName,
       })
-      throw err
-    }
-  }
-
-  private async deleteUsingLiveIncusDiscovery(project: ScopedIncusProject, name: string): Promise<void> {
-    const volumesToDelete: { pool: string; source: string }[] = []
-
-    try {
-      const { data } = await project.instances.get(name)
-      if (data.devices) {
-        for (const device of Object.values(data.devices)) {
-          if (device.type === 'disk' && device.path !== '/' && typeof device.source === 'string' && typeof device.pool === 'string') {
-            volumesToDelete.push({
-              pool: device.pool,
-              source: device.source,
-            })
-          }
-        }
-      }
-    } catch (err: unknown) {
-      if (err instanceof IncusError && err.code === 'NOT_FOUND') {
-        throw new IncusError('Capsule branch container is missing on the host. Marked for admin review.', 'CONFLICT')
-      }
-      throw err
-    }
-
-    try {
-      await project.instances.stop(name)
-    } catch (err: unknown) {
-      const detailCode = err instanceof IncusError ? readIncusErrorDetailCode(err) : undefined
-      if (!(err instanceof IncusError && (err.code === 'NOT_FOUND' || detailCode === 400))) {
-        throw err
-      }
-    }
-
-    try {
-      await project.instances.delete(name)
-    } catch (err: unknown) {
-      if (!(err instanceof IncusError && err.code === 'NOT_FOUND')) {
-        throw err
-      }
-    }
-
-    for (const volume of volumesToDelete) {
-      try {
-        await project.storage.delete(volume.pool, volume.source)
-      } catch (err: unknown) {
-        if (!(err instanceof IncusError && err.code === 'NOT_FOUND')) {
-          throw err
-        }
-      }
+      throw error
     }
   }
 
   private async transitionResourceStatusBestEffort(
-    resourceId: string | null,
+    resourceId: string,
     operationId: string,
     status: CapsuleBranchResourceStatusValue,
   ): Promise<void> {
-    if (!resourceId) {
-      return
-    }
-
     try {
       await this.stores.resources.transitionBranchResourceStatusForOperation(resourceId, operationId, status)
     } catch (error: unknown) {
-      console.error(`[CapsuleBranchDeleteSaga] Failed to mark resource '${resourceId}' as '${status}'.`, error)
+      console.error(`[CapsuleBranchDeleteOperation] Failed to mark resource '${resourceId}' as '${status}'.`, error)
     }
   }
 
   private async markResourceErrorBestEffort(
-    resourceId: string | null,
+    resourceId: string,
     operationId: string,
     error: unknown,
     context?: Record<string, unknown>,
   ): Promise<void> {
-    if (!resourceId) {
-      return
-    }
-
     try {
       await this.stores.resources.markBranchResourceErrorForOperation(resourceId, operationId, error, context)
     } catch (dbError: unknown) {
-      console.error(`[CapsuleBranchDeleteSaga] Failed to persist resource error for '${resourceId}'.`, dbError)
+      console.error(`[CapsuleBranchDeleteOperation] Failed to persist resource error for '${resourceId}'.`, dbError)
     }
   }
 
@@ -407,7 +322,7 @@ export class CapsuleBranchDeleteSaga {
       await this.stores.branches.transitionBranchState(ownerId, branchName, 'cleanup_required')
       this.events.publishStateChanged(ownerId, branchName, 'cleanup_required')
     } catch (error: unknown) {
-      console.error(`[CapsuleBranchDeleteSaga] Failed to mark branch '${branchName}' cleanup_required.`, error)
+      console.error(`[CapsuleBranchDeleteOperation] Failed to mark branch '${branchName}' cleanup_required.`, error)
     }
   }
 
@@ -420,7 +335,7 @@ export class CapsuleBranchDeleteSaga {
     try {
       await this.stores.operations.markBranchOperationFailure(operationId, status, error, context)
     } catch (dbError: unknown) {
-      console.error(`[CapsuleBranchDeleteSaga] Failed to persist operation failure for '${operationId}'.`, dbError)
+      console.error(`[CapsuleBranchDeleteOperation] Failed to persist operation failure for '${operationId}'.`, dbError)
     }
   }
 }

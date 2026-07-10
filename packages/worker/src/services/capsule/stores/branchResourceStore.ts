@@ -2,7 +2,7 @@ import { and, eq } from 'drizzle-orm'
 import {
   CapsuleBranchResourceStatus,
   capsuleBranchResourcesTable,
-  type CapsuleBranchResourceStatus as CapsuleBranchResourceStatusValue,
+  type CapsuleBranchResourceStatusValue,
   type CapsuleHostDbContract,
 } from '@qiln/core/server'
 import { IncusError, isUniqueConstraintViolation } from '../../../errors'
@@ -163,7 +163,7 @@ export class CapsuleBranchResourceStore {
     return resources.filter(resource => !terminalStatuses.has(resource.status))
   }
 
-  public async listBranchResourcesByBranchId(branchId: string) {
+  public async listBranchResourceInventoryByBranchId(branchId: string) {
     return await this.db.query.capsuleBranchResources.findMany({
       where: {
         branchId,
@@ -206,15 +206,12 @@ export class CapsuleBranchResourceStore {
       status,
       updatedAt: new Date(),
     }
-
     if (metadata !== undefined) {
       updateData.metadata = toJsonObject(metadata, 'capsule branch resource metadata')
     }
-
     if (operationId !== undefined) {
       updateData.lastOperationId = operationId
     }
-
     await this.db.update(capsuleBranchResourcesTable).set(updateData).where(eq(capsuleBranchResourcesTable.id, resourceId))
   }
 

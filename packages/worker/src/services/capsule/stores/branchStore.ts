@@ -1,5 +1,11 @@
-import { and, eq, inArray } from 'drizzle-orm'
-import { capsuleBranchesTable, type CapsuleBranchStatus, type CapsuleHostDbContract } from '@qiln/core/server'
+import { and, eq, inArray, isNull } from 'drizzle-orm'
+import {
+  capsuleBranchesTable,
+  type CapsuleBranchResourceInventoryDigest,
+  type CapsuleBranchStatus,
+  type CapsuleHostDbContract,
+} from '@qiln/core/server'
+import { IncusError } from '../../../errors'
 import type { ReconcileBranch } from './types'
 
 /**
@@ -29,6 +35,41 @@ export class CapsuleBranchStore {
       columns: { name: true, ownerId: true, status: true },
     })
     return rows
+  }
+
+  /**
+   * Persists the complete planned resource identity before branch provisioning
+   * contacts Incus. Existing non-null values are never overwritten because an
+   * inline operation is not resumable after interruption.
+   */
+  public async recordBranchResourceInventoryDigest(
+    ownerId: string,
+    name: string,
+    resourceInventoryDigest: CapsuleBranchResourceInventoryDigest,
+  ): Promise<void> {
+    const updatedBranches = await this.db
+      .update(capsuleBranchesTable)
+      .set({
+        resourceInventoryDigest,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(capsuleBranchesTable.ownerId, ownerId),
+          eq(capsuleBranchesTable.name, name),
+          eq(capsuleBranchesTable.status, 'provisioning'),
+          isNull(capsuleBranchesTable.resourceInventoryDigest),
+        ),
+      )
+      .returning({
+        id: capsuleBranchesTable.id,
+      })
+    if (updatedBranches.length !== 1) {
+      throw new IncusError('Failed to persist the capsule branch resource inventory proof.', 'API_ERROR', {
+        ownerId,
+        branchName: name,
+      })
+    }
   }
 
   public async transitionBranchState(ownerId: string, name: string, status: CapsuleBranchStatus, ip?: string | null): Promise<void> {

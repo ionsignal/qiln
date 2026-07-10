@@ -1,5 +1,6 @@
 export const CapsuleBranchCreateStepKey = {
   PLAN_RESOURCES: 'plan_resources',
+  RECORD_RESOURCE_INVENTORY: 'record_resource_inventory',
   ENSURE_NAMESPACE: 'ensure_namespace',
   RECORD_BIND_MOUNTS: 'record_bind_mounts',
   CREATE_VOLUMES: 'create_volumes',
@@ -13,11 +14,12 @@ export type CapsuleBranchCreateStepKey = (typeof CapsuleBranchCreateStepKey)[key
 /**
  * Stable branch-create step order for visibility and fail-closed diagnostics.
  *
- * These keys intentionally remain worker-internal for now; the public capsule protocol only needs
- * operation receipts until operation inspection is exposed.
+ * These keys intentionally remain worker-internal for now; the public capsule
+ * protocol only needs operation receipts until operation inspection is exposed.
  */
 export const CapsuleBranchCreateStepKeys = [
   CapsuleBranchCreateStepKey.PLAN_RESOURCES,
+  CapsuleBranchCreateStepKey.RECORD_RESOURCE_INVENTORY,
   CapsuleBranchCreateStepKey.ENSURE_NAMESPACE,
   CapsuleBranchCreateStepKey.RECORD_BIND_MOUNTS,
   CapsuleBranchCreateStepKey.CREATE_VOLUMES,

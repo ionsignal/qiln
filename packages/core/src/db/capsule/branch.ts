@@ -1,6 +1,7 @@
 import { sql, type RelationsBuilderColumnBase } from 'drizzle-orm'
 import { pgTable, uuid, text, timestamp, pgEnum, index, uniqueIndex, type AnyPgTable, type PgColumn } from 'drizzle-orm/pg-core'
 import { CapsuleBranchStatusValues, DEFAULT_CAPSULE_BLUEPRINT_NAME } from '../../protocol/capsule/messages'
+import type { CapsuleBranchResourceInventoryDigest } from '../../schemas'
 import type { RelationFragmentOneFn } from '../relations'
 
 /**
@@ -36,6 +37,7 @@ export function createCapsuleBranchesTable(ownerIdColumn?: PgColumn) {
       memory: text('memory').notNull().default('4GB'),
       blueprintName: text('blueprint_name').notNull().default(DEFAULT_CAPSULE_BLUEPRINT_NAME),
       blueprintDigest: text('blueprint_digest').notNull(),
+      resourceInventoryDigest: text('resource_inventory_digest').$type<CapsuleBranchResourceInventoryDigest>(),
       status: capsuleBranchStatusEnum('status').notNull().default('provisioning'),
       createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
       updatedAt: timestamp('updated_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),

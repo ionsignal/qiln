@@ -6,9 +6,10 @@ export const CapsuleBranchOperationType = {
   DELETE: 'delete',
 } as const
 
-export type CapsuleBranchOperationType = (typeof CapsuleBranchOperationType)[keyof typeof CapsuleBranchOperationType]
+export type CapsuleBranchOperationTypeValue = (typeof CapsuleBranchOperationType)[keyof typeof CapsuleBranchOperationType]
 
 export const CapsuleBranchOperationTypeValues = [CapsuleBranchOperationType.CREATE, CapsuleBranchOperationType.DELETE] as const
+
 export const CapsuleBranchOperationTypeSchema = z.enum(CapsuleBranchOperationTypeValues)
 
 export const CapsuleBranchOperationStatus = {
@@ -19,7 +20,7 @@ export const CapsuleBranchOperationStatus = {
   CLEANUP_REQUIRED: 'cleanup_required',
 } as const
 
-export type CapsuleBranchOperationStatus = (typeof CapsuleBranchOperationStatus)[keyof typeof CapsuleBranchOperationStatus]
+export type CapsuleBranchOperationStatusValue = (typeof CapsuleBranchOperationStatus)[keyof typeof CapsuleBranchOperationStatus]
 
 export const CapsuleBranchOperationStatusValues = [
   CapsuleBranchOperationStatus.ACCEPTED,
@@ -39,7 +40,7 @@ export const CapsuleBranchOperationStepStatus = {
   SKIPPED: 'skipped',
 } as const
 
-export type CapsuleBranchOperationStepStatus = (typeof CapsuleBranchOperationStepStatus)[keyof typeof CapsuleBranchOperationStepStatus]
+export type CapsuleBranchOperationStepStatusValue = (typeof CapsuleBranchOperationStepStatus)[keyof typeof CapsuleBranchOperationStepStatus]
 
 export const CapsuleBranchOperationStepStatusValues = [
   CapsuleBranchOperationStepStatus.PENDING,
@@ -59,7 +60,7 @@ export const CapsuleBranchResourceType = {
   PROVISIONING_FILE: 'provisioning_file',
 } as const
 
-export type CapsuleBranchResourceType = (typeof CapsuleBranchResourceType)[keyof typeof CapsuleBranchResourceType]
+export type CapsuleBranchResourceTypeValue = (typeof CapsuleBranchResourceType)[keyof typeof CapsuleBranchResourceType]
 
 export const CapsuleBranchResourceTypeValues = [
   CapsuleBranchResourceType.INCUS_PROJECT,
@@ -83,7 +84,7 @@ export const CapsuleBranchResourceStatus = {
   ERROR: 'error',
 } as const
 
-export type CapsuleBranchResourceStatus = (typeof CapsuleBranchResourceStatus)[keyof typeof CapsuleBranchResourceStatus]
+export type CapsuleBranchResourceStatusValue = (typeof CapsuleBranchResourceStatus)[keyof typeof CapsuleBranchResourceStatus]
 
 export const CapsuleBranchResourceStatusValues = [
   CapsuleBranchResourceStatus.PLANNED,
@@ -105,7 +106,8 @@ export const CapsuleBranchResourceCleanupPolicy = {
   EXTERNAL: 'external',
 } as const
 
-export type CapsuleBranchResourceCleanupPolicy = (typeof CapsuleBranchResourceCleanupPolicy)[keyof typeof CapsuleBranchResourceCleanupPolicy]
+export type CapsuleBranchResourceCleanupPolicyValue =
+  (typeof CapsuleBranchResourceCleanupPolicy)[keyof typeof CapsuleBranchResourceCleanupPolicy]
 
 export const CapsuleBranchResourceCleanupPolicyValues = [
   CapsuleBranchResourceCleanupPolicy.DELETE_WITH_BRANCH,
@@ -116,8 +118,8 @@ export const CapsuleBranchResourceCleanupPolicyValues = [
 export const CapsuleBranchResourceCleanupPolicySchema = z.enum(CapsuleBranchResourceCleanupPolicyValues)
 
 export const CapsuleBranchIdempotencyKeySchema = z.uuid()
-
 export const CapsuleBranchOperationRequestHashSchema = CapsuleBlueprintDigestSchema
+export const CapsuleBranchResourceInventoryDigestSchema = CapsuleBlueprintDigestSchema
 
 export const CapsuleBranchBlueprintReferenceSchema = z
   .object({
@@ -137,5 +139,6 @@ export const CapsuleBranchOperationReceiptSchema = z
 
 export type CapsuleBranchIdempotencyKey = z.infer<typeof CapsuleBranchIdempotencyKeySchema>
 export type CapsuleBranchOperationRequestHash = z.infer<typeof CapsuleBranchOperationRequestHashSchema>
+export type CapsuleBranchResourceInventoryDigest = z.infer<typeof CapsuleBranchResourceInventoryDigestSchema>
 export type CapsuleBranchBlueprintReference = z.infer<typeof CapsuleBranchBlueprintReferenceSchema>
 export type CapsuleBranchOperationReceipt = z.infer<typeof CapsuleBranchOperationReceiptSchema>

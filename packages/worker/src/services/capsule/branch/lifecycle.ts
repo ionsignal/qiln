@@ -13,9 +13,9 @@ import { IncusError } from '../../../errors'
 import { CapsuleBranchEventPublisher } from './events'
 import { CapsuleResourceDriver } from '../resources/driver'
 import { CapsuleBranchCreatePlanner } from '../operations/branch/create/planner'
-import { CapsuleBranchCreateSaga } from '../operations/branch/create/saga'
+import { CapsuleBranchProvisioningOperation } from '../operations/branch/create/provisioning'
 import { CapsuleBranchDeletePlanner } from '../operations/branch/delete/planner'
-import { CapsuleBranchDeleteSaga } from '../operations/branch/delete/saga'
+import { CapsuleBranchDeprovisioningOperation } from '../operations/branch/delete/deprovisioning'
 import { CapsuleAbandonedOperationError, CapsuleCompensationStatus, createOperationFailureContext } from '../operations/errors'
 import { CapsuleBranchOperationStepStore, CapsuleBranchOperationStore, CapsuleBranchResourceStore, CapsuleBranchStore } from '../stores'
 import type { IncusClient } from '../../../incus/client/index'
@@ -34,8 +34,8 @@ export class CapsuleBranchRuntimeService {
   private readonly steps: CapsuleBranchOperationStepStore
   private readonly resources: CapsuleBranchResourceStore
   private readonly events: CapsuleBranchEventPublisher
-  private readonly saga: CapsuleBranchCreateSaga
-  private readonly deleteSaga: CapsuleBranchDeleteSaga
+  private readonly provisioning: CapsuleBranchProvisioningOperation
+  private readonly deprovisioning: CapsuleBranchDeprovisioningOperation
 
   constructor(
     private readonly db: CapsuleHostDbContract,
@@ -57,10 +57,10 @@ export class CapsuleBranchRuntimeService {
       steps: this.steps,
       resources: this.resources,
     }
-    this.saga = new CapsuleBranchCreateSaga(stores, planner, driver, this.events, this.blueprints, ownerId =>
+    this.provisioning = new CapsuleBranchProvisioningOperation(stores, planner, driver, this.events, this.blueprints, ownerId =>
       this.project.getNamespace(ownerId),
     )
-    this.deleteSaga = new CapsuleBranchDeleteSaga(stores, new CapsuleBranchDeletePlanner(), this.incus, this.events, ownerId =>
+    this.deprovisioning = new CapsuleBranchDeprovisioningOperation(stores, new CapsuleBranchDeletePlanner(), this.incus, this.events, ownerId =>
       this.project.getNamespace(ownerId),
     )
   }
@@ -110,7 +110,7 @@ export class CapsuleBranchRuntimeService {
     cpu: string = '4',
     memory: string = '4GB',
   ) {
-    return await this.saga.execute({
+    return await this.provisioning.execute({
       ownerId,
       name,
       blueprintName,
@@ -194,7 +194,7 @@ export class CapsuleBranchRuntimeService {
    * Permanently deletes a capsule branch using a durable fail-closed operation ledger.
    */
   public async delete(ownerId: string, name: string, idempotencyKey: string): Promise<CapsuleBranchDeleteOutput> {
-    return await this.deleteSaga.execute({
+    return await this.deprovisioning.execute({
       ownerId,
       name,
       idempotencyKey,

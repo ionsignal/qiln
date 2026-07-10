@@ -1,7 +1,7 @@
 import path from 'node:path'
 import { CapsuleBlueprintRegistry, CapsuleNatsChannel } from '@qiln/core/server'
 import { IncusClient } from './incus/client/index'
-import { CapsuleBranchRuntimeService } from './services/capsule/branch'
+import { CapsuleBranchRuntimeService } from './services/capsule/branch/lifecycle'
 import { FileService } from './services/file'
 import { ProjectService } from './services/project'
 import { registerCapsuleChannelHandlers } from './channel'

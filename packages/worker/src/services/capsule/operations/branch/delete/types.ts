@@ -1,6 +1,10 @@
-import type { CapsuleBranchResourceCleanupPolicy, CapsuleBranchResourceStatus, CapsuleBranchResourceType } from '@qiln/core/server'
+import type {
+  CapsuleBranchResourceCleanupPolicyValue,
+  CapsuleBranchResourceStatusValue,
+  CapsuleBranchResourceTypeValue,
+} from '@qiln/core/server'
 
-export interface BranchDeleteSagaInput {
+export interface BranchDeleteOperationInput {
   ownerId: string
   name: string
   idempotencyKey: string
@@ -8,11 +12,18 @@ export interface BranchDeleteSagaInput {
 
 export interface BranchDeleteResourceRow {
   id: string
-  resourceType: CapsuleBranchResourceType
+  provider: string
+  resourceType: CapsuleBranchResourceTypeValue
   resourceKey: string
-  status: CapsuleBranchResourceStatus
-  cleanupPolicy: CapsuleBranchResourceCleanupPolicy
+  status: CapsuleBranchResourceStatusValue
+  cleanupPolicy: CapsuleBranchResourceCleanupPolicyValue
   metadata: Record<string, unknown> | null
+}
+
+export interface BranchDeletePlanInput {
+  branchName: string
+  namespace: string
+  resources: readonly BranchDeleteResourceRow[]
 }
 
 export interface BranchDeleteInstanceTarget {
@@ -30,8 +41,4 @@ export interface BranchDeletePlan {
   instance: BranchDeleteInstanceTarget | null
   volumes: BranchDeleteVolumeTarget[]
   provisioningFileResourceIds: string[]
-  retainedResourceIds: string[]
-  externalResourceIds: string[]
 }
-
-export type BranchDeletePlanSelection = { mode: 'inventory'; plan: BranchDeletePlan } | { mode: 'live_discovery' }
