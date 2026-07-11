@@ -7,7 +7,6 @@ import type {
   CapsuleBranchOperationStepStatusValue,
   CapsuleBranchResourceCleanupPolicyValue,
   CapsuleBranchResourceInventoryDigest,
-  CapsuleBranchResourceStatusValue,
   CapsuleBranchResourceTypeValue,
   CapsuleBranchStatus,
 } from '@qiln/core/server'
@@ -78,7 +77,6 @@ export interface BranchResourceInput {
   resourceType: CapsuleBranchResourceTypeValue
   resourceKey: string
   cleanupPolicy: CapsuleBranchResourceCleanupPolicyValue
-  status?: CapsuleBranchResourceStatusValue
   metadata?: Record<string, unknown>
 }
 
@@ -94,4 +92,3 @@ export interface BranchOperationStepInput {
 
 export type BranchOperationStatusValue = CapsuleBranchOperationStatusValue
 export type BranchOperationStepStatusValue = CapsuleBranchOperationStepStatusValue
-export type CompensationCallback = () => Promise<void>

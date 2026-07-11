@@ -36,9 +36,9 @@ function createNullableOperationIdColumn(columnName: string, operationIdColumn?:
 /**
  * Durable branch resource inventory.
  *
- * PR 1 still uses this mostly like the old operation resource ledger. PR 4 will
- * make it the authoritative source of branch-owned resources for delete and
- * recovery instead of rediscovering resources from live Incus state.
+ * Each row records a resource Qiln planned, adopted, created, or deleted while
+ * mutating a capsule branch. The worker uses this inventory as the authoritative
+ * ownership proof for fail-closed deletion and cleanup accounting.
  */
 export function createCapsuleBranchResourcesTable(ownerIdColumn?: PgColumn, branchIdColumn?: PgColumn, operationIdColumn?: PgColumn) {
   const ownerId = createOwnerIdColumn(ownerIdColumn)

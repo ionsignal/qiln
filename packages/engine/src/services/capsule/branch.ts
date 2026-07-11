@@ -1,7 +1,9 @@
+import { and, desc, eq, ne } from 'drizzle-orm'
 import {
   CapsuleBranchCommandName,
   DEFAULT_CAPSULE_BLUEPRINT_NAME,
   TargetType,
+  capsuleBranchesTable,
   type CapsuleBlueprintDigest,
   type CapsuleBranchCreateOutput,
   type CapsuleBranchDeleteOutput,
@@ -59,18 +61,32 @@ export class CapsuleBranchService {
     private readonly channel: CapsuleChannel,
   ) {}
 
+  /**
+   * Lists active capsule branch runtimes.
+   *
+   * Archived branches are durable history and intentionally stay outside the normal operational list.
+   * A future history surface must use an explicit branch-history query rather than weakening this runtime query.
+   */
   public async list(ownerId: string): Promise<CapsuleBranchServiceItem[]> {
-    const rows = await this.db.query.capsuleBranches.findMany({
-      where: { ownerId },
-      orderBy: (capsuleBranches, { desc }) => [desc(capsuleBranches.createdAt)],
-    })
+    const rows = await this.db
+      .select()
+      .from(capsuleBranchesTable)
+      .where(and(eq(capsuleBranchesTable.ownerId, ownerId), ne(capsuleBranchesTable.status, 'archived')))
+      .orderBy(desc(capsuleBranchesTable.createdAt))
     return rows.map(row => this.mapBranchRow(row))
   }
 
+  /**
+   * Resolves an active capsule branch runtime by name.
+   *
+   * An archived branch may share a name with a later active branch, so branch runtime reads must exclude archived historical records.
+   */
   public async state(ownerId: string, name: string): Promise<CapsuleBranchServiceItem | null> {
-    const row = await this.db.query.capsuleBranches.findFirst({
-      where: { name, ownerId },
-    })
+    const [row] = await this.db
+      .select()
+      .from(capsuleBranchesTable)
+      .where(and(eq(capsuleBranchesTable.ownerId, ownerId), eq(capsuleBranchesTable.name, name), ne(capsuleBranchesTable.status, 'archived')))
+      .limit(1)
     return row ? this.mapBranchRow(row) : null
   }
 

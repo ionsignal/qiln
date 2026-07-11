@@ -1,4 +1,4 @@
-import { and, asc, eq, inArray } from 'drizzle-orm'
+import { and, asc, eq, inArray, ne } from 'drizzle-orm'
 import {
   CapsuleBranchCreateOutputSchema,
   CapsuleBranchDeleteOutputSchema,
@@ -25,14 +25,7 @@ import type {
 } from './types'
 
 const NON_TERMINAL_BRANCH_OPERATION_STATUSES = [CapsuleBranchOperationStatus.ACCEPTED, CapsuleBranchOperationStatus.RUNNING] as const
-
-const DELETE_BLOCKED_BRANCH_STATUSES: ReadonlySet<CapsuleBranchStatus> = new Set([
-  'provisioning',
-  'recovering',
-  'starting',
-  'stopping',
-  'deleting',
-])
+const DELETE_BLOCKED_BRANCH_STATUSES: ReadonlySet<CapsuleBranchStatus> = new Set(['provisioning', 'starting', 'stopping', 'deleting'])
 
 /**
  * Persistence boundary for durable capsule branch operations.
@@ -64,15 +57,7 @@ export class CapsuleBranchOperationStore {
         idempotencyKey,
       })
     }
-    const branch = await this.db.query.capsuleBranches.findFirst({
-      where: {
-        ownerId,
-        name: operation.branchName,
-      },
-      columns: {
-        status: true,
-      },
-    })
+    const branch = await this.findOperationBranch(ownerId, operation.branchId)
     return this.createBranchCreateOutput(
       operation.id,
       operation.status,
@@ -103,16 +88,9 @@ export class CapsuleBranchOperationStore {
         idempotencyKey,
       })
     }
-    const branch = await this.db.query.capsuleBranches.findFirst({
-      where: {
-        ownerId,
-        name: operation.branchName,
-      },
-      columns: {
-        id: true,
-      },
-    })
-    return this.createBranchDeleteOutput(operation.id, operation.status, operation.branchName, !branch, true)
+    const branch = await this.findOperationBranch(ownerId, operation.branchId)
+    const branchDeleted = branch === null || branch.status === 'archived'
+    return this.createBranchDeleteOutput(operation.id, operation.status, operation.branchName, branchDeleted, true)
   }
 
   public async acceptBranchCreateOperation(input: AcceptBranchCreateOperationInput): Promise<AcceptedBranchCreateOperation> {
@@ -191,16 +169,20 @@ export class CapsuleBranchOperationStore {
           replayedReceipt,
         }
       }
-      const existingBranch = await this.db.query.capsuleBranches.findFirst({
-        where: {
-          ownerId: input.ownerId,
-          name: input.name,
-        },
-        columns: {
-          id: true,
-        },
-      })
-      if (existingBranch) {
+      const [existingActiveBranch] = await this.db
+        .select({
+          id: capsuleBranchesTable.id,
+        })
+        .from(capsuleBranchesTable)
+        .where(
+          and(
+            eq(capsuleBranchesTable.ownerId, input.ownerId),
+            eq(capsuleBranchesTable.name, input.name),
+            ne(capsuleBranchesTable.status, 'archived'),
+          ),
+        )
+        .limit(1)
+      if (existingActiveBranch) {
         throw new IncusError(`Capsule branch '${input.name}' already exists.`, 'CONFLICT')
       }
       throw new IncusError('Capsule branch create operation conflicts with an existing durable operation.', 'CONFLICT')
@@ -236,7 +218,13 @@ export class CapsuleBranchOperationStore {
             resourceInventoryDigest: capsuleBranchesTable.resourceInventoryDigest,
           })
           .from(capsuleBranchesTable)
-          .where(and(eq(capsuleBranchesTable.ownerId, input.ownerId), eq(capsuleBranchesTable.name, input.name)))
+          .where(
+            and(
+              eq(capsuleBranchesTable.ownerId, input.ownerId),
+              eq(capsuleBranchesTable.name, input.name),
+              ne(capsuleBranchesTable.status, 'archived'),
+            ),
+          )
           .limit(1)
         if (!branch) {
           throw new IncusError('Capsule branch not found or access denied.', 'NOT_FOUND')
@@ -466,9 +454,28 @@ export class CapsuleBranchOperationStore {
         type: true,
         status: true,
         requestHash: true,
+        branchId: true,
         branchName: true,
       },
     })
+  }
+
+  /**
+   * Resolves operation history through the immutable branch UUID rather than a user-facing branch name.
+   * A name may later be reused by a new active branch.
+   */
+  private async findOperationBranch(ownerId: string, branchId: string | null) {
+    if (!branchId) {
+      return null
+    }
+    const [branch] = await this.db
+      .select({
+        status: capsuleBranchesTable.status,
+      })
+      .from(capsuleBranchesTable)
+      .where(and(eq(capsuleBranchesTable.id, branchId), eq(capsuleBranchesTable.ownerId, ownerId)))
+      .limit(1)
+    return branch ?? null
   }
 
   private fallbackBranchStatusForOperation(status: CapsuleBranchOperationStatusValue): CapsuleBranchStatus {

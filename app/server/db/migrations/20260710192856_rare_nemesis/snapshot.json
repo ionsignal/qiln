@@ -1,7 +1,7 @@
 {
   "version": "8",
   "dialect": "postgres",
-  "id": "6f48b503-0a23-4cc5-9ada-50d964fa1c63",
+  "id": "6c37323b-e1d5-44ba-8a9b-c6a67c08270b",
   "prevIds": [
     "00000000-0000-0000-0000-000000000000"
   ],
@@ -906,6 +906,19 @@
       "generated": null,
       "identity": null,
       "name": "blueprint_digest",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_branches"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "resource_inventory_digest",
       "entityType": "columns",
       "schema": "public",
       "table": "capsule_branches"

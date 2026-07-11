@@ -1,4 +1,4 @@
-import { registerCapsuleBranchHandlers } from './handlers/capsule'
+import { registerCapsuleBranchHandlers } from './handlers/capsule/branch'
 import { registerCapsuleBlueprintHandlers } from './handlers/blueprints'
 import type { QilnWorkerRuntime } from '../runtime'
 

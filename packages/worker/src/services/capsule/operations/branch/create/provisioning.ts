@@ -1,14 +1,12 @@
 import {
   CapsuleBranchOperationRequestHashSchema,
   CapsuleBranchOperationStatus,
-  CapsuleBranchResourceStatus,
   digestCanonicalJsonValue,
   type CapsuleBlueprintDigest,
   type CapsuleBlueprintRegistry,
   type CapsuleBranchCreateOutput,
   type CapsuleBranchOperationRequestHash,
   type CapsuleBranchOperationStatusValue,
-  type CapsuleBranchResourceStatusValue,
 } from '@qiln/core/server'
 import { IncusError } from '../../../../../errors'
 import { InlineOperationStepExecutor } from '../../inlineStepExecutor'
@@ -31,7 +29,12 @@ import type {
 } from '../../../stores'
 import type { CapsuleResourceDriver } from '../../../resources/driver'
 import type { CapsuleBranchCreatePlanner } from './planner'
-import type { CapsuleBranchCreateResourcePlan, CapsuleBranchCreateOperationInput, PlannedBranchResource, PlannedVolumeResource } from './types'
+import type {
+  CapsuleBranchCreateResourcePlan,
+  CapsuleBranchCreateOperationInput,
+  PlannedProvisioningFile,
+  PlannedVolumeResource,
+} from './types'
 
 export type ResolveCapsuleOwnerNamespace = (ownerId: string) => string
 
@@ -50,11 +53,17 @@ interface BranchCreateRequestHashInput {
   memory: string
 }
 
-interface BranchCreateCompensationTask {
+interface VerifiedCreatedResourceCompensationTask {
   action: string
   resourceId: string
   resourceKey: string
   run: () => Promise<void>
+}
+
+interface DerivedProvisioningFileCompensation {
+  resourceId: string
+  resourceKey: string
+  backingResourceId: string
 }
 
 function createExpectedBranchResourceInventoryEntries(plan: CapsuleBranchCreateResourcePlan): CapsuleBranchResourceInventoryEntry[] {
@@ -72,6 +81,10 @@ function createBranchCreateRequestHash(input: BranchCreateRequestHashInput): Cap
     context: 'capsule branch create request',
   })
   return CapsuleBranchOperationRequestHashSchema.parse(digest)
+}
+
+function createVolumeIdentity(pool: string, volumeName: string): string {
+  return `${pool}\u0000${volumeName}`
 }
 
 export class CapsuleBranchProvisioningOperation {
@@ -132,10 +145,14 @@ export class CapsuleBranchProvisioningOperation {
       branchId: accepted.branchId,
       branchName: input.name,
     }
-    const compensationStack: BranchCreateCompensationTask[] = []
+    const verifiedCompensationStack: VerifiedCreatedResourceCompensationTask[] = []
+    const derivedProvisioningFiles: DerivedProvisioningFileCompensation[] = []
+    const createdVolumeResourceIds = new Map<string, string>()
+    let createdInstanceResourceId: string | null = null
     let currentPhase: CapsuleBranchCreateFailurePhase = CapsuleBranchCreateFailurePhase.PLAN_RESOURCES
     let currentStepKey: CapsuleBranchCreateStepKey | null = null
     let branchFinalized = false
+    let directProviderResourceOwnershipUncertain = false
     const runStep = async <TResult>(
       stepKey: CapsuleBranchCreateStepKey,
       metadata: Record<string, unknown>,
@@ -196,7 +213,7 @@ export class CapsuleBranchProvisioningOperation {
           const projectResourceId = await this.stores.resources.ensureBranchResource(this.withOperationContext(plan.project, resourceContext))
           try {
             await this.driver.ensureNamespace(input.ownerId)
-            await this.stores.resources.transitionBranchResourceStatus(projectResourceId, CapsuleBranchResourceStatus.CREATED)
+            await this.stores.resources.recordBranchResourceAdoption(projectResourceId, accepted.operationId)
           } catch (error: unknown) {
             await this.markResourceErrorBestEffort(
               projectResourceId,
@@ -206,7 +223,7 @@ export class CapsuleBranchProvisioningOperation {
                 branchName: input.name,
                 phase: currentPhase,
                 stepKey: currentStepKey,
-                action: 'ensure_namespace',
+                action: 'ensure_namespace_dependency',
                 resourceId: projectResourceId,
                 resourceKey: plan.project.resourceKey,
               }),
@@ -223,7 +240,8 @@ export class CapsuleBranchProvisioningOperation {
         },
         async () => {
           for (const bindMount of plan.bindMounts) {
-            await this.stores.resources.ensureBranchResource(this.withOperationContext(bindMount, resourceContext))
+            const resourceId = await this.stores.resources.ensureBranchResource(this.withOperationContext(bindMount, resourceContext))
+            await this.stores.resources.recordBranchResourceAdoption(resourceId, accepted.operationId)
           }
         },
       )
@@ -235,42 +253,51 @@ export class CapsuleBranchProvisioningOperation {
         async () => {
           for (const volume of plan.volumes) {
             const resourceId = await this.stores.resources.ensureBranchResource(this.withOperationContext(volume, resourceContext))
-            compensationStack.push({
-              action: 'compensate_delete_volume',
-              resourceId,
-              resourceKey: volume.resourceKey,
-              run: () =>
-                this.compensateVolume(
-                  namespace,
+            let providerMutationStarted = false
+            try {
+              await this.stores.resources.recordBranchResourceCreateIntent(resourceId, accepted.operationId)
+              providerMutationStarted = true
+              await this.driver.createVolume(namespace, volume)
+              await this.stores.resources.recordBranchResourceCreateOutcome(resourceId, accepted.operationId)
+              createdVolumeResourceIds.set(createVolumeIdentity(volume.pool, volume.volumeName), resourceId)
+              verifiedCompensationStack.push({
+                action: 'compensate_delete_volume',
+                resourceId,
+                resourceKey: volume.resourceKey,
+                run: () =>
+                  this.compensateVolume(
+                    namespace,
+                    accepted.operationId,
+                    resourceId,
+                    volume,
+                    createOperationFailureContext({
+                      operationId: accepted.operationId,
+                      branchName: input.name,
+                      phase: CapsuleBranchCreateFailurePhase.COMPENSATION,
+                      action: 'compensate_delete_volume',
+                      resourceId,
+                      resourceKey: volume.resourceKey,
+                    }),
+                  ),
+              })
+            } catch (error: unknown) {
+              if (providerMutationStarted) {
+                directProviderResourceOwnershipUncertain = true
+                await this.stores.resources.recordBranchResourceCreateFailure(
                   resourceId,
-                  volume,
+                  accepted.operationId,
+                  error,
                   createOperationFailureContext({
                     operationId: accepted.operationId,
                     branchName: input.name,
-                    phase: CapsuleBranchCreateFailurePhase.COMPENSATION,
-                    action: 'compensate_delete_volume',
+                    phase: currentPhase,
+                    stepKey: currentStepKey,
+                    action: 'create_volume',
                     resourceId,
                     resourceKey: volume.resourceKey,
                   }),
-                ),
-            })
-            try {
-              await this.driver.createVolume(namespace, volume)
-              await this.stores.resources.transitionBranchResourceStatus(resourceId, CapsuleBranchResourceStatus.CREATED)
-            } catch (error: unknown) {
-              await this.markResourceErrorBestEffort(
-                resourceId,
-                error,
-                createOperationFailureContext({
-                  operationId: accepted.operationId,
-                  branchName: input.name,
-                  phase: currentPhase,
-                  stepKey: currentStepKey,
-                  action: volume.volumeType === 'clone' ? 'clone_volume' : 'create_volume',
-                  resourceId,
-                  resourceKey: volume.resourceKey,
-                }),
-              )
+                )
+              }
               throw error
             }
           }
@@ -285,42 +312,51 @@ export class CapsuleBranchProvisioningOperation {
         },
         async () => {
           const instanceResourceId = await this.stores.resources.ensureBranchResource(this.withOperationContext(plan.instance, resourceContext))
-          compensationStack.push({
-            action: 'compensate_delete_instance',
-            resourceId: instanceResourceId,
-            resourceKey: plan.instance.resourceKey,
-            run: () =>
-              this.compensateInstance(
-                namespace,
+          let providerMutationStarted = false
+          try {
+            await this.stores.resources.recordBranchResourceCreateIntent(instanceResourceId, accepted.operationId)
+            providerMutationStarted = true
+            await this.driver.createInstance(namespace, plan.instance)
+            await this.stores.resources.recordBranchResourceCreateOutcome(instanceResourceId, accepted.operationId)
+            createdInstanceResourceId = instanceResourceId
+            verifiedCompensationStack.push({
+              action: 'compensate_delete_instance',
+              resourceId: instanceResourceId,
+              resourceKey: plan.instance.resourceKey,
+              run: () =>
+                this.compensateInstance(
+                  namespace,
+                  accepted.operationId,
+                  instanceResourceId,
+                  plan.instance.instanceName,
+                  createOperationFailureContext({
+                    operationId: accepted.operationId,
+                    branchName: input.name,
+                    phase: CapsuleBranchCreateFailurePhase.COMPENSATION,
+                    action: 'compensate_delete_instance',
+                    resourceId: instanceResourceId,
+                    resourceKey: plan.instance.resourceKey,
+                  }),
+                ),
+            })
+          } catch (error: unknown) {
+            if (providerMutationStarted) {
+              directProviderResourceOwnershipUncertain = true
+              await this.stores.resources.recordBranchResourceCreateFailure(
                 instanceResourceId,
-                plan.instance.instanceName,
+                accepted.operationId,
+                error,
                 createOperationFailureContext({
                   operationId: accepted.operationId,
                   branchName: input.name,
-                  phase: CapsuleBranchCreateFailurePhase.COMPENSATION,
-                  action: 'compensate_delete_instance',
+                  phase: currentPhase,
+                  stepKey: currentStepKey,
+                  action: 'create_instance',
                   resourceId: instanceResourceId,
                   resourceKey: plan.instance.resourceKey,
                 }),
-              ),
-          })
-          try {
-            await this.driver.createInstance(namespace, plan.instance)
-            await this.stores.resources.transitionBranchResourceStatus(instanceResourceId, CapsuleBranchResourceStatus.CREATED)
-          } catch (error: unknown) {
-            await this.markResourceErrorBestEffort(
-              instanceResourceId,
-              error,
-              createOperationFailureContext({
-                operationId: accepted.operationId,
-                branchName: input.name,
-                phase: currentPhase,
-                stepKey: currentStepKey,
-                action: 'create_instance',
-                resourceId: instanceResourceId,
-                resourceKey: plan.instance.resourceKey,
-              }),
-            )
+              )
+            }
             throw error
           }
         },
@@ -331,31 +367,48 @@ export class CapsuleBranchProvisioningOperation {
           count: plan.files.length,
         },
         async () => {
+          if (!createdInstanceResourceId) {
+            throw new IncusError('Capsule branch instance ownership was not durably recorded before provisioning files.', 'API_ERROR', {
+              operationId: accepted.operationId,
+              branchName: input.name,
+            })
+          }
           for (const file of plan.files) {
             const resourceId = await this.stores.resources.ensureBranchResource(this.withOperationContext(file, resourceContext))
+            derivedProvisioningFiles.push({
+              resourceId,
+              resourceKey: file.resourceKey,
+              backingResourceId: this.resolveProvisioningFileBackingResourceId(file, createdInstanceResourceId, createdVolumeResourceIds),
+            })
+            let providerMutationStarted = false
             try {
-              await this.stores.resources.transitionBranchResourceStatus(resourceId, CapsuleBranchResourceStatus.CREATING)
+              await this.stores.resources.recordBranchResourceCreateIntent(resourceId, accepted.operationId)
+              providerMutationStarted = true
               await this.driver.writeProvisioningFile(namespace, input.name, file)
-              await this.stores.resources.transitionBranchResourceStatus(resourceId, CapsuleBranchResourceStatus.CREATED)
+              await this.stores.resources.recordBranchResourceCreateOutcome(resourceId, accepted.operationId)
             } catch (error: unknown) {
-              await this.markResourceErrorBestEffort(
-                resourceId,
-                error,
-                createOperationFailureContext({
-                  operationId: accepted.operationId,
-                  branchName: input.name,
-                  phase: currentPhase,
-                  stepKey: currentStepKey,
-                  action: 'write_provisioning_file',
+              if (providerMutationStarted) {
+                await this.stores.resources.recordBranchResourceCreateFailure(
                   resourceId,
-                  resourceKey: file.resourceKey,
-                }),
-              )
+                  accepted.operationId,
+                  error,
+                  createOperationFailureContext({
+                    operationId: accepted.operationId,
+                    branchName: input.name,
+                    phase: currentPhase,
+                    stepKey: currentStepKey,
+                    action: 'write_provisioning_file',
+                    resourceId,
+                    resourceKey: file.resourceKey,
+                  }),
+                )
+              }
               throw error
             }
           }
         },
       )
+
       await runStep(
         CapsuleBranchCreateStepKey.FINALIZE_BRANCH_OFFLINE,
         {
@@ -400,8 +453,9 @@ export class CapsuleBranchProvisioningOperation {
         throw error
       }
       console.error(`[CapsuleBranchRuntimeService] Provisioning failed for branch '${input.name}'. Initiating compensation cleanup...`, error)
-      const compensationResult = await this.compensate(input.name, compensationStack)
-      if (compensationResult.hadFailure) {
+      const compensationResult = await this.compensate(input.name, accepted.operationId, verifiedCompensationStack, derivedProvisioningFiles)
+      const cleanupRequired = directProviderResourceOwnershipUncertain || compensationResult.hadFailure
+      if (cleanupRequired) {
         try {
           await this.stores.branches.transitionBranchState(input.ownerId, input.name, 'cleanup_required')
           this.events.publishStateChanged(input.ownerId, input.name, 'cleanup_required')
@@ -418,7 +472,8 @@ export class CapsuleBranchProvisioningOperation {
             phase: currentPhase,
             stepKey: currentStepKey,
             branchFinalized,
-            compensationStatus: CapsuleCompensationStatus.FAILED,
+            resourceOwnershipUncertain: directProviderResourceOwnershipUncertain ? true : undefined,
+            compensationStatus: compensationResult.hadFailure ? CapsuleCompensationStatus.FAILED : CapsuleCompensationStatus.COMPLETED,
             compensationFailures: compensationResult.failures,
           }),
         )
@@ -448,7 +503,12 @@ export class CapsuleBranchProvisioningOperation {
   }
 
   private withOperationContext(
-    resource: PlannedBranchResource,
+    resource: {
+      resourceType: BranchResourceInput['resourceType']
+      resourceKey: string
+      cleanupPolicy: BranchResourceInput['cleanupPolicy']
+      metadata?: Record<string, unknown>
+    },
     context: {
       operationId: string
       ownerId: string
@@ -464,24 +524,45 @@ export class CapsuleBranchProvisioningOperation {
       resourceType: resource.resourceType,
       resourceKey: resource.resourceKey,
       cleanupPolicy: resource.cleanupPolicy,
-      status: resource.status,
       metadata: resource.metadata,
     }
   }
 
-  private async compensate(branchName: string, compensationStack: BranchCreateCompensationTask[]): Promise<CapsuleCompensationResult> {
+  private resolveProvisioningFileBackingResourceId(
+    file: PlannedProvisioningFile,
+    instanceResourceId: string,
+    createdVolumeResourceIds: ReadonlyMap<string, string>,
+  ): string {
+    if (file.target.target === 'instance') {
+      return instanceResourceId
+    }
+    const backingResourceId = createdVolumeResourceIds.get(createVolumeIdentity(file.target.pool, file.target.volumeName))
+    if (!backingResourceId) {
+      throw new IncusError('Provisioning file targets a managed volume without durable ownership proof.', 'VALIDATION_ERROR', {
+        resourceKey: file.resourceKey,
+        pool: file.target.pool,
+        volumeName: file.target.volumeName,
+      })
+    }
+    return backingResourceId
+  }
+  private async compensate(
+    branchName: string,
+    operationId: string,
+    verifiedCompensationStack: VerifiedCreatedResourceCompensationTask[],
+    derivedProvisioningFiles: readonly DerivedProvisioningFileCompensation[],
+  ): Promise<CapsuleCompensationResult> {
     const failures: CapsuleCompensationResult['failures'] = []
-    while (compensationStack.length > 0) {
-      const compensationTask = compensationStack.pop()
+    const finalizedBackingResourceIds = new Set<string>()
+    while (verifiedCompensationStack.length > 0) {
+      const compensationTask = verifiedCompensationStack.pop()
       if (!compensationTask) {
         continue
       }
       try {
         await compensationTask.run()
+        finalizedBackingResourceIds.add(compensationTask.resourceId)
       } catch (compensationErr: unknown) {
-        if (compensationErr instanceof IncusError && compensationErr.code === 'NOT_FOUND') {
-          continue
-        }
         failures.push(
           createCompensationFailureDetail({
             action: compensationTask.action,
@@ -493,6 +574,24 @@ export class CapsuleBranchProvisioningOperation {
         console.error(`[CRITICAL] Orphaned Resource Detected: Failed during compensation cleanup for branch '${branchName}':`, compensationErr)
       }
     }
+    for (const file of derivedProvisioningFiles) {
+      if (!finalizedBackingResourceIds.has(file.backingResourceId)) {
+        continue
+      }
+      try {
+        await this.stores.resources.recordDerivedBranchResourceDeletion(file.resourceId, operationId)
+      } catch (compensationErr: unknown) {
+        failures.push(
+          createCompensationFailureDetail({
+            action: 'compensate_finalize_provisioning_file',
+            resourceId: file.resourceId,
+            resourceKey: file.resourceKey,
+            error: compensationErr,
+          }),
+        )
+        console.error(`[CRITICAL] Failed to record derived provisioning-file cleanup for branch '${branchName}':`, compensationErr)
+      }
+    }
     return {
       hadFailure: failures.length > 0,
       failures,
@@ -501,50 +600,44 @@ export class CapsuleBranchProvisioningOperation {
 
   private async compensateVolume(
     namespace: string,
+    operationId: string,
     resourceId: string,
     volume: PlannedVolumeResource,
     failureContext: Record<string, unknown>,
   ): Promise<void> {
-    await this.transitionResourceStatusBestEffort(resourceId, CapsuleBranchResourceStatus.DELETING)
+    await this.stores.resources.recordBranchResourceDeleteIntent(resourceId, operationId)
     try {
       await this.driver.deleteVolume(namespace, volume)
-      await this.transitionResourceStatusBestEffort(resourceId, CapsuleBranchResourceStatus.DELETED)
     } catch (compensationErr: unknown) {
       if (compensationErr instanceof IncusError && compensationErr.code === 'NOT_FOUND') {
-        await this.transitionResourceStatusBestEffort(resourceId, CapsuleBranchResourceStatus.MISSING)
+        await this.stores.resources.recordBranchResourceDeleteOutcome(resourceId, operationId, 'missing')
         return
       }
-      await this.markResourceErrorBestEffort(resourceId, compensationErr, failureContext)
+      await this.stores.resources.recordBranchResourceDeleteFailure(resourceId, operationId, compensationErr, failureContext)
       throw compensationErr
     }
+    await this.stores.resources.recordBranchResourceDeleteOutcome(resourceId, operationId, 'deleted')
   }
 
   private async compensateInstance(
     namespace: string,
+    operationId: string,
     resourceId: string,
     instanceName: string,
     failureContext: Record<string, unknown>,
   ): Promise<void> {
-    await this.transitionResourceStatusBestEffort(resourceId, CapsuleBranchResourceStatus.DELETING)
+    await this.stores.resources.recordBranchResourceDeleteIntent(resourceId, operationId)
     try {
       await this.driver.deleteInstance(namespace, instanceName)
-      await this.transitionResourceStatusBestEffort(resourceId, CapsuleBranchResourceStatus.DELETED)
     } catch (compensationErr: unknown) {
       if (compensationErr instanceof IncusError && compensationErr.code === 'NOT_FOUND') {
-        await this.transitionResourceStatusBestEffort(resourceId, CapsuleBranchResourceStatus.MISSING)
+        await this.stores.resources.recordBranchResourceDeleteOutcome(resourceId, operationId, 'missing')
         return
       }
-      await this.markResourceErrorBestEffort(resourceId, compensationErr, failureContext)
+      await this.stores.resources.recordBranchResourceDeleteFailure(resourceId, operationId, compensationErr, failureContext)
       throw compensationErr
     }
-  }
-
-  private async transitionResourceStatusBestEffort(resourceId: string, status: CapsuleBranchResourceStatusValue): Promise<void> {
-    try {
-      await this.stores.resources.transitionBranchResourceStatus(resourceId, status)
-    } catch (error: unknown) {
-      console.error(`[CapsuleBranchRuntimeService] Failed to mark resource '${resourceId}' as '${status}' during compensation cleanup.`, error)
-    }
+    await this.stores.resources.recordBranchResourceDeleteOutcome(resourceId, operationId, 'deleted')
   }
 
   private async markResourceErrorBestEffort(resourceId: string, error: unknown, context?: Record<string, unknown>): Promise<void> {

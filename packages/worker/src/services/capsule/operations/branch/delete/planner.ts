@@ -43,7 +43,7 @@ export class CapsuleBranchDeletePlanner {
     const plan: BranchDeletePlan = {
       instance: null,
       volumes: [],
-      provisioningFileResourceIds: [],
+      provisioningFileResourceIdsToFinalize: [],
     }
     let projectCount = 0
     let instanceCount = 0
@@ -146,7 +146,7 @@ export class CapsuleBranchDeletePlanner {
           }
           provisioningFileIdentities.add(fileIdentity)
           if (this.assertDisposition(resource, true) === 'actionable') {
-            plan.provisioningFileResourceIds.push(resource.id)
+            plan.provisioningFileResourceIdsToFinalize.push(resource.id)
           }
           break
         }

@@ -1,8 +1,7 @@
-import { sql, type RelationsBuilderColumnBase } from 'drizzle-orm'
-import { pgTable, uuid, text, timestamp, pgEnum, index, uniqueIndex, type AnyPgTable, type PgColumn } from 'drizzle-orm/pg-core'
+import { sql } from 'drizzle-orm'
+import { pgTable, uuid, text, timestamp, pgEnum, index, uniqueIndex, type PgColumn } from 'drizzle-orm/pg-core'
 import { CapsuleBranchStatusValues, DEFAULT_CAPSULE_BLUEPRINT_NAME } from '../../protocol/capsule/messages'
 import type { CapsuleBranchResourceInventoryDigest } from '../../schemas'
-import type { RelationFragmentOneFn } from '../relations'
 
 /**
  * Canonical database enum for capsule branch runtime state.
@@ -44,92 +43,17 @@ export function createCapsuleBranchesTable(ownerIdColumn?: PgColumn) {
     },
     table => [
       index('capsule_branches_owner_idx').on(table.ownerId),
-      uniqueIndex('capsule_branches_owner_name_unique_idx').on(table.ownerId, table.name),
+      uniqueIndex('capsule_branches_owner_active_name_unique_idx')
+        .on(table.ownerId, table.name)
+        .where(sql`${table.status} <> 'archived'`),
     ],
   )
 }
 
 /**
- * Defines the capsule branch read-model tables that must be composed into a host schema.
+ * Package-local Drizzle table for direct engine/worker DML against the host-owned physical table.
  *
- * This `capsule_branches` is intentionally only the branch read model. A first-class durable `capsules`
- * table will come later with snapshot/version/route-alias semantics; this task only renames the
- * existing branch persistence boundary.
- */
-export function createCapsuleBranchSchema<TUserIdColumn extends PgColumn>(userIdColumn: TUserIdColumn) {
-  return {
-    capsuleBranches: createCapsuleBranchesTable(userIdColumn),
-  }
-}
-
-/**
- * Package-local Drizzle table for direct engine/worker DML against the host-owned physical table. This
- * intentionally has no FK declaration because packages do not own the host `users` table; the real FK
- * remains in the host-composed schema.
+ * The host-composed schema owns the real users foreign key. This package-local table intentionally
+ * omits that declaration because @qiln/core does not own the host users table.
  */
 export const capsuleBranchesTable = createCapsuleBranchesTable()
-
-/**
- * Minimal package schema for capsule branch consumers that need typed relational
- * queries without pretending to own the host user table.
- */
-export const capsuleBranchRuntimeSchema = {
-  capsuleBranches: capsuleBranchesTable,
-} as const
-
-/**
- * Drizzle relation helpers read column availability from the table's internal
- * `_["columns"]` metadata, not just top-level table properties. This type keeps
- * that internal-column requirement explicit while preserving top-level column
- * access for compatibility with real `pgTable(...)` results.
- */
-type PgTableWithInternalColumns<TColumns extends Record<string, PgColumn>> = AnyPgTable<{ columns: TColumns }> & TColumns
-
-/**
- * Minimal host user-table shape required by the capsule branch relation fragment.
- */
-export type CapsuleBranchHostUsersTable = PgTableWithInternalColumns<{
-  id: PgColumn
-}>
-
-/**
- * Package-local capsule branch table shape for runtime DML/query contracts.
- */
-export type CapsuleBranchTable = typeof capsuleBranchesTable
-
-/**
- * Package schema retained for relation and database contract extraction.
- */
-export type CapsuleBranchPackageSchema = typeof capsuleBranchRuntimeSchema & {
-  users: CapsuleBranchHostUsersTable
-}
-
-/**
- * Narrow helper surface required by the capsule branch relation fragment.
- */
-export interface CapsuleBranchRelationHelpers {
-  one: {
-    users: RelationFragmentOneFn<'users'>
-  }
-  users: {
-    id: RelationsBuilderColumnBase<'users'>
-  }
-  capsuleBranches: {
-    ownerId: RelationsBuilderColumnBase<'capsuleBranches'>
-  }
-}
-
-/**
- * Defines the relation graph owned by the capsule branch read model.
- */
-export function defineCapsuleBranchRelations(helpers: CapsuleBranchRelationHelpers) {
-  return {
-    capsuleBranches: {
-      owner: helpers.one.users({
-        from: helpers.capsuleBranches.ownerId,
-        to: helpers.users.id,
-        optional: false,
-      }),
-    },
-  }
-}

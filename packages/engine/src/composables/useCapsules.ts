@@ -98,6 +98,14 @@ export function provideCapsules(options: UseCapsulesOptions): CapsuleContext {
     await refreshSafely()
   }
 
+  function refreshFromCapsuleEvent(): void {
+    void refreshSafely().then(refreshed => {
+      if (!refreshed) {
+        console.error('[provideCapsules] Background refresh failed after a capsule branch event.')
+      }
+    })
+  }
+
   async function runLifecycleMutation(
     name: string,
     pendingStatus: CapsuleBranchStatus,
@@ -149,18 +157,8 @@ export function provideCapsules(options: UseCapsulesOptions): CapsuleContext {
         return
       }
       const event = parsedEvent.data
-      if (event.type === CapsuleBranchEventName.BRANCH_STATE_CHANGED) {
-        const replaced = replaceBranch(event.name, branch => ({
-          ...branch,
-          status: event.status,
-        }))
-        if (!replaced) {
-          refresh().catch(error => console.error('[provideCapsules] Background refresh failed:', error))
-        }
-        return
-      }
-      if (event.type === CapsuleBranchEventName.BRANCH_DELETED) {
-        options.branches.value = options.branches.value.filter(branch => branch.name !== event.name)
+      if (event.type === CapsuleBranchEventName.BRANCH_STATE_CHANGED || event.type === CapsuleBranchEventName.BRANCH_DELETED) {
+        refreshFromCapsuleEvent()
       }
     })
   })

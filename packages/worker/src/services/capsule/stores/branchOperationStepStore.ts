@@ -121,7 +121,7 @@ export class CapsuleBranchOperationStepStore {
     if (status === CapsuleBranchOperationStepStatus.RUNNING) {
       updateData.startedAt = now
     }
-    if (status === CapsuleBranchOperationStepStatus.COMPLETED || status === CapsuleBranchOperationStepStatus.SKIPPED) {
+    if (status === CapsuleBranchOperationStepStatus.COMPLETED) {
       updateData.completedAt = now
     }
     if (status === CapsuleBranchOperationStepStatus.FAILED) {

@@ -49,6 +49,7 @@ export interface OperationFailureContextInput {
   action?: string
   resourceId?: string
   resourceKey?: string
+  resourceOwnershipUncertain?: boolean
   compensationStatus?: CapsuleCompensationStatus
   compensationFailures?: readonly CapsuleCompensationFailureDetail[]
 }
@@ -124,6 +125,7 @@ export function createOperationFailureContext(input: OperationFailureContextInpu
   assignIfDefined(context, 'action', input.action)
   assignIfDefined(context, 'resourceId', input.resourceId)
   assignIfDefined(context, 'resourceKey', input.resourceKey)
+  assignIfDefined(context, 'resourceOwnershipUncertain', input.resourceOwnershipUncertain)
   assignIfDefined(context, 'compensationStatus', input.compensationStatus)
   if (input.compensationFailures && input.compensationFailures.length > 0) {
     context.compensationFailures = input.compensationFailures

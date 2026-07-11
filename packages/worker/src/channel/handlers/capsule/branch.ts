@@ -1,6 +1,6 @@
 import { CapsuleBranchCommandName, type CapsuleCommandHandlerOptions } from '@qiln/core/server'
-import { mapWorkerCapsuleCommandError } from '../errors'
-import type { QilnWorkerRuntime } from '../../runtime'
+import { mapWorkerCapsuleCommandError } from '../../errors'
+import type { QilnWorkerRuntime } from '../../../runtime'
 
 /**
  * Registers privileged capsule branch lifecycle handlers.

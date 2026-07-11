@@ -2,7 +2,6 @@ import type {
   CapsuleBlueprint,
   CapsuleBlueprintDigest,
   CapsuleBranchResourceCleanupPolicyValue,
-  CapsuleBranchResourceStatusValue,
   CapsuleBranchResourceTypeValue,
 } from '@qiln/core/server'
 import type { ManagedVolume } from '../../../provisioning/fileTargets'
@@ -12,7 +11,6 @@ export interface PlannedBranchResource {
   resourceKey: string
   resourceType: CapsuleBranchResourceTypeValue
   cleanupPolicy: CapsuleBranchResourceCleanupPolicyValue
-  status?: CapsuleBranchResourceStatusValue
   metadata?: Record<string, unknown>
 }
 
@@ -75,5 +73,3 @@ export interface CapsuleBranchCreateOperationInput {
   cpu: string
   memory: string
 }
-
-export type RollbackCallback = () => Promise<void>

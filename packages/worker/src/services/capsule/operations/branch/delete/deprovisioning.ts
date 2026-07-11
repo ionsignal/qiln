@@ -1,12 +1,10 @@
 import {
   CapsuleBranchOperationRequestHashSchema,
   CapsuleBranchOperationStatus,
-  CapsuleBranchResourceStatus,
   digestCanonicalJsonValue,
   type CapsuleBranchDeleteOutput,
   type CapsuleBranchOperationRequestHash,
   type CapsuleBranchOperationStatusValue,
-  type CapsuleBranchResourceStatusValue,
 } from '@qiln/core/server'
 import { IncusError, readIncusErrorDetailCode } from '../../../../../errors'
 import { InlineOperationStepExecutor } from '../../inlineStepExecutor'
@@ -64,6 +62,10 @@ function toInventoryEntries(resources: readonly BranchDeleteResourceRow[]): Caps
 
 /**
  * Inline durable branch delete operation.
+ *
+ * This operation is deliberately fail closed. Every direct Incus deletion has a durable `deleting` intent fence and a
+ * durable terminal outcome fence. If Qiln cannot persist either fence, it stops and leaves the branch runtime for
+ * manual cleanup rather than retiring an uncertain runtime.
  */
 export class CapsuleBranchDeprovisioningOperation {
   private readonly stepExecutor: InlineOperationStepExecutor
@@ -108,7 +110,7 @@ export class CapsuleBranchDeprovisioningOperation {
     }
     let currentPhase: CapsuleBranchDeleteStepKey | 'complete_operation' = CapsuleBranchDeleteStepKey.PLAN_DELETE
     let currentStepKey: CapsuleBranchDeleteStepKey | null = null
-    let branchRecordDeleted = false
+    let branchRuntimeArchived = false
     const runStep = async <TResult>(
       stepKey: CapsuleBranchDeleteStepKey,
       metadata: Record<string, unknown>,
@@ -162,8 +164,7 @@ export class CapsuleBranchDeprovisioningOperation {
           if (!plan.instance) {
             return
           }
-
-          await this.deleteBranchInstance(project, accepted.operationId, plan.instance.resourceId, plan.instance.instanceName)
+          await this.deleteInstanceWithLedgerFence(project, accepted.operationId, plan.instance.resourceId, plan.instance.instanceName)
         },
       )
       await runStep(
@@ -173,29 +174,30 @@ export class CapsuleBranchDeprovisioningOperation {
         },
         async () => {
           for (const volume of plan.volumes) {
-            await this.deleteBranchVolume(project, accepted.operationId, volume)
+            await this.deleteVolumeWithLedgerFence(project, accepted.operationId, volume)
           }
         },
       )
       await runStep(
-        CapsuleBranchDeleteStepKey.MARK_PROVISIONING_FILES_DELETED,
+        CapsuleBranchDeleteStepKey.FINALIZE_DERIVED_RESOURCE_OUTCOMES,
         {
-          count: plan.provisioningFileResourceIds.length,
+          provisioningFileResourceCount: plan.provisioningFileResourceIdsToFinalize.length,
         },
         async () => {
-          for (const resourceId of plan.provisioningFileResourceIds) {
-            await this.transitionResourceStatusBestEffort(resourceId, accepted.operationId, CapsuleBranchResourceStatus.DELETED)
+          for (const resourceId of plan.provisioningFileResourceIdsToFinalize) {
+            await this.stores.resources.recordDerivedBranchResourceDeletion(resourceId, accepted.operationId)
           }
         },
       )
       await runStep(
-        CapsuleBranchDeleteStepKey.DELETE_BRANCH_RECORD,
+        CapsuleBranchDeleteStepKey.ARCHIVE_BRANCH_RUNTIME,
         {
-          branchName: input.name,
+          branchId: accepted.branchId,
+          status: 'archived',
         },
         async () => {
-          await this.stores.branches.deleteBranch(input.ownerId, input.name)
-          branchRecordDeleted = true
+          await this.stores.branches.archiveBranchRuntime(input.ownerId, accepted.branchId)
+          branchRuntimeArchived = true
           this.events.publishDeleted(input.ownerId, input.name)
         },
       )
@@ -210,8 +212,8 @@ export class CapsuleBranchDeprovisioningOperation {
         false,
       )
     } catch (error: unknown) {
-      const operationStatus = branchRecordDeleted ? CapsuleBranchOperationStatus.FAILED : CapsuleBranchOperationStatus.CLEANUP_REQUIRED
-      if (!branchRecordDeleted) {
+      const operationStatus = branchRuntimeArchived ? CapsuleBranchOperationStatus.FAILED : CapsuleBranchOperationStatus.CLEANUP_REQUIRED
+      if (!branchRuntimeArchived) {
         await this.markBranchCleanupRequiredBestEffort(input.ownerId, input.name)
       }
       await this.markOperationFailureBestEffort(
@@ -223,7 +225,7 @@ export class CapsuleBranchDeprovisioningOperation {
           branchName: input.name,
           phase: currentPhase,
           stepKey: currentStepKey,
-          branchFinalized: branchRecordDeleted,
+          branchFinalized: branchRuntimeArchived,
           action: currentPhase === 'complete_operation' ? 'mark_operation_completed' : undefined,
         }),
       )
@@ -231,90 +233,62 @@ export class CapsuleBranchDeprovisioningOperation {
     }
   }
 
-  private async deleteBranchInstance(
+  private async deleteInstanceWithLedgerFence(
     project: ScopedIncusProject,
     operationId: string,
     resourceId: string,
     instanceName: string,
   ): Promise<void> {
-    await this.transitionResourceStatusBestEffort(resourceId, operationId, CapsuleBranchResourceStatus.DELETING)
-    let instanceMissing = false
+    await this.stores.resources.recordBranchResourceDeleteIntent(resourceId, operationId)
     try {
       await project.instances.stop(instanceName)
     } catch (error: unknown) {
       const detailCode = error instanceof IncusError ? readIncusErrorDetailCode(error) : undefined
       if (error instanceof IncusError && error.code === 'NOT_FOUND') {
-        instanceMissing = true
-      } else if (!(error instanceof IncusError && detailCode === 400)) {
-        await this.markResourceErrorBestEffort(resourceId, operationId, error, {
+        await this.stores.resources.recordBranchResourceDeleteOutcome(resourceId, operationId, 'missing')
+        return
+      }
+      if (!(error instanceof IncusError && detailCode === 400)) {
+        await this.stores.resources.recordBranchResourceDeleteFailure(resourceId, operationId, error, {
           action: 'stop_instance_before_delete',
           instanceName,
         })
         throw error
       }
     }
-    if (instanceMissing) {
-      await this.transitionResourceStatusBestEffort(resourceId, operationId, CapsuleBranchResourceStatus.MISSING)
-      return
-    }
     try {
       await project.instances.delete(instanceName)
-      await this.transitionResourceStatusBestEffort(resourceId, operationId, CapsuleBranchResourceStatus.DELETED)
     } catch (error: unknown) {
       if (error instanceof IncusError && error.code === 'NOT_FOUND') {
-        await this.transitionResourceStatusBestEffort(resourceId, operationId, CapsuleBranchResourceStatus.MISSING)
+        await this.stores.resources.recordBranchResourceDeleteOutcome(resourceId, operationId, 'missing')
         return
       }
-      await this.markResourceErrorBestEffort(resourceId, operationId, error, {
+      await this.stores.resources.recordBranchResourceDeleteFailure(resourceId, operationId, error, {
         action: 'delete_instance',
         instanceName,
       })
       throw error
     }
+    await this.stores.resources.recordBranchResourceDeleteOutcome(resourceId, operationId, 'deleted')
   }
 
-  private async deleteBranchVolume(project: ScopedIncusProject, operationId: string, volume: BranchDeleteVolumeTarget): Promise<void> {
-    await this.transitionResourceStatusBestEffort(volume.resourceId, operationId, CapsuleBranchResourceStatus.DELETING)
+  private async deleteVolumeWithLedgerFence(project: ScopedIncusProject, operationId: string, volume: BranchDeleteVolumeTarget): Promise<void> {
+    await this.stores.resources.recordBranchResourceDeleteIntent(volume.resourceId, operationId)
     try {
       await project.storage.delete(volume.pool, volume.volumeName)
-      await this.transitionResourceStatusBestEffort(volume.resourceId, operationId, CapsuleBranchResourceStatus.DELETED)
     } catch (error: unknown) {
       if (error instanceof IncusError && error.code === 'NOT_FOUND') {
-        await this.transitionResourceStatusBestEffort(volume.resourceId, operationId, CapsuleBranchResourceStatus.MISSING)
+        await this.stores.resources.recordBranchResourceDeleteOutcome(volume.resourceId, operationId, 'missing')
         return
       }
-      await this.markResourceErrorBestEffort(volume.resourceId, operationId, error, {
+      await this.stores.resources.recordBranchResourceDeleteFailure(volume.resourceId, operationId, error, {
         action: 'delete_volume',
         pool: volume.pool,
         volumeName: volume.volumeName,
       })
       throw error
     }
-  }
-
-  private async transitionResourceStatusBestEffort(
-    resourceId: string,
-    operationId: string,
-    status: CapsuleBranchResourceStatusValue,
-  ): Promise<void> {
-    try {
-      await this.stores.resources.transitionBranchResourceStatusForOperation(resourceId, operationId, status)
-    } catch (error: unknown) {
-      console.error(`[CapsuleBranchDeleteOperation] Failed to mark resource '${resourceId}' as '${status}'.`, error)
-    }
-  }
-
-  private async markResourceErrorBestEffort(
-    resourceId: string,
-    operationId: string,
-    error: unknown,
-    context?: Record<string, unknown>,
-  ): Promise<void> {
-    try {
-      await this.stores.resources.markBranchResourceErrorForOperation(resourceId, operationId, error, context)
-    } catch (dbError: unknown) {
-      console.error(`[CapsuleBranchDeleteOperation] Failed to persist resource error for '${resourceId}'.`, dbError)
-    }
+    await this.stores.resources.recordBranchResourceDeleteOutcome(volume.resourceId, operationId, 'deleted')
   }
 
   private async markBranchCleanupRequiredBestEffort(ownerId: string, branchName: string): Promise<void> {

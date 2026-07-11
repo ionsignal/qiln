@@ -49,7 +49,7 @@
               <template #icon><icon :path="mdiDelete" :size="16" /></template>
             </n-button>
           </template>
-          Permanently delete this capsule branch and its branch data?
+          Delete this capsule branch runtime? Its durable branch history will remain archived.
         </n-popconfirm>
       </n-flex>
     </template>
@@ -61,6 +61,7 @@
   import { NCard, NText, NFlex, NTag, NButton, NButtonGroup, NPopconfirm, useMessage } from 'naive-ui'
   import { isTRPCClientError } from '@trpc/client'
   import { mdiPlay, mdiStop, mdiDelete, mdiCpu64Bit, mdiMemory } from '@mdi/js'
+  import { CapsuleBranchIdempotencyKeySchema } from '@qiln/core/client'
   import { useCapsuleContext } from '../composables/useCapsules'
   import { Icon } from './Icon'
   import type { CapsuleBranchItem } from '../types'
@@ -73,7 +74,7 @@
   const { start, stop, delete: removeBranch } = useCapsuleContext()
 
   const isProcessing = computed(() => {
-    return ['provisioning', 'starting', 'stopping'].includes(props.branch.status)
+    return ['provisioning', 'starting', 'stopping', 'deleting'].includes(props.branch.status)
   })
 
   const statusType = computed(() => {
@@ -83,13 +84,23 @@
       case 'provisioning':
       case 'starting':
       case 'stopping':
+      case 'deleting':
         return 'warning'
       case 'error':
+      case 'cleanup_required':
         return 'error'
       default:
         return 'default'
     }
   })
+
+  function generateIdempotencyKey(): string | null {
+    if (typeof globalThis.crypto?.randomUUID !== 'function') {
+      return null
+    }
+    const parsed = CapsuleBranchIdempotencyKeySchema.safeParse(globalThis.crypto.randomUUID())
+    return parsed.success ? parsed.data : null
+  }
 
   async function handleStart() {
     try {
@@ -110,12 +121,19 @@
   }
 
   async function handleDelete() {
+    const idempotencyKey = generateIdempotencyKey()
+    if (!idempotencyKey) {
+      message.error('Failed to generate a branch delete idempotency key. Please retry in a modern browser.')
+      return
+    }
     try {
-      await removeBranch({ name: props.branch.name, idempotencyKey: '' })
-      throw Error('we need to fix idempotencyKey to support delete')
-      message.success('Capsule branch deleted')
+      await removeBranch({
+        name: props.branch.name,
+        idempotencyKey,
+      })
+      message.success('Capsule branch runtime deleted')
     } catch (err: unknown) {
-      message.error(isTRPCClientError(err) ? err.message : 'Failed to delete capsule branch')
+      message.error(isTRPCClientError(err) ? err.message : 'Failed to delete capsule branch runtime')
     }
   }
 </script>

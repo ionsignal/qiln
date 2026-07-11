@@ -75,6 +75,7 @@ CREATE TABLE "capsule_branches" (
 	"memory" text DEFAULT '4GB' NOT NULL,
 	"blueprint_name" text DEFAULT 'n8n-comfyui-capsule' NOT NULL,
 	"blueprint_digest" text NOT NULL,
+	"resource_inventory_digest" text,
 	"status" "capsule_branch_status" DEFAULT 'provisioning'::"capsule_branch_status" NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL

@@ -37,7 +37,6 @@ export const CapsuleBranchOperationStepStatus = {
   RUNNING: 'running',
   COMPLETED: 'completed',
   FAILED: 'failed',
-  SKIPPED: 'skipped',
 } as const
 
 export type CapsuleBranchOperationStepStatusValue = (typeof CapsuleBranchOperationStepStatus)[keyof typeof CapsuleBranchOperationStepStatus]
@@ -47,7 +46,6 @@ export const CapsuleBranchOperationStepStatusValues = [
   CapsuleBranchOperationStepStatus.RUNNING,
   CapsuleBranchOperationStepStatus.COMPLETED,
   CapsuleBranchOperationStepStatus.FAILED,
-  CapsuleBranchOperationStepStatus.SKIPPED,
 ] as const
 
 export const CapsuleBranchOperationStepStatusSchema = z.enum(CapsuleBranchOperationStepStatusValues)
@@ -80,7 +78,6 @@ export const CapsuleBranchResourceStatus = {
   DELETED: 'deleted',
   ADOPTED: 'adopted',
   MISSING: 'missing',
-  ORPHANED: 'orphaned',
   ERROR: 'error',
 } as const
 
@@ -94,7 +91,6 @@ export const CapsuleBranchResourceStatusValues = [
   CapsuleBranchResourceStatus.DELETED,
   CapsuleBranchResourceStatus.ADOPTED,
   CapsuleBranchResourceStatus.MISSING,
-  CapsuleBranchResourceStatus.ORPHANED,
   CapsuleBranchResourceStatus.ERROR,
 ] as const
 

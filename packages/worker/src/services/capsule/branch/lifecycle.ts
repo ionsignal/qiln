@@ -210,11 +210,7 @@ export class CapsuleBranchRuntimeService {
     const dbBranches = await this.branches.listBranchesForReconcile()
     const activeBranches = dbBranches.filter(
       branch =>
-        branch.status !== 'provisioning' &&
-        branch.status !== 'recovering' &&
-        branch.status !== 'deleting' &&
-        branch.status !== 'error' &&
-        branch.status !== 'cleanup_required',
+        branch.status !== 'provisioning' && branch.status !== 'deleting' && branch.status !== 'error' && branch.status !== 'cleanup_required',
     )
     const ownerMap = new Map<string, { ownerId: string; branches: ReconcileBranch[] }>()
     for (const branch of activeBranches) {

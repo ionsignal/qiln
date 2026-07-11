@@ -1,9 +1,4 @@
-import {
-  CapsuleBranchResourceCleanupPolicy,
-  CapsuleBranchResourceStatus,
-  CapsuleBranchResourceType,
-  type CapsuleBlueprint,
-} from '@qiln/core/server'
+import { CapsuleBranchResourceCleanupPolicy, CapsuleBranchResourceType, type CapsuleBlueprint } from '@qiln/core/server'
 import { interpolate } from '../../../../../utils/template'
 import {
   bindMountResourceKey,
@@ -55,7 +50,6 @@ export class CapsuleBranchCreatePlanner {
             resourceType: CapsuleBranchResourceType.BIND_MOUNT,
             resourceKey: bindMountResourceKey(namespace, volume.host_path, volume.mount_path),
             cleanupPolicy: CapsuleBranchResourceCleanupPolicy.EXTERNAL,
-            status: CapsuleBranchResourceStatus.CREATED,
             metadata: {
               namespace,
               hostPath: volume.host_path,
@@ -86,7 +80,6 @@ export class CapsuleBranchCreatePlanner {
             resourceType: CapsuleBranchResourceType.ZFS_VOLUME,
             resourceKey: volumeResourceKey(namespace, volume.pool, volumeName),
             cleanupPolicy: CapsuleBranchResourceCleanupPolicy.DELETE_WITH_BRANCH,
-            status: CapsuleBranchResourceStatus.CREATING,
             metadata: {
               namespace,
               pool: volume.pool,
@@ -112,7 +105,7 @@ export class CapsuleBranchCreatePlanner {
         }
       }
     }
-    managedVolumes.sort((a, b) => b.mountPath.length - a.mountPath.length)
+    managedVolumes.sort((left, right) => right.mountPath.length - left.mountPath.length)
     const env: Record<string, string> = {
       ...blueprint.instance_template.config,
       'environment.QILN_TENANT_ID': name,
@@ -142,7 +135,6 @@ export class CapsuleBranchCreatePlanner {
         resourceType: CapsuleBranchResourceType.INCUS_PROJECT,
         resourceKey: projectResourceKey(namespace),
         cleanupPolicy: CapsuleBranchResourceCleanupPolicy.RETAIN,
-        status: CapsuleBranchResourceStatus.CREATING,
         metadata: {
           namespace,
         },
@@ -158,7 +150,6 @@ export class CapsuleBranchCreatePlanner {
         resourceType: CapsuleBranchResourceType.INCUS_INSTANCE,
         resourceKey: instanceResourceKey(namespace, name),
         cleanupPolicy: CapsuleBranchResourceCleanupPolicy.DELETE_WITH_BRANCH,
-        status: CapsuleBranchResourceStatus.CREATING,
         metadata: {
           namespace,
           instanceName: name,
@@ -208,7 +199,6 @@ export class CapsuleBranchCreatePlanner {
         resourceType: CapsuleBranchResourceType.PROVISIONING_FILE,
         resourceKey: provisioningFileResourceKey(input.namespace, input.name, file.path, target),
         cleanupPolicy: CapsuleBranchResourceCleanupPolicy.DELETE_WITH_BRANCH,
-        status: CapsuleBranchResourceStatus.CREATING,
         metadata: createProvisioningFileResourceMetadata(input.namespace, input.name, file.path, target),
       }
     })

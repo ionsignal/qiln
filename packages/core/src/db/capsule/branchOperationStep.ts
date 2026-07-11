@@ -31,16 +31,15 @@ function createNullableBranchIdColumn(branchIdColumn?: PgColumn) {
 }
 
 /**
- * Durable step state for branch operations.
+ * Durable step state for inline capsule branch operations.
  *
- * PR 1 only introduces the table. PR 3 will use this table to record
- * deterministic inline branch-create steps without adding a background runner.
+ * Step rows are inspection and accounting records for deterministic inline
+ * mutation phases. They are not a queue, scheduler, lease, or resume mechanism.
  */
 export function createCapsuleBranchOperationStepsTable(ownerIdColumn?: PgColumn, operationIdColumn?: PgColumn, branchIdColumn?: PgColumn) {
   const ownerId = createOwnerIdColumn(ownerIdColumn)
   const operationId = createOperationIdColumn(operationIdColumn)
   const branchId = createNullableBranchIdColumn(branchIdColumn)
-
   return pgTable(
     'capsule_branch_operation_steps',
     {

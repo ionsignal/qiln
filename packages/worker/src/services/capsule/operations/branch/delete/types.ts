@@ -40,5 +40,5 @@ export interface BranchDeleteVolumeTarget {
 export interface BranchDeletePlan {
   instance: BranchDeleteInstanceTarget | null
   volumes: BranchDeleteVolumeTarget[]
-  provisioningFileResourceIds: string[]
+  provisioningFileResourceIdsToFinalize: string[]
 }
