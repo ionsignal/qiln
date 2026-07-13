@@ -63,12 +63,22 @@ export const IncusNetworkInterfaceSchema = z.object({
 })
 
 /**
+ * Incus returns `network: null` for stopped instances. Normalize that provider
+ * representation to `undefined` so downstream runtime code has one absence
+ * representation and cannot mistake a stopped branch for a schema failure.
+ */
+const IncusNetworkSchema = z.preprocess(
+  value => (value === null ? undefined : value),
+  z.record(z.string(), IncusNetworkInterfaceSchema).optional(),
+)
+
+/**
  * Schema for an Instance's state (Network, CPU, Status).
  */
 export const IncusStateSchema = z.object({
   status: z.string(),
   status_code: z.number(),
-  network: z.record(z.string(), IncusNetworkInterfaceSchema).optional(),
+  network: IncusNetworkSchema,
 })
 
 /**

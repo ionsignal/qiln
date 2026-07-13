@@ -1,5 +1,5 @@
 /**
- * QilnEngine Composables
+ * QilnEngine composables.
  */
 export { provideConsole, useConsole } from './useConsole'
 export { provideCapsules, useCapsuleContext } from './useCapsules'
@@ -7,11 +7,12 @@ export { provideFileBrowser, useFileBrowser } from './useFileBrowser'
 
 export type { ConsoleTab, ConsoleState } from './useConsole'
 export type {
-  CapsuleBranchClient,
-  CapsuleBranchCreateClientInput,
+  CapsuleBranchRuntimeInput,
+  CapsuleClient,
   CapsuleContext,
+  CapsuleCreateClientInput,
   CapsuleEventStreamSubscription,
-  UseCapsulesOptions,
+  ProvideCapsulesOptions,
 } from './useCapsules'
 export type { FileBrowserProviderOptions, FileBrowserState, FileBrowserStatusBarInfo } from './useFileBrowser'
 export type { LogCategory } from '../utils/mockLog'

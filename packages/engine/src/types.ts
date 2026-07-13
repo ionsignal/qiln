@@ -21,7 +21,7 @@ export interface EnginePluginOptions {
 }
 
 /**
- * The Context required by the QilnEngine tRPC router.
+ * Context required by the QilnEngine tRPC router.
  */
 export interface EngineContext {
   user: {
@@ -36,8 +36,21 @@ type EngineRouterOutputs = inferRouterOutputs<EngineRouter>
 export type FileType = 'text' | 'image' | 'config' | 'archive' | 'binary' | 'unknown'
 
 export type FileEntry =
-  | { type: 'file'; path: string; name: string; size: number; modified: string; extension: string }
-  | { type: 'directory'; path: string; name: string; modified: string; childCount: number }
+  | {
+      type: 'file'
+      path: string
+      name: string
+      size: number
+      modified: string
+      extension: string
+    }
+  | {
+      type: 'directory'
+      path: string
+      name: string
+      modified: string
+      childCount: number
+    }
 
 export interface MockFsNode {
   type: 'file' | 'directory'
@@ -51,9 +64,8 @@ export interface MockFsNode {
 /**
  * Narrow retained type for the mock file browser surface.
  *
- * Extra metadata is intentionally modeled as unknown so the retained demo vault
- * fixtures can keep their old shape without reintroducing broad workspace/vault
- * product concepts into the capsule API boundary.
+ * Extra metadata is intentionally modeled as unknown so retained demo fixtures do not reintroduce
+ * broad workspace or generic infrastructure concepts into the capsule API boundary.
  */
 export interface FileBrowserVault {
   id: string
@@ -74,7 +86,27 @@ export interface EditorTab {
 }
 
 export type FileInspectorTarget =
-  | { type: 'file'; path: string; name: string; size: number; modified: string; extension: string; content: string | null; fileType: FileType }
-  | { type: 'directory'; path: string; name: string; modified: string; childCount: number }
+  | {
+      type: 'file'
+      path: string
+      name: string
+      size: number
+      modified: string
+      extension: string
+      content: string | null
+      fileType: FileType
+    }
+  | {
+      type: 'directory'
+      path: string
+      name: string
+      modified: string
+      childCount: number
+    }
 
-export type CapsuleBranchItem = EngineRouterOutputs['capsules']['branch']['list'][number]
+export type CapsuleBranchItem = EngineRouterOutputs['capsules']['branches']['list'][number]
+export type CapsuleSnapshotItem = EngineRouterOutputs['capsules']['snapshots']['list'][number]
+export type CapsuleCreateResult = EngineRouterOutputs['capsules']['create']
+export type CapsuleArchiveResult = EngineRouterOutputs['capsules']['archive']
+export type CapsuleUnarchiveResult = EngineRouterOutputs['capsules']['unarchive']
+export type CapsuleDestroyResult = EngineRouterOutputs['capsules']['destroy']

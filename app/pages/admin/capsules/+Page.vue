@@ -10,7 +10,6 @@
         <template #icon><icon :path="mdiPlus" /></template>
       </n-button>
     </n-flex>
-
     <div class="summary-grid">
       <n-card embedded size="small" class="summary-card">
         <n-text depth="3" class="summary-label">Capsule Branches</n-text>
@@ -25,7 +24,6 @@
         <div class="summary-value">{{ blueprintCount }}</div>
       </n-card>
     </div>
-
     <n-card embedded size="small" class="lifecycle-card">
       <template #header>
         <n-text class="section-title">Capsule lifecycle</n-text>
@@ -44,7 +42,6 @@
         </n-flex>
       </n-flex>
     </n-card>
-
     <n-flex vertical :size="18">
       <n-flex justify="space-between" align="center">
         <div>
@@ -52,7 +49,6 @@
           <n-text depth="3">Editable forks of durable capsule versions. Production is promoted, not edited directly.</n-text>
         </div>
       </n-flex>
-
       <div v-if="branchesRef.length === 0">
         <n-empty description="No capsule branches yet. Create a branch from a capsule blueprint to begin." class="empty-state" />
       </div>
@@ -60,15 +56,12 @@
         <capsule-branch-card v-for="branch in branchesRef" :key="branch.id" :branch="branch" />
       </div>
     </n-flex>
-
     <n-divider />
-
     <n-flex vertical :size="18">
       <div>
         <h2 class="section-heading">Capsule Blueprints</h2>
         <n-text depth="3">Supported capsule templates available for branch creation.</n-text>
       </div>
-
       <div v-if="blueprints.length === 0">
         <n-empty description="No capsule blueprints are currently loaded." class="empty-state" />
       </div>
@@ -76,8 +69,7 @@
         <blueprint-card v-for="blueprint in blueprints" :key="blueprint.name" :blueprint="blueprint" @create-branch="openCreateDrawer" />
       </div>
     </n-flex>
-
-    <capsule-branch-create-drawer v-model:show="showDrawer" :blueprints="blueprints" :preselected-blueprint="selectedBlueprint" />
+    <capsule-create-drawer v-model:show="showDrawer" :blueprints="blueprints" :preselected-blueprint="selectedBlueprint" />
   </n-flex>
 </template>
 
@@ -89,24 +81,22 @@
   import { useData } from '@/composables/useData'
   import { usePageContext } from '@/composables/usePageContext'
   import { useTRPC } from '@/composables/useTRPC'
-  import { CapsuleBranchCard, BlueprintCard, CapsuleBranchCreateDrawer, provideCapsules } from '@qiln/engine/client'
+  import { CapsuleBranchCard, BlueprintCard, CapsuleCreateDrawer, provideCapsules } from '@qiln/engine/client'
   import type { CapsuleBranchItem } from '@qiln/engine/client'
   import type { Data } from './+data'
 
   const data = useData<Data>()
   const pageContext = usePageContext()
   const trpc = useTRPC(pageContext.value)
-
   const branchesRef = ref<CapsuleBranchItem[]>(data.value.branches)
   const showDrawer = ref(false)
   const selectedBlueprint = ref<string | undefined>(undefined)
-
   const blueprints = computed(() => data.value.manifest.blueprints)
   const branchCount = computed(() => branchesRef.value.length)
   const onlineBranchCount = computed(() => branchesRef.value.filter(branch => branch.status === 'online').length)
   const blueprintCount = computed(() => blueprints.value.length)
-
   const streamHandlers = new Set<(rawEvent: unknown) => void>()
+
   let streamSubscription: ReturnType<typeof trpc.stream.events.subscribe> | null = null
 
   const registerStreamHandler = (handler: (rawEvent: unknown) => void) => {

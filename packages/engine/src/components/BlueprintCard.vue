@@ -32,14 +32,14 @@
       </n-flex>
     </n-flex>
     <template #action>
-      <n-button block type="primary" size="small" @click="$emit('create-branch', blueprint.name)">Create Capsule Branch</n-button>
+      <n-button block type="primary" size="small" @click="$emit('create-capsule', blueprint.name)">Create Capsule</n-button>
     </template>
   </n-card>
 </template>
 
 <script setup lang="ts">
   import { computed } from 'vue'
-  import { NCard, NText, NFlex, NTag, NButton } from 'naive-ui'
+  import { NButton, NCard, NFlex, NTag, NText } from 'naive-ui'
   import { mdiFingerprint, mdiLayers, mdiTag } from '@mdi/js'
   import { Icon } from './Icon'
   import type { CapsuleBlueprintManifestItem } from '@qiln/core/client'
@@ -49,7 +49,7 @@
   }>()
 
   defineEmits<{
-    (e: 'create-branch', blueprintName: string): void
+    (event: 'create-capsule', blueprintName: string): void
   }>()
 
   const shortDigest = computed(() => {

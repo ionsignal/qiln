@@ -1,13 +1,14 @@
 import { sql, defineRelations } from 'drizzle-orm'
 import { pgTable, uuid, text, timestamp } from 'drizzle-orm/pg-core'
 import {
-  capsuleBranchOperationStatusEnum,
-  capsuleBranchOperationStepStatusEnum,
-  capsuleBranchOperationTypeEnum,
   capsuleBranchResourceCleanupPolicyEnum,
   capsuleBranchResourceStatusEnum,
   capsuleBranchResourceTypeEnum,
   capsuleBranchStatusEnum,
+  capsuleLifecycleOperationStatusEnum,
+  capsuleLifecycleOperationStepStatusEnum,
+  capsuleLifecycleOperationTypeEnum,
+  capsuleLifecycleStatusEnum,
   createCapsuleSchema,
   defineCapsuleRelations,
   mergeRelationFragments,
@@ -21,7 +22,12 @@ export const users = pgTable('users', {
   email: text('email').notNull().unique(),
   password: text('password').notNull(),
   avatar: text('avatar').notNull().default('default'),
-  createdAt: timestamp('created_at', { withTimezone: true, mode: 'date' }).notNull().defaultNow(),
+  createdAt: timestamp('created_at', {
+    withTimezone: true,
+    mode: 'date',
+  })
+    .notNull()
+    .defaultNow(),
 })
 
 export const sessions = pgTable('sessions', {
@@ -29,60 +35,66 @@ export const sessions = pgTable('sessions', {
   userId: uuid('user_id')
     .notNull()
     .references(() => users.id, { onDelete: 'cascade' }),
-  expiresAt: timestamp('expires_at', { withTimezone: true, mode: 'date' }).notNull(),
+  expiresAt: timestamp('expires_at', {
+    withTimezone: true,
+    mode: 'date',
+  }).notNull(),
 })
 
-// Instantiate the shared capsule tables, passing in the `host` user ID column.
 const capsuleTables = createCapsuleSchema(users.id)
 
 export {
-  capsuleBranchOperationStatusEnum,
-  capsuleBranchOperationStepStatusEnum,
-  capsuleBranchOperationTypeEnum,
+  capsuleLifecycleStatusEnum,
+  capsuleLifecycleOperationTypeEnum,
+  capsuleLifecycleOperationStatusEnum,
+  capsuleLifecycleOperationStepStatusEnum,
   capsuleBranchResourceCleanupPolicyEnum,
   capsuleBranchResourceStatusEnum,
   capsuleBranchResourceTypeEnum,
   capsuleBranchStatusEnum,
 }
 
-export const { capsuleBranches, capsuleBranchOperations, capsuleBranchOperationSteps, capsuleBranchResources } = capsuleTables
+export const {
+  capsules,
+  capsuleBranches,
+  capsuleLifecycleOperations,
+  capsuleLifecycleOperationSteps,
+  capsuleBranchResources,
+  capsuleSnapshots,
+} = capsuleTables
 
 /**
- * The unified schema object containing all tables from both the host and shared core fragments.
- * This is the single source of truth passed to the `drizzle()` constructor.
+ * Unified physical schema consumed by Drizzle.
  */
 export const schema = {
-  // host
   users,
   sessions,
-  // capsule enums
+  capsuleLifecycleStatusEnum,
   capsuleBranchStatusEnum,
-  capsuleBranchOperationTypeEnum,
-  capsuleBranchOperationStatusEnum,
-  capsuleBranchOperationStepStatusEnum,
+  capsuleLifecycleOperationTypeEnum,
+  capsuleLifecycleOperationStatusEnum,
+  capsuleLifecycleOperationStepStatusEnum,
   capsuleBranchResourceTypeEnum,
   capsuleBranchResourceStatusEnum,
   capsuleBranchResourceCleanupPolicyEnum,
-  // capsule tables
   ...capsuleTables,
 } as const
 
-// Export the type of the merged schema for use in other modules.
 export type AppSchema = typeof schema
 
 /**
- * Defines ALL relations for the entire application using the Drizzle v1 API.
- * This merges Host-specific relations with Core-provided capsule relations.
+ * Defines all host and Core capsule relations using the Drizzle v1 relations
+ * API. Duplicate relation names fail during fragment composition.
  */
 export const relations = defineRelations(schema, helpers =>
   mergeRelationFragments(
     {
-      // host relations
       users: {
         sessions: helpers.many.sessions(),
+        capsules: helpers.many.capsules(),
         capsuleBranches: helpers.many.capsuleBranches(),
-        capsuleBranchOperations: helpers.many.capsuleBranchOperations(),
-        capsuleBranchOperationSteps: helpers.many.capsuleBranchOperationSteps(),
+        capsuleLifecycleOperations: helpers.many.capsuleLifecycleOperations(),
+        capsuleLifecycleOperationSteps: helpers.many.capsuleLifecycleOperationSteps(),
         capsuleBranchResources: helpers.many.capsuleBranchResources(),
       },
       sessions: {
@@ -92,7 +104,6 @@ export const relations = defineRelations(schema, helpers =>
         }),
       },
     },
-    // capsule relations
     defineCapsuleRelations(helpers),
   ),
 )

@@ -23,7 +23,8 @@ const defaultRateLimitConfig = {
 // Helper to get the application path
 const appPath = process.env.FASTIFY_APP_PATH ?? process.cwd()
 // Helper to safely decode Base64 strings for mTLS certificates
-const decodeBase64 = (val?: string) => (val ? Buffer.from(val, 'base64').toString('utf-8') : undefined)
+const decodeBase64 = (value?: string) => (value ? Buffer.from(value, 'base64').toString('utf-8') : undefined)
+
 export default {
   dev,
   host,
@@ -36,7 +37,6 @@ export default {
   },
   worker: {
     embedded: process.env.QILN_EMBEDDED_WORKER_ENABLED === 'true',
-    reconcileOnStart: process.env.QILN_WORKER_RECONCILE_ON_START === 'true',
   },
   cookies: {
     name: process.env.COOKIE_NAME ?? 'runemind_session',

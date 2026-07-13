@@ -45,7 +45,6 @@ type DefinitionConfig = {
 
 type WorkerConfig = {
   embedded: boolean
-  reconcileOnStart: boolean
 }
 
 export interface IncusConfig {

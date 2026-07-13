@@ -16,13 +16,13 @@ export default fp(
     const worker = new QilnWorkerRuntime({
       db,
       config: fastify.config,
-      reconcileOnStart: fastify.config.worker.reconcileOnStart,
     })
     await worker.start()
-    // asign to fastify
     fastify.worker = worker
     fastify.addHook('onClose', async () => {
-      if (fastify.worker !== worker) return
+      if (fastify.worker !== worker) {
+        return
+      }
       fastify.log.info('[Worker] Stopping embedded worker runtime...')
       try {
         await worker.stop()

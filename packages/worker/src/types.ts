@@ -26,5 +26,4 @@ export interface WorkerRuntimeConfig {
 export interface WorkerRuntimeOptions {
   db: CapsuleHostDbContract
   config?: WorkerRuntimeConfig
-  reconcileOnStart?: boolean
 }

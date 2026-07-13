@@ -1,10 +1,10 @@
 /**
- * QilnEngine UI Components
+ * QilnEngine UI components.
  */
 export { Icon } from './Icon'
 export { default as BlueprintCard } from './BlueprintCard.vue'
 export { default as CapsuleBranchCard } from './CapsuleBranchCard.vue'
-export { default as CapsuleBranchCreateDrawer } from './CapsuleBranchCreateDrawer.vue'
+export { default as CapsuleCreateDrawer } from './CapsuleCreateDrawer.vue'
 export { default as Console } from './Console.vue'
 export { default as FileToolbar } from './FileToolbar.vue'
 export { default as FileTable } from './FileTable.vue'

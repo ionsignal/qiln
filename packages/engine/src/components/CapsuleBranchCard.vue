@@ -1,7 +1,13 @@
 <template>
   <n-card bordered embedded size="small" class="capsule-branch-card">
     <template #header>
-      <n-text style="font-weight: 600; letter-spacing: 0.05em">{{ branch.name }}</n-text>
+      <n-flex :size="8" align="center">
+        <n-text style="font-weight: 600; letter-spacing: 0.05em">
+          {{ branch.name }}
+        </n-text>
+
+        <n-tag v-if="branch.isRootBranch" size="small" :bordered="false">Root</n-tag>
+      </n-flex>
     </template>
     <template #header-extra>
       <n-tag :type="statusType" size="small" round :bordered="false">
@@ -22,46 +28,41 @@
       <n-text depth="3" style="font-size: 12px">Blueprint: {{ branch.blueprint }}</n-text>
     </n-flex>
     <template #action>
-      <n-flex justify="space-between" align="center">
-        <n-button-group>
-          <n-button
-            size="small"
-            type="success"
-            secondary
-            :disabled="isProcessing || branch.status === 'online'"
-            :loading="branch.status === 'starting'"
-            @click="handleStart">
-            <template #icon><icon :path="mdiPlay" :size="16" /></template>
-          </n-button>
-          <n-button
-            size="small"
-            type="warning"
-            secondary
-            :disabled="isProcessing || branch.status === 'offline'"
-            :loading="branch.status === 'stopping'"
-            @click="handleStop">
-            <template #icon><icon :path="mdiStop" :size="16" /></template>
-          </n-button>
-        </n-button-group>
-        <n-popconfirm @positive-click="handleDelete" :positive-button-props="{ type: 'error' }">
-          <template #trigger>
-            <n-button size="small" type="error" quaternary :disabled="isProcessing">
-              <template #icon><icon :path="mdiDelete" :size="16" /></template>
-            </n-button>
+      <n-button-group>
+        <n-button
+          size="small"
+          type="success"
+          secondary
+          :disabled="branch.status !== 'offline'"
+          :loading="branch.status === 'starting'"
+          @click="handleStart">
+          <template #icon>
+            <icon :path="mdiPlay" :size="16" />
           </template>
-          Delete this capsule branch runtime? Its durable branch history will remain archived.
-        </n-popconfirm>
-      </n-flex>
+          Start
+        </n-button>
+        <n-button
+          size="small"
+          type="warning"
+          secondary
+          :disabled="branch.status !== 'online'"
+          :loading="branch.status === 'stopping'"
+          @click="handleStop">
+          <template #icon>
+            <icon :path="mdiStop" :size="16" />
+          </template>
+          Stop
+        </n-button>
+      </n-button-group>
     </template>
   </n-card>
 </template>
 
 <script setup lang="ts">
   import { computed } from 'vue'
-  import { NCard, NText, NFlex, NTag, NButton, NButtonGroup, NPopconfirm, useMessage } from 'naive-ui'
+  import { NButton, NButtonGroup, NCard, NFlex, NTag, NText, useMessage } from 'naive-ui'
   import { isTRPCClientError } from '@trpc/client'
-  import { mdiPlay, mdiStop, mdiDelete, mdiCpu64Bit, mdiMemory } from '@mdi/js'
-  import { CapsuleBranchIdempotencyKeySchema } from '@qiln/core/client'
+  import { mdiCpu64Bit, mdiMemory, mdiPlay, mdiStop } from '@mdi/js'
   import { useCapsuleContext } from '../composables/useCapsules'
   import { Icon } from './Icon'
   import type { CapsuleBranchItem } from '../types'
@@ -71,12 +72,7 @@
   }>()
 
   const message = useMessage()
-  const { start, stop, delete: removeBranch } = useCapsuleContext()
-
-  const isProcessing = computed(() => {
-    return ['provisioning', 'starting', 'stopping', 'deleting'].includes(props.branch.status)
-  })
-
+  const { startBranch, stopBranch } = useCapsuleContext()
   const statusType = computed(() => {
     switch (props.branch.status) {
       case 'online':
@@ -84,7 +80,7 @@
       case 'provisioning':
       case 'starting':
       case 'stopping':
-      case 'deleting':
+      case 'destroying':
         return 'warning'
       case 'error':
       case 'cleanup_required':
@@ -94,46 +90,27 @@
     }
   })
 
-  function generateIdempotencyKey(): string | null {
-    if (typeof globalThis.crypto?.randomUUID !== 'function') {
-      return null
-    }
-    const parsed = CapsuleBranchIdempotencyKeySchema.safeParse(globalThis.crypto.randomUUID())
-    return parsed.success ? parsed.data : null
-  }
-
-  async function handleStart() {
+  async function handleStart(): Promise<void> {
     try {
-      await start(props.branch.name)
-      message.success('Capsule branch started')
-    } catch (err: unknown) {
-      message.error(isTRPCClientError(err) ? err.message : 'Failed to start capsule branch')
-    }
-  }
-
-  async function handleStop() {
-    try {
-      await stop(props.branch.name)
-      message.success('Capsule branch stopped')
-    } catch (err: unknown) {
-      message.error(isTRPCClientError(err) ? err.message : 'Failed to stop capsule branch')
-    }
-  }
-
-  async function handleDelete() {
-    const idempotencyKey = generateIdempotencyKey()
-    if (!idempotencyKey) {
-      message.error('Failed to generate a branch delete idempotency key. Please retry in a modern browser.')
-      return
-    }
-    try {
-      await removeBranch({
+      await startBranch({
+        capsuleId: props.branch.capsuleId,
         name: props.branch.name,
-        idempotencyKey,
       })
-      message.success('Capsule branch runtime deleted')
-    } catch (err: unknown) {
-      message.error(isTRPCClientError(err) ? err.message : 'Failed to delete capsule branch runtime')
+      message.success('Capsule branch started')
+    } catch (error: unknown) {
+      message.error(isTRPCClientError(error) ? error.message : 'Failed to start capsule branch')
+    }
+  }
+
+  async function handleStop(): Promise<void> {
+    try {
+      await stopBranch({
+        capsuleId: props.branch.capsuleId,
+        name: props.branch.name,
+      })
+      message.success('Capsule branch stopped')
+    } catch (error: unknown) {
+      message.error(isTRPCClientError(error) ? error.message : 'Failed to stop capsule branch')
     }
   }
 </script>

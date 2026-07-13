@@ -1,69 +1,72 @@
-import { onMounted, onUnmounted, provide, inject } from 'vue'
+import { inject, onMounted, onUnmounted, provide } from 'vue'
 import {
   CapsuleBranchEventName,
   CapsuleEventSchema,
+  CapsuleLifecycleEventName,
   type CapsuleBlueprintDigest,
-  type CapsuleBranchIdempotencyKey,
   type CapsuleBranchName,
   type CapsuleBranchStatus,
+  type CapsuleLifecycleIdempotencyKey,
 } from '@qiln/core/client'
 import type { InjectionKey, Ref } from 'vue'
 import type { TRPCClient } from '@trpc/client'
 import type { EngineRouter } from '../trpc'
 import type { CapsuleBranchItem } from '../types'
 
-export type CapsuleBranchClient = TRPCClient<EngineRouter>['capsules']
+export type CapsuleClient = TRPCClient<EngineRouter>['capsules']
 
 export interface CapsuleEventStreamSubscription {
   unsubscribe: () => void
 }
 
-export interface CapsuleBranchDeleteClientInput {
+export interface CapsuleBranchRuntimeInput {
+  capsuleId: string
   name: CapsuleBranchName
-  idempotencyKey: CapsuleBranchIdempotencyKey
 }
 
-export interface CapsuleBranchCreateClientInput {
-  name: CapsuleBranchName
+export interface CapsuleCreateClientInput {
+  rootBranchName: CapsuleBranchName
   blueprintName: string
   blueprintDigest: CapsuleBlueprintDigest
-  idempotencyKey: CapsuleBranchIdempotencyKey
+  idempotencyKey: CapsuleLifecycleIdempotencyKey
   cpu?: string
   memory?: string
 }
 
-export interface UseCapsulesOptions {
-  client: CapsuleBranchClient
+export interface ProvideCapsulesOptions {
+  client: CapsuleClient
   branches: Ref<CapsuleBranchItem[]>
-  onError?: (err: Error) => void
+  onError?: (error: Error) => void
   onEventStream: (handler: (rawEvent: unknown) => void) => CapsuleEventStreamSubscription
 }
 
 export interface CapsuleContext {
-  refresh: () => Promise<void>
-  create: (input: CapsuleBranchCreateClientInput) => Promise<void>
-  delete: (input: CapsuleBranchDeleteClientInput) => Promise<void>
-  start: (name: string) => Promise<void>
-  stop: (name: string) => Promise<void>
+  refreshBranches: () => Promise<void>
+  createCapsule: (input: CapsuleCreateClientInput) => Promise<void>
+  startBranch: (input: CapsuleBranchRuntimeInput) => Promise<void>
+  stopBranch: (input: CapsuleBranchRuntimeInput) => Promise<void>
 }
 
 const CapsuleContextKey: InjectionKey<CapsuleContext> = Symbol('CapsuleContext')
 
-function toError(err: unknown, fallbackMessage: string): Error {
-  return err instanceof Error ? err : new Error(fallbackMessage)
+function toError(error: unknown, fallbackMessage: string): Error {
+  return error instanceof Error ? error : new Error(fallbackMessage)
 }
 
-export function provideCapsules(options: UseCapsulesOptions): CapsuleContext {
-  let eventSubscription: CapsuleEventStreamSubscription | null = null
+function branchIdentityMatches(branch: CapsuleBranchItem, input: CapsuleBranchRuntimeInput): boolean {
+  return branch.capsuleId === input.capsuleId && branch.name === input.name
+}
 
-  function findBranch(name: string): CapsuleBranchItem | undefined {
-    return options.branches.value.find(branch => branch.name === name)
+export function provideCapsules(options: ProvideCapsulesOptions): CapsuleContext {
+  let eventSubscription: CapsuleEventStreamSubscription | null = null
+  function findBranch(input: CapsuleBranchRuntimeInput): CapsuleBranchItem | undefined {
+    return options.branches.value.find(branch => branchIdentityMatches(branch, input))
   }
 
-  function replaceBranch(name: string, update: (branch: CapsuleBranchItem) => CapsuleBranchItem): boolean {
+  function replaceBranch(input: CapsuleBranchRuntimeInput, update: (branch: CapsuleBranchItem) => CapsuleBranchItem): boolean {
     let replaced = false
     options.branches.value = options.branches.value.map(branch => {
-      if (branch.name !== name) {
+      if (!branchIdentityMatches(branch, input)) {
         return branch
       }
       replaced = true
@@ -72,92 +75,82 @@ export function provideCapsules(options: UseCapsulesOptions): CapsuleContext {
     return replaced
   }
 
-  function setLocalBranchStatus(name: string, status: CapsuleBranchStatus): boolean {
-    return replaceBranch(name, branch => ({
+  function setLocalBranchStatus(input: CapsuleBranchRuntimeInput, status: CapsuleBranchStatus): boolean {
+    return replaceBranch(input, branch => ({
       ...branch,
       status,
     }))
   }
 
-  async function refreshBranches(): Promise<void> {
-    const list = await options.client.branch.list.query()
-    options.branches.value = list ?? []
+  async function fetchBranches(): Promise<void> {
+    const branches = await options.client.branches.list.query()
+    options.branches.value = branches
   }
 
-  async function refreshSafely(): Promise<boolean> {
+  async function refreshBranchesSafely(): Promise<boolean> {
     try {
-      await refreshBranches()
+      await fetchBranches()
       return true
-    } catch (err: unknown) {
-      options.onError?.(toError(err, 'Failed to refresh capsule branches'))
+    } catch (error: unknown) {
+      options.onError?.(toError(error, 'Failed to refresh capsule branches'))
       return false
     }
   }
 
-  async function refresh() {
-    await refreshSafely()
+  async function refreshBranches(): Promise<void> {
+    await fetchBranches()
   }
 
   function refreshFromCapsuleEvent(): void {
-    void refreshSafely().then(refreshed => {
+    void refreshBranchesSafely().then(refreshed => {
       if (!refreshed) {
-        console.error('[provideCapsules] Background refresh failed after a capsule branch event.')
+        console.error('[provideCapsules] Background refresh failed after a capsule event.')
       }
     })
   }
 
-  async function runLifecycleMutation(
-    name: string,
+  async function runRuntimeMutation(
+    input: CapsuleBranchRuntimeInput,
     pendingStatus: CapsuleBranchStatus,
     successStatus: CapsuleBranchStatus,
     mutate: () => Promise<unknown>,
   ): Promise<void> {
-    const previousStatus = findBranch(name)?.status
-    setLocalBranchStatus(name, pendingStatus)
+    const previousStatus = findBranch(input)?.status
+    setLocalBranchStatus(input, pendingStatus)
     try {
       await mutate()
-      setLocalBranchStatus(name, successStatus)
-      await refreshSafely()
-    } catch (err: unknown) {
-      const refreshed = await refreshSafely()
+      setLocalBranchStatus(input, successStatus)
+      await refreshBranchesSafely()
+    } catch (error: unknown) {
+      const refreshed = await refreshBranchesSafely()
       if (!refreshed && previousStatus) {
-        setLocalBranchStatus(name, previousStatus)
+        setLocalBranchStatus(input, previousStatus)
       }
-      throw err
+      throw error
     }
   }
 
-  async function create(input: CapsuleBranchCreateClientInput) {
-    await options.client.branch.create.mutate(input)
-    await refresh()
+  async function createCapsule(input: CapsuleCreateClientInput): Promise<void> {
+    await options.client.create.mutate(input)
+    await refreshBranches()
   }
 
-  async function start(name: string) {
-    await runLifecycleMutation(name, 'starting', 'online', () => options.client.branch.start.mutate({ name }))
+  async function startBranch(input: CapsuleBranchRuntimeInput): Promise<void> {
+    await runRuntimeMutation(input, 'starting', 'online', () => options.client.branches.start.mutate(input))
   }
 
-  async function stop(name: string) {
-    await runLifecycleMutation(name, 'stopping', 'offline', () => options.client.branch.stop.mutate({ name }))
-  }
-
-  async function remove(input: CapsuleBranchDeleteClientInput) {
-    try {
-      await options.client.branch.delete.mutate(input)
-      options.branches.value = options.branches.value.filter(branch => branch.name !== input.name)
-    } catch (err: unknown) {
-      await refreshSafely()
-      throw err
-    }
+  async function stopBranch(input: CapsuleBranchRuntimeInput): Promise<void> {
+    await runRuntimeMutation(input, 'stopping', 'offline', () => options.client.branches.stop.mutate(input))
   }
 
   onMounted(() => {
-    eventSubscription = options.onEventStream((rawData: unknown) => {
-      const parsedEvent = CapsuleEventSchema.safeParse(rawData)
+    eventSubscription = options.onEventStream((rawEvent: unknown) => {
+      const parsedEvent = CapsuleEventSchema.safeParse(rawEvent)
       if (!parsedEvent.success) {
         return
       }
       const event = parsedEvent.data
-      if (event.type === CapsuleBranchEventName.BRANCH_STATE_CHANGED || event.type === CapsuleBranchEventName.BRANCH_DELETED) {
+      if (event.type === CapsuleBranchEventName.BRANCH_STATE_CHANGED || event.type === CapsuleLifecycleEventName.LIFECYCLE_CHANGED) {
         refreshFromCapsuleEvent()
       }
     })
@@ -169,11 +162,10 @@ export function provideCapsules(options: UseCapsulesOptions): CapsuleContext {
   })
 
   const context: CapsuleContext = {
-    refresh,
-    create,
-    start,
-    stop,
-    delete: remove,
+    refreshBranches,
+    createCapsule,
+    startBranch,
+    stopBranch,
   }
 
   provide(CapsuleContextKey, context)

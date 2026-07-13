@@ -3,16 +3,16 @@ import type { PgColumn } from 'drizzle-orm/pg-core'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import { capsuleBranchesTable, createCapsuleBranchesTable } from './branch'
 import {
-  capsuleBranchOperationStatusEnum,
-  capsuleBranchOperationTypeEnum,
-  capsuleBranchOperationsTable,
-  createCapsuleBranchOperationsTable,
-} from './branchOperation'
+  capsuleLifecycleOperationStatusEnum,
+  capsuleLifecycleOperationTypeEnum,
+  capsuleLifecycleOperationsTable,
+  createCapsuleLifecycleOperationsTable,
+} from './lifecycleOperation'
 import {
-  capsuleBranchOperationStepStatusEnum,
-  capsuleBranchOperationStepsTable,
-  createCapsuleBranchOperationStepsTable,
-} from './branchOperationStep'
+  capsuleLifecycleOperationStepStatusEnum,
+  capsuleLifecycleOperationStepsTable,
+  createCapsuleLifecycleOperationStepsTable,
+} from './lifecycleOperationStep'
 import {
   capsuleBranchResourceCleanupPolicyEnum,
   capsuleBranchResourceStatusEnum,
@@ -20,137 +20,207 @@ import {
   capsuleBranchResourcesTable,
   createCapsuleBranchResourcesTable,
 } from './branchResource'
+import { capsuleLifecycleStatusEnum, capsulesTable, createCapsulesTable } from './capsule'
+import { capsuleSnapshotsTable, createCapsuleSnapshotsTable } from './snapshot'
 import type { RelationFragmentManyFn, RelationFragmentOneFn } from '../relations'
 
 export {
-  capsuleBranchOperationStatusEnum,
-  capsuleBranchOperationStepStatusEnum,
-  capsuleBranchOperationTypeEnum,
+  capsuleLifecycleStatusEnum,
+  capsuleLifecycleOperationStatusEnum,
+  capsuleLifecycleOperationStepStatusEnum,
+  capsuleLifecycleOperationTypeEnum,
   capsuleBranchResourceCleanupPolicyEnum,
   capsuleBranchResourceStatusEnum,
   capsuleBranchResourceTypeEnum,
 }
 
 export function createCapsuleSchema<TUserIdColumn extends PgColumn>(userIdColumn: TUserIdColumn) {
-  const capsuleBranches = createCapsuleBranchesTable(userIdColumn)
-  const capsuleBranchOperations = createCapsuleBranchOperationsTable(userIdColumn, capsuleBranches.id)
-  const capsuleBranchOperationSteps = createCapsuleBranchOperationStepsTable(userIdColumn, capsuleBranchOperations.id, capsuleBranches.id)
-  const capsuleBranchResources = createCapsuleBranchResourcesTable(userIdColumn, capsuleBranches.id, capsuleBranchOperations.id)
+  const capsules = createCapsulesTable(userIdColumn)
+  const capsuleBranches = createCapsuleBranchesTable(userIdColumn, capsules.id)
+  const capsuleSnapshots = createCapsuleSnapshotsTable(capsules.id, capsuleBranches.id)
+  const capsuleLifecycleOperations = createCapsuleLifecycleOperationsTable(userIdColumn, capsules.id, capsuleBranches.id)
+  const capsuleBranchResources = createCapsuleBranchResourcesTable(userIdColumn, capsuleBranches.id, capsuleLifecycleOperations.id)
+  const capsuleLifecycleOperationSteps = createCapsuleLifecycleOperationStepsTable(
+    userIdColumn,
+    capsules.id,
+    capsuleLifecycleOperations.id,
+    capsuleBranches.id,
+  )
   return {
+    capsules,
     capsuleBranches,
-    capsuleBranchOperations,
-    capsuleBranchOperationSteps,
+    capsuleLifecycleOperations,
+    capsuleLifecycleOperationSteps,
     capsuleBranchResources,
+    capsuleSnapshots,
   }
 }
 
 export const capsuleRuntimeSchema = {
+  capsules: capsulesTable,
   capsuleBranches: capsuleBranchesTable,
-  capsuleBranchOperations: capsuleBranchOperationsTable,
-  capsuleBranchOperationSteps: capsuleBranchOperationStepsTable,
+  capsuleLifecycleOperations: capsuleLifecycleOperationsTable,
+  capsuleLifecycleOperationSteps: capsuleLifecycleOperationStepsTable,
   capsuleBranchResources: capsuleBranchResourcesTable,
+  capsuleSnapshots: capsuleSnapshotsTable,
 } as const
 
 export interface CapsuleRelationHelpers {
   one: {
     users: RelationFragmentOneFn<'users'>
+    capsules: RelationFragmentOneFn<'capsules'>
     capsuleBranches: RelationFragmentOneFn<'capsuleBranches'>
-    capsuleBranchOperations: RelationFragmentOneFn<'capsuleBranchOperations'>
+    capsuleLifecycleOperations: RelationFragmentOneFn<'capsuleLifecycleOperations'>
   }
   many: {
-    capsuleBranchOperations: RelationFragmentManyFn<'capsuleBranchOperations'>
-    capsuleBranchOperationSteps: RelationFragmentManyFn<'capsuleBranchOperationSteps'>
+    capsules: RelationFragmentManyFn<'capsules'>
+    capsuleBranches: RelationFragmentManyFn<'capsuleBranches'>
+    capsuleLifecycleOperations: RelationFragmentManyFn<'capsuleLifecycleOperations'>
+    capsuleLifecycleOperationSteps: RelationFragmentManyFn<'capsuleLifecycleOperationSteps'>
     capsuleBranchResources: RelationFragmentManyFn<'capsuleBranchResources'>
+    capsuleSnapshots: RelationFragmentManyFn<'capsuleSnapshots'>
   }
   users: {
     id: RelationsBuilderColumnBase<'users'>
   }
+  capsules: {
+    id: RelationsBuilderColumnBase<'capsules'>
+    ownerId: RelationsBuilderColumnBase<'capsules'>
+  }
   capsuleBranches: {
     id: RelationsBuilderColumnBase<'capsuleBranches'>
     ownerId: RelationsBuilderColumnBase<'capsuleBranches'>
+    capsuleId: RelationsBuilderColumnBase<'capsuleBranches'>
   }
-  capsuleBranchOperations: {
-    id: RelationsBuilderColumnBase<'capsuleBranchOperations'>
-    ownerId: RelationsBuilderColumnBase<'capsuleBranchOperations'>
-    branchId: RelationsBuilderColumnBase<'capsuleBranchOperations'>
+  capsuleLifecycleOperations: {
+    id: RelationsBuilderColumnBase<'capsuleLifecycleOperations'>
+    ownerId: RelationsBuilderColumnBase<'capsuleLifecycleOperations'>
+    capsuleId: RelationsBuilderColumnBase<'capsuleLifecycleOperations'>
+    branchId: RelationsBuilderColumnBase<'capsuleLifecycleOperations'>
   }
-  capsuleBranchOperationSteps: {
-    ownerId: RelationsBuilderColumnBase<'capsuleBranchOperationSteps'>
-    operationId: RelationsBuilderColumnBase<'capsuleBranchOperationSteps'>
-    branchId: RelationsBuilderColumnBase<'capsuleBranchOperationSteps'>
+  capsuleLifecycleOperationSteps: {
+    ownerId: RelationsBuilderColumnBase<'capsuleLifecycleOperationSteps'>
+    capsuleId: RelationsBuilderColumnBase<'capsuleLifecycleOperationSteps'>
+    operationId: RelationsBuilderColumnBase<'capsuleLifecycleOperationSteps'>
+    branchId: RelationsBuilderColumnBase<'capsuleLifecycleOperationSteps'>
   }
   capsuleBranchResources: {
     ownerId: RelationsBuilderColumnBase<'capsuleBranchResources'>
     branchId: RelationsBuilderColumnBase<'capsuleBranchResources'>
-    createdByOperationId: RelationsBuilderColumnBase<'capsuleBranchResources'>
-    lastOperationId: RelationsBuilderColumnBase<'capsuleBranchResources'>
+    createdByLifecycleOperationId: RelationsBuilderColumnBase<'capsuleBranchResources'>
+    lastLifecycleOperationId: RelationsBuilderColumnBase<'capsuleBranchResources'>
+  }
+  capsuleSnapshots: {
+    capsuleId: RelationsBuilderColumnBase<'capsuleSnapshots'>
+    sourceBranchId: RelationsBuilderColumnBase<'capsuleSnapshots'>
   }
 }
 
 /**
  * Defines the full capsule relation fragment owned by @qiln/core.
  *
- * Host-owned reverse relations from `users` are still composed in the host app
- * because the host owns the physical users table.
+ * Host-owned reverse relations from users remain composed by the host because the host owns the physical users table.
  */
 export function defineCapsuleRelations(helpers: CapsuleRelationHelpers) {
   return {
+    capsules: {
+      owner: helpers.one.users({
+        from: helpers.capsules.ownerId,
+        to: helpers.users.id,
+        optional: false,
+      }),
+      branches: helpers.many.capsuleBranches({
+        from: helpers.capsules.id,
+        to: helpers.capsuleBranches.capsuleId,
+      }),
+      lifecycleOperations: helpers.many.capsuleLifecycleOperations({
+        from: helpers.capsules.id,
+        to: helpers.capsuleLifecycleOperations.capsuleId,
+      }),
+      lifecycleOperationSteps: helpers.many.capsuleLifecycleOperationSteps({
+        from: helpers.capsules.id,
+        to: helpers.capsuleLifecycleOperationSteps.capsuleId,
+      }),
+      snapshots: helpers.many.capsuleSnapshots({
+        from: helpers.capsules.id,
+        to: helpers.capsuleSnapshots.capsuleId,
+      }),
+    },
     capsuleBranches: {
       owner: helpers.one.users({
         from: helpers.capsuleBranches.ownerId,
         to: helpers.users.id,
         optional: false,
       }),
-      operations: helpers.many.capsuleBranchOperations({
-        from: helpers.capsuleBranches.id,
-        to: helpers.capsuleBranchOperations.branchId,
+      capsule: helpers.one.capsules({
+        from: helpers.capsuleBranches.capsuleId,
+        to: helpers.capsules.id,
+        optional: false,
       }),
-      operationSteps: helpers.many.capsuleBranchOperationSteps({
+      lifecycleOperations: helpers.many.capsuleLifecycleOperations({
         from: helpers.capsuleBranches.id,
-        to: helpers.capsuleBranchOperationSteps.branchId,
+        to: helpers.capsuleLifecycleOperations.branchId,
+      }),
+      lifecycleOperationSteps: helpers.many.capsuleLifecycleOperationSteps({
+        from: helpers.capsuleBranches.id,
+        to: helpers.capsuleLifecycleOperationSteps.branchId,
       }),
       resources: helpers.many.capsuleBranchResources({
         from: helpers.capsuleBranches.id,
         to: helpers.capsuleBranchResources.branchId,
       }),
+      snapshots: helpers.many.capsuleSnapshots({
+        from: helpers.capsuleBranches.id,
+        to: helpers.capsuleSnapshots.sourceBranchId,
+      }),
     },
-    capsuleBranchOperations: {
+    capsuleLifecycleOperations: {
       owner: helpers.one.users({
-        from: helpers.capsuleBranchOperations.ownerId,
+        from: helpers.capsuleLifecycleOperations.ownerId,
         to: helpers.users.id,
         optional: false,
       }),
+      capsule: helpers.one.capsules({
+        from: helpers.capsuleLifecycleOperations.capsuleId,
+        to: helpers.capsules.id,
+        optional: false,
+      }),
       branch: helpers.one.capsuleBranches({
-        from: helpers.capsuleBranchOperations.branchId,
+        from: helpers.capsuleLifecycleOperations.branchId,
         to: helpers.capsuleBranches.id,
         optional: true,
       }),
-      steps: helpers.many.capsuleBranchOperationSteps({
-        from: helpers.capsuleBranchOperations.id,
-        to: helpers.capsuleBranchOperationSteps.operationId,
+      steps: helpers.many.capsuleLifecycleOperationSteps({
+        from: helpers.capsuleLifecycleOperations.id,
+        to: helpers.capsuleLifecycleOperationSteps.operationId,
       }),
       resourcesCreated: helpers.many.capsuleBranchResources({
-        from: helpers.capsuleBranchOperations.id,
-        to: helpers.capsuleBranchResources.createdByOperationId,
+        from: helpers.capsuleLifecycleOperations.id,
+        to: helpers.capsuleBranchResources.createdByLifecycleOperationId,
       }),
       resourcesLastTouched: helpers.many.capsuleBranchResources({
-        from: helpers.capsuleBranchOperations.id,
-        to: helpers.capsuleBranchResources.lastOperationId,
+        from: helpers.capsuleLifecycleOperations.id,
+        to: helpers.capsuleBranchResources.lastLifecycleOperationId,
       }),
     },
-    capsuleBranchOperationSteps: {
+    capsuleLifecycleOperationSteps: {
       owner: helpers.one.users({
-        from: helpers.capsuleBranchOperationSteps.ownerId,
+        from: helpers.capsuleLifecycleOperationSteps.ownerId,
         to: helpers.users.id,
         optional: false,
       }),
-      operation: helpers.one.capsuleBranchOperations({
-        from: helpers.capsuleBranchOperationSteps.operationId,
-        to: helpers.capsuleBranchOperations.id,
+      capsule: helpers.one.capsules({
+        from: helpers.capsuleLifecycleOperationSteps.capsuleId,
+        to: helpers.capsules.id,
+        optional: false,
+      }),
+      operation: helpers.one.capsuleLifecycleOperations({
+        from: helpers.capsuleLifecycleOperationSteps.operationId,
+        to: helpers.capsuleLifecycleOperations.id,
         optional: false,
       }),
       branch: helpers.one.capsuleBranches({
-        from: helpers.capsuleBranchOperationSteps.branchId,
+        from: helpers.capsuleLifecycleOperationSteps.branchId,
         to: helpers.capsuleBranches.id,
         optional: true,
       }),
@@ -166,15 +236,27 @@ export function defineCapsuleRelations(helpers: CapsuleRelationHelpers) {
         to: helpers.capsuleBranches.id,
         optional: true,
       }),
-      createdByOperation: helpers.one.capsuleBranchOperations({
-        from: helpers.capsuleBranchResources.createdByOperationId,
-        to: helpers.capsuleBranchOperations.id,
+      createdByLifecycleOperation: helpers.one.capsuleLifecycleOperations({
+        from: helpers.capsuleBranchResources.createdByLifecycleOperationId,
+        to: helpers.capsuleLifecycleOperations.id,
         optional: true,
       }),
-      lastOperation: helpers.one.capsuleBranchOperations({
-        from: helpers.capsuleBranchResources.lastOperationId,
-        to: helpers.capsuleBranchOperations.id,
+      lastLifecycleOperation: helpers.one.capsuleLifecycleOperations({
+        from: helpers.capsuleBranchResources.lastLifecycleOperationId,
+        to: helpers.capsuleLifecycleOperations.id,
         optional: true,
+      }),
+    },
+    capsuleSnapshots: {
+      capsule: helpers.one.capsules({
+        from: helpers.capsuleSnapshots.capsuleId,
+        to: helpers.capsules.id,
+        optional: false,
+      }),
+      sourceBranch: helpers.one.capsuleBranches({
+        from: helpers.capsuleSnapshots.sourceBranchId,
+        to: helpers.capsuleBranches.id,
+        optional: false,
       }),
     },
   }

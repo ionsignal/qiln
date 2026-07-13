@@ -1,10 +1,10 @@
 import path from 'node:path'
-import { CapsuleBlueprintRegistry, CapsuleNatsChannel } from '@qiln/core/server'
-import { IncusClient } from './incus/client/index'
-import { CapsuleBranchRuntimeService } from './services/capsule/branch/lifecycle'
-import { FileService } from './services/file'
-import { ProjectService } from './services/project'
+
 import { registerCapsuleChannelHandlers } from './channel'
+import { IncusClient } from './incus/client/index'
+import { CapsuleService } from './services/capsule'
+import { ProjectService } from './services/project'
+import { CapsuleBlueprintRegistry, CapsuleNatsChannel } from '@qiln/core/server'
 import type { WorkerRuntimeConfig, WorkerRuntimeOptions } from './types'
 
 const WORKER_LOG_PREFIX = '[QilnWorker]'
@@ -20,9 +20,11 @@ function resolveWorkerRuntimeConfig(config?: WorkerRuntimeConfig): ResolvedWorke
   if (!config?.nats) {
     throw new Error(`${WORKER_LOG_PREFIX} Missing required configuration: config.nats is required.`)
   }
+
   if (!config.incus) {
     throw new Error(`${WORKER_LOG_PREFIX} Missing required configuration: config.incus is required.`)
   }
+
   return {
     ...config,
     nats: config.nats,
@@ -31,22 +33,20 @@ function resolveWorkerRuntimeConfig(config?: WorkerRuntimeConfig): ResolvedWorke
 }
 
 /**
- * Standalone privileged worker runtime.
+ * Standalone privileged Worker runtime.
  *
- * This runtime owns Incus/ZFS mutation privileges and exposes the narrow capsule
- * command surface through the Capsule Channel. It intentionally has no Fastify,
- * Vike, Vue, or tRPC dependency.
+ * The runtime owns infrastructure connections and composes one capsule-domain
+ * façade. Capsule services own lifecycle policy, durable accounting, resource
+ * ownership verification, and provider mutation fences.
  */
 export class QilnWorkerRuntime {
   public readonly project: ProjectService
-  public readonly capsule: CapsuleBranchRuntimeService
-  public readonly file: FileService
+  public readonly capsule: CapsuleService
   public readonly incus: IncusClient
   public readonly channel: CapsuleNatsChannel
   public readonly blueprints: CapsuleBlueprintRegistry
 
   private readonly config: ResolvedWorkerRuntimeConfig
-  private readonly reconcileOnStart: boolean
 
   private started = false
   private disposed = false
@@ -54,17 +54,11 @@ export class QilnWorkerRuntime {
 
   constructor(options: WorkerRuntimeOptions) {
     this.config = resolveWorkerRuntimeConfig(options.config)
-    this.reconcileOnStart = options.reconcileOnStart ?? false
     this.incus = new IncusClient(this.config.incus)
-    this.channel = new CapsuleNatsChannel(this.config.nats, {
-      loggerPrefix: CHANNEL_LOG_PREFIX,
-    })
     this.project = new ProjectService(this.incus)
-    this.blueprints = new CapsuleBlueprintRegistry({
-      loggerPrefix: BLUEPRINT_LOG_PREFIX,
-    })
-    this.capsule = new CapsuleBranchRuntimeService(options.db, this.incus, this.channel, this.project, this.blueprints)
-    this.file = new FileService(options.db, this.incus, this.project)
+    this.channel = new CapsuleNatsChannel(this.config.nats, { loggerPrefix: CHANNEL_LOG_PREFIX })
+    this.blueprints = new CapsuleBlueprintRegistry({ loggerPrefix: BLUEPRINT_LOG_PREFIX })
+    this.capsule = new CapsuleService(options.db, this.incus, this.channel, this.project, this.blueprints)
   }
 
   public async start(): Promise<void> {
@@ -94,7 +88,7 @@ export class QilnWorkerRuntime {
       try {
         await this.booting
       } catch {
-        // Failed startup owns its own cleanup path and marks the runtime disposed.
+        // Failed startup owns its cleanup path and marks the runtime disposed.
         return
       }
     }
@@ -109,24 +103,29 @@ export class QilnWorkerRuntime {
 
   private async boot(): Promise<void> {
     try {
-      const blueprintDir = this.resolveBlueprintDirectory()
+      const blueprintDirectory = this.resolveBlueprintDirectory()
 
-      await this.blueprints.load(blueprintDir)
+      await this.blueprints.load(blueprintDirectory)
       await this.incus.init()
       await this.channel.start()
 
       /**
-       * Fail closed before accepting new commands. In the MVP there is no lease
-       * or operation runner; a non-terminal inline branch operation from a prior
-       * worker process is uncertain and must not be resumed automatically.
+       * The MVP has no lease, scheduler, retry, or operation runner. A
+       * nonterminal inline lifecycle operation from an earlier process is
+       * uncertain and must be marked cleanup-required before runtime
+       * reconciliation or new commands are accepted.
        */
-      await this.capsule.markAbandonedBranchOperationsCleanupRequired()
+      await this.capsule.markAbandonedOperationsCleanupRequired()
+
+      /**
+       * Runtime reconciliation is mandatory and observation-only. It converges
+       * branch status from live Incus state without retrying abandoned start or
+       * stop mutations.
+       */
+      await this.capsule.branch.reconcileRuntimeStates()
 
       registerCapsuleChannelHandlers(this)
 
-      if (this.reconcileOnStart) {
-        await this.capsule.reconcile()
-      }
       this.started = true
       console.log(`${WORKER_LOG_PREFIX} Runtime started.`)
     } catch (error: unknown) {

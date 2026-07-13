@@ -67,6 +67,9 @@ export class IncusTransport implements IIncusTransport {
         )
       }
     }
+    // TODO: Make initial Incus HTTP/WebSocket readiness bounded and awaited before Worker startup continues.
+    // Async operations must register their timeout before waiting for WebSocket readiness, with HTTP probing
+    // and WebSocket events acting as completion mechanisms.
     void this.connect()
   }
 

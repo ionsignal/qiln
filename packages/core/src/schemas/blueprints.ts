@@ -7,7 +7,7 @@ import { z } from 'zod'
  * Image build YAMLs under `catalog/images` are external build inputs and are not part of
  * the runtime capsule contract.
  */
-
+export const DEFAULT_CAPSULE_BLUEPRINT_NAME = 'n8n-comfyui-capsule'
 export const CapsuleBlueprintConfigMapSchema = z.record(z.string(), z.string())
 
 /**

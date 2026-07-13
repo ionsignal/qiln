@@ -1,21 +1,44 @@
 import { TRPCError } from '@trpc/server'
 import { CapsuleChannelError, CapsuleChannelErrorCode, GlobalError, GlobalErrorCode } from '@qiln/core/server'
-import { IncusError } from '../errors'
 
 function handleGlobalError(error: GlobalError): never {
   switch (error.code) {
     case GlobalErrorCode.BAD_REQUEST:
-      throw new TRPCError({ code: 'BAD_REQUEST', message: error.message, cause: error })
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: error.message,
+        cause: error,
+      })
     case GlobalErrorCode.UNAUTHORIZED:
-      throw new TRPCError({ code: 'UNAUTHORIZED', message: error.message, cause: error })
+      throw new TRPCError({
+        code: 'UNAUTHORIZED',
+        message: error.message,
+        cause: error,
+      })
     case GlobalErrorCode.FORBIDDEN:
-      throw new TRPCError({ code: 'FORBIDDEN', message: error.message, cause: error })
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: error.message,
+        cause: error,
+      })
     case GlobalErrorCode.NOT_FOUND:
-      throw new TRPCError({ code: 'NOT_FOUND', message: error.message, cause: error })
+      throw new TRPCError({
+        code: 'NOT_FOUND',
+        message: error.message,
+        cause: error,
+      })
     case GlobalErrorCode.CONFLICT:
-      throw new TRPCError({ code: 'CONFLICT', message: error.message, cause: error })
+      throw new TRPCError({
+        code: 'CONFLICT',
+        message: error.message,
+        cause: error,
+      })
     case GlobalErrorCode.TIMEOUT:
-      throw new TRPCError({ code: 'TIMEOUT', message: error.message, cause: error })
+      throw new TRPCError({
+        code: 'TIMEOUT',
+        message: error.message,
+        cause: error,
+      })
     case GlobalErrorCode.INTERNAL_ERROR:
     default:
       console.error(`[QilnEngine] Global Error (${error.code}):`, error.message, error.details ?? '')
@@ -30,19 +53,43 @@ function handleGlobalError(error: GlobalError): never {
 function handleCapsuleChannelError(error: CapsuleChannelError): never {
   switch (error.code) {
     case CapsuleChannelErrorCode.BAD_REQUEST:
-      throw new TRPCError({ code: 'BAD_REQUEST', message: error.message, cause: error })
+      throw new TRPCError({
+        code: 'BAD_REQUEST',
+        message: error.message,
+        cause: error,
+      })
     case CapsuleChannelErrorCode.UNAUTHORIZED:
-      throw new TRPCError({ code: 'UNAUTHORIZED', message: error.message, cause: error })
+      throw new TRPCError({
+        code: 'UNAUTHORIZED',
+        message: error.message,
+        cause: error,
+      })
     case CapsuleChannelErrorCode.FORBIDDEN:
-      throw new TRPCError({ code: 'FORBIDDEN', message: error.message, cause: error })
+      throw new TRPCError({
+        code: 'FORBIDDEN',
+        message: error.message,
+        cause: error,
+      })
     case CapsuleChannelErrorCode.NOT_FOUND:
-      throw new TRPCError({ code: 'NOT_FOUND', message: error.message, cause: error })
+      throw new TRPCError({
+        code: 'NOT_FOUND',
+        message: error.message,
+        cause: error,
+      })
     case CapsuleChannelErrorCode.CONFLICT:
-      throw new TRPCError({ code: 'CONFLICT', message: error.message, cause: error })
+      throw new TRPCError({
+        code: 'CONFLICT',
+        message: error.message,
+        cause: error,
+      })
     case CapsuleChannelErrorCode.TIMEOUT:
-      throw new TRPCError({ code: 'TIMEOUT', message: error.message, cause: error })
+      throw new TRPCError({
+        code: 'TIMEOUT',
+        message: error.message,
+        cause: error,
+      })
     case CapsuleChannelErrorCode.TRANSPORT_ERROR:
-      console.error(`[QilnEngine] Capsule Channel transport error:`, error.message, error.details ?? '')
+      console.error('[QilnEngine] Capsule Channel transport error:', error.message, error.details ?? '')
       throw new TRPCError({
         code: 'INTERNAL_SERVER_ERROR',
         message: 'Failed to communicate with the capsule channel.',
@@ -50,7 +97,7 @@ function handleCapsuleChannelError(error: CapsuleChannelError): never {
       })
     case CapsuleChannelErrorCode.INTERNAL_ERROR:
     default:
-      console.error(`[QilnEngine] Capsule Channel internal error:`, error.message, error.details ?? '')
+      console.error('[QilnEngine] Capsule Channel internal error:', error.message, error.details ?? '')
       throw new TRPCError({
         code: 'INTERNAL_SERVER_ERROR',
         message: 'An internal capsule channel error occurred.',
@@ -61,6 +108,9 @@ function handleCapsuleChannelError(error: CapsuleChannelError): never {
 
 /**
  * Centralized error handler for the QilnEngine tRPC boundary.
+ *
+ * Infrastructure-specific Worker errors cross the Capsule Channel as validated `CapsuleChannelError` instances.
+ * The Engine does not depend on Incus error classes or provider implementation details.
  */
 export function handleEngineError(error: unknown): never {
   if (error instanceof TRPCError) {
@@ -71,37 +121,6 @@ export function handleEngineError(error: unknown): never {
   }
   if (error instanceof GlobalError) {
     handleGlobalError(error)
-  }
-  if (error instanceof IncusError) {
-    console.error(`[QilnEngine] Incus Error (${error.code}):`, error.message, error.details ?? '')
-    switch (error.code) {
-      case 'NOT_FOUND':
-        throw new TRPCError({ code: 'NOT_FOUND', message: error.message, cause: error })
-      case 'CONFLICT':
-        throw new TRPCError({ code: 'CONFLICT', message: error.message, cause: error })
-      case 'VALIDATION_ERROR':
-        throw new TRPCError({ code: 'BAD_REQUEST', message: error.message, cause: error })
-      case 'FORBIDDEN':
-        throw new TRPCError({ code: 'FORBIDDEN', message: error.message, cause: error })
-      case 'API_ERROR':
-        throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message: 'An internal infrastructure error occurred.',
-          cause: error,
-        })
-      case 'TRANSPORT_ERROR':
-        throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message: 'Failed to communicate with the engine infrastructure.',
-          cause: error,
-        })
-      default:
-        throw new TRPCError({
-          code: 'INTERNAL_SERVER_ERROR',
-          message: 'An unexpected infrastructure error occurred.',
-          cause: error,
-        })
-    }
   }
   console.error('[QilnEngine] Unexpected Error:', error)
   throw new TRPCError({
