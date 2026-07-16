@@ -4,7 +4,7 @@ import { CapsuleBlueprintDigestSchema, CapsuleBranchNameSchema, CapsuleBranchSta
 import { protectedProcedure, router } from '../../init'
 import { handleEngineError } from '../../utils'
 
-export const CapsuleBranchRuntimeItemSchema = z
+export const CapsuleBranchSummarySchema = z
   .object({
     id: z.uuid(),
     capsuleId: z.uuid(),
@@ -13,9 +13,9 @@ export const CapsuleBranchRuntimeItemSchema = z
     isRootBranch: z.boolean(),
     cpu: z.string(),
     memory: z.string(),
-    blueprint: z.string(),
+    blueprintName: z.string(),
     blueprintDigest: CapsuleBlueprintDigestSchema,
-    ip: z.string().nullable(),
+    runtimeIp: z.string().nullable(),
     createdAt: z.date(),
     updatedAt: z.date(),
   })
@@ -29,7 +29,7 @@ const CapsuleBranchIdentitySchema = z
   .strict()
 
 export const capsuleBranchesRouter = router({
-  list: protectedProcedure.output(z.array(CapsuleBranchRuntimeItemSchema)).query(async ({ ctx }) => {
+  list: protectedProcedure.output(z.array(CapsuleBranchSummarySchema)).query(async ({ ctx }) => {
     try {
       return await ctx.engine.capsuleBranches.list(ctx.user.id)
     } catch (error: unknown) {
@@ -39,7 +39,7 @@ export const capsuleBranchesRouter = router({
 
   state: protectedProcedure
     .input(CapsuleBranchIdentitySchema)
-    .output(CapsuleBranchRuntimeItemSchema)
+    .output(CapsuleBranchSummarySchema)
     .query(async ({ ctx, input }) => {
       try {
         const branch = await ctx.engine.capsuleBranches.state(ctx.user.id, input.capsuleId, input.name)

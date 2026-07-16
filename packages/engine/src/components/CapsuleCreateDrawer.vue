@@ -5,9 +5,9 @@
         <n-form-item label="Root Branch Name" path="rootBranchName">
           <n-input v-model:value="form.rootBranchName" placeholder="e.g. sdxl-campaign" :disabled="isSubmitting" />
         </n-form-item>
-        <n-form-item label="Capsule Blueprint" path="blueprint">
+        <n-form-item label="Capsule Blueprint" path="blueprintName">
           <n-select
-            v-model:value="form.blueprint"
+            v-model:value="form.blueprintName"
             :options="blueprintOptions"
             placeholder="Select a capsule blueprint"
             :disabled="isSubmitting" />
@@ -30,22 +30,22 @@
   import { NButton, NDrawer, NDrawerContent, NForm, NFormItem, NInput, NSelect, NSlider, NText, useMessage } from 'naive-ui'
   import { isTRPCClientError } from '@trpc/client'
   import {
-    CapsuleLifecycleIdempotencyKeySchema,
+    CapsuleOperationIdempotencyKeySchema,
     type CapsuleBlueprintManifestItem,
-    type CapsuleLifecycleIdempotencyKey,
+    type CapsuleOperationIdempotencyKey,
   } from '@qiln/core/client'
   import { useCapsuleContext } from '../composables/useCapsules'
 
   interface CapsuleCreateForm {
     rootBranchName: string
-    blueprint: string
+    blueprintName: string
     cpu: number
     memory: number
   }
 
   interface PendingSubmission {
     fingerprint: string
-    idempotencyKey: CapsuleLifecycleIdempotencyKey
+    idempotencyKey: CapsuleOperationIdempotencyKey
   }
 
   const props = defineProps<{
@@ -72,7 +72,7 @@
   })
 
   const selectedBlueprint = computed(() => {
-    return props.blueprints.find(blueprint => blueprint.name === form.value.blueprint) ?? null
+    return props.blueprints.find(blueprint => blueprint.name === form.value.blueprintName) ?? null
   })
 
   const shortSelectedDigest = computed(() => {
@@ -99,7 +99,7 @@
     () => props.blueprints,
     () => {
       if (props.show && !selectedBlueprint.value) {
-        form.value.blueprint = resolveInitialBlueprint()
+        form.value.blueprintName = resolveInitialBlueprint()
         pendingSubmission.value = null
       }
     },
@@ -108,7 +108,7 @@
   function createInitialForm(): CapsuleCreateForm {
     return {
       rootBranchName: '',
-      blueprint: resolveInitialBlueprint(),
+      blueprintName: resolveInitialBlueprint(),
       cpu: 4,
       memory: 4,
     }
@@ -127,19 +127,19 @@
     return digest.startsWith('sha256:') ? `sha256:${digestPreview}` : digestPreview
   }
 
-  function generateIdempotencyKey(): CapsuleLifecycleIdempotencyKey | null {
+  function generateOperationIdempotencyKey(): CapsuleOperationIdempotencyKey | null {
     if (typeof globalThis.crypto?.randomUUID !== 'function') {
       return null
     }
-    const parsed = CapsuleLifecycleIdempotencyKeySchema.safeParse(globalThis.crypto.randomUUID())
+    const parsed = CapsuleOperationIdempotencyKeySchema.safeParse(globalThis.crypto.randomUUID())
     return parsed.success ? parsed.data : null
   }
 
-  function resolveIdempotencyKey(fingerprint: string): CapsuleLifecycleIdempotencyKey | null {
+  function resolveOperationIdempotencyKey(fingerprint: string): CapsuleOperationIdempotencyKey | null {
     if (pendingSubmission.value?.fingerprint === fingerprint) {
       return pendingSubmission.value.idempotencyKey
     }
-    const idempotencyKey = generateIdempotencyKey()
+    const idempotencyKey = generateOperationIdempotencyKey()
     if (!idempotencyKey) {
       return null
     }
@@ -156,7 +156,7 @@
 
   async function handleSubmit(): Promise<void> {
     const rootBranchName = form.value.rootBranchName.trim()
-    if (!rootBranchName || !form.value.blueprint) {
+    if (!rootBranchName || !form.value.blueprintName) {
       message.warning('Please provide a root branch name and capsule blueprint.')
       return
     }
@@ -173,9 +173,9 @@
       memory: `${form.value.memory}GB`,
     }
     const fingerprint = JSON.stringify(request)
-    const idempotencyKey = resolveIdempotencyKey(fingerprint)
+    const idempotencyKey = resolveOperationIdempotencyKey(fingerprint)
     if (!idempotencyKey) {
-      message.error('Failed to generate a capsule lifecycle idempotency key. Please retry in a modern browser.')
+      message.error('Failed to generate a capsule operation idempotency key. Please retry in a modern browser.')
       return
     }
     isSubmitting.value = true
@@ -185,10 +185,10 @@
         idempotencyKey,
       })
       pendingSubmission.value = null
-      message.success('Capsule created with an offline root branch.')
+      message.success('Capsule creation accepted.')
       emit('update:show', false)
     } catch (error: unknown) {
-      message.error(isTRPCClientError(error) ? error.message : 'Failed to create capsule.')
+      message.error(isTRPCClientError(error) ? error.message : 'Failed to submit capsule creation.')
     } finally {
       isSubmitting.value = false
     }

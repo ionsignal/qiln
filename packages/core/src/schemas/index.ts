@@ -1,5 +1,6 @@
+export * from './capsule/branch'
 export * from './capsule/lifecycle'
-export * from './capsule/lifecycleOperations'
+export * from './capsule/operations'
 export * from './capsule/resources'
 export * from './capsule/snapshots'
 export * from './blueprints'

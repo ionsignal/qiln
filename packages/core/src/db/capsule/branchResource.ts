@@ -2,7 +2,7 @@ import { sql } from 'drizzle-orm'
 import { index, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid, type PgColumn } from 'drizzle-orm/pg-core'
 import { CapsuleBranchResourceCleanupPolicyValues, CapsuleBranchResourceStatusValues, CapsuleBranchResourceTypeValues } from '../../schemas'
 import { capsuleBranchesTable } from './branch'
-import { capsuleLifecycleOperationsTable } from './lifecycleOperation'
+import { capsuleOperationsTable } from './operation'
 
 export const capsuleBranchResourceTypeEnum = pgEnum('capsule_branch_resource_type', CapsuleBranchResourceTypeValues)
 export const capsuleBranchResourceStatusEnum = pgEnum('capsule_branch_resource_status', CapsuleBranchResourceStatusValues)
@@ -24,8 +24,9 @@ function createNullableBranchIdColumn(branchIdColumn?: PgColumn) {
     : uuid('branch_id')
 }
 
-function createNullableLifecycleOperationIdColumn(columnName: string, operationIdColumn?: PgColumn) {
+function createNullableOperationIdColumn(columnName: string, operationIdColumn?: PgColumn) {
   const column = uuid(columnName)
+
   return operationIdColumn
     ? column.references(() => operationIdColumn, {
         onDelete: 'set null',
@@ -36,18 +37,16 @@ function createNullableLifecycleOperationIdColumn(columnName: string, operationI
 /**
  * Durable branch resource inventory.
  *
- * Lifecycle operation provenance records which operation created and last
- * touched a resource. Destroy can delete only resources whose durable inventory,
- * cleanup policy, and provider state satisfy its fail-closed ownership checks.
+ * Operation provenance records which operation created and last touched a
+ * resource. Destroy can delete only resources whose durable inventory, cleanup
+ * policy, and provider state satisfy fail-closed ownership checks.
  */
-export function createCapsuleBranchResourcesTable(ownerIdColumn?: PgColumn, branchIdColumn?: PgColumn, lifecycleOperationIdColumn?: PgColumn) {
+export function createCapsuleBranchResourcesTable(ownerIdColumn?: PgColumn, branchIdColumn?: PgColumn, operationIdColumn?: PgColumn) {
   const ownerId = createOwnerIdColumn(ownerIdColumn)
   const branchId = createNullableBranchIdColumn(branchIdColumn)
-  const lastLifecycleOperationId = createNullableLifecycleOperationIdColumn('last_lifecycle_operation_id', lifecycleOperationIdColumn)
-  const createdByLifecycleOperationId = createNullableLifecycleOperationIdColumn(
-    'created_by_lifecycle_operation_id',
-    lifecycleOperationIdColumn,
-  )
+  const lastOperationId = createNullableOperationIdColumn('last_operation_id', operationIdColumn)
+  const createdByOperationId = createNullableOperationIdColumn('created_by_operation_id', operationIdColumn)
+
   return pgTable(
     'capsule_branch_resources',
     {
@@ -57,8 +56,8 @@ export function createCapsuleBranchResourcesTable(ownerIdColumn?: PgColumn, bran
       ownerId,
       branchId,
       branchName: text('branch_name').notNull(),
-      createdByLifecycleOperationId,
-      lastLifecycleOperationId,
+      createdByOperationId,
+      lastOperationId,
       resourceType: capsuleBranchResourceTypeEnum('resource_type').notNull(),
       provider: text('provider').notNull().default('incus'),
       resourceKey: text('resource_key').notNull(),
@@ -84,17 +83,13 @@ export function createCapsuleBranchResourcesTable(ownerIdColumn?: PgColumn, bran
     table => [
       index('capsule_branch_resources_owner_idx').on(table.ownerId),
       index('capsule_branch_resources_branch_idx').on(table.branchId),
-      index('capsule_branch_resources_created_by_lifecycle_operation_idx').on(table.createdByLifecycleOperationId),
-      index('capsule_branch_resources_last_lifecycle_operation_idx').on(table.lastLifecycleOperationId),
+      index('capsule_branch_resources_created_by_operation_idx').on(table.createdByOperationId),
+      index('capsule_branch_resources_last_operation_idx').on(table.lastOperationId),
       index('capsule_branch_resources_resource_key_idx').on(table.resourceKey),
-      uniqueIndex('capsule_branch_resources_lifecycle_operation_key_unique_idx').on(table.createdByLifecycleOperationId, table.resourceKey),
+      uniqueIndex('capsule_branch_resources_operation_key_unique_idx').on(table.createdByOperationId, table.resourceKey),
       uniqueIndex('capsule_branch_resources_branch_key_unique_idx').on(table.branchId, table.resourceKey),
     ],
   )
 }
 
-export const capsuleBranchResourcesTable = createCapsuleBranchResourcesTable(
-  undefined,
-  capsuleBranchesTable.id,
-  capsuleLifecycleOperationsTable.id,
-)
+export const capsuleBranchResourcesTable = createCapsuleBranchResourcesTable(undefined, capsuleBranchesTable.id, capsuleOperationsTable.id)

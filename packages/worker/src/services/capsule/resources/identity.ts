@@ -1,4 +1,4 @@
-import type { ProvisioningFileTarget } from '../provisioning/fileTargets'
+import type { ProvisioningFileTarget } from './bootstrap/targets'
 
 function encodeResourceKeySegment(value: string): string {
   return encodeURIComponent(value)

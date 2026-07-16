@@ -29,6 +29,7 @@ export default defineConfig(() => {
           'drizzle-orm',
           'drizzle-orm/pg-core',
           'drizzle-orm/postgres-js',
+          'postgres',
           'undici',
           'ws',
           'yaml',

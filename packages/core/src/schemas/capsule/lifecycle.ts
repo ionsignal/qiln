@@ -3,13 +3,15 @@ import { z } from 'zod'
 /**
  * Durable lifecycle state for the capsule aggregate.
  *
- * Archive is deliberately not represented here. An archived capsule remains
- * active and carries an `archivedAt` timestamp that can later be cleared by an
- * explicit unarchive operation.
+ * Archive remains reversible logical state represented by `archivedAt`.
+ * `archiving` and `unarchiving` are durable mutation fences while accepted
+ * capsule operations execute under the Worker control plane.
  */
 export const CapsuleLifecycleStatus = {
   PROVISIONING: 'provisioning',
   ACTIVE: 'active',
+  ARCHIVING: 'archiving',
+  UNARCHIVING: 'unarchiving',
   DESTROYING: 'destroying',
   DESTROYED: 'destroyed',
   CREATION_FAILED: 'creation_failed',
@@ -21,6 +23,8 @@ export type CapsuleLifecycleStatusValue = (typeof CapsuleLifecycleStatus)[keyof 
 export const CapsuleLifecycleStatusValues = [
   CapsuleLifecycleStatus.PROVISIONING,
   CapsuleLifecycleStatus.ACTIVE,
+  CapsuleLifecycleStatus.ARCHIVING,
+  CapsuleLifecycleStatus.UNARCHIVING,
   CapsuleLifecycleStatus.DESTROYING,
   CapsuleLifecycleStatus.DESTROYED,
   CapsuleLifecycleStatus.CREATION_FAILED,

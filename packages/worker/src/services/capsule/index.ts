@@ -1,39 +1,69 @@
-import { type CapsuleBlueprintRegistry, type CapsuleChannel, type CapsuleHostDbContract } from '@qiln/core/server'
+import type { CapsuleBlueprintRegistry, CapsuleChannel, CapsuleHostDbContract } from '@qiln/core/server'
+import type { OperationSupervisor } from '../../coordination'
 import { IncusClient } from '../../incus/client/index'
 import { ProjectService } from '../project'
-import { CapsuleBootstrapService } from './bootstrap'
-import { CapsuleBranchEventPublisher } from './branch/events'
-import { CapsuleBranchRuntimeObserver } from './branch/providerState'
-import { CapsuleBranchRuntimeService } from './branch/runtime'
-import { CapsuleDestroyCoordinator, CapsuleLifecycleEventPublisher, CapsuleLifecycleService } from './lifecycle'
+import { CapsuleBranchRuntimeObserver, CapsuleBranchRuntimeReconciler, CapsuleBranchRuntimeService } from './branch'
+import { CapsuleBranchEventPublisher, CapsuleLifecycleEventPublisher, CapsuleOperationEventPublisher } from './events'
+import { CapsuleOperationAbandonmentCoordinator, CapsuleOperationAbandonmentHandlerRegistry } from './operations/abandonment'
+import {
+  CapsuleArchiveAbandonmentHandler,
+  CapsuleArchiveExecutor,
+  CapsuleArchiveRepository,
+  CapsuleArchiveSubmissionService,
+} from './operations/archival/archive'
+import { ProviderFreeArchivalOperationLedger } from './operations/archival/shared'
+import {
+  CapsuleUnarchiveAbandonmentHandler,
+  CapsuleUnarchiveExecutor,
+  CapsuleUnarchiveRepository,
+  CapsuleUnarchiveSubmissionService,
+} from './operations/archival/unarchive'
+import {
+  CapsuleCreateService,
+  CreateCapsuleAbandonmentHandler,
+  CreateCapsuleExecutor,
+  CreateCapsuleOperationRepository,
+} from './operations/create'
+import {
+  DestroyCapsuleAbandonmentHandler,
+  DestroyCapsuleExecutor,
+  DestroyCapsuleOperationRepository,
+  DestroyCapsuleProvider,
+  DestroyCapsuleSubmissionService,
+} from './operations/destroy'
+import { CapsuleOperationReader, CapsuleOperationStepStore } from './operations/shared'
 import { CapsuleResourceDriver } from './resources/driver'
 import { CapsuleSnapshotService } from './snapshot'
-import {
-  CapsuleBranchResourceStore,
-  CapsuleBranchStore,
-  CapsuleLifecycleOperationStepStore,
-  CapsuleLifecycleOperationStore,
-  CapsuleSnapshotStore,
-} from './stores'
+import { CapsuleBranchResourceStore, CapsuleBranchStore, CapsuleSnapshotStore } from './stores'
 
-export * from './bootstrap'
-export * from './lifecycle'
+export * from './operations'
+export * from './events'
 export * from './snapshot'
-export * from './branch/runtime'
-export * from './branch/providerState'
+export * from './branch'
 
 /**
  * Capsule-domain composition boundary for one Worker runtime.
  *
- * The services share one durable lifecycle ledger and resource inventory while keeping operation-specific
- * policy in bootstrap, branch runtime, snapshot, and capsule lifecycle services. Infrastructure connection
- * ownership remains with `QilnWorkerRuntime`.
+ * Shared dependencies provide persistence and infrastructure mechanics only.
+ * Create, archive, unarchive, and destroy retain ownership of their acceptance,
+ * execution, aggregate transitions, and terminal failure policies.
+ *
+ * The branch service owns runtime behavior for existing branches. It does not
+ * own creation of root branches or future snapshot-based branch forks.
+ *
+ * Startup abandonment coordination remains operation-agnostic. Each operation
+ * registers an adapter that owns its repository classification and committed
+ * invalidation behavior.
  */
 export class CapsuleService {
-  public readonly bootstrap: CapsuleBootstrapService
+  public readonly create: CapsuleCreateService
+  public readonly archive: CapsuleArchiveSubmissionService
+  public readonly unarchive: CapsuleUnarchiveSubmissionService
+  public readonly destroy: DestroyCapsuleSubmissionService
   public readonly branch: CapsuleBranchRuntimeService
-  public readonly lifecycle: CapsuleLifecycleService
   public readonly snapshot: CapsuleSnapshotService
+
+  private readonly abandonmentCoordinator: CapsuleOperationAbandonmentCoordinator
 
   constructor(
     db: CapsuleHostDbContract,
@@ -41,61 +71,146 @@ export class CapsuleService {
     channel: CapsuleChannel,
     project: ProjectService,
     blueprints: CapsuleBlueprintRegistry,
+    supervisor: OperationSupervisor,
   ) {
+    const operationReader = new CapsuleOperationReader(db)
+    const operationSteps = new CapsuleOperationStepStore(db)
     const branches = new CapsuleBranchStore(db)
-    const operations = new CapsuleLifecycleOperationStore(db)
-    const steps = new CapsuleLifecycleOperationStepStore(db)
     const resources = new CapsuleBranchResourceStore(db)
     const snapshots = new CapsuleSnapshotStore(db)
-    const branchEvents = new CapsuleBranchEventPublisher(channel)
+
+    const operationEvents = new CapsuleOperationEventPublisher(channel)
     const lifecycleEvents = new CapsuleLifecycleEventPublisher(channel)
+    const branchEvents = new CapsuleBranchEventPublisher(channel)
+
     const runtimeObserver = new CapsuleBranchRuntimeObserver(incus, project)
-    const driver = new CapsuleResourceDriver(incus, project)
-    const destroy = new CapsuleDestroyCoordinator({
-      operations,
-      steps,
+    const runtimeReconciler = new CapsuleBranchRuntimeReconciler({
       branches,
+      events: branchEvents,
+      observer: runtimeObserver,
+    })
+
+    const resourceDriver = new CapsuleResourceDriver(incus, project)
+
+    const createRepository = new CreateCapsuleOperationRepository(db, operationReader)
+    const createExecutor = new CreateCapsuleExecutor({
+      repository: createRepository,
+      steps: operationSteps,
       resources,
-      incus,
+      driver: resourceDriver,
+      project,
+      operationEvents,
+      lifecycleEvents,
       branchEvents,
+    })
+
+    this.create = new CapsuleCreateService(
+      createRepository,
+      createExecutor,
+      supervisor,
+      blueprints,
+      operationEvents,
+      lifecycleEvents,
+      branchEvents,
+    )
+
+    const archivalOperationLedger = new ProviderFreeArchivalOperationLedger(db, operationReader)
+
+    const archiveRepository = new CapsuleArchiveRepository(db, archivalOperationLedger)
+    const archiveExecutor = new CapsuleArchiveExecutor({
+      repository: archiveRepository,
+      operationEvents,
       lifecycleEvents,
     })
-    this.bootstrap = new CapsuleBootstrapService({
-      branches,
-      operations,
-      steps,
-      resources,
-      events: branchEvents,
-      driver,
-      project,
-      blueprints,
+
+    this.archive = new CapsuleArchiveSubmissionService(archiveRepository, archiveExecutor, supervisor, operationEvents, lifecycleEvents)
+
+    const unarchiveRepository = new CapsuleUnarchiveRepository(db, archivalOperationLedger)
+    const unarchiveExecutor = new CapsuleUnarchiveExecutor({
+      repository: unarchiveRepository,
+      operationEvents,
+      lifecycleEvents,
     })
+
+    this.unarchive = new CapsuleUnarchiveSubmissionService(unarchiveRepository, unarchiveExecutor, supervisor, operationEvents, lifecycleEvents)
+
+    const destroyRepository = new DestroyCapsuleOperationRepository(db, operationReader)
+    const destroyProvider = new DestroyCapsuleProvider({
+      incus,
+      resources,
+    })
+    const destroyExecutor = new DestroyCapsuleExecutor({
+      repository: destroyRepository,
+      steps: operationSteps,
+      resources,
+      provider: destroyProvider,
+      operationEvents,
+      lifecycleEvents,
+      branchEvents,
+    })
+
+    this.destroy = new DestroyCapsuleSubmissionService(
+      destroyRepository,
+      destroyExecutor,
+      supervisor,
+      operationEvents,
+      lifecycleEvents,
+      branchEvents,
+    )
+
     this.branch = new CapsuleBranchRuntimeService({
       branches,
       events: branchEvents,
+      observer: runtimeObserver,
+      reconciler: runtimeReconciler,
       incus,
       project,
-      observer: runtimeObserver,
     })
-    this.lifecycle = new CapsuleLifecycleService({
-      operations,
-      branches,
-      destroy,
-      lifecycleEvents,
-      branchEvents,
-    })
+
     this.snapshot = new CapsuleSnapshotService(snapshots)
+
+    const abandonmentHandlers = new CapsuleOperationAbandonmentHandlerRegistry([
+      new CreateCapsuleAbandonmentHandler({
+        repository: createRepository,
+        operationEvents,
+        lifecycleEvents,
+        branchEvents,
+      }),
+      new CapsuleArchiveAbandonmentHandler({
+        repository: archiveRepository,
+        operationEvents,
+        lifecycleEvents,
+      }),
+      new CapsuleUnarchiveAbandonmentHandler({
+        repository: unarchiveRepository,
+        operationEvents,
+        lifecycleEvents,
+      }),
+      new DestroyCapsuleAbandonmentHandler({
+        repository: destroyRepository,
+        operationEvents,
+        lifecycleEvents,
+        branchEvents,
+      }),
+    ])
+
+    this.abandonmentCoordinator = new CapsuleOperationAbandonmentCoordinator({
+      reader: operationReader,
+      steps: operationSteps,
+      handlers: abandonmentHandlers,
+    })
   }
 
   /**
-   * Performs accounting-only startup sweeps before provider reconciliation and command-handler registration.
+   * Classifies durable nonterminal operations left by an earlier Worker before
+   * runtime reconciliation or command intake becomes available.
    *
-   * A nonterminal inline lifecycle operation from an earlier Worker process has uncertain provider state.
-   * The Worker records cleanup-required state and never resumes, retries, compensates, or inspects provider
-   * state for those lifecycle operations.
+   * Operation-local adapters own classification transactions, committed
+   * identity validation, and invalidation publication. The shared coordinator
+   * performs no provider inspection, executor replay, compensation, or generic
+   * aggregate restoration.
    */
-  public async markAbandonedOperationsCleanupRequired(): Promise<void> {
-    await this.bootstrap.markAbandonedBootstrapOperationsCleanupRequired()
-    await this.lifecycle.markAbandonedDestroyOperationsCleanupRequired()
+  public async classifyAbandonedOperationsAtStartup(): Promise<void> {
+    await this.abandonmentCoordinator.classifyAtStartup()
   }
 }

@@ -12,7 +12,6 @@ export function registerCapsuleSnapshotHandlers(worker: QilnWorkerRuntime): void
   const handlerOptions: CapsuleCommandHandlerOptions = {
     mapError: mapWorkerCapsuleCommandError,
   }
-
   worker.channel.handle(
     CapsuleSnapshotCommandName.SNAPSHOTS_LIST,
     async input => {

@@ -6,8 +6,10 @@
         <n-text depth="3">Create, branch, test, promote, and roll back versioned AI workflow systems.</n-text>
       </div>
       <n-button type="primary" size="small" color="white" strong @click="openCreateDrawer()">
-        Create Branch
-        <template #icon><icon :path="mdiPlus" /></template>
+        Create Capsule
+        <template #icon>
+          <icon :path="mdiPlus" />
+        </template>
       </n-button>
     </n-flex>
     <div class="summary-grid">
@@ -30,7 +32,8 @@
       </template>
       <n-flex vertical :size="10">
         <n-text depth="3" style="font-size: 13px">
-          Current working slice: create branch, observe branch state, and start/stop/delete branches through the real capsule channel.
+          Current working slice: create a capsule with its root branch, observe branch state, and start or stop branches through the capsule
+          channel.
         </n-text>
         <n-flex :size="8" wrap>
           <n-tag size="small" :bordered="false" type="info">Snapshot</n-tag>
@@ -50,7 +53,7 @@
         </div>
       </n-flex>
       <div v-if="branchesRef.length === 0">
-        <n-empty description="No capsule branches yet. Create a branch from a capsule blueprint to begin." class="empty-state" />
+        <n-empty description="No capsule branches yet. Create a capsule from a blueprint to begin." class="empty-state" />
       </div>
       <div v-else class="branch-grid">
         <capsule-branch-card v-for="branch in branchesRef" :key="branch.id" :branch="branch" />
@@ -60,13 +63,13 @@
     <n-flex vertical :size="18">
       <div>
         <h2 class="section-heading">Capsule Blueprints</h2>
-        <n-text depth="3">Supported capsule templates available for branch creation.</n-text>
+        <n-text depth="3">Supported capsule templates available for capsule creation.</n-text>
       </div>
       <div v-if="blueprints.length === 0">
         <n-empty description="No capsule blueprints are currently loaded." class="empty-state" />
       </div>
       <div v-else class="blueprint-grid">
-        <blueprint-card v-for="blueprint in blueprints" :key="blueprint.name" :blueprint="blueprint" @create-branch="openCreateDrawer" />
+        <blueprint-card v-for="blueprint in blueprints" :key="blueprint.name" :blueprint="blueprint" @create-capsule="openCreateDrawer" />
       </div>
     </n-flex>
     <capsule-create-drawer v-model:show="showDrawer" :blueprints="blueprints" :preselected-blueprint="selectedBlueprint" />
@@ -74,32 +77,34 @@
 </template>
 
 <script setup lang="ts">
-  import { computed, ref, watch, onMounted, onUnmounted } from 'vue'
-  import { NButton, NFlex, NText, NEmpty, NDivider, NCard, NTag } from 'naive-ui'
+  import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+  import { NButton, NCard, NDivider, NEmpty, NFlex, NTag, NText } from 'naive-ui'
   import { mdiPlus } from '@mdi/js'
   import { Icon } from '@/components/Icon'
   import { useData } from '@/composables/useData'
   import { usePageContext } from '@/composables/usePageContext'
   import { useTRPC } from '@/composables/useTRPC'
-  import { CapsuleBranchCard, BlueprintCard, CapsuleCreateDrawer, provideCapsules } from '@qiln/engine/client'
-  import type { CapsuleBranchItem } from '@qiln/engine/client'
+  import { BlueprintCard, CapsuleBranchCard, CapsuleCreateDrawer, provideCapsules } from '@qiln/engine/client'
+  import type { CapsuleBranchSummary } from '@qiln/engine/client'
   import type { Data } from './+data'
 
   const data = useData<Data>()
   const pageContext = usePageContext()
   const trpc = useTRPC(pageContext.value)
-  const branchesRef = ref<CapsuleBranchItem[]>(data.value.branches)
+
+  const branchesRef = ref<CapsuleBranchSummary[]>(data.value.branches)
   const showDrawer = ref(false)
   const selectedBlueprint = ref<string | undefined>(undefined)
+  const streamHandlers = new Set<(rawEvent: unknown) => void>()
+
   const blueprints = computed(() => data.value.manifest.blueprints)
   const branchCount = computed(() => branchesRef.value.length)
   const onlineBranchCount = computed(() => branchesRef.value.filter(branch => branch.status === 'online').length)
   const blueprintCount = computed(() => blueprints.value.length)
-  const streamHandlers = new Set<(rawEvent: unknown) => void>()
 
   let streamSubscription: ReturnType<typeof trpc.stream.events.subscribe> | null = null
 
-  const registerStreamHandler = (handler: (rawEvent: unknown) => void) => {
+  function registerStreamHandler(handler: (rawEvent: unknown) => void) {
     streamHandlers.add(handler)
     return {
       unsubscribe: () => {
@@ -111,31 +116,41 @@
   provideCapsules({
     client: trpc.engine.capsules,
     branches: branchesRef,
-    onError: err => console.error('[Qiln Admin] Capsule branch sync error:', err),
+    onError: error => {
+      console.error('[Qiln Admin] Capsule branch sync error:', error)
+    },
     onEventStream: registerStreamHandler,
   })
 
   watch(
     () => data.value.branches,
-    newBranches => {
-      branchesRef.value = newBranches
+    branches => {
+      branchesRef.value = branches
     },
     { deep: false },
   )
 
-  function openCreateDrawer(blueprintName?: string) {
+  function openCreateDrawer(blueprintName?: string): void {
     selectedBlueprint.value = blueprintName
     showDrawer.value = true
   }
 
   onMounted(() => {
     streamSubscription = trpc.stream.events.subscribe(undefined, {
-      onStarted: () => console.log('[Qiln Admin] Connected to capsule event stream'),
-      onData: eventData => {
-        streamHandlers.forEach(handler => handler(eventData))
+      onStarted: () => {
+        console.log('[Qiln Admin] Connected to capsule event stream')
       },
-      onError: (err: unknown) => console.error('[Qiln Admin] Capsule stream error:', err),
-      onStopped: () => console.log('[Qiln Admin] Capsule event stream stopped'),
+      onData: event => {
+        streamHandlers.forEach(handler => {
+          handler(event)
+        })
+      },
+      onError: (error: unknown) => {
+        console.error('[Qiln Admin] Capsule stream error:', error)
+      },
+      onStopped: () => {
+        console.log('[Qiln Admin] Capsule event stream stopped')
+      },
     })
   })
 

@@ -1,15 +1,9 @@
 import type {
-  CapsuleBlueprint,
-  CapsuleBlueprintDigest,
-  CapsuleBootstrapCreateOutput,
   CapsuleBranchResourceCleanupPolicyValue,
   CapsuleBranchResourceInventoryDigest,
   CapsuleBranchResourceStatusValue,
   CapsuleBranchResourceTypeValue,
   CapsuleBranchStatus,
-  CapsuleLifecycleOperationStatusValue,
-  CapsuleLifecycleOperationStepStatusValue,
-  CapsuleLifecycleStatusValue,
 } from '@qiln/core/server'
 
 export interface BranchRuntimeReconciliationCandidate {
@@ -61,119 +55,22 @@ export interface BranchRuntimeErrorResult {
   statusChanged: boolean
 }
 
-export interface AcceptBootstrapLifecycleOperationInput {
-  ownerId: string
-  bootstrapBranchName: string
-  idempotencyKey: string
-  requestHash: string
-  blueprintName: string
-  blueprintDigest: CapsuleBlueprintDigest
-  blueprintSnapshot: CapsuleBlueprint
-  cpu: string
-  memory: string
-}
-
-export type AcceptedBootstrapLifecycleOperation =
-  | {
-      operationId: string
-      capsuleId: string
-      branchId: string
-    }
-  | {
-      replayedReceipt: CapsuleBootstrapCreateOutput
-    }
-
-export interface ArchiveCapsuleInput {
-  ownerId: string
-  capsuleId: string
-  idempotencyKey: string
-  requestHash: string
-}
-
-export interface UnarchiveCapsuleInput {
-  ownerId: string
-  capsuleId: string
-  idempotencyKey: string
-  requestHash: string
-}
-
-export interface AcceptDestroyLifecycleOperationInput {
-  ownerId: string
-  capsuleId: string
-  idempotencyKey: string
-  requestHash: string
-}
-
-export type AcceptedDestroyLifecycleOperation =
-  | {
-      operationId: string
-      capsuleId: string
-      branches: DestroyingCapsuleBranch[]
-    }
-  | {
-      replayedReceipt: CapsuleLifecycleReceiptRecord
-    }
-
-export interface DestroyingCapsuleBranch {
-  id: string
-  capsuleId: string
-  ownerId: string
-  name: string
-  status: CapsuleBranchStatus
-  isRootBranch: boolean
-  resourceInventoryDigest: CapsuleBranchResourceInventoryDigest | null
-}
-
-export interface CapsuleLifecycleReceiptRecord {
-  operationId: string
-  operationType: 'archive' | 'unarchive' | 'destroy'
-  operationStatus: CapsuleLifecycleOperationStatusValue
-  capsuleId: string
-  lifecycleStatus: CapsuleLifecycleStatusValue
-  archivedAt: Date | null
-  destroyedAt: Date | null
-  replayed: boolean
-}
-
-export interface AbandonedBootstrapLifecycleOperationCandidate {
-  id: string
-  capsuleId: string
-  ownerId: string
-  branchId: string | null
-  branchName: string | null
-  status: CapsuleLifecycleOperationStatusValue
-  createdAt: Date
-  updatedAt: Date
-}
-
-export interface AbandonedDestroyLifecycleOperationCandidate {
-  id: string
-  capsuleId: string
-  ownerId: string
-  status: CapsuleLifecycleOperationStatusValue
-  createdAt: Date
-  updatedAt: Date
-}
-
+/**
+ * Shared resource-level persistence input.
+ *
+ * Operation-specific repositories own operation acceptance and aggregate
+ * transitions. This shape carries only the provenance required to associate a
+ * branch resource with the operation that created it.
+ */
 export interface BranchResourceInput {
-  lifecycleOperationId: string
+  operationId: string
   ownerId: string
   branchId: string
   branchName: string
   resourceType: CapsuleBranchResourceTypeValue
   resourceKey: string
   cleanupPolicy: CapsuleBranchResourceCleanupPolicyValue
-  metadata?: Record<string, unknown>
-}
-
-export interface LifecycleOperationStepInput {
-  operationId: string
-  capsuleId: string
-  ownerId: string
-  branchId?: string | null
-  branchName?: string | null
-  stepKey: string
-  status?: CapsuleLifecycleOperationStepStatusValue
+  provider?: string
   metadata?: Record<string, unknown>
 }
 
@@ -188,9 +85,20 @@ export interface CapsuleBranchResourceInventoryRow {
   status: CapsuleBranchResourceStatusValue
   cleanupPolicy: CapsuleBranchResourceCleanupPolicyValue
   metadata: Record<string, unknown> | null
-  createdByLifecycleOperationId: string | null
-  lastLifecycleOperationId: string | null
+  createdByOperationId: string | null
+  lastOperationId: string | null
 }
 
-export type LifecycleOperationStatusValue = CapsuleLifecycleOperationStatusValue
-export type LifecycleOperationStepStatusValue = CapsuleLifecycleOperationStepStatusValue
+/**
+ * Branch identity required by destroy planning and operation-specific
+ * repositories.
+ */
+export interface CapsuleBranchIdentityRow {
+  id: string
+  capsuleId: string
+  ownerId: string
+  name: string
+  status: CapsuleBranchStatus
+  isRootBranch: boolean
+  resourceInventoryDigest: CapsuleBranchResourceInventoryDigest | null
+}

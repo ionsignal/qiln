@@ -1,20 +1,24 @@
-import { registerCapsuleBootstrapHandlers } from './handlers/capsule/bootstrap'
-import { registerCapsuleBranchHandlers } from './handlers/capsule/branch'
-import { registerCapsuleLifecycleHandlers } from './handlers/capsule/lifecycle'
-import { registerCapsuleSnapshotHandlers } from './handlers/capsule/snapshot'
 import { registerCapsuleBlueprintHandlers } from './handlers/blueprints'
+import { registerCapsuleArchiveHandler } from './handlers/capsule/archive'
+import { registerCapsuleBranchHandlers } from './handlers/capsule/branch'
+import { registerCapsuleCreateHandler } from './handlers/capsule/create'
+import { registerCapsuleDestroyHandler } from './handlers/capsule/destroy'
+import { registerCapsuleSnapshotHandlers } from './handlers/capsule/snapshot'
+import { registerCapsuleUnarchiveHandler } from './handlers/capsule/unarchive'
 import type { QilnWorkerRuntime } from '../runtime'
 
 /**
- * Registers all Worker-side Capsule Channel handlers.
+ * Registers the Worker-side Capsule Channel command responders.
  *
- * Registration occurs only after the Worker has completed its fail-closed
- * startup sweep for lifecycle operations abandoned by an earlier process.
+ * Runtime startup invokes this only after singleton acquisition, abandoned
+ * operation classification, and branch runtime reconciliation have completed.
  */
 export function registerCapsuleChannelHandlers(worker: QilnWorkerRuntime): void {
-  registerCapsuleBootstrapHandlers(worker)
+  registerCapsuleCreateHandler(worker)
+  registerCapsuleArchiveHandler(worker)
+  registerCapsuleUnarchiveHandler(worker)
+  registerCapsuleDestroyHandler(worker)
   registerCapsuleBranchHandlers(worker)
-  registerCapsuleLifecycleHandlers(worker)
   registerCapsuleSnapshotHandlers(worker)
   registerCapsuleBlueprintHandlers(worker)
 }

@@ -10,9 +10,6 @@ export interface EngineNatsConfig {
 
 export interface EngineConfig {
   nats?: EngineNatsConfig
-  definitions?: {
-    path: string
-  }
 }
 
 export interface EnginePluginOptions {
@@ -64,8 +61,9 @@ export interface MockFsNode {
 /**
  * Narrow retained type for the mock file browser surface.
  *
- * Extra metadata is intentionally modeled as unknown so retained demo fixtures do not reintroduce
- * broad workspace or generic infrastructure concepts into the capsule API boundary.
+ * Extra metadata is intentionally modeled as unknown so retained demo fixtures
+ * do not reintroduce broad workspace or generic infrastructure concepts into
+ * the capsule API boundary.
  */
 export interface FileBrowserVault {
   id: string
@@ -104,9 +102,6 @@ export type FileInspectorTarget =
       childCount: number
     }
 
-export type CapsuleBranchItem = EngineRouterOutputs['capsules']['branches']['list'][number]
+export type CapsuleBranchSummary = EngineRouterOutputs['capsules']['branches']['list'][number]
+export type CapsuleOperationSummary = EngineRouterOutputs['capsules']['operations']['get']
 export type CapsuleSnapshotItem = EngineRouterOutputs['capsules']['snapshots']['list'][number]
-export type CapsuleCreateResult = EngineRouterOutputs['capsules']['create']
-export type CapsuleArchiveResult = EngineRouterOutputs['capsules']['archive']
-export type CapsuleUnarchiveResult = EngineRouterOutputs['capsules']['unarchive']
-export type CapsuleDestroyResult = EngineRouterOutputs['capsules']['destroy']

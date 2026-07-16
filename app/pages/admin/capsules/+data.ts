@@ -1,10 +1,10 @@
 import { useTRPC } from '@/composables/useTRPC'
-import type { PageContextServer, PageContextClient } from 'vike/types'
+import type { PageContextClient, PageContextServer } from 'vike/types'
 import type { CapsuleBlueprintManifest } from '@qiln/core/client'
-import type { CapsuleBranchItem } from '@qiln/engine/client'
+import type { CapsuleBranchSummary } from '@qiln/engine/client'
 
 export type Data = {
-  branches: CapsuleBranchItem[]
+  branches: CapsuleBranchSummary[]
   manifest: CapsuleBlueprintManifest
 }
 

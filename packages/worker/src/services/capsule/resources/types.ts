@@ -1,6 +1,6 @@
 import type { IncusFilePushOptions } from '../../../incus/client/types'
 import type { IncusDeviceMap } from '../../../schemas/incus'
-import type { ProvisioningFileTarget } from '../provisioning/fileTargets'
+import type { ProvisioningFileTarget } from './bootstrap/targets'
 
 export type {
   BindMountResourceMetadata,

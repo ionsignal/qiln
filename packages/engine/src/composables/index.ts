@@ -7,11 +7,12 @@ export { provideFileBrowser, useFileBrowser } from './useFileBrowser'
 
 export type { ConsoleTab, ConsoleState } from './useConsole'
 export type {
-  CapsuleBranchRuntimeInput,
+  CapsuleBranchInput,
   CapsuleClient,
   CapsuleContext,
   CapsuleCreateClientInput,
   CapsuleEventStreamSubscription,
+  CapsuleMutationInput,
   ProvideCapsulesOptions,
 } from './useCapsules'
 export type { FileBrowserProviderOptions, FileBrowserState, FileBrowserStatusBarInfo } from './useFileBrowser'

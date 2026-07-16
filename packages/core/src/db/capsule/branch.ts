@@ -1,14 +1,14 @@
 import { sql } from 'drizzle-orm'
 import { boolean, check, index, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid, type PgColumn } from 'drizzle-orm/pg-core'
-import { CapsuleBranchStatusValues } from '../../protocol/capsule/messages'
-import { DEFAULT_CAPSULE_BLUEPRINT_NAME, type CapsuleBranchResourceInventoryDigest } from '../../schemas'
+import { CapsuleBranchStatusValues, DEFAULT_CAPSULE_BLUEPRINT_NAME, type CapsuleBranchResourceInventoryDigest } from '../../schemas'
 import { capsulesTable } from './capsule'
 
 /**
  * Canonical database enum for capsule branch runtime state.
  *
- * Logical capsule archive state is not represented here. A branch remains offline while its capsule is
- * archived. Destroying and destroyed represent the terminal capsule-level provider retirement flow.
+ * Logical capsule archive state is not represented here. A branch remains
+ * offline while its capsule is archived. Destroying and destroyed represent
+ * terminal capsule-level provider retirement flow.
  */
 export const capsuleBranchStatusEnum = pgEnum('capsule_branch_status', CapsuleBranchStatusValues)
 
@@ -31,12 +31,8 @@ function createCapsuleIdColumn(capsuleIdColumn?: PgColumn) {
 /**
  * Creates the physical `capsule_branches` table.
  *
- * Transitional runtime statuses are durable mutation fences. Runtime error fields preserve the
- * reason Qiln could not prove a stable provider state.
- *
- * The root marker makes the bootstrap lineage root explicit and durable.
- * Destroyed rows remain audit history and may later coexist with a new branch using the same
- * owner-scoped Incus instance name.
+ * Transitional runtime statuses are durable mutation fences. Runtime error
+ * fields preserve why Qiln could not prove a stable provider state.
  */
 export function createCapsuleBranchesTable(ownerIdColumn?: PgColumn, capsuleIdColumn?: PgColumn) {
   const ownerId = createOwnerIdColumn(ownerIdColumn)

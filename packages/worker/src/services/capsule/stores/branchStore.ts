@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm'
-import { capsuleBranchesTable, capsulesTable, type CapsuleBranchResourceInventoryDigest, type CapsuleHostDbContract } from '@qiln/core/server'
+import { capsuleBranchesTable, capsulesTable, type CapsuleHostDbContract } from '@qiln/core/server'
 import { IncusError } from '../../../errors'
-import { createFailureDetails, failureCodeFromUnknown, failureMessageFromUnknown } from './errorDetails'
+import { createFailureDetails, failureCodeFromUnknown, failureMessageFromUnknown } from '../failures'
 import { toJsonObject } from './jsonPersistence'
 import type {
   BranchRuntimeErrorInput,
@@ -116,37 +116,6 @@ export class CapsuleBranchStore {
         ),
       )
       .orderBy(asc(capsuleBranchesTable.ownerId), asc(capsuleBranchesTable.id))
-  }
-
-  public async recordBootstrapBranchResourceInventoryDigest(
-    ownerId: string,
-    branchId: string,
-    resourceInventoryDigest: CapsuleBranchResourceInventoryDigest,
-  ): Promise<void> {
-    const updatedBranches = await this.db
-      .update(capsuleBranchesTable)
-      .set({
-        resourceInventoryDigest,
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(capsuleBranchesTable.id, branchId),
-          eq(capsuleBranchesTable.ownerId, ownerId),
-          eq(capsuleBranchesTable.status, 'provisioning'),
-          eq(capsuleBranchesTable.isRootBranch, true),
-          isNull(capsuleBranchesTable.resourceInventoryDigest),
-        ),
-      )
-      .returning({
-        id: capsuleBranchesTable.id,
-      })
-    if (updatedBranches.length !== 1) {
-      throw new IncusError('Failed to persist the accepted root branch resource inventory proof.', 'API_ERROR', {
-        ownerId,
-        branchId,
-      })
-    }
   }
 
   public async beginBranchStart(ownerId: string, capsuleId: string, branchName: string): Promise<BranchRuntimeTransitionContext> {

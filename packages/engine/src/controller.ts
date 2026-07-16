@@ -1,9 +1,9 @@
 import { CapsuleNatsChannel } from '@qiln/core/server'
 import { CapsuleEventHub } from './events/capsule'
-import { CapsuleBlueprintService } from './services/capsule/blueprints'
-import { CapsuleBranchRuntimeService } from './services/capsule/branchRuntime'
-import { CapsuleLifecycleService } from './services/capsule/lifecycle'
-import { CapsuleSnapshotService } from './services/capsule/snapshot'
+import { CapsuleBlueprintService } from './services/blueprints'
+import { CapsuleBranchesService } from './services/capsule/branches'
+import { CapsuleOperationsService } from './services/capsule/operations'
+import { CapsuleSnapshotsService } from './services/capsule/snapshots'
 import type { CapsuleHostDbContract } from '@qiln/core/server'
 import type { EngineConfig } from './types'
 
@@ -14,9 +14,9 @@ export class QilnEngineController {
   public readonly events: CapsuleEventHub
   public readonly channel: CapsuleNatsChannel
   public readonly blueprints: CapsuleBlueprintService
-  public readonly capsuleLifecycle: CapsuleLifecycleService
-  public readonly capsuleBranches: CapsuleBranchRuntimeService
-  public readonly capsuleSnapshots: CapsuleSnapshotService
+  public readonly capsuleOperations: CapsuleOperationsService
+  public readonly capsuleBranches: CapsuleBranchesService
+  public readonly capsuleSnapshots: CapsuleSnapshotsService
 
   private started = false
   private starting: Promise<void> | null = null
@@ -27,12 +27,14 @@ export class QilnEngineController {
     if (!nats) {
       throw new Error(`${LOGGER_PREFIX} Missing required configuration: config.nats is required.`)
     }
-    this.channel = new CapsuleNatsChannel(nats, { loggerPrefix: CHANNEL_LOGGER_PREFIX })
+    this.channel = new CapsuleNatsChannel(nats, {
+      loggerPrefix: CHANNEL_LOGGER_PREFIX,
+    })
     this.events = new CapsuleEventHub(this.channel)
     this.blueprints = new CapsuleBlueprintService(this.channel)
-    this.capsuleLifecycle = new CapsuleLifecycleService(this.channel)
-    this.capsuleBranches = new CapsuleBranchRuntimeService(db, this.channel)
-    this.capsuleSnapshots = new CapsuleSnapshotService(db, this.channel)
+    this.capsuleOperations = new CapsuleOperationsService(db, this.channel)
+    this.capsuleBranches = new CapsuleBranchesService(db, this.channel)
+    this.capsuleSnapshots = new CapsuleSnapshotsService(db, this.channel)
   }
 
   public async start(): Promise<void> {

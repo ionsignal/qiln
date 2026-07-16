@@ -5,7 +5,6 @@
         <n-text style="font-weight: 600; letter-spacing: 0.05em">
           {{ branch.name }}
         </n-text>
-
         <n-tag v-if="branch.isRootBranch" size="small" :bordered="false">Root</n-tag>
       </n-flex>
     </template>
@@ -25,7 +24,8 @@
           <n-text depth="2">{{ branch.memory }}</n-text>
         </n-flex>
       </n-flex>
-      <n-text depth="3" style="font-size: 12px">Blueprint: {{ branch.blueprint }}</n-text>
+      <n-text depth="3" style="font-size: 12px">Blueprint: {{ branch.blueprintName }}</n-text>
+      <n-text v-if="branch.runtimeIp" depth="3" style="font-size: 12px">Runtime IP: {{ branch.runtimeIp }}</n-text>
     </n-flex>
     <template #action>
       <n-button-group>
@@ -65,10 +65,10 @@
   import { mdiCpu64Bit, mdiMemory, mdiPlay, mdiStop } from '@mdi/js'
   import { useCapsuleContext } from '../composables/useCapsules'
   import { Icon } from './Icon'
-  import type { CapsuleBranchItem } from '../types'
+  import type { CapsuleBranchSummary } from '../types'
 
   const props = defineProps<{
-    branch: CapsuleBranchItem
+    branch: CapsuleBranchSummary
   }>()
 
   const message = useMessage()
@@ -96,9 +96,9 @@
         capsuleId: props.branch.capsuleId,
         name: props.branch.name,
       })
-      message.success('Capsule branch started')
+      message.success('Capsule branch started.')
     } catch (error: unknown) {
-      message.error(isTRPCClientError(error) ? error.message : 'Failed to start capsule branch')
+      message.error(isTRPCClientError(error) ? error.message : 'Failed to start capsule branch.')
     }
   }
 
@@ -108,9 +108,9 @@
         capsuleId: props.branch.capsuleId,
         name: props.branch.name,
       })
-      message.success('Capsule branch stopped')
+      message.success('Capsule branch stopped.')
     } catch (error: unknown) {
-      message.error(isTRPCClientError(error) ? error.message : 'Failed to stop capsule branch')
+      message.error(isTRPCClientError(error) ? error.message : 'Failed to stop capsule branch.')
     }
   }
 </script>

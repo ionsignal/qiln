@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { IncusError } from '../../../errors'
-import type { ProvisioningFileTarget } from '../provisioning/fileTargets'
+import type { ProvisioningFileTarget } from './bootstrap/targets'
 
 const NonEmptyStringSchema = z.string().trim().min(1)
 

@@ -5,6 +5,10 @@ export interface WorkerNatsConfig {
   token?: string
 }
 
+export interface WorkerDatabaseConfig {
+  url: string
+}
+
 export interface WorkerIncusConfig {
   socketPath?: string
   url?: string
@@ -16,6 +20,7 @@ export interface WorkerIncusConfig {
 }
 
 export interface WorkerRuntimeConfig {
+  database?: WorkerDatabaseConfig
   nats?: WorkerNatsConfig
   definitions?: {
     path: string

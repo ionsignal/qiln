@@ -5,10 +5,6 @@
 			"path": "."
 		},
 		{
-			"name": "runemind-infrastructure",
-			"path": "../runemind-infrastructure"
-		},
-		{
 			"name": "iondocs",
 			"path": "../iondocs"
 		},

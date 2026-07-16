@@ -17,6 +17,7 @@
     "@nats-io/transport-node": "3.4.0",
     "@qiln/core": "*",
     "drizzle-orm": "1.0.0-rc.4",
+    "postgres": "3.4.9",
     "undici": "8.7.0",
     "ws": "8.21.0",
     "yaml": "2.9.0",

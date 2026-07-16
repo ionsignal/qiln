@@ -63,6 +63,7 @@
     "@mdi/js": "7.4.47",
     "@qiln/core": "*",
     "@qiln/engine": "*",
+    "@qiln/worker": "*",
     "@trpc/client": "11.18.0",
     "@trpc/server": "11.18.0",
     "@vue-flow/core": "1.48.2",

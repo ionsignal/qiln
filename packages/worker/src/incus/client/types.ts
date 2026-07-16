@@ -1,55 +1,82 @@
 import type { IncusError } from '../../errors'
 import type { Response } from 'undici'
 
-// A pending async Incus operation awaiting resolution via the event stream.
+/**
+ * A pending asynchronous Incus operation.
+ *
+ * WebSocket events, HTTP probes, reconnect reconciliation, timeout expiry, and
+ * transport shutdown all converge through the transport's guarded settlement
+ * path. Callers must not invoke these callbacks directly.
+ */
 export interface PendingOp {
   resolve: () => void
-  reject: (e: IncusError) => void
-  timer: NodeJS.Timeout
+  reject: (error: IncusError) => void
+  deadlineAt: number
+  deadlineTimer: ReturnType<typeof setTimeout>
+  probeTimer: ReturnType<typeof setTimeout> | null
+  probeInFlight: boolean
+  settled: boolean
+  abortController: AbortController
   project?: string
+  lastProbeError?: string
 }
 
-// IncusFilePushOptions shared between Instance and Storage file clients
+/**
+ * Incus file push options shared between instance and storage file clients.
+ */
 export interface IncusFilePushOptions {
   uid?: number
   gid?: number
-  mode?: string // e.g., '0600'
+  mode?: string
   type?: 'file' | 'symlink' | 'directory'
   write?: 'overwrite' | 'append'
 }
 
-// IncusListOptions for filtering and scoping instance list requests
+/**
+ * Incus instance-list filtering options.
+ */
 export interface IncusListOptions {
   filter?: string
 }
 
-// Options interface to support ETag and Headers
+/**
+ * Request options shared by synchronous and asynchronous Incus requests.
+ *
+ * `signal` is primarily used internally to bind HTTP probes to the overall
+ * provider-operation deadline. Operation callers should rely on the
+ * transport-owned deadline rather than supplying an independent timeout.
+ */
 export interface IncusRequestOptions {
   body?: unknown
   headers?: Record<string, string>
   etag?: string
   project?: string
+  signal?: AbortSignal
 }
 
-// Options for raw requests to enforce type safety
+/**
+ * Options for raw requests that carry bytes rather than JSON.
+ */
 export interface IncusRawRequestOptions extends Omit<IncusRequestOptions, 'body'> {
   body?: Uint8Array | string
 }
 
 export interface IIncusTransport {
   /**
-   * Internal wrapper for synchronous Incus requests.
+   * Performs a synchronous Incus API request.
    */
   request(path: string, method: string, options?: IncusRequestOptions): Promise<{ data: unknown; etag?: string }>
 
   /**
-   * Internal wrapper for requestRaw used in Incus File API requests that deal in raw bytes rather than JSON
+   * Performs a raw Incus API request used by file operations.
    */
   raw(path: string, method: string, options?: IncusRawRequestOptions): Promise<Response>
 
   /**
-   * Internal wrapper for asynchronous Incus requests.
-   * Resolves via the WebSocket event stream rather than HTTP long-polling.
+   * Performs a bounded asynchronous Incus operation.
+   *
+   * A timeout means the provider outcome is unknown unless a terminal provider
+   * state was positively observed before the deadline.
    */
   operation(path: string, method: string, options?: IncusRequestOptions): Promise<void>
 }

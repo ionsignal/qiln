@@ -5,10 +5,10 @@ import {
   capsuleBranchResourceStatusEnum,
   capsuleBranchResourceTypeEnum,
   capsuleBranchStatusEnum,
-  capsuleLifecycleOperationStatusEnum,
-  capsuleLifecycleOperationStepStatusEnum,
-  capsuleLifecycleOperationTypeEnum,
   capsuleLifecycleStatusEnum,
+  capsuleOperationStatusEnum,
+  capsuleOperationStepStatusEnum,
+  capsuleOperationTypeEnum,
   createCapsuleSchema,
   defineCapsuleRelations,
   mergeRelationFragments,
@@ -45,23 +45,16 @@ const capsuleTables = createCapsuleSchema(users.id)
 
 export {
   capsuleLifecycleStatusEnum,
-  capsuleLifecycleOperationTypeEnum,
-  capsuleLifecycleOperationStatusEnum,
-  capsuleLifecycleOperationStepStatusEnum,
+  capsuleOperationTypeEnum,
+  capsuleOperationStatusEnum,
+  capsuleOperationStepStatusEnum,
   capsuleBranchResourceCleanupPolicyEnum,
   capsuleBranchResourceStatusEnum,
   capsuleBranchResourceTypeEnum,
   capsuleBranchStatusEnum,
 }
 
-export const {
-  capsules,
-  capsuleBranches,
-  capsuleLifecycleOperations,
-  capsuleLifecycleOperationSteps,
-  capsuleBranchResources,
-  capsuleSnapshots,
-} = capsuleTables
+export const { capsules, capsuleBranches, capsuleOperations, capsuleOperationSteps, capsuleBranchResources, capsuleSnapshots } = capsuleTables
 
 /**
  * Unified physical schema consumed by Drizzle.
@@ -71,16 +64,14 @@ export const schema = {
   sessions,
   capsuleLifecycleStatusEnum,
   capsuleBranchStatusEnum,
-  capsuleLifecycleOperationTypeEnum,
-  capsuleLifecycleOperationStatusEnum,
-  capsuleLifecycleOperationStepStatusEnum,
+  capsuleOperationTypeEnum,
+  capsuleOperationStatusEnum,
+  capsuleOperationStepStatusEnum,
   capsuleBranchResourceTypeEnum,
   capsuleBranchResourceStatusEnum,
   capsuleBranchResourceCleanupPolicyEnum,
   ...capsuleTables,
 } as const
-
-export type AppSchema = typeof schema
 
 /**
  * Defines all host and Core capsule relations using the Drizzle v1 relations
@@ -93,8 +84,8 @@ export const relations = defineRelations(schema, helpers =>
         sessions: helpers.many.sessions(),
         capsules: helpers.many.capsules(),
         capsuleBranches: helpers.many.capsuleBranches(),
-        capsuleLifecycleOperations: helpers.many.capsuleLifecycleOperations(),
-        capsuleLifecycleOperationSteps: helpers.many.capsuleLifecycleOperationSteps(),
+        capsuleOperations: helpers.many.capsuleOperations(),
+        capsuleOperationSteps: helpers.many.capsuleOperationSteps(),
         capsuleBranchResources: helpers.many.capsuleBranchResources(),
       },
       sessions: {

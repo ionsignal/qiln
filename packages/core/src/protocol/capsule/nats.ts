@@ -113,19 +113,26 @@ function validationDetails(error: ZodErrorLike): Record<string, unknown> {
  *
  * Product code should not construct subjects or transport envelopes directly.
  *
- * This class owns the capsule subject family, request/reply envelope, validation,
- * and target checks for capsule branch commands/events. Raw NATS plumbing lives in
- * `transport/nats` so future protocol adapters can reuse connection mechanics
- * without inheriting capsule semantics.
+ * This class owns the capsule subject family, request/reply envelope, validation, and target checks for
+ * capsule branch commands/events. Raw NATS plumbing lives in `transport/nats` so future protocol adapters
+ * can reuse connection mechanics without inheriting capsule semantics.
  */
 export class CapsuleNatsChannel implements CapsuleChannel {
   private readonly connection: NatsConnectionManager
   private readonly loggerPrefix: string
-  private readonly commandQueue: string
+  private readonly commands: string
 
+  /*
+   * TODO: Capsule targets validate routing and payload/subject consistency, but they do not authenticate
+   * the command publisher. Qiln currently treats NATS as a private, trusted control plane, and all NATS
+   * publishers are equivalently privileged to request owner-targeted capsule operations.
+   *
+   * After MVP, we will enforce producer identity and subject-level publish permissions, then bind Worker
+   * authorization to that authenticated producer identity rather than trusting `input.target.id` alone.
+   */
   constructor(config: CapsuleNatsChannelConfig, options: CapsuleNatsChannelOptions = {}) {
     this.loggerPrefix = options.loggerPrefix ?? DEFAULT_LOGGER_PREFIX
-    this.commandQueue = options.commandQueue ?? DEFAULT_COMMAND_QUEUE
+    this.commands = options.commandQueue ?? DEFAULT_COMMAND_QUEUE
     this.connection = new NatsConnectionManager(config, {
       loggerPrefix: this.loggerPrefix,
     })
@@ -146,7 +153,7 @@ export class CapsuleNatsChannel implements CapsuleChannel {
   ): void {
     const definition = getCapsuleCommandDefinition(name)
     const subject = buildCapsuleCommandHandlerSubject(definition.target.type, name)
-    const queue = options.queue ?? this.commandQueue
+    const queue = options.queue ?? this.commands
     const sub = queue ? this.connection.subscribe(subject, { queue }) : this.connection.subscribe(subject)
     void this.runCommandResponder(sub, name, handler, options)
   }
@@ -310,24 +317,20 @@ export class CapsuleNatsChannel implements CapsuleChannel {
         subject: msg.subject,
       })
     }
-
     const definition = getCapsuleCommandDefinition(name)
     const decoded = decodeMessageJson(msg, {
       context: `capsule command '${name}' request`,
       emptyFallback: {},
     })
-
     if (!decoded.ok) {
       return this.failureEnvelope(CapsuleChannelErrorCode.BAD_REQUEST, `Malformed JSON payload for capsule command '${name}'.`, {
         parseError: this.transportErrorDetails(decoded.error),
       })
     }
-
     const parsedInput = this.safeParseCommandInput(definition, decoded.data)
     if (!parsedInput.ok) {
       return this.failureEnvelope(CapsuleChannelErrorCode.BAD_REQUEST, `Invalid payload for capsule command '${name}'.`, parsedInput.details)
     }
-
     const expectedTarget = this.safeResolveDefinitionTarget(definition, parsedInput.data)
     if (!expectedTarget.ok) {
       return this.failureEnvelope(
@@ -336,26 +339,22 @@ export class CapsuleNatsChannel implements CapsuleChannel {
         expectedTarget.details,
       )
     }
-
     if (!isTargetEqual(parsedSubject.target, expectedTarget.data)) {
       return this.failureEnvelope(CapsuleChannelErrorCode.FORBIDDEN, `Capsule command '${name}' target does not match payload target.`, {
         subjectTarget: parsedSubject.target,
         expectedTarget: expectedTarget.data,
       })
     }
-
     try {
       const result = await handler(parsedInput.data, {
         target: expectedTarget.data,
         name,
       })
-
       const parsedOutput = this.safeParseCommandOutput(definition, result)
       if (!parsedOutput.ok) {
         console.error(`${this.loggerPrefix} Output validation failed for capsule command '${name}'.`, parsedOutput.details)
         return this.failureEnvelope(CapsuleChannelErrorCode.INTERNAL_ERROR, `Invalid output for capsule command '${name}'.`)
       }
-
       return createCapsuleRpcSuccessEnvelope(parsedOutput.data)
     } catch (error: unknown) {
       return this.mapCommandError(error, options)
