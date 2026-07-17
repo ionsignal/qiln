@@ -118,14 +118,25 @@ export class DestroyCapsuleExecutor {
           resourceCount: plannedResources.resourceIds.size,
         },
         async () => {
-          const rows = await this.dependencies.resources.listBranchResourceInventories(
-            plannedResources.branches.map(branchPlan => branchPlan.branch.id),
+          const rows = await this.dependencies.resources.listBranchResourceInventories(executionContext.branches.map(branch => branch.id))
+
+          /**
+           * This is an early diagnostic and durable step-accounting boundary.
+           * It cannot authorize completion because the rows are not locked
+           * together with the terminal aggregate transaction.
+           */
+          this.planner.assertTerminalResourceOutcomes(
+            executionContext.ownerId,
+            executionContext.capsuleId,
+            executionContext.branches,
+            rows,
+            executionContext.operationId,
           )
-          this.planner.verifyTerminalOutcomes(plannedResources, rows)
         },
       )
 
       state.beginTerminalPhase(DestroyCapsuleFailurePhase.COMPLETE_DESTROY)
+
       const completed = await this.dependencies.repository.complete(executionContext.operationId)
       state.markAggregateCompletionCommitted()
       this.publishTerminalResult(completed)

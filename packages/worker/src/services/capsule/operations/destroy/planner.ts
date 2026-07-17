@@ -1,4 +1,9 @@
-import { CapsuleBranchResourceCleanupPolicy, CapsuleBranchResourceStatus, CapsuleBranchResourceType } from '@qiln/core/server'
+import {
+  CapsuleBranchResourceCleanupPolicy,
+  CapsuleBranchResourceStatus,
+  CapsuleBranchResourceType,
+  type CapsuleBranchResourceStatusValue,
+} from '@qiln/core/server'
 import { IncusError } from '../../../../errors'
 import { instanceResourceKey, volumeResourceKey } from '../../resources/identity'
 import { assertCapsuleBranchResourceInventoryMatches } from '../../resources/inventory'
@@ -21,6 +26,15 @@ import type {
   DestroyCapsuleProvisioningFileResource,
   DestroyCapsuleVolumeTarget,
 } from './types'
+
+type DestroyInventoryValidation =
+  | {
+      phase: 'deletion_ready'
+    }
+  | {
+      phase: 'terminal'
+      operationId: string
+    }
 
 function compareStableString(left: string, right: string): number {
   if (left < right) {
@@ -46,70 +60,85 @@ function requireSingleResource<TResource>(resources: readonly TResource[], messa
 }
 
 /**
- * Builds a fail-closed destroy plan exclusively from durable Qiln inventory.
+ * Builds and validates fail-closed destroy ownership evidence exclusively from
+ * durable Qiln inventory.
  *
- * Live Incus state is never used to discover ownership. Provider reads are
- * permitted only after this planner has selected and validated a target from
- * the complete durable branch resource inventory.
+ * Live Incus state is never used to discover ownership. Provider reads and
+ * mutations are permitted only after `createPlan()` has selected deletion
+ * targets from a complete, digest-verified branch inventory.
+ *
+ * `assertTerminalResourceOutcomes()` applies the same topology and ownership
+ * proof to terminal persistence state. It additionally requires each managed or
+ * derived resource outcome to have been last touched by the completing destroy
+ * operation.
  */
 export class DestroyCapsulePlanner {
+  /**
+   * Produces the deterministic provider deletion plan from deletion-ready
+   * durable inventory.
+   */
   public createPlan(
     ownerId: string,
     capsuleId: string,
     branches: readonly DestroyCapsuleAcceptedBranch[],
     resourceRows: readonly CapsuleBranchResourceInventoryRow[],
   ): DestroyCapsulePlan {
-    if (branches.length === 0) {
-      throw new IncusError('Capsule destroy requires at least one durable branch.', 'CONFLICT', {
+    return this.createValidatedPlan(ownerId, capsuleId, branches, resourceRows, {
+      phase: 'deletion_ready',
+    })
+  }
+
+  /**
+   * Proves that the complete durable resource inventory reached terminal
+   * outcomes under one specific destroy operation.
+   *
+   * This method does not trust or consume a process-local plan. It reconstructs
+   * branch resource topology from the supplied durable branch and resource rows,
+   * verifies every inventory digest, and checks operation provenance for all
+   * destructive outcomes.
+   *
+   * Completion must call this with rows locked inside its terminal transaction.
+   * The executor may also call it as an earlier diagnostic preflight.
+   */
+  public assertTerminalResourceOutcomes(
+    ownerId: string,
+    capsuleId: string,
+    branches: readonly DestroyCapsuleAcceptedBranch[],
+    resourceRows: readonly CapsuleBranchResourceInventoryRow[],
+    operationId: string,
+  ): void {
+    if (operationId.trim() === '') {
+      throw new IncusError('Capsule destroy terminal verification requires a durable operation identity.', 'VALIDATION_ERROR', {
         ownerId,
         capsuleId,
       })
     }
+    this.createValidatedPlan(ownerId, capsuleId, branches, resourceRows, {
+      phase: 'terminal',
+      operationId,
+    })
+  }
 
-    const rootBranches = branches.filter(branch => branch.isRootBranch)
-    if (rootBranches.length !== 1) {
-      throw new IncusError('Capsule destroy requires exactly one durable root branch.', 'CONFLICT', {
-        ownerId,
-        capsuleId,
-        branchCount: branches.length,
-        rootBranchCount: rootBranches.length,
-      })
+  public summarize(plan: DestroyCapsulePlan): DestroyCapsulePlanSummary {
+    return {
+      branchCount: plan.branches.length,
+      instanceCount: plan.instances.length,
+      volumeCount: plan.volumes.length,
+      provisioningFileCount: plan.provisioningFiles.length,
     }
+  }
 
-    const branchIds = new Set<string>()
+  private createValidatedPlan(
+    ownerId: string,
+    capsuleId: string,
+    branches: readonly DestroyCapsuleAcceptedBranch[],
+    resourceRows: readonly CapsuleBranchResourceInventoryRow[],
+    validation: DestroyInventoryValidation,
+  ): DestroyCapsulePlan {
+    this.assertBranchLineage(ownerId, capsuleId, branches)
 
-    for (const branch of branches) {
-      if (branch.ownerId !== ownerId || branch.capsuleId !== capsuleId) {
-        throw new IncusError('Capsule destroy branch identity does not match the accepted aggregate.', 'CONFLICT', {
-          ownerId,
-          capsuleId,
-          branchId: branch.id,
-          branchOwnerId: branch.ownerId,
-          branchCapsuleId: branch.capsuleId,
-        })
-      }
-
-      if (branch.status !== 'destroying') {
-        throw new IncusError('Capsule destroy planning requires every accepted branch to remain destroying.', 'CONFLICT', {
-          capsuleId,
-          branchId: branch.id,
-          branchName: branch.name,
-          branchStatus: branch.status,
-        })
-      }
-
-      if (branchIds.has(branch.id)) {
-        throw new IncusError('Capsule destroy contains a duplicate branch identity.', 'CONFLICT', {
-          capsuleId,
-          branchId: branch.id,
-        })
-      }
-
-      branchIds.add(branch.id)
-    }
-
+    const branchIds = new Set(branches.map(branch => branch.id))
     const rowsByBranch = new Map<string, CapsuleBranchResourceInventoryRow[]>()
-
     for (const row of resourceRows) {
       if (row.branchId === null || !branchIds.has(row.branchId)) {
         throw new IncusError('Capsule destroy resource inventory contains a foreign or detached resource.', 'CONFLICT', {
@@ -117,31 +146,27 @@ export class DestroyCapsulePlanner {
           resourceId: row.id,
           branchId: row.branchId,
           resourceKey: row.resourceKey,
+          validationPhase: validation.phase,
         })
       }
-
       if (row.createdByOperationId === null) {
         throw new IncusError('Capsule destroy resource has no durable creation provenance.', 'CONFLICT', {
           capsuleId,
           resourceId: row.id,
           branchId: row.branchId,
           resourceKey: row.resourceKey,
+          validationPhase: validation.phase,
         })
       }
-
       const rows = rowsByBranch.get(row.branchId) ?? []
       rows.push(row)
       rowsByBranch.set(row.branchId, rows)
     }
-
     const branchPlans = [...branches]
       .sort((left, right) => compareStableString(left.id, right.id))
-      .map(branch => this.createBranchPlan(ownerId, branch, rowsByBranch.get(branch.id) ?? []))
-
+      .map(branch => this.createBranchPlan(ownerId, branch, rowsByBranch.get(branch.id) ?? [], validation))
     const instances = branchPlans.map(plan => plan.instance).sort((left, right) => compareStableString(left.resourceKey, right.resourceKey))
-
     const volumes = branchPlans.flatMap(plan => plan.volumes).sort((left, right) => compareStableString(left.resourceKey, right.resourceKey))
-
     const provisioningFiles = branchPlans
       .flatMap(plan => plan.provisioningFiles)
       .sort((left, right) => compareStableString(left.resourceKey, right.resourceKey))
@@ -159,69 +184,48 @@ export class DestroyCapsulePlanner {
     }
   }
 
-  public verifyTerminalOutcomes(plan: DestroyCapsulePlan, rows: readonly CapsuleBranchResourceInventoryRow[]): void {
-    if (rows.length !== plan.resourceIds.size) {
-      throw new IncusError('Capsule destroy terminal resource inventory count changed after planning.', 'CONFLICT', {
-        capsuleId: plan.capsuleId,
-        expectedResourceCount: plan.resourceIds.size,
-        actualResourceCount: rows.length,
+  private assertBranchLineage(ownerId: string, capsuleId: string, branches: readonly DestroyCapsuleAcceptedBranch[]): void {
+    if (branches.length === 0) {
+      throw new IncusError('Capsule destroy requires at least one durable branch.', 'CONFLICT', {
+        ownerId,
+        capsuleId,
       })
     }
-
-    const rowsById = new Map(rows.map(row => [row.id, row]))
-
-    for (const resourceId of plan.resourceIds) {
-      if (!rowsById.has(resourceId)) {
-        throw new IncusError('Capsule destroy terminal verification is missing a planned resource.', 'CONFLICT', {
-          capsuleId: plan.capsuleId,
-          resourceId,
+    const rootBranches = branches.filter(branch => branch.isRootBranch)
+    if (rootBranches.length !== 1) {
+      throw new IncusError('Capsule destroy requires exactly one durable root branch.', 'CONFLICT', {
+        ownerId,
+        capsuleId,
+        branchCount: branches.length,
+        rootBranchCount: rootBranches.length,
+      })
+    }
+    const branchIds = new Set<string>()
+    for (const branch of branches) {
+      if (branch.ownerId !== ownerId || branch.capsuleId !== capsuleId) {
+        throw new IncusError('Capsule destroy branch identity does not match the accepted aggregate.', 'CONFLICT', {
+          ownerId,
+          capsuleId,
+          branchId: branch.id,
+          branchOwnerId: branch.ownerId,
+          branchCapsuleId: branch.capsuleId,
         })
       }
-    }
-
-    for (const branchPlan of plan.branches) {
-      this.requireStatus(
-        rowsById,
-        branchPlan.project.id,
-        [CapsuleBranchResourceStatus.ADOPTED],
-        'Retained capsule project resource changed during destroy.',
-      )
-
-      for (const bindMount of branchPlan.bindMounts) {
-        this.requireStatus(
-          rowsById,
-          bindMount.id,
-          [CapsuleBranchResourceStatus.ADOPTED],
-          'External capsule bind-mount resource changed during destroy.',
-        )
+      if (branch.status !== 'destroying') {
+        throw new IncusError('Capsule destroy validation requires every accepted branch to remain destroying.', 'CONFLICT', {
+          capsuleId,
+          branchId: branch.id,
+          branchName: branch.name,
+          branchStatus: branch.status,
+        })
       }
-    }
-
-    for (const target of [...plan.instances, ...plan.volumes]) {
-      this.requireStatus(
-        rowsById,
-        target.id,
-        [CapsuleBranchResourceStatus.DELETED, CapsuleBranchResourceStatus.MISSING],
-        'Managed capsule resource did not reach a terminal destroy outcome.',
-      )
-    }
-
-    for (const file of plan.provisioningFiles) {
-      this.requireStatus(
-        rowsById,
-        file.id,
-        [CapsuleBranchResourceStatus.DELETED],
-        'Derived provisioning-file resource did not reach its terminal destroy outcome.',
-      )
-    }
-  }
-
-  public summarize(plan: DestroyCapsulePlan): DestroyCapsulePlanSummary {
-    return {
-      branchCount: plan.branches.length,
-      instanceCount: plan.instances.length,
-      volumeCount: plan.volumes.length,
-      provisioningFileCount: plan.provisioningFiles.length,
+      if (branchIds.has(branch.id)) {
+        throw new IncusError('Capsule destroy contains a duplicate branch identity.', 'CONFLICT', {
+          capsuleId,
+          branchId: branch.id,
+        })
+      }
+      branchIds.add(branch.id)
     }
   }
 
@@ -229,15 +233,16 @@ export class DestroyCapsulePlanner {
     ownerId: string,
     branch: DestroyCapsuleAcceptedBranch,
     rows: readonly CapsuleBranchResourceInventoryRow[],
+    validation: DestroyInventoryValidation,
   ): DestroyCapsuleBranchPlan {
     if (branch.resourceInventoryDigest === null) {
       throw new IncusError('Capsule branch has no durable resource inventory proof. Manual review is required.', 'CONFLICT', {
         capsuleId: branch.capsuleId,
         branchId: branch.id,
         branchName: branch.name,
+        validationPhase: validation.phase,
       })
     }
-
     for (const row of rows) {
       if (row.ownerId !== ownerId || row.branchId !== branch.id || row.branchName !== branch.name || row.provider !== 'incus') {
         throw new IncusError('Capsule branch resource identity does not match its accepted destroy branch.', 'CONFLICT', {
@@ -249,6 +254,7 @@ export class DestroyCapsulePlanner {
           resourceBranchId: row.branchId,
           resourceBranchName: row.branchName,
           provider: row.provider,
+          validationPhase: validation.phase,
         })
       }
     }
@@ -276,8 +282,7 @@ export class DestroyCapsulePlanner {
     for (const row of rows) {
       switch (row.resourceType) {
         case CapsuleBranchResourceType.INCUS_PROJECT: {
-          this.assertResourcePolicyAndStatus(row, CapsuleBranchResourceCleanupPolicy.RETAIN, CapsuleBranchResourceStatus.ADOPTED)
-
+          this.assertResourceState(row, CapsuleBranchResourceCleanupPolicy.RETAIN, [CapsuleBranchResourceStatus.ADOPTED], validation, false)
           projects.push({
             kind: 'project',
             id: row.id,
@@ -287,13 +292,11 @@ export class DestroyCapsulePlanner {
             status: row.status,
             metadata: parseProjectResourceMetadata(row.metadata),
           })
-
           break
         }
 
         case CapsuleBranchResourceType.BIND_MOUNT: {
-          this.assertResourcePolicyAndStatus(row, CapsuleBranchResourceCleanupPolicy.EXTERNAL, CapsuleBranchResourceStatus.ADOPTED)
-
+          this.assertResourceState(row, CapsuleBranchResourceCleanupPolicy.EXTERNAL, [CapsuleBranchResourceStatus.ADOPTED], validation, false)
           bindMounts.push({
             kind: 'bindMount',
             id: row.id,
@@ -303,15 +306,20 @@ export class DestroyCapsulePlanner {
             status: row.status,
             metadata: parseBindMountResourceMetadata(row.metadata),
           })
-
           break
         }
 
         case CapsuleBranchResourceType.INCUS_INSTANCE: {
-          this.assertResourcePolicyAndStatus(row, CapsuleBranchResourceCleanupPolicy.DELETE_WITH_BRANCH, CapsuleBranchResourceStatus.CREATED)
-
+          this.assertResourceState(
+            row,
+            CapsuleBranchResourceCleanupPolicy.DELETE_WITH_BRANCH,
+            validation.phase === 'deletion_ready'
+              ? [CapsuleBranchResourceStatus.CREATED]
+              : [CapsuleBranchResourceStatus.DELETED, CapsuleBranchResourceStatus.MISSING],
+            validation,
+            true,
+          )
           const metadata = parseInstanceResourceMetadata(row.metadata)
-
           instances.push({
             kind: 'instance',
             id: row.id,
@@ -326,12 +334,17 @@ export class DestroyCapsulePlanner {
 
           break
         }
-
         case CapsuleBranchResourceType.ZFS_VOLUME: {
-          this.assertResourcePolicyAndStatus(row, CapsuleBranchResourceCleanupPolicy.DELETE_WITH_BRANCH, CapsuleBranchResourceStatus.CREATED)
-
+          this.assertResourceState(
+            row,
+            CapsuleBranchResourceCleanupPolicy.DELETE_WITH_BRANCH,
+            validation.phase === 'deletion_ready'
+              ? [CapsuleBranchResourceStatus.CREATED]
+              : [CapsuleBranchResourceStatus.DELETED, CapsuleBranchResourceStatus.MISSING],
+            validation,
+            true,
+          )
           const metadata = parseVolumeResourceMetadata(row.metadata)
-
           volumes.push({
             kind: 'volume',
             id: row.id,
@@ -347,34 +360,38 @@ export class DestroyCapsulePlanner {
 
           break
         }
-
         case CapsuleBranchResourceType.PROVISIONING_FILE: {
-          this.assertResourcePolicyAndStatus(row, CapsuleBranchResourceCleanupPolicy.DELETE_WITH_BRANCH, CapsuleBranchResourceStatus.CREATED)
-
+          this.assertResourceState(
+            row,
+            CapsuleBranchResourceCleanupPolicy.DELETE_WITH_BRANCH,
+            validation.phase === 'deletion_ready' ? [CapsuleBranchResourceStatus.CREATED] : [CapsuleBranchResourceStatus.DELETED],
+            validation,
+            true,
+          )
           rawProvisioningFiles.push({
             row,
             metadata: parseProvisioningFileResourceMetadata(row.metadata),
           })
-
           break
+        }
+        default: {
+          this.rejectUnsupportedResourceType(row, branch, validation)
         }
       }
     }
-
     const project = requireSingleResource(projects, 'Capsule branch destroy inventory must contain exactly one retained project.', {
       capsuleId: branch.capsuleId,
       branchId: branch.id,
       branchName: branch.name,
+      validationPhase: validation.phase,
     })
-
     const instance = requireSingleResource(instances, 'Capsule branch destroy inventory must contain exactly one managed instance.', {
       capsuleId: branch.capsuleId,
       branchId: branch.id,
       branchName: branch.name,
+      validationPhase: validation.phase,
     })
-
     const expectedNamespace = `user-${ownerId}`
-
     if (project.metadata.namespace !== expectedNamespace || instance.namespace !== expectedNamespace) {
       throw new IncusError('Capsule branch resource namespace does not match its owner namespace.', 'CONFLICT', {
         capsuleId: branch.capsuleId,
@@ -382,18 +399,18 @@ export class DestroyCapsulePlanner {
         expectedNamespace,
         projectNamespace: project.metadata.namespace,
         instanceNamespace: instance.namespace,
+        validationPhase: validation.phase,
       })
     }
-
     if (instance.instanceName !== branch.name) {
       throw new IncusError('Capsule branch managed instance identity does not match the durable branch name.', 'CONFLICT', {
         capsuleId: branch.capsuleId,
         branchId: branch.id,
         branchName: branch.name,
         instanceName: instance.instanceName,
+        validationPhase: validation.phase,
       })
     }
-
     for (const bindMount of bindMounts) {
       if (bindMount.metadata.namespace !== expectedNamespace) {
         throw new IncusError('Capsule branch bind-mount namespace does not match its owner namespace.', 'CONFLICT', {
@@ -402,10 +419,10 @@ export class DestroyCapsulePlanner {
           resourceId: bindMount.id,
           expectedNamespace,
           actualNamespace: bindMount.metadata.namespace,
+          validationPhase: validation.phase,
         })
       }
     }
-
     for (const volume of volumes) {
       if (volume.namespace !== expectedNamespace) {
         throw new IncusError('Capsule branch volume namespace does not match its owner namespace.', 'CONFLICT', {
@@ -414,15 +431,14 @@ export class DestroyCapsulePlanner {
           resourceId: volume.id,
           expectedNamespace,
           actualNamespace: volume.namespace,
+          validationPhase: validation.phase,
         })
       }
     }
-
     const directResourcesByKey = new Map<string, string>([
       [instanceResourceKey(instance.namespace, instance.instanceName), instance.id],
       ...volumes.map(volume => [volumeResourceKey(volume.namespace, volume.pool, volume.volumeName), volume.id] as const),
     ])
-
     const provisioningFiles: DestroyCapsuleProvisioningFileResource[] = rawProvisioningFiles.map(({ row, metadata }) => {
       if (metadata.namespace !== expectedNamespace || metadata.branchName !== branch.name) {
         throw new IncusError('Provisioning-file metadata does not match its capsule branch identity.', 'CONFLICT', {
@@ -433,16 +449,14 @@ export class DestroyCapsulePlanner {
           actualNamespace: metadata.namespace,
           expectedBranchName: branch.name,
           actualBranchName: metadata.branchName,
+          validationPhase: validation.phase,
         })
       }
-
       const backingResourceKey =
         metadata.target === 'instance'
           ? instanceResourceKey(metadata.namespace, metadata.branchName)
           : volumeResourceKey(metadata.namespace, metadata.pool, metadata.volumeName)
-
       const backingResourceId = directResourcesByKey.get(backingResourceKey)
-
       if (!backingResourceId) {
         throw new IncusError('Provisioning-file resource has no proven managed backing resource.', 'CONFLICT', {
           capsuleId: branch.capsuleId,
@@ -450,9 +464,9 @@ export class DestroyCapsulePlanner {
           resourceId: row.id,
           resourceKey: row.resourceKey,
           backingResourceKey,
+          validationPhase: validation.phase,
         })
       }
-
       return {
         kind: 'provisioningFile',
         id: row.id,
@@ -464,7 +478,6 @@ export class DestroyCapsulePlanner {
         metadata,
       }
     })
-
     return {
       branch,
       project,
@@ -475,22 +488,51 @@ export class DestroyCapsulePlanner {
     }
   }
 
-  private assertResourcePolicyAndStatus(
+  private assertResourceState(
     row: CapsuleBranchResourceInventoryRow,
     expectedCleanupPolicy: CapsuleBranchResourceInventoryRow['cleanupPolicy'],
-    expectedStatus: CapsuleBranchResourceInventoryRow['status'],
+    allowedStatuses: readonly CapsuleBranchResourceStatusValue[],
+    validation: DestroyInventoryValidation,
+    requireDestroyOperationProvenance: boolean,
   ): void {
-    if (row.cleanupPolicy !== expectedCleanupPolicy || row.status !== expectedStatus) {
-      throw new IncusError('Capsule branch resource is not eligible for destroy under its durable policy and status.', 'CONFLICT', {
+    if (row.cleanupPolicy !== expectedCleanupPolicy || !allowedStatuses.includes(row.status)) {
+      throw new IncusError('Capsule branch resource is not eligible under its durable destroy policy and status.', 'CONFLICT', {
         resourceId: row.id,
         resourceKey: row.resourceKey,
         resourceType: row.resourceType,
         expectedCleanupPolicy,
         actualCleanupPolicy: row.cleanupPolicy,
-        expectedStatus,
+        allowedStatuses,
         actualStatus: row.status,
+        validationPhase: validation.phase,
       })
     }
+    if (validation.phase === 'terminal' && requireDestroyOperationProvenance && row.lastOperationId !== validation.operationId) {
+      throw new IncusError('Capsule branch terminal resource outcome was not committed by the completing destroy operation.', 'CONFLICT', {
+        operationId: validation.operationId,
+        resourceId: row.id,
+        resourceKey: row.resourceKey,
+        resourceType: row.resourceType,
+        resourceStatus: row.status,
+        lastOperationId: row.lastOperationId,
+      })
+    }
+  }
+
+  private rejectUnsupportedResourceType(
+    row: CapsuleBranchResourceInventoryRow,
+    branch: DestroyCapsuleAcceptedBranch,
+    validation: DestroyInventoryValidation,
+  ): never {
+    throw new IncusError('Capsule branch resource type is unsupported by fail-closed destroy planning.', 'CONFLICT', {
+      capsuleId: branch.capsuleId,
+      branchId: branch.id,
+      branchName: branch.name,
+      resourceId: row.id,
+      resourceKey: row.resourceKey,
+      resourceType: row.resourceType,
+      validationPhase: validation.phase,
+    })
   }
 
   private assertUniqueManagedProviderIdentities(
@@ -498,10 +540,8 @@ export class DestroyCapsulePlanner {
     volumes: readonly DestroyCapsuleVolumeTarget[],
   ): void {
     const identities = new Set<string>()
-
     for (const instance of instances) {
       const identity = `instance\u0000${instance.namespace}\u0000${instance.instanceName}`
-
       if (identities.has(identity)) {
         throw new IncusError('Capsule destroy plan contains a duplicate managed instance identity.', 'CONFLICT', {
           namespace: instance.namespace,
@@ -509,13 +549,10 @@ export class DestroyCapsulePlanner {
           resourceId: instance.id,
         })
       }
-
       identities.add(identity)
     }
-
     for (const volume of volumes) {
       const identity = `volume\u0000${volume.namespace}\u0000${volume.pool}\u0000${volume.volumeName}`
-
       if (identities.has(identity)) {
         throw new IncusError('Capsule destroy plan contains a duplicate managed volume identity.', 'CONFLICT', {
           namespace: volume.namespace,
@@ -524,25 +561,7 @@ export class DestroyCapsulePlanner {
           resourceId: volume.id,
         })
       }
-
       identities.add(identity)
-    }
-  }
-
-  private requireStatus(
-    rowsById: ReadonlyMap<string, CapsuleBranchResourceInventoryRow>,
-    resourceId: string,
-    allowedStatuses: readonly CapsuleBranchResourceInventoryRow['status'][],
-    message: string,
-  ): void {
-    const row = rowsById.get(resourceId)
-
-    if (!row || !allowedStatuses.includes(row.status)) {
-      throw new IncusError(message, 'CONFLICT', {
-        resourceId,
-        actualStatus: row?.status ?? null,
-        allowedStatuses,
-      })
     }
   }
 }
