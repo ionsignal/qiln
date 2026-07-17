@@ -376,26 +376,32 @@ export class CapsuleUnarchiveRepository {
   // ---------------------------------------------------------------------------
 
   /**
-   * Terminalizes a claimed unarchive execution failure.
+   * Classifies a provider-free unarchive execution failure from any nonterminal
+   * phase, including execution-input loading and accepted-to-running claiming.
+   *
+   * The transaction reloads and locks all durable evidence. It does not trust
+   * the executor's process-local phase to decide whether aggregate restoration
+   * is safe.
    *
    * An intact provider-free unarchive fence becomes an ordinary failed
    * operation and restores the active, archived capsule state while preserving
    * its exact archive timestamp. Contradictory durable evidence is classified
    * cleanup-required.
+   *
+   * A null result means the operation became terminal before this
+   * classification transaction acquired its lock. Existing terminal state is
+   * authoritative and is never overwritten.
    */
-  public async finalizeExecutionFailure(
+  public async classifyExecutionFailure(
     operationId: string,
     error: unknown,
     context: Record<string, unknown>,
-  ): Promise<UnarchiveCapsuleTerminalResult> {
+  ): Promise<UnarchiveCapsuleTerminalResult | null> {
     return await this.db.transaction(async tx => {
       const operation = await this.lockUnarchiveOperation(tx, operationId)
 
-      if (operation.status !== CapsuleOperationStatus.RUNNING) {
-        throw new IncusError('Capsule unarchive operation is not eligible for failure finalization.', 'CONFLICT', {
-          operationId,
-          operationStatus: operation.status,
-        })
+      if (!isNonterminalUnarchiveStatus(operation.status)) {
+        return null
       }
 
       const capsule = await lockOwnedArchivalCapsule(tx, operation.ownerId, operation.capsuleId)
@@ -403,17 +409,19 @@ export class CapsuleUnarchiveRepository {
       const lineage = inspectOfflineBranchLineage(operation.ownerId, operation.capsuleId, branches)
       const originalArchivedAt = capsule.archivedAt
 
-      if (
-        operation.providerMutationStartedAt !== null ||
-        operation.branchId !== null ||
-        capsule.lifecycleStatus !== 'unarchiving' ||
-        originalArchivedAt === null ||
-        !lineage.valid
-      ) {
+      const safeProviderFreeFailure =
+        operation.providerMutationStartedAt === null &&
+        operation.branchId === null &&
+        capsule.lifecycleStatus === 'unarchiving' &&
+        originalArchivedAt !== null &&
+        lineage.valid
+
+      if (!safeProviderFreeFailure) {
         return await this.markCleanupRequiredInTransaction(tx, operation, capsule, error, {
           ...context,
           classification: 'unarchive_execution_failure',
           invariantViolation: true,
+          previousOperationStatus: operation.status,
           providerIntentPresent: operation.providerMutationStartedAt !== null,
           operationBranchId: operation.branchId,
           capsuleLifecycleStatus: capsule.lifecycleStatus,
@@ -430,6 +438,7 @@ export class CapsuleUnarchiveRepository {
         {
           ...context,
           classification: 'unarchive_execution_failure',
+          previousOperationStatus: operation.status,
           providerIntentPresent: false,
           offlineBranchLineage: lineage,
         },

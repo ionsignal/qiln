@@ -1,7 +1,7 @@
 {
   "version": "8",
   "dialect": "postgres",
-  "id": "873990ed-63eb-42e8-aa1c-43efe20e3b82",
+  "id": "7b62cf3a-204c-48c6-9c13-ef8fe09a9b0d",
   "prevIds": [
     "00000000-0000-0000-0000-000000000000"
   ],
@@ -61,13 +61,28 @@
     },
     {
       "values": [
+        "provisioning",
+        "active",
+        "archiving",
+        "unarchiving",
+        "destroying",
+        "destroyed",
+        "creation_failed",
+        "cleanup_required"
+      ],
+      "name": "capsule_lifecycle_status",
+      "entityType": "enums",
+      "schema": "public"
+    },
+    {
+      "values": [
         "accepted",
         "running",
         "completed",
         "failed",
         "cleanup_required"
       ],
-      "name": "capsule_lifecycle_operation_status",
+      "name": "capsule_operation_status",
       "entityType": "enums",
       "schema": "public"
     },
@@ -78,31 +93,18 @@
         "completed",
         "failed"
       ],
-      "name": "capsule_lifecycle_operation_step_status",
+      "name": "capsule_operation_step_status",
       "entityType": "enums",
       "schema": "public"
     },
     {
       "values": [
-        "bootstrap",
+        "create",
         "archive",
         "unarchive",
         "destroy"
       ],
-      "name": "capsule_lifecycle_operation_type",
-      "entityType": "enums",
-      "schema": "public"
-    },
-    {
-      "values": [
-        "provisioning",
-        "active",
-        "destroying",
-        "destroyed",
-        "creation_failed",
-        "cleanup_required"
-      ],
-      "name": "capsule_lifecycle_status",
+      "name": "capsule_operation_type",
       "entityType": "enums",
       "schema": "public"
     },
@@ -120,13 +122,13 @@
     },
     {
       "isRlsEnabled": false,
-      "name": "capsule_lifecycle_operation_steps",
+      "name": "capsule_operation_steps",
       "entityType": "tables",
       "schema": "public"
     },
     {
       "isRlsEnabled": false,
-      "name": "capsule_lifecycle_operations",
+      "name": "capsule_operations",
       "entityType": "tables",
       "schema": "public"
     },
@@ -214,7 +216,7 @@
       "default": null,
       "generated": null,
       "identity": null,
-      "name": "created_by_lifecycle_operation_id",
+      "name": "created_by_operation_id",
       "entityType": "columns",
       "schema": "public",
       "table": "capsule_branch_resources"
@@ -227,7 +229,7 @@
       "default": null,
       "generated": null,
       "identity": null,
-      "name": "last_lifecycle_operation_id",
+      "name": "last_operation_id",
       "entityType": "columns",
       "schema": "public",
       "table": "capsule_branch_resources"
@@ -620,7 +622,7 @@
       "name": "id",
       "entityType": "columns",
       "schema": "public",
-      "table": "capsule_lifecycle_operation_steps"
+      "table": "capsule_operation_steps"
     },
     {
       "type": "uuid",
@@ -633,7 +635,7 @@
       "name": "operation_id",
       "entityType": "columns",
       "schema": "public",
-      "table": "capsule_lifecycle_operation_steps"
+      "table": "capsule_operation_steps"
     },
     {
       "type": "uuid",
@@ -646,7 +648,7 @@
       "name": "capsule_id",
       "entityType": "columns",
       "schema": "public",
-      "table": "capsule_lifecycle_operation_steps"
+      "table": "capsule_operation_steps"
     },
     {
       "type": "uuid",
@@ -659,7 +661,7 @@
       "name": "owner_id",
       "entityType": "columns",
       "schema": "public",
-      "table": "capsule_lifecycle_operation_steps"
+      "table": "capsule_operation_steps"
     },
     {
       "type": "uuid",
@@ -672,7 +674,7 @@
       "name": "branch_id",
       "entityType": "columns",
       "schema": "public",
-      "table": "capsule_lifecycle_operation_steps"
+      "table": "capsule_operation_steps"
     },
     {
       "type": "text",
@@ -685,7 +687,7 @@
       "name": "branch_name",
       "entityType": "columns",
       "schema": "public",
-      "table": "capsule_lifecycle_operation_steps"
+      "table": "capsule_operation_steps"
     },
     {
       "type": "text",
@@ -698,10 +700,10 @@
       "name": "step_key",
       "entityType": "columns",
       "schema": "public",
-      "table": "capsule_lifecycle_operation_steps"
+      "table": "capsule_operation_steps"
     },
     {
-      "type": "capsule_lifecycle_operation_step_status",
+      "type": "capsule_operation_step_status",
       "typeSchema": "public",
       "notNull": true,
       "dimensions": 0,
@@ -711,7 +713,7 @@
       "name": "status",
       "entityType": "columns",
       "schema": "public",
-      "table": "capsule_lifecycle_operation_steps"
+      "table": "capsule_operation_steps"
     },
     {
       "type": "jsonb",
@@ -724,7 +726,7 @@
       "name": "metadata",
       "entityType": "columns",
       "schema": "public",
-      "table": "capsule_lifecycle_operation_steps"
+      "table": "capsule_operation_steps"
     },
     {
       "type": "timestamp with time zone",
@@ -737,7 +739,7 @@
       "name": "started_at",
       "entityType": "columns",
       "schema": "public",
-      "table": "capsule_lifecycle_operation_steps"
+      "table": "capsule_operation_steps"
     },
     {
       "type": "timestamp with time zone",
@@ -750,7 +752,7 @@
       "name": "completed_at",
       "entityType": "columns",
       "schema": "public",
-      "table": "capsule_lifecycle_operation_steps"
+      "table": "capsule_operation_steps"
     },
     {
       "type": "timestamp with time zone",
@@ -763,7 +765,7 @@
       "name": "failed_at",
       "entityType": "columns",
       "schema": "public",
-      "table": "capsule_lifecycle_operation_steps"
+      "table": "capsule_operation_steps"
     },
     {
       "type": "text",
@@ -776,7 +778,7 @@
       "name": "failure_code",
       "entityType": "columns",
       "schema": "public",
-      "table": "capsule_lifecycle_operation_steps"
+      "table": "capsule_operation_steps"
     },
     {
       "type": "text",
@@ -789,7 +791,7 @@
       "name": "failure_message",
       "entityType": "columns",
       "schema": "public",
-      "table": "capsule_lifecycle_operation_steps"
+      "table": "capsule_operation_steps"
     },
     {
       "type": "jsonb",
@@ -802,7 +804,7 @@
       "name": "failure_details",
       "entityType": "columns",
       "schema": "public",
-      "table": "capsule_lifecycle_operation_steps"
+      "table": "capsule_operation_steps"
     },
     {
       "type": "timestamp with time zone",
@@ -815,7 +817,7 @@
       "name": "created_at",
       "entityType": "columns",
       "schema": "public",
-      "table": "capsule_lifecycle_operation_steps"
+      "table": "capsule_operation_steps"
     },
     {
       "type": "timestamp with time zone",
@@ -828,7 +830,7 @@
       "name": "updated_at",
       "entityType": "columns",
       "schema": "public",
-      "table": "capsule_lifecycle_operation_steps"
+      "table": "capsule_operation_steps"
     },
     {
       "type": "uuid",
@@ -841,7 +843,7 @@
       "name": "id",
       "entityType": "columns",
       "schema": "public",
-      "table": "capsule_lifecycle_operations"
+      "table": "capsule_operations"
     },
     {
       "type": "uuid",
@@ -854,7 +856,7 @@
       "name": "owner_id",
       "entityType": "columns",
       "schema": "public",
-      "table": "capsule_lifecycle_operations"
+      "table": "capsule_operations"
     },
     {
       "type": "uuid",
@@ -867,7 +869,7 @@
       "name": "capsule_id",
       "entityType": "columns",
       "schema": "public",
-      "table": "capsule_lifecycle_operations"
+      "table": "capsule_operations"
     },
     {
       "type": "uuid",
@@ -880,10 +882,10 @@
       "name": "branch_id",
       "entityType": "columns",
       "schema": "public",
-      "table": "capsule_lifecycle_operations"
+      "table": "capsule_operations"
     },
     {
-      "type": "capsule_lifecycle_operation_type",
+      "type": "capsule_operation_type",
       "typeSchema": "public",
       "notNull": true,
       "dimensions": 0,
@@ -893,10 +895,10 @@
       "name": "type",
       "entityType": "columns",
       "schema": "public",
-      "table": "capsule_lifecycle_operations"
+      "table": "capsule_operations"
     },
     {
-      "type": "capsule_lifecycle_operation_status",
+      "type": "capsule_operation_status",
       "typeSchema": "public",
       "notNull": true,
       "dimensions": 0,
@@ -906,7 +908,7 @@
       "name": "status",
       "entityType": "columns",
       "schema": "public",
-      "table": "capsule_lifecycle_operations"
+      "table": "capsule_operations"
     },
     {
       "type": "uuid",
@@ -919,7 +921,7 @@
       "name": "idempotency_key",
       "entityType": "columns",
       "schema": "public",
-      "table": "capsule_lifecycle_operations"
+      "table": "capsule_operations"
     },
     {
       "type": "text",
@@ -932,7 +934,7 @@
       "name": "request_hash",
       "entityType": "columns",
       "schema": "public",
-      "table": "capsule_lifecycle_operations"
+      "table": "capsule_operations"
     },
     {
       "type": "text",
@@ -945,7 +947,7 @@
       "name": "branch_name",
       "entityType": "columns",
       "schema": "public",
-      "table": "capsule_lifecycle_operations"
+      "table": "capsule_operations"
     },
     {
       "type": "text",
@@ -958,7 +960,7 @@
       "name": "blueprint_name",
       "entityType": "columns",
       "schema": "public",
-      "table": "capsule_lifecycle_operations"
+      "table": "capsule_operations"
     },
     {
       "type": "text",
@@ -971,7 +973,7 @@
       "name": "blueprint_digest",
       "entityType": "columns",
       "schema": "public",
-      "table": "capsule_lifecycle_operations"
+      "table": "capsule_operations"
     },
     {
       "type": "jsonb",
@@ -984,7 +986,20 @@
       "name": "blueprint_snapshot",
       "entityType": "columns",
       "schema": "public",
-      "table": "capsule_lifecycle_operations"
+      "table": "capsule_operations"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "accepted_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_operations"
     },
     {
       "type": "timestamp with time zone",
@@ -994,10 +1009,23 @@
       "default": null,
       "generated": null,
       "identity": null,
-      "name": "started_at",
+      "name": "execution_started_at",
       "entityType": "columns",
       "schema": "public",
-      "table": "capsule_lifecycle_operations"
+      "table": "capsule_operations"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "provider_mutation_started_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_operations"
     },
     {
       "type": "timestamp with time zone",
@@ -1010,7 +1038,7 @@
       "name": "completed_at",
       "entityType": "columns",
       "schema": "public",
-      "table": "capsule_lifecycle_operations"
+      "table": "capsule_operations"
     },
     {
       "type": "timestamp with time zone",
@@ -1023,7 +1051,7 @@
       "name": "failed_at",
       "entityType": "columns",
       "schema": "public",
-      "table": "capsule_lifecycle_operations"
+      "table": "capsule_operations"
     },
     {
       "type": "text",
@@ -1036,7 +1064,7 @@
       "name": "failure_code",
       "entityType": "columns",
       "schema": "public",
-      "table": "capsule_lifecycle_operations"
+      "table": "capsule_operations"
     },
     {
       "type": "text",
@@ -1049,7 +1077,7 @@
       "name": "failure_message",
       "entityType": "columns",
       "schema": "public",
-      "table": "capsule_lifecycle_operations"
+      "table": "capsule_operations"
     },
     {
       "type": "jsonb",
@@ -1062,7 +1090,7 @@
       "name": "failure_details",
       "entityType": "columns",
       "schema": "public",
-      "table": "capsule_lifecycle_operations"
+      "table": "capsule_operations"
     },
     {
       "type": "timestamp with time zone",
@@ -1075,7 +1103,7 @@
       "name": "created_at",
       "entityType": "columns",
       "schema": "public",
-      "table": "capsule_lifecycle_operations"
+      "table": "capsule_operations"
     },
     {
       "type": "timestamp with time zone",
@@ -1088,7 +1116,7 @@
       "name": "updated_at",
       "entityType": "columns",
       "schema": "public",
-      "table": "capsule_lifecycle_operations"
+      "table": "capsule_operations"
     },
     {
       "type": "uuid",
@@ -1435,7 +1463,7 @@
       "nameExplicit": true,
       "columns": [
         {
-          "value": "created_by_lifecycle_operation_id",
+          "value": "created_by_operation_id",
           "isExpression": false,
           "asc": true,
           "nullsFirst": false,
@@ -1447,7 +1475,7 @@
       "with": "",
       "method": "btree",
       "concurrently": false,
-      "name": "capsule_branch_resources_created_by_lifecycle_operation_idx",
+      "name": "capsule_branch_resources_created_by_operation_idx",
       "entityType": "indexes",
       "schema": "public",
       "table": "capsule_branch_resources"
@@ -1456,7 +1484,7 @@
       "nameExplicit": true,
       "columns": [
         {
-          "value": "last_lifecycle_operation_id",
+          "value": "last_operation_id",
           "isExpression": false,
           "asc": true,
           "nullsFirst": false,
@@ -1468,7 +1496,7 @@
       "with": "",
       "method": "btree",
       "concurrently": false,
-      "name": "capsule_branch_resources_last_lifecycle_operation_idx",
+      "name": "capsule_branch_resources_last_operation_idx",
       "entityType": "indexes",
       "schema": "public",
       "table": "capsule_branch_resources"
@@ -1498,7 +1526,7 @@
       "nameExplicit": true,
       "columns": [
         {
-          "value": "created_by_lifecycle_operation_id",
+          "value": "created_by_operation_id",
           "isExpression": false,
           "asc": true,
           "nullsFirst": false,
@@ -1517,7 +1545,7 @@
       "with": "",
       "method": "btree",
       "concurrently": false,
-      "name": "capsule_branch_resources_lifecycle_operation_key_unique_idx",
+      "name": "capsule_branch_resources_operation_key_unique_idx",
       "entityType": "indexes",
       "schema": "public",
       "table": "capsule_branch_resources"
@@ -1706,10 +1734,10 @@
       "with": "",
       "method": "btree",
       "concurrently": false,
-      "name": "capsule_lifecycle_operation_steps_operation_idx",
+      "name": "capsule_operation_steps_operation_idx",
       "entityType": "indexes",
       "schema": "public",
-      "table": "capsule_lifecycle_operation_steps"
+      "table": "capsule_operation_steps"
     },
     {
       "nameExplicit": true,
@@ -1727,10 +1755,10 @@
       "with": "",
       "method": "btree",
       "concurrently": false,
-      "name": "capsule_lifecycle_operation_steps_capsule_idx",
+      "name": "capsule_operation_steps_capsule_idx",
       "entityType": "indexes",
       "schema": "public",
-      "table": "capsule_lifecycle_operation_steps"
+      "table": "capsule_operation_steps"
     },
     {
       "nameExplicit": true,
@@ -1755,10 +1783,10 @@
       "with": "",
       "method": "btree",
       "concurrently": false,
-      "name": "capsule_lifecycle_operation_steps_owner_status_idx",
+      "name": "capsule_operation_steps_owner_status_idx",
       "entityType": "indexes",
       "schema": "public",
-      "table": "capsule_lifecycle_operation_steps"
+      "table": "capsule_operation_steps"
     },
     {
       "nameExplicit": true,
@@ -1776,10 +1804,10 @@
       "with": "",
       "method": "btree",
       "concurrently": false,
-      "name": "capsule_lifecycle_operation_steps_branch_idx",
+      "name": "capsule_operation_steps_branch_idx",
       "entityType": "indexes",
       "schema": "public",
-      "table": "capsule_lifecycle_operation_steps"
+      "table": "capsule_operation_steps"
     },
     {
       "nameExplicit": true,
@@ -1804,10 +1832,10 @@
       "with": "",
       "method": "btree",
       "concurrently": false,
-      "name": "capsule_lifecycle_operation_steps_operation_key_unique_idx",
+      "name": "capsule_operation_steps_operation_key_unique_idx",
       "entityType": "indexes",
       "schema": "public",
-      "table": "capsule_lifecycle_operation_steps"
+      "table": "capsule_operation_steps"
     },
     {
       "nameExplicit": true,
@@ -1832,10 +1860,10 @@
       "with": "",
       "method": "btree",
       "concurrently": false,
-      "name": "capsule_lifecycle_operations_owner_status_idx",
+      "name": "capsule_operations_owner_status_idx",
       "entityType": "indexes",
       "schema": "public",
-      "table": "capsule_lifecycle_operations"
+      "table": "capsule_operations"
     },
     {
       "nameExplicit": true,
@@ -1860,10 +1888,10 @@
       "with": "",
       "method": "btree",
       "concurrently": false,
-      "name": "capsule_lifecycle_operations_capsule_status_idx",
+      "name": "capsule_operations_capsule_status_idx",
       "entityType": "indexes",
       "schema": "public",
-      "table": "capsule_lifecycle_operations"
+      "table": "capsule_operations"
     },
     {
       "nameExplicit": true,
@@ -1881,10 +1909,31 @@
       "with": "",
       "method": "btree",
       "concurrently": false,
-      "name": "capsule_lifecycle_operations_branch_idx",
+      "name": "capsule_operations_branch_idx",
       "entityType": "indexes",
       "schema": "public",
-      "table": "capsule_lifecycle_operations"
+      "table": "capsule_operations"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "provider_mutation_started_at",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "capsule_operations_provider_mutation_started_idx",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "capsule_operations"
     },
     {
       "nameExplicit": true,
@@ -1909,10 +1958,31 @@
       "with": "",
       "method": "btree",
       "concurrently": false,
-      "name": "capsule_lifecycle_operations_owner_idempotency_key_unique_idx",
+      "name": "capsule_operations_owner_idempotency_key_unique_idx",
       "entityType": "indexes",
       "schema": "public",
-      "table": "capsule_lifecycle_operations"
+      "table": "capsule_operations"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "capsule_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": true,
+      "where": "\"status\" IN ('accepted', 'running')",
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "capsule_operations_capsule_nonterminal_unique_idx",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "capsule_operations"
     },
     {
       "nameExplicit": true,
@@ -2049,16 +2119,16 @@
     {
       "nameExplicit": false,
       "columns": [
-        "created_by_lifecycle_operation_id"
+        "created_by_operation_id"
       ],
       "schemaTo": "public",
-      "tableTo": "capsule_lifecycle_operations",
+      "tableTo": "capsule_operations",
       "columnsTo": [
         "id"
       ],
       "onUpdate": "NO ACTION",
       "onDelete": "SET NULL",
-      "name": "capsule_branch_resources_Cm9dOmDwqgKI_fkey",
+      "name": "capsule_branch_resources_3Q5TCQ46rOSG_fkey",
       "entityType": "fks",
       "schema": "public",
       "table": "capsule_branch_resources"
@@ -2066,16 +2136,16 @@
     {
       "nameExplicit": false,
       "columns": [
-        "last_lifecycle_operation_id"
+        "last_operation_id"
       ],
       "schemaTo": "public",
-      "tableTo": "capsule_lifecycle_operations",
+      "tableTo": "capsule_operations",
       "columnsTo": [
         "id"
       ],
       "onUpdate": "NO ACTION",
       "onDelete": "SET NULL",
-      "name": "capsule_branch_resources_9jy9ejJtQZym_fkey",
+      "name": "capsule_branch_resources_ltnZH1shcsde_fkey",
       "entityType": "fks",
       "schema": "public",
       "table": "capsule_branch_resources"
@@ -2120,16 +2190,16 @@
         "operation_id"
       ],
       "schemaTo": "public",
-      "tableTo": "capsule_lifecycle_operations",
+      "tableTo": "capsule_operations",
       "columnsTo": [
         "id"
       ],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
-      "name": "capsule_lifecycle_operation_steps_7qaRCoAHTT8q_fkey",
+      "name": "capsule_operation_steps_operation_id_capsule_operations_id_fkey",
       "entityType": "fks",
       "schema": "public",
-      "table": "capsule_lifecycle_operation_steps"
+      "table": "capsule_operation_steps"
     },
     {
       "nameExplicit": false,
@@ -2143,10 +2213,10 @@
       ],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
-      "name": "capsule_lifecycle_operation_steps_capsule_id_capsules_id_fkey",
+      "name": "capsule_operation_steps_capsule_id_capsules_id_fkey",
       "entityType": "fks",
       "schema": "public",
-      "table": "capsule_lifecycle_operation_steps"
+      "table": "capsule_operation_steps"
     },
     {
       "nameExplicit": false,
@@ -2160,10 +2230,10 @@
       ],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
-      "name": "capsule_lifecycle_operation_steps_owner_id_users_id_fkey",
+      "name": "capsule_operation_steps_owner_id_users_id_fkey",
       "entityType": "fks",
       "schema": "public",
-      "table": "capsule_lifecycle_operation_steps"
+      "table": "capsule_operation_steps"
     },
     {
       "nameExplicit": false,
@@ -2177,10 +2247,10 @@
       ],
       "onUpdate": "NO ACTION",
       "onDelete": "SET NULL",
-      "name": "capsule_lifecycle_operation_steps_JLNq0P5XDrLw_fkey",
+      "name": "capsule_operation_steps_branch_id_capsule_branches_id_fkey",
       "entityType": "fks",
       "schema": "public",
-      "table": "capsule_lifecycle_operation_steps"
+      "table": "capsule_operation_steps"
     },
     {
       "nameExplicit": false,
@@ -2194,10 +2264,10 @@
       ],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
-      "name": "capsule_lifecycle_operations_owner_id_users_id_fkey",
+      "name": "capsule_operations_owner_id_users_id_fkey",
       "entityType": "fks",
       "schema": "public",
-      "table": "capsule_lifecycle_operations"
+      "table": "capsule_operations"
     },
     {
       "nameExplicit": false,
@@ -2211,10 +2281,10 @@
       ],
       "onUpdate": "NO ACTION",
       "onDelete": "CASCADE",
-      "name": "capsule_lifecycle_operations_capsule_id_capsules_id_fkey",
+      "name": "capsule_operations_capsule_id_capsules_id_fkey",
       "entityType": "fks",
       "schema": "public",
-      "table": "capsule_lifecycle_operations"
+      "table": "capsule_operations"
     },
     {
       "nameExplicit": false,
@@ -2228,10 +2298,10 @@
       ],
       "onUpdate": "NO ACTION",
       "onDelete": "SET NULL",
-      "name": "capsule_lifecycle_operations_branch_id_capsule_branches_id_fkey",
+      "name": "capsule_operations_branch_id_capsule_branches_id_fkey",
       "entityType": "fks",
       "schema": "public",
-      "table": "capsule_lifecycle_operations"
+      "table": "capsule_operations"
     },
     {
       "nameExplicit": false,
@@ -2326,9 +2396,9 @@
         "id"
       ],
       "nameExplicit": false,
-      "name": "capsule_lifecycle_operation_steps_pkey",
+      "name": "capsule_operation_steps_pkey",
       "schema": "public",
-      "table": "capsule_lifecycle_operation_steps",
+      "table": "capsule_operation_steps",
       "entityType": "pks"
     },
     {
@@ -2336,9 +2406,9 @@
         "id"
       ],
       "nameExplicit": false,
-      "name": "capsule_lifecycle_operations_pkey",
+      "name": "capsule_operations_pkey",
       "schema": "public",
-      "table": "capsule_lifecycle_operations",
+      "table": "capsule_operations",
       "entityType": "pks"
     },
     {

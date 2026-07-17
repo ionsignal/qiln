@@ -58,17 +58,14 @@ export class ProviderFreeArchivalOperationLedger {
    */
   public async findSubmissionReplay(input: FindProviderFreeArchivalReplayInput): Promise<PersistedCapsuleOperation | null> {
     const operation = await this.reader.loadByOwnerAndIdempotencyKey(input.ownerId, input.idempotencyKey)
-
     if (!operation) {
       return null
     }
-
     assertOperationReplayIdentity(operation, {
       operationType: input.operationType,
       requestHash: input.requestHash,
       requestDescription: input.requestDescription,
     })
-
     return operation
   }
 
@@ -81,13 +78,11 @@ export class ProviderFreeArchivalOperationLedger {
    */
   public async loadAcceptedExecution(input: LoadAcceptedProviderFreeArchivalOperationInput): Promise<PersistedCapsuleOperation> {
     const operation = await this.reader.loadById(input.operationId)
-
     if (!operation) {
       throw new IncusError(`${input.operationDescription} operation was not found.`, 'NOT_FOUND', {
         operationId: input.operationId,
       })
     }
-
     if (operation.type !== input.operationType) {
       throw new IncusError(`Operation is not a ${input.operationDescription} operation.`, 'CONFLICT', {
         operationId: input.operationId,
@@ -95,28 +90,24 @@ export class ProviderFreeArchivalOperationLedger {
         actualOperationType: operation.type,
       })
     }
-
     if (operation.status !== CapsuleOperationStatus.ACCEPTED) {
       throw new IncusError(`${input.operationDescription} operation is no longer accepted for execution.`, 'CONFLICT', {
         operationId: input.operationId,
         operationStatus: operation.status,
       })
     }
-
     if (operation.branchId !== null) {
       throw new IncusError(`${input.operationDescription} operation unexpectedly references a capsule branch.`, 'CONFLICT', {
         operationId: input.operationId,
         branchId: operation.branchId,
       })
     }
-
     if (operation.providerMutationStartedAt !== null) {
       throw new IncusError(`${input.operationDescription} operation unexpectedly contains provider intent.`, 'CONFLICT', {
         operationId: input.operationId,
         providerMutationStartedAt: operation.providerMutationStartedAt.toISOString(),
       })
     }
-
     return operation
   }
 
@@ -129,7 +120,6 @@ export class ProviderFreeArchivalOperationLedger {
    */
   public async claimAccepted(input: ClaimProviderFreeArchivalOperationInput): Promise<CapsuleOperationTransitionOutput> {
     const now = new Date()
-
     const [claimed] = await this.db
       .update(capsuleOperationsTable)
       .set({
@@ -152,21 +142,18 @@ export class ProviderFreeArchivalOperationLedger {
         branchId: capsuleOperationsTable.branchId,
         operationStatus: capsuleOperationsTable.status,
       })
-
     if (!claimed) {
       throw new IncusError(`${input.operationDescription} operation could not be claimed from accepted to running.`, 'CONFLICT', {
         operationId: input.operationId,
         operationType: input.operationType,
       })
     }
-
     if (claimed.branchId !== null) {
       throw new IncusError(`${input.operationDescription} claim returned an unexpected capsule branch reference.`, 'CONFLICT', {
         operationId: input.operationId,
         branchId: claimed.branchId,
       })
     }
-
     return toCapsuleOperationTransition({
       ownerId: claimed.ownerId,
       operationId: input.operationId,

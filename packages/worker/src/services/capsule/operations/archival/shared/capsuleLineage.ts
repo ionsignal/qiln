@@ -3,9 +3,7 @@ import { capsuleBranchesTable, capsulesTable, type CapsuleHostDbContract } from 
 import { IncusError } from '../../../../../errors'
 
 export type ArchivalOperationTransaction = Parameters<Parameters<CapsuleHostDbContract['transaction']>[0]>[0]
-
 export type ArchivalCapsuleRecord = Pick<typeof capsulesTable.$inferSelect, 'id' | 'ownerId' | 'lifecycleStatus' | 'archivedAt' | 'destroyedAt'>
-
 export type ArchivalBranchRecord = Pick<
   typeof capsuleBranchesTable.$inferSelect,
   'id' | 'capsuleId' | 'ownerId' | 'name' | 'status' | 'isRootBranch'
@@ -49,7 +47,6 @@ export async function readOwnedArchivalCapsule(
     .from(capsulesTable)
     .where(and(eq(capsulesTable.id, capsuleId), eq(capsulesTable.ownerId, ownerId)))
     .limit(1)
-
   return capsule ?? null
 }
 
@@ -76,14 +73,12 @@ export async function lockOwnedArchivalCapsule(
     .where(and(eq(capsulesTable.id, capsuleId), eq(capsulesTable.ownerId, ownerId)))
     .for('update')
     .limit(1)
-
   if (!capsule) {
     throw new IncusError('Capsule not found or access denied.', 'NOT_FOUND', {
       ownerId,
       capsuleId,
     })
   }
-
   return capsule
 }
 
@@ -129,7 +124,6 @@ export function inspectOfflineBranchLineage(
     branches.length > 0 &&
     rootBranchCount === 1 &&
     branches.every(branch => branch.ownerId === ownerId && branch.capsuleId === capsuleId && branch.status === 'offline')
-
   return {
     valid,
     branchCount: branches.length,
@@ -159,11 +153,9 @@ export function isValidOfflineBranchLineage(ownerId: string, capsuleId: string, 
  */
 export function assertValidOfflineBranchLineage(ownerId: string, capsuleId: string, branches: readonly ArchivalBranchRecord[]): void {
   const inspection = inspectOfflineBranchLineage(ownerId, capsuleId, branches)
-
   if (inspection.valid) {
     return
   }
-
   throw new IncusError('Capsule archival mutation requires exactly one root branch and every branch offline.', 'CONFLICT', {
     ownerId,
     capsuleId,

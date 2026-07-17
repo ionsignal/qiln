@@ -1,6 +1,10 @@
+import { CapsuleOperationType } from '@qiln/core/server'
+import { ProviderFreeArchivalOperationExecution } from '../shared'
 import type { CapsuleLifecycleEventPublisher, CapsuleOperationEventPublisher } from '../../../events'
 import type { CapsuleArchiveRepository } from './repository'
-import type { ArchiveCapsuleTerminalResult } from './types'
+import type { ArchiveCapsuleExecutionInput, ArchiveCapsuleTerminalResult } from './types'
+
+const LOGGER_PREFIX = '[CapsuleArchiveExecutor]'
 
 export interface CapsuleArchiveExecutorDependencies {
   repository: CapsuleArchiveRepository
@@ -11,39 +15,32 @@ export interface CapsuleArchiveExecutorDependencies {
 /**
  * Executes one durably accepted, provider-free archive operation.
  *
- * The executor receives only the operation ID. PostgreSQL is reloaded before
- * claiming, and the repository retains ownership of all archive lifecycle and
- * terminal-classification policy.
+ * The executor is a thin archive-specific composition boundary. The shared
+ * execution coordinator owns the mechanical load, claim, completion, and
+ * failure-dispatch sequence. The archive repository retains ownership of
+ * lifecycle eligibility, offline branch-lineage policy, archive timestamp
+ * policy, and terminal classification.
  */
 export class CapsuleArchiveExecutor {
-  constructor(private readonly dependencies: CapsuleArchiveExecutorDependencies) {}
+  private readonly execution: ProviderFreeArchivalOperationExecution<ArchiveCapsuleExecutionInput, ArchiveCapsuleTerminalResult>
+
+  constructor(private readonly dependencies: CapsuleArchiveExecutorDependencies) {
+    this.execution = new ProviderFreeArchivalOperationExecution({
+      operationType: CapsuleOperationType.ARCHIVE,
+      operationDescription: 'capsule archive',
+      loggerPrefix: LOGGER_PREFIX,
+      loadAcceptedExecution: operationId => this.dependencies.repository.loadAcceptedExecution(operationId),
+      claimAccepted: operationId => this.dependencies.repository.claimAccepted(operationId),
+      complete: operationId => this.dependencies.repository.complete(operationId),
+      classifyExecutionFailure: (operationId, error, context) =>
+        this.dependencies.repository.classifyExecutionFailure(operationId, error, context),
+      publishOperationChanged: operation => this.dependencies.operationEvents.publishChanged(operation),
+      publishTerminalResult: result => this.publishTerminalResult(result),
+    })
+  }
 
   public async execute(operationId: string): Promise<void> {
-    const input = await this.dependencies.repository.loadAcceptedExecution(operationId)
-    const running = await this.dependencies.repository.claimAccepted(operationId)
-    this.dependencies.operationEvents.publishChanged(running)
-    try {
-      const completed = await this.dependencies.repository.complete(operationId)
-      this.publishTerminalResult(completed)
-    } catch (archiveError: unknown) {
-      try {
-        const terminal = await this.dependencies.repository.finalizeExecutionFailure(operationId, archiveError, {
-          operationId,
-          capsuleId: input.capsuleId,
-          phase: 'execute_archive',
-          action: 'complete_capsule_archive',
-          providerIntentExpected: false,
-        })
-        this.publishTerminalResult(terminal)
-      } catch (terminalizationError: unknown) {
-        console.error(`[CapsuleArchiveExecutor] Failed to terminalize capsule archive operation '${operationId}'.`, {
-          archiveError,
-          terminalizationError,
-        })
-        throw terminalizationError
-      }
-      throw archiveError
-    }
+    await this.execution.execute(operationId)
   }
 
   private publishTerminalResult(result: ArchiveCapsuleTerminalResult): void {

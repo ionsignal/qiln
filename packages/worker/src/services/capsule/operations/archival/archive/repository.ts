@@ -363,25 +363,31 @@ export class CapsuleArchiveRepository {
   // ---------------------------------------------------------------------------
 
   /**
-   * Terminalizes a claimed archive execution failure.
+   * Classifies a provider-free archive execution failure from any nonterminal
+   * phase, including execution-input loading and accepted-to-running claiming.
+   *
+   * The transaction reloads and locks all durable evidence. It does not trust
+   * the executor's process-local phase to decide whether aggregate restoration
+   * is safe.
    *
    * A valid provider-free archive fence becomes an ordinary failed operation
    * and restores the active, unarchived capsule state. Contradictory durable
    * evidence is classified cleanup-required.
+   *
+   * A null result means the operation became terminal before this
+   * classification transaction acquired its lock. Existing terminal state is
+   * authoritative and is never overwritten.
    */
-  public async finalizeExecutionFailure(
+  public async classifyExecutionFailure(
     operationId: string,
     error: unknown,
     context: Record<string, unknown>,
-  ): Promise<ArchiveCapsuleTerminalResult> {
+  ): Promise<ArchiveCapsuleTerminalResult | null> {
     return await this.db.transaction(async tx => {
       const operation = await this.lockArchiveOperation(tx, operationId)
 
-      if (operation.status !== CapsuleOperationStatus.RUNNING) {
-        throw new IncusError('Capsule archive operation is not eligible for failure finalization.', 'CONFLICT', {
-          operationId,
-          operationStatus: operation.status,
-        })
+      if (!isNonterminalArchiveStatus(operation.status)) {
+        return null
       }
 
       const capsule = await lockOwnedArchivalCapsule(tx, operation.ownerId, operation.capsuleId)
@@ -400,6 +406,7 @@ export class CapsuleArchiveRepository {
           ...context,
           classification: 'archive_execution_failure',
           invariantViolation: true,
+          previousOperationStatus: operation.status,
           providerIntentPresent: operation.providerMutationStartedAt !== null,
           operationBranchId: operation.branchId,
           capsuleLifecycleStatus: capsule.lifecycleStatus,
@@ -415,6 +422,7 @@ export class CapsuleArchiveRepository {
         {
           ...context,
           classification: 'archive_execution_failure',
+          previousOperationStatus: operation.status,
           providerIntentPresent: false,
           offlineBranchLineage: lineage,
         },

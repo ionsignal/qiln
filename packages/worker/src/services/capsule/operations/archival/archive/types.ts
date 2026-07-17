@@ -1,5 +1,6 @@
 import type { CapsuleArchiveReceipt, CapsuleLifecycleState, CapsuleOperationRequestHash } from '@qiln/core/server'
 import type { CapsuleOperationTransitionOutput } from '../../shared'
+import type { ProviderFreeArchivalTerminalResult } from '../shared/execution'
 
 export interface SubmitArchiveCapsuleInput {
   ownerId: string
@@ -24,7 +25,7 @@ export interface ArchiveCapsuleAcceptanceResult {
   capsule: CapsuleLifecycleState
 }
 
-export interface ArchiveCapsuleTerminalResult {
+export interface ArchiveCapsuleTerminalResult extends ProviderFreeArchivalTerminalResult {
   operation: CapsuleOperationTransitionOutput
   capsule: CapsuleLifecycleState
 }
