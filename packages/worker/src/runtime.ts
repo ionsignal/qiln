@@ -3,8 +3,8 @@ import { CapsuleBlueprintRegistry, CapsuleNatsChannel } from '@qiln/core/server'
 import { registerCapsuleChannelHandlers } from './channel'
 import { OperationSupervisor, WorkerAuthority, type AuthorityLossError } from './coordination'
 import { IncusClient } from './incus/client/index'
-import { CapsuleService } from './services/capsule'
 import { ProjectService } from './services/project'
+import { composeCapsuleService, type CapsuleService } from './services/capsule'
 import type { WorkerRuntimeConfig, WorkerRuntimeOptions } from './types'
 
 const WORKER_LOG_PREFIX = '[QilnWorker]'
@@ -109,7 +109,14 @@ export class QilnWorkerRuntime {
         this.handleFatalAuthorityLoss(error)
       },
     })
-    this.capsule = new CapsuleService(options.db, this.incus, this.channel, this.project, this.blueprints, this.supervisor)
+    this.capsule = composeCapsuleService({
+      db: options.db,
+      incus: this.incus,
+      channel: this.channel,
+      project: this.project,
+      blueprints: this.blueprints,
+      supervisor: this.supervisor,
+    })
   }
 
   public async start(): Promise<void> {

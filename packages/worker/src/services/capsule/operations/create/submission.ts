@@ -23,7 +23,7 @@ interface CreateCapsuleRequestIdentity {
  * confirmed that no durable idempotent replay exists. Once accepted, the
  * executor reloads the immutable blueprint snapshot from PostgreSQL.
  */
-export class CapsuleCreateService {
+export class CreateCapsuleSubmissionService {
   constructor(
     private readonly repository: CreateCapsuleOperationRepository,
     private readonly executor: CreateCapsuleExecutor,
