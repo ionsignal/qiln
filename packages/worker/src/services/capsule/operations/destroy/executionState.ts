@@ -2,16 +2,21 @@ import type { DestroyCapsuleFailurePhase } from './failureContext'
 import type { DestroyCapsuleStepKey } from './stepKeys'
 
 /**
- * Process-local safety facts for one destroy attempt.
+ * Process-local diagnostic facts for one destroy attempt.
  *
  * This state has no serialization, recovery, replay, or resume behavior.
  * PostgreSQL remains authoritative for operation and aggregate state.
+ *
+ * In particular, `providerIntentCommitted` records only what this executor
+ * observed. Terminal failure classification must reload the durable
+ * `providerMutationStartedAt` fence because a database commit may have
+ * succeeded even when its response did not reach this process.
  */
 export class DestroyCapsuleExecutionState {
   private activeFailurePhase: DestroyCapsuleFailurePhase
   private activeStepKey: DestroyCapsuleStepKey | null = null
-  private providerIntentFenceCommitted = false
-  private aggregateCompletionCommitted = false
+  private providerIntentFenceObserved = false
+  private aggregateCompletionObserved = false
 
   constructor(initialPhase: DestroyCapsuleFailurePhase) {
     this.activeFailurePhase = initialPhase
@@ -28,11 +33,11 @@ export class DestroyCapsuleExecutionState {
   }
 
   public markProviderIntentCommitted(): void {
-    this.providerIntentFenceCommitted = true
+    this.providerIntentFenceObserved = true
   }
 
   public markAggregateCompletionCommitted(): void {
-    this.aggregateCompletionCommitted = true
+    this.aggregateCompletionObserved = true
   }
 
   public get currentFailurePhase(): DestroyCapsuleFailurePhase {
@@ -44,10 +49,10 @@ export class DestroyCapsuleExecutionState {
   }
 
   public get providerIntentCommitted(): boolean {
-    return this.providerIntentFenceCommitted
+    return this.providerIntentFenceObserved
   }
 
   public get completionCommitted(): boolean {
-    return this.aggregateCompletionCommitted
+    return this.aggregateCompletionObserved
   }
 }

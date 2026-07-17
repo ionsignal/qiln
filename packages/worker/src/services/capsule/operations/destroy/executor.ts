@@ -37,33 +37,38 @@ export class DestroyCapsuleExecutor {
   }
 
   public async execute(operationId: string): Promise<void> {
-    const input = await this.dependencies.repository.loadAcceptedExecutionInput(operationId)
-    const running = await this.dependencies.repository.claimAccepted(operationId)
-
-    this.dependencies.operationEvents.publishChanged(running)
-
-    const context: DestroyCapsuleOperationContext = {
-      operationId: input.operationId,
-      ownerId: input.ownerId,
-      capsuleId: input.capsuleId,
-      branches: input.branches,
-    }
-
-    const state = new DestroyCapsuleExecutionState(DestroyCapsuleFailurePhase.PLAN_DESTROY)
+    const state = new DestroyCapsuleExecutionState(DestroyCapsuleFailurePhase.LOAD_EXECUTION_INPUT)
+    let context: DestroyCapsuleOperationContext | null = null
     let plan: DestroyCapsulePlan | null = null
-
     try {
+      state.beginTerminalPhase(DestroyCapsuleFailurePhase.LOAD_EXECUTION_INPUT)
+
+      const input = await this.dependencies.repository.loadAcceptedExecutionInput(operationId)
+      const executionContext: DestroyCapsuleOperationContext = {
+        operationId: input.operationId,
+        ownerId: input.ownerId,
+        capsuleId: input.capsuleId,
+        branches: input.branches,
+      }
+
+      context = executionContext
+
+      state.beginTerminalPhase(DestroyCapsuleFailurePhase.CLAIM_OPERATION)
+
+      const running = await this.dependencies.repository.claimAccepted(operationId)
+      this.dependencies.operationEvents.publishChanged(running)
+
       const plannedResources = await this.runStep(
-        context,
+        executionContext,
         state,
         DestroyCapsuleStepKey.PLAN_DESTROY,
         {
-          branchCount: context.branches.length,
+          branchCount: executionContext.branches.length,
         },
         async () => {
-          const rows = await this.dependencies.resources.listBranchResourceInventories(context.branches.map(branch => branch.id))
+          const rows = await this.dependencies.resources.listBranchResourceInventories(executionContext.branches.map(branch => branch.id))
 
-          return this.planner.createPlan(context.ownerId, context.capsuleId, context.branches, rows)
+          return this.planner.createPlan(executionContext.ownerId, executionContext.capsuleId, executionContext.branches, rows)
         },
       )
 
@@ -72,43 +77,41 @@ export class DestroyCapsuleExecutor {
 
       state.beginTerminalPhase(DestroyCapsuleFailurePhase.COMMIT_PROVIDER_INTENT_FENCE)
 
-      // This operation-wide fence commits before an instance stop, instance
-      // delete, volume delete, or any other provider mutation.
-      await this.dependencies.repository.commitProviderIntentFence(context.operationId)
+      await this.dependencies.repository.commitProviderIntentFence(executionContext.operationId)
       state.markProviderIntentCommitted()
 
       await this.runStep(
-        context,
+        executionContext,
         state,
         DestroyCapsuleStepKey.DELETE_BRANCH_INSTANCES,
         {
           count: summary.instanceCount,
         },
-        () => this.dependencies.provider.deleteInstances(context, plannedResources.instances),
+        () => this.dependencies.provider.deleteInstances(executionContext, plannedResources.instances),
       )
 
       await this.runStep(
-        context,
+        executionContext,
         state,
         DestroyCapsuleStepKey.DELETE_BRANCH_VOLUMES,
         {
           count: summary.volumeCount,
         },
-        () => this.dependencies.provider.deleteVolumes(context, plannedResources.volumes),
+        () => this.dependencies.provider.deleteVolumes(executionContext, plannedResources.volumes),
       )
 
       await this.runStep(
-        context,
+        executionContext,
         state,
         DestroyCapsuleStepKey.FINALIZE_DERIVED_RESOURCE_OUTCOMES,
         {
           count: summary.provisioningFileCount,
         },
-        () => this.dependencies.provider.finalizeDerivedResources(context, plannedResources),
+        () => this.dependencies.provider.finalizeDerivedResources(executionContext, plannedResources),
       )
 
       await this.runStep(
-        context,
+        executionContext,
         state,
         DestroyCapsuleStepKey.VERIFY_TERMINAL_RESOURCE_OUTCOMES,
         {
@@ -118,112 +121,94 @@ export class DestroyCapsuleExecutor {
           const rows = await this.dependencies.resources.listBranchResourceInventories(
             plannedResources.branches.map(branchPlan => branchPlan.branch.id),
           )
-
           this.planner.verifyTerminalOutcomes(plannedResources, rows)
         },
       )
 
       state.beginTerminalPhase(DestroyCapsuleFailurePhase.COMPLETE_DESTROY)
-
-      const completed = await this.dependencies.repository.complete(context.operationId)
-
+      const completed = await this.dependencies.repository.complete(executionContext.operationId)
       state.markAggregateCompletionCommitted()
       this.publishTerminalResult(completed)
-    } catch (error: unknown) {
+    } catch (executionError: unknown) {
       if (state.completionCommitted) {
         console.error(
           `[DestroyCapsuleExecutor] Capsule destroy '${operationId}' committed, but a later non-durable action failed. Preserving terminal state.`,
-          error,
+          executionError,
         )
         return
       }
-
       const failedPhase = state.currentFailurePhase
       const failedStepKey = state.currentStepKey
+      const classified = await this.classifyFailure(operationId, context, state, plan, executionError, failedPhase, failedStepKey)
+      if (!classified) {
+        /**
+         * A null classification result means PostgreSQL already contains a
+         * terminal operation. This covers an ambiguous response after a
+         * successful completion commit and prevents the executor from
+         * overwriting or reinterpreting committed terminal state.
+         */
+        return
+      }
 
-      await this.resolveFailure(context, state, plan, error, failedPhase, failedStepKey)
-      throw error
+      /**
+       * The repository committed operation-specific terminal failure state.
+       * Rethrowing preserves process-level diagnostics without creating retry
+       * or resume behavior.
+       */
+      throw executionError
     }
   }
 
-  private async resolveFailure(
-    context: DestroyCapsuleOperationContext,
+  private async classifyFailure(
+    operationId: string,
+    context: DestroyCapsuleOperationContext | null,
     state: DestroyCapsuleExecutionState,
     plan: DestroyCapsulePlan | null,
     error: unknown,
     failedPhase: DestroyCapsuleFailurePhase,
     failedStepKey: DestroyCapsuleStepKey | null,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const summary = plan === null ? null : this.planner.summarize(plan)
 
-    if (!state.providerIntentCommitted) {
-      state.beginTerminalPhase(DestroyCapsuleFailurePhase.FAIL_BEFORE_PROVIDER_MUTATION)
+    state.beginTerminalPhase(DestroyCapsuleFailurePhase.CLASSIFY_EXECUTION_FAILURE)
 
-      try {
-        const failed = await this.dependencies.repository.failBeforeProviderMutation(
-          context.operationId,
-          error,
-          createDestroyCapsuleFailureContext({
-            operationId: context.operationId,
-            capsuleId: context.capsuleId,
-            phase: DestroyCapsuleFailurePhase.FAIL_BEFORE_PROVIDER_MUTATION,
-            failedPhase,
-            stepKey: failedStepKey,
-            action: 'fail_destroy_before_provider_mutation',
-            providerIntentCommitted: false,
-            providerOwnershipUncertain: false,
-            aggregateCompletionCommitted: false,
-            branchCount: context.branches.length,
-            instanceCount: summary?.instanceCount,
-            volumeCount: summary?.volumeCount,
-            provisioningFileCount: summary?.provisioningFileCount,
-          }),
-        )
-
-        this.publishTerminalResult(failed)
-        return
-      } catch (terminalizationError: unknown) {
-        console.error(`[DestroyCapsuleExecutor] Failed to terminalize pre-provider destroy failure for '${context.operationId}'.`, {
-          destroyError: error,
-          terminalizationError,
-        })
-
-        throw terminalizationError
-      }
-    }
-
-    state.beginTerminalPhase(DestroyCapsuleFailurePhase.REQUIRE_CLEANUP)
-
+    let terminal: DestroyCapsuleTerminalResult | null
     try {
-      const cleanup = await this.dependencies.repository.requireCleanup(
-        context.operationId,
+      terminal = await this.dependencies.repository.classifyExecutionFailure(
+        operationId,
         error,
         createDestroyCapsuleFailureContext({
-          operationId: context.operationId,
-          capsuleId: context.capsuleId,
-          phase: DestroyCapsuleFailurePhase.REQUIRE_CLEANUP,
+          operationId,
+          capsuleId: context?.capsuleId,
+          phase: DestroyCapsuleFailurePhase.CLASSIFY_EXECUTION_FAILURE,
           failedPhase,
           stepKey: failedStepKey,
-          action: 'mark_destroy_cleanup_required',
-          providerIntentCommitted: true,
-          providerOwnershipUncertain: true,
-          aggregateCompletionCommitted: false,
-          branchCount: context.branches.length,
+          action: 'classify_destroy_execution_failure',
+          providerIntentCommitted: state.providerIntentCommitted,
+          providerOwnershipUncertain: state.providerIntentCommitted,
+          aggregateCompletionCommitted: state.completionCommitted,
+          branchCount: context?.branches.length,
           instanceCount: summary?.instanceCount,
           volumeCount: summary?.volumeCount,
           provisioningFileCount: summary?.provisioningFileCount,
         }),
       )
-
-      this.publishTerminalResult(cleanup)
-    } catch (terminalizationError: unknown) {
-      console.error(`[DestroyCapsuleExecutor] Failed to persist cleanup-required state for destroy operation '${context.operationId}'.`, {
-        destroyError: error,
-        terminalizationError,
+    } catch (classificationError: unknown) {
+      console.error(`[DestroyCapsuleExecutor] Failed to terminalize destroy operation '${operationId}'.`, {
+        executionError: error,
+        classificationError,
+        failedPhase,
       })
-
-      throw terminalizationError
+      throw classificationError
     }
+    if (terminal === null) {
+      console.warn(`[DestroyCapsuleExecutor] Destroy operation '${operationId}' was already terminal during failure classification.`, {
+        failedPhase,
+      })
+      return false
+    }
+    this.publishTerminalResult(terminal)
+    return true
   }
 
   private async runStep<TResult>(

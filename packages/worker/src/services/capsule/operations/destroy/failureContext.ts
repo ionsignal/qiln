@@ -6,6 +6,8 @@ import {
 import { DestroyCapsuleStepKey } from './stepKeys'
 
 export const DestroyCapsuleFailurePhase = {
+  LOAD_EXECUTION_INPUT: 'load_execution_input',
+  CLAIM_OPERATION: 'claim_operation',
   PLAN_DESTROY: DestroyCapsuleStepKey.PLAN_DESTROY,
   COMMIT_PROVIDER_INTENT_FENCE: 'commit_provider_intent_fence',
   DELETE_BRANCH_INSTANCES: DestroyCapsuleStepKey.DELETE_BRANCH_INSTANCES,
@@ -13,15 +15,14 @@ export const DestroyCapsuleFailurePhase = {
   FINALIZE_DERIVED_RESOURCE_OUTCOMES: DestroyCapsuleStepKey.FINALIZE_DERIVED_RESOURCE_OUTCOMES,
   VERIFY_TERMINAL_RESOURCE_OUTCOMES: DestroyCapsuleStepKey.VERIFY_TERMINAL_RESOURCE_OUTCOMES,
   COMPLETE_DESTROY: 'complete_destroy',
-  FAIL_BEFORE_PROVIDER_MUTATION: 'fail_before_provider_mutation',
-  REQUIRE_CLEANUP: 'require_cleanup',
+  CLASSIFY_EXECUTION_FAILURE: 'classify_execution_failure',
 } as const
 
 export type DestroyCapsuleFailurePhase = (typeof DestroyCapsuleFailurePhase)[keyof typeof DestroyCapsuleFailurePhase]
 
 export interface DestroyCapsuleFailureContextInput {
   operationId: string
-  capsuleId: string
+  capsuleId?: string
   phase: DestroyCapsuleFailurePhase
   failedPhase?: DestroyCapsuleFailurePhase
   stepKey?: DestroyCapsuleStepKey | null
@@ -70,10 +71,10 @@ function assignIfDefined(target: Record<string, unknown>, key: string, value: un
 export function createDestroyCapsuleFailureContext(input: DestroyCapsuleFailureContextInput): Record<string, unknown> {
   const context: Record<string, unknown> = {
     operationId: input.operationId,
-    capsuleId: input.capsuleId,
     phase: input.phase,
   }
 
+  assignIfDefined(context, 'capsuleId', input.capsuleId)
   assignIfDefined(context, 'failedPhase', input.failedPhase)
   assignIfDefined(context, 'stepKey', input.stepKey)
   assignIfDefined(context, 'action', input.action)

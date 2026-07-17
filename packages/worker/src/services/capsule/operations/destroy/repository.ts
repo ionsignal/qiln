@@ -39,6 +39,24 @@ const NONTERMINAL_DESTROY_STATUSES = [CapsuleOperationStatus.ACCEPTED, CapsuleOp
 
 type DestroyTransaction = Parameters<Parameters<CapsuleHostDbContract['transaction']>[0]>[0]
 type PersistedDestroyOperation = typeof capsuleOperationsTable.$inferSelect
+type PersistedDestroyCapsule = typeof capsulesTable.$inferSelect
+
+interface DestroyBranchLineageDescription {
+  branchId: string
+  capsuleId: string
+  ownerId: string
+  branchName: string
+  status: DestroyCapsuleAcceptedBranch['status']
+  isRootBranch: boolean
+}
+
+interface DestroyBranchLineageInspection {
+  valid: boolean
+  branchCount: number
+  rootBranchCount: number
+  requiredStatus: 'offline' | 'destroying'
+  branches: DestroyBranchLineageDescription[]
+}
 
 function isNonterminalDestroyStatus(status: CapsuleOperationStatusValue): status is (typeof NONTERMINAL_DESTROY_STATUSES)[number] {
   return status === CapsuleOperationStatus.ACCEPTED || status === CapsuleOperationStatus.RUNNING
@@ -49,6 +67,10 @@ function isNonterminalDestroyStatus(status: CapsuleOperationStatusValue): status
  *
  * Provider mutation remains outside this repository, but operation-wide
  * provider intent and all aggregate terminal policies are committed here.
+ *
+ * Execution failure classification always reloads and locks PostgreSQL state.
+ * Process-local executor phase and fence observations are diagnostic only and
+ * cannot authorize aggregate restoration.
  */
 export class DestroyCapsuleOperationRepository {
   constructor(
@@ -330,6 +352,9 @@ export class DestroyCapsuleOperationRepository {
 
   /**
    * Claims one accepted destroy operation for process-local execution.
+   *
+   * A destroy operation is capsule-scoped and must not reference one branch.
+   * The null branch predicate is part of the durable compare-and-set fence.
    */
   public async claimAccepted(operationId: string): Promise<CapsuleOperationTransitionOutput> {
     const now = new Date()
@@ -346,6 +371,7 @@ export class DestroyCapsuleOperationRepository {
           eq(capsuleOperationsTable.id, operationId),
           eq(capsuleOperationsTable.type, CapsuleOperationType.DESTROY),
           eq(capsuleOperationsTable.status, CapsuleOperationStatus.ACCEPTED),
+          isNull(capsuleOperationsTable.branchId),
           isNull(capsuleOperationsTable.providerMutationStartedAt),
         ),
       )
@@ -399,6 +425,7 @@ export class DestroyCapsuleOperationRepository {
           eq(capsuleOperationsTable.id, operationId),
           eq(capsuleOperationsTable.type, CapsuleOperationType.DESTROY),
           eq(capsuleOperationsTable.status, CapsuleOperationStatus.RUNNING),
+          isNull(capsuleOperationsTable.branchId),
           isNull(capsuleOperationsTable.providerMutationStartedAt),
         ),
       )
@@ -462,6 +489,7 @@ export class DestroyCapsuleOperationRepository {
             eq(capsuleOperationsTable.id, operationId),
             eq(capsuleOperationsTable.type, CapsuleOperationType.DESTROY),
             eq(capsuleOperationsTable.status, CapsuleOperationStatus.RUNNING),
+            isNull(capsuleOperationsTable.branchId),
             isNotNull(capsuleOperationsTable.providerMutationStartedAt),
           ),
         )
@@ -541,110 +569,281 @@ export class DestroyCapsuleOperationRepository {
   }
 
   // ---------------------------------------------------------------------------
-  // Pre-provider failure
+  // Execution failure classification
   // ---------------------------------------------------------------------------
 
   /**
-   * Restores an intact destroy mutation fence after a failure proven to have
-   * occurred before provider intent.
+   * Classifies a destroy execution failure from any nonterminal phase,
+   * including execution-input loading and accepted-to-running claiming.
+   *
+   * The transaction reloads and locks all durable evidence. It does not trust
+   * process-local executor state to decide whether provider intent committed.
+   *
+   * An intact pre-provider destroy fence becomes an ordinary failed operation
+   * and restores the active, archived capsule with every branch offline.
+   * Provider intent or contradictory durable evidence becomes
+   * cleanup-required.
+   *
+   * A null result means the operation became terminal before classification
+   * acquired its lock. Existing terminal state remains authoritative.
    */
-  public async failBeforeProviderMutation(
+  public async classifyExecutionFailure(
     operationId: string,
     error: unknown,
-    context?: Record<string, unknown>,
-  ): Promise<DestroyCapsuleTerminalResult> {
-    const result = await this.finalizeFailureBeforeProviderMutation(operationId, error, context, false)
-
-    if (!result) {
-      throw new IncusError('Capsule destroy operation became terminal before failure finalization.', 'CONFLICT', {
-        operationId,
-      })
-    }
-
-    return result
-  }
-
-  private async finalizeFailureBeforeProviderMutation(
-    operationId: string,
-    error: unknown,
-    context: Record<string, unknown> | undefined,
-    allowNoChange: boolean,
+    context: Record<string, unknown>,
   ): Promise<DestroyCapsuleTerminalResult | null> {
-    const failureDetails = createOperationFailureDetails(error, context)
-
     return await this.db.transaction(async tx => {
       const operation = await this.lockDestroyOperation(tx, operationId)
 
       if (!isNonterminalDestroyStatus(operation.status)) {
-        if (allowNoChange) {
-          return null
-        }
-
-        throw new IncusError('Capsule destroy operation is already terminal.', 'CONFLICT', {
-          operationId,
-          operationStatus: operation.status,
-        })
-      }
-
-      if (operation.providerMutationStartedAt !== null) {
-        throw new IncusError('Capsule destroy cannot restore aggregate state after provider intent.', 'CONFLICT', {
-          operationId,
-          providerMutationStartedAt: operation.providerMutationStartedAt.toISOString(),
-        })
+        return null
       }
 
       const capsule = await this.lockCapsule(tx, operation.ownerId, operation.capsuleId)
       const branches = await this.lockCapsuleBranches(tx, operation.capsuleId)
+      const lineage = this.inspectBranchLineage(operation.ownerId, operation.capsuleId, branches, 'destroying')
 
-      this.assertDestroyingBranchLineage(operation.ownerId, operation.capsuleId, branches)
+      const safePreProviderFailure =
+        operation.providerMutationStartedAt === null &&
+        operation.branchId === null &&
+        capsule.lifecycleStatus === 'destroying' &&
+        capsule.archivedAt !== null &&
+        lineage.valid
 
-      if (capsule.lifecycleStatus !== 'destroying' || capsule.archivedAt === null) {
-        throw new IncusError('Capsule destroy fence is not eligible for restoration before provider mutation.', 'CONFLICT', {
-          operationId,
-          capsuleId: operation.capsuleId,
-          lifecycleStatus: capsule.lifecycleStatus,
-          archived: capsule.archivedAt !== null,
+      const durableContext: Record<string, unknown> = {
+        ...context,
+        classification: 'destroy_execution_failure',
+        previousOperationStatus: operation.status,
+        providerIntentPresent: operation.providerMutationStartedAt !== null,
+        providerMutationStartedAt: operation.providerMutationStartedAt?.toISOString() ?? null,
+        operationBranchId: operation.branchId,
+        capsuleLifecycleStatus: capsule.lifecycleStatus,
+        capsuleArchived: capsule.archivedAt !== null,
+        destroyingBranchLineage: lineage,
+      }
+
+      if (safePreProviderFailure) {
+        return await this.failBeforeProviderMutationInTransaction(tx, operation, capsule, branches, error, {
+          ...durableContext,
+          safePreProviderFailure: true,
         })
       }
 
-      const originalArchivedAt = capsule.archivedAt
-      const now = new Date()
+      return await this.markCleanupRequiredInTransaction(tx, operation, capsule, error, {
+        ...durableContext,
+        safePreProviderFailure: false,
+        invariantViolation: operation.providerMutationStartedAt === null,
+        providerOwnershipUncertain: operation.providerMutationStartedAt !== null,
+      })
+    })
+  }
 
-      const [failedOperation] = await tx
-        .update(capsuleOperationsTable)
-        .set({
-          status: CapsuleOperationStatus.FAILED,
-          failedAt: now,
-          failureCode: operationFailureCodeFromUnknown(error),
-          failureMessage: operationFailureMessageFromUnknown(error, 'Capsule destroy failed before provider mutation.'),
-          failureDetails:
-            failureDetails === undefined ? undefined : toJsonObject(failureDetails, 'capsule destroy pre-provider failure details'),
-          updatedAt: now,
-        })
-        .where(
-          and(
-            eq(capsuleOperationsTable.id, operationId),
-            eq(capsuleOperationsTable.type, CapsuleOperationType.DESTROY),
-            inArray(capsuleOperationsTable.status, NONTERMINAL_DESTROY_STATUSES),
-            isNull(capsuleOperationsTable.providerMutationStartedAt),
-          ),
-        )
-        .returning({
-          id: capsuleOperationsTable.id,
-        })
+  /**
+   * Restores an intact destroy mutation fence after PostgreSQL proves that no
+   * provider-intent fence was committed.
+   */
+  private async failBeforeProviderMutationInTransaction(
+    tx: DestroyTransaction,
+    operation: PersistedDestroyOperation,
+    capsule: PersistedDestroyCapsule,
+    branches: readonly DestroyCapsuleAcceptedBranch[],
+    error: unknown,
+    context: Record<string, unknown>,
+  ): Promise<DestroyCapsuleTerminalResult> {
+    const lineage = this.inspectBranchLineage(operation.ownerId, operation.capsuleId, branches, 'destroying')
 
-      const [restoredCapsule] = await tx
+    if (
+      !isNonterminalDestroyStatus(operation.status) ||
+      operation.providerMutationStartedAt !== null ||
+      operation.branchId !== null ||
+      capsule.lifecycleStatus !== 'destroying' ||
+      capsule.archivedAt === null ||
+      !lineage.valid
+    ) {
+      throw new IncusError('Capsule destroy durable evidence does not prove a safe pre-provider failure.', 'CONFLICT', {
+        operationId: operation.id,
+        operationStatus: operation.status,
+        branchId: operation.branchId,
+        providerMutationStartedAt: operation.providerMutationStartedAt?.toISOString() ?? null,
+        capsuleLifecycleStatus: capsule.lifecycleStatus,
+        capsuleArchived: capsule.archivedAt !== null,
+        destroyingBranchLineage: lineage,
+      })
+    }
+
+    const failureDetails = createOperationFailureDetails(error, context)
+    const originalArchivedAt = capsule.archivedAt
+    const now = new Date()
+
+    const [failedOperation] = await tx
+      .update(capsuleOperationsTable)
+      .set({
+        status: CapsuleOperationStatus.FAILED,
+        failedAt: now,
+        failureCode: operationFailureCodeFromUnknown(error),
+        failureMessage: operationFailureMessageFromUnknown(error, 'Capsule destroy failed before provider mutation.'),
+        failureDetails: failureDetails === undefined ? undefined : toJsonObject(failureDetails, 'capsule destroy pre-provider failure details'),
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(capsuleOperationsTable.id, operation.id),
+          eq(capsuleOperationsTable.type, CapsuleOperationType.DESTROY),
+          inArray(capsuleOperationsTable.status, NONTERMINAL_DESTROY_STATUSES),
+          isNull(capsuleOperationsTable.branchId),
+          isNull(capsuleOperationsTable.providerMutationStartedAt),
+        ),
+      )
+      .returning({
+        id: capsuleOperationsTable.id,
+      })
+
+    const [restoredCapsule] = await tx
+      .update(capsulesTable)
+      .set({
+        lifecycleStatus: 'active',
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(capsulesTable.id, operation.capsuleId),
+          eq(capsulesTable.ownerId, operation.ownerId),
+          eq(capsulesTable.lifecycleStatus, 'destroying'),
+          isNotNull(capsulesTable.archivedAt),
+        ),
+      )
+      .returning({
+        lifecycleStatus: capsulesTable.lifecycleStatus,
+        archivedAt: capsulesTable.archivedAt,
+        destroyedAt: capsulesTable.destroyedAt,
+      })
+
+    const restoredBranches = await tx
+      .update(capsuleBranchesTable)
+      .set({
+        status: 'offline',
+        runtimeIp: null,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(capsuleBranchesTable.capsuleId, operation.capsuleId),
+          eq(capsuleBranchesTable.ownerId, operation.ownerId),
+          eq(capsuleBranchesTable.status, 'destroying'),
+        ),
+      )
+      .returning({
+        id: capsuleBranchesTable.id,
+        capsuleId: capsuleBranchesTable.capsuleId,
+        name: capsuleBranchesTable.name,
+        status: capsuleBranchesTable.status,
+      })
+
+    if (
+      !failedOperation ||
+      !restoredCapsule ||
+      restoredCapsule.archivedAt === null ||
+      restoredCapsule.archivedAt.getTime() !== originalArchivedAt.getTime() ||
+      restoredBranches.length !== branches.length
+    ) {
+      throw new IncusError('Failed to atomically restore capsule state after pre-provider destroy failure.', 'CONFLICT', {
+        operationId: operation.id,
+        capsuleId: operation.capsuleId,
+        expectedBranchCount: branches.length,
+        restoredBranchCount: restoredBranches.length,
+        originalArchivedAt: originalArchivedAt.toISOString(),
+        restoredArchivedAt: restoredCapsule?.archivedAt?.toISOString() ?? null,
+      })
+    }
+
+    return {
+      operation: toCapsuleOperationTransition({
+        ownerId: operation.ownerId,
+        operationId: operation.id,
+        operationType: CapsuleOperationType.DESTROY,
+        operationStatus: CapsuleOperationStatus.FAILED,
+        capsuleId: operation.capsuleId,
+        branchId: null,
+      }),
+      capsule: toCapsuleLifecycleState({
+        capsuleId: operation.capsuleId,
+        lifecycleStatus: restoredCapsule.lifecycleStatus,
+        archivedAt: restoredCapsule.archivedAt,
+        destroyedAt: restoredCapsule.destroyedAt,
+      }),
+      branches: restoredBranches,
+    }
+  }
+
+  /**
+   * Marks a nonterminal destroy operation and its affected aggregate
+   * cleanup-required after provider intent or contradictory durable evidence.
+   */
+  private async markCleanupRequiredInTransaction(
+    tx: DestroyTransaction,
+    operation: PersistedDestroyOperation,
+    capsule: PersistedDestroyCapsule,
+    error: unknown,
+    context: Record<string, unknown>,
+  ): Promise<DestroyCapsuleTerminalResult> {
+    if (!isNonterminalDestroyStatus(operation.status)) {
+      throw new IncusError('Capsule destroy operation is already terminal.', 'CONFLICT', {
+        operationId: operation.id,
+        operationStatus: operation.status,
+      })
+    }
+
+    const failureDetails = createOperationFailureDetails(error, context)
+    const now = new Date()
+
+    const [cleanupOperation] = await tx
+      .update(capsuleOperationsTable)
+      .set({
+        status: CapsuleOperationStatus.CLEANUP_REQUIRED,
+        failedAt: now,
+        failureCode: operationFailureCodeFromUnknown(error),
+        failureMessage: operationFailureMessageFromUnknown(error, 'Capsule destroy requires manual cleanup and inspection.'),
+        failureDetails: failureDetails === undefined ? undefined : toJsonObject(failureDetails, 'capsule destroy cleanup-required details'),
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(capsuleOperationsTable.id, operation.id),
+          eq(capsuleOperationsTable.type, CapsuleOperationType.DESTROY),
+          inArray(capsuleOperationsTable.status, NONTERMINAL_DESTROY_STATUSES),
+        ),
+      )
+      .returning({
+        id: capsuleOperationsTable.id,
+      })
+
+    if (!cleanupOperation) {
+      throw new IncusError('Failed to mark capsule destroy operation cleanup-required.', 'CONFLICT', {
+        operationId: operation.id,
+        capsuleId: operation.capsuleId,
+      })
+    }
+
+    let committedCapsule = {
+      lifecycleStatus: capsule.lifecycleStatus,
+      archivedAt: capsule.archivedAt,
+      destroyedAt: capsule.destroyedAt,
+    }
+
+    // A terminal destroyed capsule cannot be rewritten without violating its
+    // durable destroyed-timestamp invariant.
+    if (capsule.lifecycleStatus !== 'destroyed') {
+      const [cleanupCapsule] = await tx
         .update(capsulesTable)
         .set({
-          lifecycleStatus: 'active',
+          lifecycleStatus: 'cleanup_required',
           updatedAt: now,
         })
         .where(
           and(
             eq(capsulesTable.id, operation.capsuleId),
             eq(capsulesTable.ownerId, operation.ownerId),
-            eq(capsulesTable.lifecycleStatus, 'destroying'),
-            isNotNull(capsulesTable.archivedAt),
+            ne(capsulesTable.lifecycleStatus, 'destroyed'),
           ),
         )
         .returning({
@@ -653,224 +852,59 @@ export class DestroyCapsuleOperationRepository {
           destroyedAt: capsulesTable.destroyedAt,
         })
 
-      const restoredBranches = await tx
-        .update(capsuleBranchesTable)
-        .set({
-          status: 'offline',
-          runtimeIp: null,
-          updatedAt: now,
-        })
-        .where(
-          and(
-            eq(capsuleBranchesTable.capsuleId, operation.capsuleId),
-            eq(capsuleBranchesTable.ownerId, operation.ownerId),
-            eq(capsuleBranchesTable.status, 'destroying'),
-          ),
-        )
-        .returning({
-          id: capsuleBranchesTable.id,
-          capsuleId: capsuleBranchesTable.capsuleId,
-          name: capsuleBranchesTable.name,
-          status: capsuleBranchesTable.status,
-        })
-
-      if (
-        !failedOperation ||
-        !restoredCapsule ||
-        restoredCapsule.archivedAt === null ||
-        restoredCapsule.archivedAt.getTime() !== originalArchivedAt.getTime() ||
-        restoredBranches.length !== branches.length
-      ) {
-        throw new IncusError('Failed to atomically restore capsule state after pre-provider destroy failure.', 'CONFLICT', {
-          operationId,
+      if (!cleanupCapsule) {
+        throw new IncusError('Failed to mark capsule aggregate cleanup-required after destroy uncertainty.', 'CONFLICT', {
+          operationId: operation.id,
           capsuleId: operation.capsuleId,
-          expectedBranchCount: branches.length,
-          restoredBranchCount: restoredBranches.length,
-          originalArchivedAt: originalArchivedAt.toISOString(),
-          restoredArchivedAt: restoredCapsule?.archivedAt?.toISOString() ?? null,
         })
       }
 
-      return {
-        operation: toCapsuleOperationTransition({
-          ownerId: operation.ownerId,
-          operationId,
-          operationType: CapsuleOperationType.DESTROY,
-          operationStatus: CapsuleOperationStatus.FAILED,
-          capsuleId: operation.capsuleId,
-          branchId: null,
-        }),
-        capsule: toCapsuleLifecycleState({
-          capsuleId: operation.capsuleId,
-          lifecycleStatus: restoredCapsule.lifecycleStatus,
-          archivedAt: restoredCapsule.archivedAt,
-          destroyedAt: restoredCapsule.destroyedAt,
-        }),
-        branches: restoredBranches,
-      }
-    })
-  }
-
-  // ---------------------------------------------------------------------------
-  // Cleanup-required classification
-  // ---------------------------------------------------------------------------
-
-  /**
-   * Marks a nonterminal destroy operation and its affected aggregate
-   * cleanup-required after provider intent or contradictory durable evidence.
-   */
-  public async requireCleanup(operationId: string, error: unknown, context?: Record<string, unknown>): Promise<DestroyCapsuleTerminalResult> {
-    const result = await this.markCleanupRequired(operationId, error, context, false)
-
-    if (!result) {
-      throw new IncusError('Capsule destroy operation became terminal before cleanup classification.', 'CONFLICT', {
-        operationId,
-      })
+      committedCapsule = cleanupCapsule
     }
 
-    return result
-  }
+    await tx
+      .update(capsuleBranchesTable)
+      .set({
+        status: 'cleanup_required',
+        runtimeIp: null,
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(capsuleBranchesTable.capsuleId, operation.capsuleId),
+          eq(capsuleBranchesTable.ownerId, operation.ownerId),
+          ne(capsuleBranchesTable.status, 'destroyed'),
+        ),
+      )
 
-  private async markCleanupRequired(
-    operationId: string,
-    error: unknown,
-    context: Record<string, unknown> | undefined,
-    allowNoChange: boolean,
-  ): Promise<DestroyCapsuleTerminalResult | null> {
-    const failureDetails = createOperationFailureDetails(error, context)
+    const committedBranches = await tx
+      .select({
+        id: capsuleBranchesTable.id,
+        capsuleId: capsuleBranchesTable.capsuleId,
+        name: capsuleBranchesTable.name,
+        status: capsuleBranchesTable.status,
+      })
+      .from(capsuleBranchesTable)
+      .where(and(eq(capsuleBranchesTable.capsuleId, operation.capsuleId), eq(capsuleBranchesTable.ownerId, operation.ownerId)))
+      .orderBy(asc(capsuleBranchesTable.id))
 
-    return await this.db.transaction(async tx => {
-      const operation = await this.lockDestroyOperation(tx, operationId)
-
-      if (!isNonterminalDestroyStatus(operation.status)) {
-        if (allowNoChange) {
-          return null
-        }
-
-        throw new IncusError('Capsule destroy operation is already terminal.', 'CONFLICT', {
-          operationId,
-          operationStatus: operation.status,
-        })
-      }
-
-      const capsule = await this.lockCapsule(tx, operation.ownerId, operation.capsuleId)
-
-      await this.lockCapsuleBranches(tx, operation.capsuleId)
-
-      const now = new Date()
-
-      const [cleanupOperation] = await tx
-        .update(capsuleOperationsTable)
-        .set({
-          status: CapsuleOperationStatus.CLEANUP_REQUIRED,
-          failedAt: now,
-          failureCode: operationFailureCodeFromUnknown(error),
-          failureMessage: operationFailureMessageFromUnknown(error, 'Capsule destroy requires manual cleanup and inspection.'),
-          failureDetails: failureDetails === undefined ? undefined : toJsonObject(failureDetails, 'capsule destroy cleanup-required details'),
-          updatedAt: now,
-        })
-        .where(
-          and(
-            eq(capsuleOperationsTable.id, operationId),
-            eq(capsuleOperationsTable.type, CapsuleOperationType.DESTROY),
-            inArray(capsuleOperationsTable.status, NONTERMINAL_DESTROY_STATUSES),
-          ),
-        )
-        .returning({
-          id: capsuleOperationsTable.id,
-        })
-
-      if (!cleanupOperation) {
-        if (allowNoChange) {
-          return null
-        }
-
-        throw new IncusError('Failed to mark capsule destroy operation cleanup-required.', 'CONFLICT', {
-          operationId,
-          capsuleId: operation.capsuleId,
-        })
-      }
-
-      let committedCapsule = {
-        lifecycleStatus: capsule.lifecycleStatus,
-        archivedAt: capsule.archivedAt,
-        destroyedAt: capsule.destroyedAt,
-      }
-
-      if (capsule.lifecycleStatus !== 'destroyed') {
-        const [cleanupCapsule] = await tx
-          .update(capsulesTable)
-          .set({
-            lifecycleStatus: 'cleanup_required',
-            updatedAt: now,
-          })
-          .where(
-            and(
-              eq(capsulesTable.id, operation.capsuleId),
-              eq(capsulesTable.ownerId, operation.ownerId),
-              ne(capsulesTable.lifecycleStatus, 'destroyed'),
-            ),
-          )
-          .returning({
-            lifecycleStatus: capsulesTable.lifecycleStatus,
-            archivedAt: capsulesTable.archivedAt,
-            destroyedAt: capsulesTable.destroyedAt,
-          })
-
-        if (!cleanupCapsule) {
-          throw new IncusError('Failed to mark capsule aggregate cleanup-required after destroy uncertainty.', 'CONFLICT', {
-            operationId,
-            capsuleId: operation.capsuleId,
-          })
-        }
-
-        committedCapsule = cleanupCapsule
-      }
-
-      await tx
-        .update(capsuleBranchesTable)
-        .set({
-          status: 'cleanup_required',
-          runtimeIp: null,
-          updatedAt: now,
-        })
-        .where(
-          and(
-            eq(capsuleBranchesTable.capsuleId, operation.capsuleId),
-            eq(capsuleBranchesTable.ownerId, operation.ownerId),
-            ne(capsuleBranchesTable.status, 'destroyed'),
-          ),
-        )
-
-      const committedBranches = await tx
-        .select({
-          id: capsuleBranchesTable.id,
-          capsuleId: capsuleBranchesTable.capsuleId,
-          name: capsuleBranchesTable.name,
-          status: capsuleBranchesTable.status,
-        })
-        .from(capsuleBranchesTable)
-        .where(and(eq(capsuleBranchesTable.capsuleId, operation.capsuleId), eq(capsuleBranchesTable.ownerId, operation.ownerId)))
-        .orderBy(asc(capsuleBranchesTable.id))
-
-      return {
-        operation: toCapsuleOperationTransition({
-          ownerId: operation.ownerId,
-          operationId,
-          operationType: CapsuleOperationType.DESTROY,
-          operationStatus: CapsuleOperationStatus.CLEANUP_REQUIRED,
-          capsuleId: operation.capsuleId,
-          branchId: null,
-        }),
-        capsule: toCapsuleLifecycleState({
-          capsuleId: operation.capsuleId,
-          lifecycleStatus: committedCapsule.lifecycleStatus,
-          archivedAt: committedCapsule.archivedAt,
-          destroyedAt: committedCapsule.destroyedAt,
-        }),
-        branches: committedBranches,
-      }
-    })
+    return {
+      operation: toCapsuleOperationTransition({
+        ownerId: operation.ownerId,
+        operationId: operation.id,
+        operationType: CapsuleOperationType.DESTROY,
+        operationStatus: CapsuleOperationStatus.CLEANUP_REQUIRED,
+        capsuleId: operation.capsuleId,
+        branchId: operation.branchId,
+      }),
+      capsule: toCapsuleLifecycleState({
+        capsuleId: operation.capsuleId,
+        lifecycleStatus: committedCapsule.lifecycleStatus,
+        archivedAt: committedCapsule.archivedAt,
+        destroyedAt: committedCapsule.destroyedAt,
+      }),
+      branches: committedBranches,
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -880,68 +914,31 @@ export class DestroyCapsuleOperationRepository {
   /**
    * Classifies a destroy operation left nonterminal by a previous Worker.
    *
-   * No executor is invoked and no provider state is inspected. An intact
-   * pre-provider destroy fence is restored. Provider intent or contradictory
-   * durable evidence requires cleanup.
+   * No executor is invoked and no provider state is inspected. The same
+   * operation-specific durable evidence used for live execution failures is
+   * applied here:
+   *
+   * - an intact pre-provider destroy fence is restored;
+   * - provider intent or contradictory durable state requires cleanup.
    */
   public async classifyAbandoned(operationId: string): Promise<DestroyCapsuleAbandonedClassificationResult> {
     const operation = await this.reader.loadById(operationId)
-
     if (!operation || operation.type !== CapsuleOperationType.DESTROY || !isNonterminalDestroyStatus(operation.status)) {
       return null
     }
-
     const abandonedError = new IncusError('Capsule destroy operation was abandoned by a previous Worker process.', 'API_ERROR', {
       operationId,
       capsuleId: operation.capsuleId,
       providerMutationStartedAt: operation.providerMutationStartedAt,
       policy: 'no_provider_mutation_after_restart',
     })
-
-    if (operation.providerMutationStartedAt !== null) {
-      return await this.markCleanupRequired(
-        operationId,
-        abandonedError,
-        {
-          operationId,
-          capsuleId: operation.capsuleId,
-          phase: 'startup_abandoned_operation_classification',
-          providerIntentCommitted: true,
-          providerOwnershipUncertain: true,
-        },
-        true,
-      )
-    }
-
-    try {
-      return await this.finalizeFailureBeforeProviderMutation(
-        operationId,
-        abandonedError,
-        {
-          operationId,
-          capsuleId: operation.capsuleId,
-          phase: 'startup_abandoned_operation_classification',
-          providerIntentCommitted: false,
-          policy: 'restore_active_archived_capsule_before_provider_intent',
-        },
-        true,
-      )
-    } catch (classificationError: unknown) {
-      return await this.markCleanupRequired(
-        operationId,
-        classificationError,
-        {
-          operationId,
-          capsuleId: operation.capsuleId,
-          phase: 'startup_abandoned_operation_classification',
-          action: 'classify_destroy_invariant_conflict_cleanup_required',
-          providerIntentCommitted: false,
-          invariantViolation: true,
-          originalAbandonedError: abandonedError.message,
-        },
-        true,
-      )
-    }
+    return await this.classifyExecutionFailure(operationId, abandonedError, {
+      operationId,
+      capsuleId: operation.capsuleId,
+      phase: 'startup_abandoned_operation_classification',
+      action: 'classify_abandoned_destroy_operation',
+      policy: 'no_executor_replay_after_worker_restart',
+    })
   }
 
   // ---------------------------------------------------------------------------
@@ -959,7 +956,6 @@ export class DestroyCapsuleOperationRepository {
         branchId: operation.branchId,
       })
     }
-
     const [capsule] = await this.db
       .select({
         lifecycleStatus: capsulesTable.lifecycleStatus,
@@ -969,14 +965,12 @@ export class DestroyCapsuleOperationRepository {
       .from(capsulesTable)
       .where(and(eq(capsulesTable.id, operation.capsuleId), eq(capsulesTable.ownerId, operation.ownerId)))
       .limit(1)
-
     if (!capsule) {
       throw new IncusError('Capsule destroy operation references a missing capsule aggregate.', 'API_ERROR', {
         operationId: operation.id,
         capsuleId: operation.capsuleId,
       })
     }
-
     const branches = await this.db
       .select({
         id: capsuleBranchesTable.id,
@@ -987,7 +981,6 @@ export class DestroyCapsuleOperationRepository {
       .from(capsuleBranchesTable)
       .where(and(eq(capsuleBranchesTable.capsuleId, operation.capsuleId), eq(capsuleBranchesTable.ownerId, operation.ownerId)))
       .orderBy(asc(capsuleBranchesTable.id))
-
     return {
       newlyAccepted,
       receipt: this.createReceipt({
@@ -1056,35 +1049,31 @@ export class DestroyCapsuleOperationRepository {
       .where(and(eq(capsuleOperationsTable.id, operationId), eq(capsuleOperationsTable.type, CapsuleOperationType.DESTROY)))
       .for('update')
       .limit(1)
-
     if (!operation) {
       throw new IncusError('Capsule destroy operation was not found.', 'NOT_FOUND', {
         operationId,
       })
     }
-
     return operation
   }
 
-  private async lockCapsule(tx: DestroyTransaction, ownerId: string, capsuleId: string) {
+  private async lockCapsule(tx: DestroyTransaction, ownerId: string, capsuleId: string): Promise<PersistedDestroyCapsule> {
     const [capsule] = await tx
       .select()
       .from(capsulesTable)
       .where(and(eq(capsulesTable.id, capsuleId), eq(capsulesTable.ownerId, ownerId)))
       .for('update')
       .limit(1)
-
     if (!capsule) {
       throw new IncusError('Capsule not found or access denied.', 'NOT_FOUND', {
         ownerId,
         capsuleId,
       })
     }
-
     return capsule
   }
 
-  private async lockCapsuleBranches(tx: DestroyTransaction, capsuleId: string) {
+  private async lockCapsuleBranches(tx: DestroyTransaction, capsuleId: string): Promise<DestroyCapsuleAcceptedBranch[]> {
     return await tx
       .select({
         id: capsuleBranchesTable.id,
@@ -1101,75 +1090,58 @@ export class DestroyCapsuleOperationRepository {
       .for('update')
   }
 
-  private assertOfflineBranchLineage(
+  private inspectBranchLineage(
     ownerId: string,
     capsuleId: string,
-    branches: readonly {
-      id: string
-      capsuleId: string
-      ownerId: string
-      name: string
-      status: string
-      isRootBranch: boolean
-    }[],
-  ): void {
+    branches: readonly DestroyCapsuleAcceptedBranch[],
+    requiredStatus: 'offline' | 'destroying',
+  ): DestroyBranchLineageInspection {
     const rootBranchCount = branches.filter(branch => branch.isRootBranch).length
-
-    if (
-      branches.length === 0 ||
-      rootBranchCount !== 1 ||
-      branches.some(branch => branch.ownerId !== ownerId || branch.capsuleId !== capsuleId || branch.status !== 'offline')
-    ) {
-      throw new IncusError('Capsule destroy requires exactly one root branch and every branch offline.', 'CONFLICT', {
-        ownerId,
-        capsuleId,
-        branchCount: branches.length,
-        rootBranchCount,
-        branches: branches.map(branch => ({
-          branchId: branch.id,
-          branchOwnerId: branch.ownerId,
-          branchCapsuleId: branch.capsuleId,
-          branchName: branch.name,
-          status: branch.status,
-          isRootBranch: branch.isRootBranch,
-        })),
-      })
+    const valid =
+      branches.length > 0 &&
+      rootBranchCount === 1 &&
+      branches.every(branch => branch.ownerId === ownerId && branch.capsuleId === capsuleId && branch.status === requiredStatus)
+    return {
+      valid,
+      branchCount: branches.length,
+      rootBranchCount,
+      requiredStatus,
+      branches: branches.map(branch => ({
+        branchId: branch.id,
+        capsuleId: branch.capsuleId,
+        ownerId: branch.ownerId,
+        branchName: branch.name,
+        status: branch.status,
+        isRootBranch: branch.isRootBranch,
+      })),
     }
   }
 
-  private assertDestroyingBranchLineage(
-    ownerId: string,
-    capsuleId: string,
-    branches: readonly {
-      id: string
-      capsuleId: string
-      ownerId: string
-      name: string
-      status: string
-      isRootBranch: boolean
-    }[],
-  ): void {
-    const rootBranchCount = branches.filter(branch => branch.isRootBranch).length
-
-    if (
-      branches.length === 0 ||
-      rootBranchCount !== 1 ||
-      branches.some(branch => branch.ownerId !== ownerId || branch.capsuleId !== capsuleId || branch.status !== 'destroying')
-    ) {
-      throw new IncusError('Capsule destroy requires every durable branch to remain in its destroy fence.', 'CONFLICT', {
-        ownerId,
-        capsuleId,
-        branchCount: branches.length,
-        rootBranchCount,
-        branches: branches.map(branch => ({
-          branchId: branch.id,
-          branchOwnerId: branch.ownerId,
-          branchCapsuleId: branch.capsuleId,
-          branchName: branch.name,
-          status: branch.status,
-          isRootBranch: branch.isRootBranch,
-        })),
-      })
+  private assertOfflineBranchLineage(ownerId: string, capsuleId: string, branches: readonly DestroyCapsuleAcceptedBranch[]): void {
+    const inspection = this.inspectBranchLineage(ownerId, capsuleId, branches, 'offline')
+    if (inspection.valid) {
+      return
     }
+    throw new IncusError('Capsule destroy requires exactly one root branch and every branch offline.', 'CONFLICT', {
+      ownerId,
+      capsuleId,
+      branchCount: inspection.branchCount,
+      rootBranchCount: inspection.rootBranchCount,
+      branches: inspection.branches,
+    })
+  }
+
+  private assertDestroyingBranchLineage(ownerId: string, capsuleId: string, branches: readonly DestroyCapsuleAcceptedBranch[]): void {
+    const inspection = this.inspectBranchLineage(ownerId, capsuleId, branches, 'destroying')
+    if (inspection.valid) {
+      return
+    }
+    throw new IncusError('Capsule destroy requires every durable branch to remain in its destroy fence.', 'CONFLICT', {
+      ownerId,
+      capsuleId,
+      branchCount: inspection.branchCount,
+      rootBranchCount: inspection.rootBranchCount,
+      branches: inspection.branches,
+    })
   }
 }
