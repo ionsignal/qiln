@@ -4,17 +4,18 @@ import {
   CapsuleBranchResourceType,
   type CapsuleBranchResourceStatusValue,
 } from '@qiln/core/server'
-import { IncusError } from '../../../../errors'
-import { instanceResourceKey, volumeResourceKey } from '../../resources/identity'
-import { assertCapsuleBranchResourceInventoryMatches } from '../../resources/inventory'
+import { IncusError } from '../../../../../errors'
+import { instanceResourceKey, volumeResourceKey } from '../../../resources/identity'
+import { assertCapsuleBranchResourceInventoryMatches } from '../../../resources/inventory'
 import {
   parseBindMountResourceMetadata,
   parseInstanceResourceMetadata,
   parseProjectResourceMetadata,
   parseProvisioningFileResourceMetadata,
   parseVolumeResourceMetadata,
-} from '../../resources/metadata'
-import type { CapsuleBranchResourceInventoryRow } from '../../stores/types'
+} from '../../../resources/metadata'
+import { assertDestroyingCapsuleBranchLineage } from '../policy/lineage'
+import type { CapsuleBranchResourceInventoryRow } from '../../../stores/types'
 import type {
   DestroyCapsuleAcceptedBranch,
   DestroyCapsuleBindMountResource,
@@ -25,7 +26,7 @@ import type {
   DestroyCapsuleProjectResource,
   DestroyCapsuleProvisioningFileResource,
   DestroyCapsuleVolumeTarget,
-} from './types'
+} from '../types'
 
 type DestroyInventoryValidation =
   | {
@@ -135,7 +136,7 @@ export class DestroyCapsulePlanner {
     resourceRows: readonly CapsuleBranchResourceInventoryRow[],
     validation: DestroyInventoryValidation,
   ): DestroyCapsulePlan {
-    this.assertBranchLineage(ownerId, capsuleId, branches)
+    assertDestroyingCapsuleBranchLineage(ownerId, capsuleId, branches)
 
     const branchIds = new Set(branches.map(branch => branch.id))
     const rowsByBranch = new Map<string, CapsuleBranchResourceInventoryRow[]>()
@@ -172,7 +173,6 @@ export class DestroyCapsulePlanner {
       .sort((left, right) => compareStableString(left.resourceKey, right.resourceKey))
 
     this.assertUniqueManagedProviderIdentities(instances, volumes)
-
     return {
       ownerId,
       capsuleId,
@@ -181,51 +181,6 @@ export class DestroyCapsulePlanner {
       volumes,
       provisioningFiles,
       resourceIds: new Set(resourceRows.map(row => row.id)),
-    }
-  }
-
-  private assertBranchLineage(ownerId: string, capsuleId: string, branches: readonly DestroyCapsuleAcceptedBranch[]): void {
-    if (branches.length === 0) {
-      throw new IncusError('Capsule destroy requires at least one durable branch.', 'CONFLICT', {
-        ownerId,
-        capsuleId,
-      })
-    }
-    const rootBranches = branches.filter(branch => branch.isRootBranch)
-    if (rootBranches.length !== 1) {
-      throw new IncusError('Capsule destroy requires exactly one durable root branch.', 'CONFLICT', {
-        ownerId,
-        capsuleId,
-        branchCount: branches.length,
-        rootBranchCount: rootBranches.length,
-      })
-    }
-    const branchIds = new Set<string>()
-    for (const branch of branches) {
-      if (branch.ownerId !== ownerId || branch.capsuleId !== capsuleId) {
-        throw new IncusError('Capsule destroy branch identity does not match the accepted aggregate.', 'CONFLICT', {
-          ownerId,
-          capsuleId,
-          branchId: branch.id,
-          branchOwnerId: branch.ownerId,
-          branchCapsuleId: branch.capsuleId,
-        })
-      }
-      if (branch.status !== 'destroying') {
-        throw new IncusError('Capsule destroy validation requires every accepted branch to remain destroying.', 'CONFLICT', {
-          capsuleId,
-          branchId: branch.id,
-          branchName: branch.name,
-          branchStatus: branch.status,
-        })
-      }
-      if (branchIds.has(branch.id)) {
-        throw new IncusError('Capsule destroy contains a duplicate branch identity.', 'CONFLICT', {
-          capsuleId,
-          branchId: branch.id,
-        })
-      }
-      branchIds.add(branch.id)
     }
   }
 
@@ -278,7 +233,6 @@ export class DestroyCapsulePlanner {
       row: CapsuleBranchResourceInventoryRow
       metadata: ReturnType<typeof parseProvisioningFileResourceMetadata>
     }> = []
-
     for (const row of rows) {
       switch (row.resourceType) {
         case CapsuleBranchResourceType.INCUS_PROJECT: {
@@ -331,7 +285,6 @@ export class DestroyCapsulePlanner {
             instanceName: metadata.instanceName,
             metadata,
           })
-
           break
         }
         case CapsuleBranchResourceType.ZFS_VOLUME: {
@@ -357,7 +310,6 @@ export class DestroyCapsulePlanner {
             volumeName: metadata.volumeName,
             metadata,
           })
-
           break
         }
         case CapsuleBranchResourceType.PROVISIONING_FILE: {

@@ -2,30 +2,30 @@ import {
   failureCodeFromUnknown as operationFailureCodeFromUnknown,
   failureMessageFromUnknown as operationFailureMessageFromUnknown,
   normalizeFailureDetails as operationFailureDetailsFromUnknown,
-} from '../../failures'
-import { DestroyCapsuleStepKey } from './stepKeys'
+} from '../../../failures'
+import { DestroyStepKey } from '../execution/steps'
 
-export const DestroyCapsuleFailurePhase = {
+export const DestroyOperationPhase = {
   LOAD_EXECUTION_INPUT: 'load_execution_input',
   CLAIM_OPERATION: 'claim_operation',
-  PLAN_DESTROY: DestroyCapsuleStepKey.PLAN_DESTROY,
+  PLAN_DESTROY: DestroyStepKey.PLAN_DESTROY,
   COMMIT_PROVIDER_INTENT_FENCE: 'commit_provider_intent_fence',
-  DELETE_BRANCH_INSTANCES: DestroyCapsuleStepKey.DELETE_BRANCH_INSTANCES,
-  DELETE_BRANCH_VOLUMES: DestroyCapsuleStepKey.DELETE_BRANCH_VOLUMES,
-  FINALIZE_DERIVED_RESOURCE_OUTCOMES: DestroyCapsuleStepKey.FINALIZE_DERIVED_RESOURCE_OUTCOMES,
-  VERIFY_TERMINAL_RESOURCE_OUTCOMES: DestroyCapsuleStepKey.VERIFY_TERMINAL_RESOURCE_OUTCOMES,
+  DELETE_BRANCH_INSTANCES: DestroyStepKey.DELETE_BRANCH_INSTANCES,
+  DELETE_BRANCH_VOLUMES: DestroyStepKey.DELETE_BRANCH_VOLUMES,
+  FINALIZE_DERIVED_RESOURCE_OUTCOMES: DestroyStepKey.FINALIZE_DERIVED_RESOURCE_OUTCOMES,
+  VERIFY_TERMINAL_RESOURCE_OUTCOMES: DestroyStepKey.VERIFY_TERMINAL_RESOURCE_OUTCOMES,
   COMPLETE_DESTROY: 'complete_destroy',
   CLASSIFY_EXECUTION_FAILURE: 'classify_execution_failure',
 } as const
 
-export type DestroyCapsuleFailurePhase = (typeof DestroyCapsuleFailurePhase)[keyof typeof DestroyCapsuleFailurePhase]
+export type DestroyOperationPhase = (typeof DestroyOperationPhase)[keyof typeof DestroyOperationPhase]
 
-export interface DestroyCapsuleFailureContextInput {
+export interface DestroyFailureDiagnosticsInput {
   operationId: string
   capsuleId?: string
-  phase: DestroyCapsuleFailurePhase
-  failedPhase?: DestroyCapsuleFailurePhase
-  stepKey?: DestroyCapsuleStepKey | null
+  phase: DestroyOperationPhase
+  failedPhase?: DestroyOperationPhase
+  stepKey?: DestroyStepKey | null
   action?: string
   branchId?: string
   branchName?: string
@@ -41,7 +41,7 @@ export interface DestroyCapsuleFailureContextInput {
 }
 
 export interface DestroyCapsuleProviderFailureInput {
-  phase: typeof DestroyCapsuleFailurePhase.DELETE_BRANCH_INSTANCES | typeof DestroyCapsuleFailurePhase.DELETE_BRANCH_VOLUMES
+  phase: typeof DestroyOperationPhase.DELETE_BRANCH_INSTANCES | typeof DestroyOperationPhase.DELETE_BRANCH_VOLUMES
   action: string
   error: unknown
   branchId: string
@@ -51,7 +51,7 @@ export interface DestroyCapsuleProviderFailureInput {
 }
 
 export interface DestroyCapsuleProviderFailure {
-  phase: typeof DestroyCapsuleFailurePhase.DELETE_BRANCH_INSTANCES | typeof DestroyCapsuleFailurePhase.DELETE_BRANCH_VOLUMES
+  phase: typeof DestroyOperationPhase.DELETE_BRANCH_INSTANCES | typeof DestroyOperationPhase.DELETE_BRANCH_VOLUMES
   action: string
   code: string
   message: string
@@ -68,7 +68,7 @@ function assignIfDefined(target: Record<string, unknown>, key: string, value: un
   }
 }
 
-export function createDestroyCapsuleFailureContext(input: DestroyCapsuleFailureContextInput): Record<string, unknown> {
+export function buildDestroyFailureDiagnostics(input: DestroyFailureDiagnosticsInput): Record<string, unknown> {
   const context: Record<string, unknown> = {
     operationId: input.operationId,
     phase: input.phase,
@@ -104,12 +104,9 @@ export function createDestroyCapsuleProviderFailure(input: DestroyCapsuleProvide
     resourceId: input.resourceId,
     resourceKey: input.resourceKey,
   }
-
   const details = operationFailureDetailsFromUnknown(input.error)
-
   if (details !== undefined) {
     failure.details = details
   }
-
   return failure
 }

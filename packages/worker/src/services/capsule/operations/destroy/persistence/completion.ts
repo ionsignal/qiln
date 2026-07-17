@@ -9,7 +9,8 @@ import {
 } from '@qiln/core/server'
 import { IncusError } from '../../../../../errors'
 import { toCapsuleLifecycleState, toCapsuleOperationTransition } from '../../shared'
-import { DestroyCapsulePlanner } from '../planner'
+import { assertDestroyingCapsuleBranchLineage } from '../policy/lineage'
+import { DestroyCapsulePlanner } from '../resource/planner'
 import { lockDestroyBranchResourceInventories, lockDestroyCapsuleBranches, lockDestroyOperation, lockOwnedDestroyCapsule } from './locks'
 import type { DestroyCapsuleTerminalResult } from '../types'
 
@@ -47,7 +48,7 @@ export async function completeDestroyCapsule(db: CapsuleHostDbContract, operatio
     const capsule = await lockOwnedDestroyCapsule(tx, operation.ownerId, operation.capsuleId)
     const branches = await lockDestroyCapsuleBranches(tx, operation.capsuleId)
 
-    assertDestroyingBranchLineage(operation.ownerId, operation.capsuleId, branches)
+    assertDestroyingCapsuleBranchLineage(operation.ownerId, operation.capsuleId, branches)
 
     if (capsule.lifecycleStatus !== 'destroying' || capsule.archivedAt === null) {
       throw new IncusError('Capsule aggregate is not eligible for terminal destroy completion.', 'CONFLICT', {
@@ -149,44 +150,5 @@ export async function completeDestroyCapsule(db: CapsuleHostDbContract, operatio
       }),
       branches: destroyedBranches,
     }
-  })
-}
-
-interface DestroyingBranchLineageRecord {
-  id: string
-  capsuleId: string
-  ownerId: string
-  name: string
-  status: string
-  isRootBranch: boolean
-}
-
-/**
- * Completion must prove that the complete durable branch lineage remains inside
- * the destroy mutation fence before resource evidence or terminal aggregate
- * updates are considered.
- */
-function assertDestroyingBranchLineage(ownerId: string, capsuleId: string, branches: readonly DestroyingBranchLineageRecord[]): void {
-  const rootBranchCount = branches.filter(branch => branch.isRootBranch).length
-  const valid =
-    branches.length > 0 &&
-    rootBranchCount === 1 &&
-    branches.every(branch => branch.ownerId === ownerId && branch.capsuleId === capsuleId && branch.status === 'destroying')
-  if (valid) {
-    return
-  }
-  throw new IncusError('Capsule destroy requires every durable branch to remain in its destroy fence.', 'CONFLICT', {
-    ownerId,
-    capsuleId,
-    branchCount: branches.length,
-    rootBranchCount,
-    branches: branches.map(branch => ({
-      branchId: branch.id,
-      capsuleId: branch.capsuleId,
-      ownerId: branch.ownerId,
-      branchName: branch.name,
-      status: branch.status,
-      isRootBranch: branch.isRootBranch,
-    })),
   })
 }

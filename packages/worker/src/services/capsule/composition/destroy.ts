@@ -9,8 +9,8 @@ import type { CapsuleOperationStepStore } from '../operations/shared/operationSt
 import type { CapsuleBranchResourceStore } from '../stores/branchResourceStore'
 import { DestroyCapsuleAbandonmentHandler } from '../operations/destroy/abandonment'
 import { DestroyCapsuleExecutor } from '../operations/destroy/executor'
-import { DestroyCapsuleProvider } from '../operations/destroy/provider'
-import { DestroyCapsuleOperationRepository } from '../operations/destroy/repository'
+import { DestroyCapsuleProvider } from '../operations/destroy/resource/provider'
+import { DestroyCapsuleOperationRepository } from '../operations/destroy/persistence/repository'
 import { DestroyCapsuleSubmissionService } from '../operations/destroy/submission'
 
 export interface ComposeDestroyCapabilityOptions {

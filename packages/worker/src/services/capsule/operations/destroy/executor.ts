@@ -1,15 +1,15 @@
 import { CapsuleOperationType } from '@qiln/core/server'
 import { CapsuleOperationStepRunner } from '../shared'
-import { DestroyCapsuleExecutionState } from './executionState'
-import { DestroyCapsuleFailurePhase, createDestroyCapsuleFailureContext } from './failureContext'
-import { DestroyCapsulePlanner } from './planner'
-import { DestroyCapsuleStepKey } from './stepKeys'
+import { DestroyExecutionState } from './execution/state'
+import { DestroyOperationPhase, buildDestroyFailureDiagnostics } from './execution/diagnostics'
+import { DestroyCapsulePlanner } from './resource/planner'
+import { DestroyStepKey } from './execution/steps'
 import type { CapsuleOperationStepStore } from '../shared'
 import type { CapsuleBranchEventPublisher } from '../../events/branch'
 import type { CapsuleLifecycleEventPublisher, CapsuleOperationEventPublisher } from '../../events'
 import type { CapsuleBranchResourceStore } from '../../stores'
-import type { DestroyCapsuleOperationRepository } from './repository'
-import type { DestroyCapsuleProvider } from './provider'
+import type { DestroyCapsuleOperationRepository } from './persistence/repository'
+import type { DestroyCapsuleProvider } from './resource/provider'
 import type { DestroyCapsuleOperationContext, DestroyCapsulePlan, DestroyCapsuleTerminalResult } from './types'
 
 export interface DestroyCapsuleExecutorDependencies {
@@ -37,11 +37,11 @@ export class DestroyCapsuleExecutor {
   }
 
   public async execute(operationId: string): Promise<void> {
-    const state = new DestroyCapsuleExecutionState(DestroyCapsuleFailurePhase.LOAD_EXECUTION_INPUT)
+    const state = new DestroyExecutionState(DestroyOperationPhase.LOAD_EXECUTION_INPUT)
     let context: DestroyCapsuleOperationContext | null = null
     let plan: DestroyCapsulePlan | null = null
     try {
-      state.beginTerminalPhase(DestroyCapsuleFailurePhase.LOAD_EXECUTION_INPUT)
+      state.enterPhase(DestroyOperationPhase.LOAD_EXECUTION_INPUT)
 
       const input = await this.dependencies.repository.loadAcceptedExecutionInput(operationId)
       const executionContext: DestroyCapsuleOperationContext = {
@@ -53,7 +53,7 @@ export class DestroyCapsuleExecutor {
 
       context = executionContext
 
-      state.beginTerminalPhase(DestroyCapsuleFailurePhase.CLAIM_OPERATION)
+      state.enterPhase(DestroyOperationPhase.CLAIM_OPERATION)
 
       const running = await this.dependencies.repository.claimAccepted(operationId)
       this.dependencies.operationEvents.publishChanged(running)
@@ -61,7 +61,7 @@ export class DestroyCapsuleExecutor {
       const plannedResources = await this.runStep(
         executionContext,
         state,
-        DestroyCapsuleStepKey.PLAN_DESTROY,
+        DestroyStepKey.PLAN_DESTROY,
         {
           branchCount: executionContext.branches.length,
         },
@@ -75,7 +75,7 @@ export class DestroyCapsuleExecutor {
       plan = plannedResources
       const summary = this.planner.summarize(plannedResources)
 
-      state.beginTerminalPhase(DestroyCapsuleFailurePhase.COMMIT_PROVIDER_INTENT_FENCE)
+      state.enterPhase(DestroyOperationPhase.COMMIT_PROVIDER_INTENT_FENCE)
 
       await this.dependencies.repository.commitProviderIntentFence(executionContext.operationId)
       state.markProviderIntentCommitted()
@@ -83,7 +83,7 @@ export class DestroyCapsuleExecutor {
       await this.runStep(
         executionContext,
         state,
-        DestroyCapsuleStepKey.DELETE_BRANCH_INSTANCES,
+        DestroyStepKey.DELETE_BRANCH_INSTANCES,
         {
           count: summary.instanceCount,
         },
@@ -93,7 +93,7 @@ export class DestroyCapsuleExecutor {
       await this.runStep(
         executionContext,
         state,
-        DestroyCapsuleStepKey.DELETE_BRANCH_VOLUMES,
+        DestroyStepKey.DELETE_BRANCH_VOLUMES,
         {
           count: summary.volumeCount,
         },
@@ -103,7 +103,7 @@ export class DestroyCapsuleExecutor {
       await this.runStep(
         executionContext,
         state,
-        DestroyCapsuleStepKey.FINALIZE_DERIVED_RESOURCE_OUTCOMES,
+        DestroyStepKey.FINALIZE_DERIVED_RESOURCE_OUTCOMES,
         {
           count: summary.provisioningFileCount,
         },
@@ -113,7 +113,7 @@ export class DestroyCapsuleExecutor {
       await this.runStep(
         executionContext,
         state,
-        DestroyCapsuleStepKey.VERIFY_TERMINAL_RESOURCE_OUTCOMES,
+        DestroyStepKey.VERIFY_TERMINAL_RESOURCE_OUTCOMES,
         {
           resourceCount: plannedResources.resourceIds.size,
         },
@@ -135,7 +135,7 @@ export class DestroyCapsuleExecutor {
         },
       )
 
-      state.beginTerminalPhase(DestroyCapsuleFailurePhase.COMPLETE_DESTROY)
+      state.enterPhase(DestroyOperationPhase.COMPLETE_DESTROY)
 
       const completed = await this.dependencies.repository.complete(executionContext.operationId)
       state.markAggregateCompletionCommitted()
@@ -148,7 +148,7 @@ export class DestroyCapsuleExecutor {
         )
         return
       }
-      const failedPhase = state.currentFailurePhase
+      const failedPhase = state.currentPhase
       const failedStepKey = state.currentStepKey
       const classified = await this.classifyFailure(operationId, context, state, plan, executionError, failedPhase, failedStepKey)
       if (!classified) {
@@ -173,25 +173,25 @@ export class DestroyCapsuleExecutor {
   private async classifyFailure(
     operationId: string,
     context: DestroyCapsuleOperationContext | null,
-    state: DestroyCapsuleExecutionState,
+    state: DestroyExecutionState,
     plan: DestroyCapsulePlan | null,
     error: unknown,
-    failedPhase: DestroyCapsuleFailurePhase,
-    failedStepKey: DestroyCapsuleStepKey | null,
+    failedPhase: DestroyOperationPhase,
+    failedStepKey: DestroyStepKey | null,
   ): Promise<boolean> {
     const summary = plan === null ? null : this.planner.summarize(plan)
 
-    state.beginTerminalPhase(DestroyCapsuleFailurePhase.CLASSIFY_EXECUTION_FAILURE)
+    state.enterPhase(DestroyOperationPhase.CLASSIFY_EXECUTION_FAILURE)
 
     let terminal: DestroyCapsuleTerminalResult | null
     try {
       terminal = await this.dependencies.repository.classifyExecutionFailure(
         operationId,
         error,
-        createDestroyCapsuleFailureContext({
+        buildDestroyFailureDiagnostics({
           operationId,
           capsuleId: context?.capsuleId,
-          phase: DestroyCapsuleFailurePhase.CLASSIFY_EXECUTION_FAILURE,
+          phase: DestroyOperationPhase.CLASSIFY_EXECUTION_FAILURE,
           failedPhase,
           stepKey: failedStepKey,
           action: 'classify_destroy_execution_failure',
@@ -224,8 +224,8 @@ export class DestroyCapsuleExecutor {
 
   private async runStep<TResult>(
     context: DestroyCapsuleOperationContext,
-    state: DestroyCapsuleExecutionState,
-    stepKey: DestroyCapsuleStepKey,
+    state: DestroyExecutionState,
+    stepKey: DestroyStepKey,
     metadata: Record<string, unknown>,
     action: () => Promise<TResult> | TResult,
   ): Promise<TResult> {

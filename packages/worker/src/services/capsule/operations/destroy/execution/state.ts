@@ -1,5 +1,5 @@
-import type { DestroyCapsuleFailurePhase } from './failureContext'
-import type { DestroyCapsuleStepKey } from './stepKeys'
+import type { DestroyOperationPhase } from './diagnostics'
+import type { DestroyStepKey } from './steps'
 
 /**
  * Process-local diagnostic facts for one destroy attempt.
@@ -12,23 +12,23 @@ import type { DestroyCapsuleStepKey } from './stepKeys'
  * `providerMutationStartedAt` fence because a database commit may have
  * succeeded even when its response did not reach this process.
  */
-export class DestroyCapsuleExecutionState {
-  private activeFailurePhase: DestroyCapsuleFailurePhase
-  private activeStepKey: DestroyCapsuleStepKey | null = null
+export class DestroyExecutionState {
+  private activePhase: DestroyOperationPhase
+  private activeStepKey: DestroyStepKey | null = null
   private providerIntentFenceObserved = false
   private aggregateCompletionObserved = false
 
-  constructor(initialPhase: DestroyCapsuleFailurePhase) {
-    this.activeFailurePhase = initialPhase
+  constructor(initialPhase: DestroyOperationPhase) {
+    this.activePhase = initialPhase
   }
 
-  public beginStep(stepKey: DestroyCapsuleStepKey): void {
-    this.activeFailurePhase = stepKey
+  public beginStep(stepKey: DestroyStepKey): void {
+    this.activePhase = stepKey
     this.activeStepKey = stepKey
   }
 
-  public beginTerminalPhase(phase: DestroyCapsuleFailurePhase): void {
-    this.activeFailurePhase = phase
+  public enterPhase(phase: DestroyOperationPhase): void {
+    this.activePhase = phase
     this.activeStepKey = null
   }
 
@@ -40,11 +40,11 @@ export class DestroyCapsuleExecutionState {
     this.aggregateCompletionObserved = true
   }
 
-  public get currentFailurePhase(): DestroyCapsuleFailurePhase {
-    return this.activeFailurePhase
+  public get currentPhase(): DestroyOperationPhase {
+    return this.activePhase
   }
 
-  public get currentStepKey(): DestroyCapsuleStepKey | null {
+  public get currentStepKey(): DestroyStepKey | null {
     return this.activeStepKey
   }
 

@@ -4,7 +4,7 @@ import type { OperationSupervisor } from '../../../../coordination'
 import type { CapsuleBranchEventPublisher } from '../../events/branch'
 import type { CapsuleLifecycleEventPublisher, CapsuleOperationEventPublisher } from '../../events'
 import type { DestroyCapsuleExecutor } from './executor'
-import type { DestroyCapsuleOperationRepository } from './repository'
+import type { DestroyCapsuleOperationRepository } from './persistence/repository'
 import type { SubmitDestroyCapsuleInput } from './types'
 
 interface DestroyCapsuleRequestIdentity {
@@ -39,30 +39,21 @@ export class DestroyCapsuleSubmissionService {
       } satisfies DestroyCapsuleRequestIdentity,
       'capsule destroy request',
     )
-
     const acceptance = await this.repository.acceptOrReplay({
       ...input,
       requestHash,
     })
-
     if (!acceptance.newlyAccepted) {
       return acceptance.receipt
     }
-
     this.operationEvents.publishChanged(acceptance.operation)
     this.lifecycleEvents.publishChanged(acceptance.operation.ownerId, acceptance.capsule)
-
     for (const branch of acceptance.branches) {
       this.branchEvents.publishStateChanged(acceptance.operation.ownerId, branch.capsuleId, branch.name, branch.status)
     }
-
     const operationId = acceptance.receipt.operationId
     const executor = this.executor
-
-    // A false result leaves the durable operation accepted. The next Worker
-    // startup will classify it without issuing provider mutations.
     this.supervisor.schedule(operationId, () => executor.execute(operationId))
-
     return acceptance.receipt
   }
 }

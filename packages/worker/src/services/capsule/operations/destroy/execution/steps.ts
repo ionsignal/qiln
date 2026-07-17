@@ -1,4 +1,4 @@
-export const DestroyCapsuleStepKey = {
+export const DestroyStepKey = {
   PLAN_DESTROY: 'plan_destroy',
   DELETE_BRANCH_INSTANCES: 'delete_branch_instances',
   DELETE_BRANCH_VOLUMES: 'delete_branch_volumes',
@@ -6,7 +6,7 @@ export const DestroyCapsuleStepKey = {
   VERIFY_TERMINAL_RESOURCE_OUTCOMES: 'verify_terminal_resource_outcomes',
 } as const
 
-export type DestroyCapsuleStepKey = (typeof DestroyCapsuleStepKey)[keyof typeof DestroyCapsuleStepKey]
+export type DestroyStepKey = (typeof DestroyStepKey)[keyof typeof DestroyStepKey]
 
 /**
  * Stable accounting boundaries for one destroy execution.
@@ -14,10 +14,10 @@ export type DestroyCapsuleStepKey = (typeof DestroyCapsuleStepKey)[keyof typeof 
  * These keys identify durable inspection records only. They are not resumable
  * checkpoints and never authorize an abandoned operation to continue.
  */
-export const DestroyCapsuleStepKeys = [
-  DestroyCapsuleStepKey.PLAN_DESTROY,
-  DestroyCapsuleStepKey.DELETE_BRANCH_INSTANCES,
-  DestroyCapsuleStepKey.DELETE_BRANCH_VOLUMES,
-  DestroyCapsuleStepKey.FINALIZE_DERIVED_RESOURCE_OUTCOMES,
-  DestroyCapsuleStepKey.VERIFY_TERMINAL_RESOURCE_OUTCOMES,
-] as const satisfies readonly DestroyCapsuleStepKey[]
+export const DestroyStepKeys = [
+  DestroyStepKey.PLAN_DESTROY,
+  DestroyStepKey.DELETE_BRANCH_INSTANCES,
+  DestroyStepKey.DELETE_BRANCH_VOLUMES,
+  DestroyStepKey.FINALIZE_DERIVED_RESOURCE_OUTCOMES,
+  DestroyStepKey.VERIFY_TERMINAL_RESOURCE_OUTCOMES,
+] as const satisfies readonly DestroyStepKey[]

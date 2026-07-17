@@ -8,7 +8,7 @@ import {
 } from '../abandonment'
 import type { CapsuleBranchEventPublisher, CapsuleLifecycleEventPublisher, CapsuleOperationEventPublisher } from '../../events'
 import type { PersistedCapsuleOperation } from '../shared'
-import type { DestroyCapsuleOperationRepository } from './repository'
+import type { DestroyCapsuleOperationRepository } from './persistence/repository'
 import type { DestroyCapsuleTerminalResult } from './types'
 
 export interface DestroyCapsuleAbandonmentHandlerDependencies {
