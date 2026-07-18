@@ -2,9 +2,8 @@ import type { CapsuleBranchStatus } from '@qiln/core/server'
 import { createCapsuleBranchReconciliationError } from './resolution'
 import type { CapsuleBranchEventPublisher } from '../events/branch'
 import type { CapsuleBranchRuntimeObserver } from './observer'
-import type { CapsuleBranchStore } from '../stores'
-import type { BranchRuntimeReconciliationCandidate } from '../stores/types'
-import type { StableBranchRuntimeStatus } from './types'
+import type { CapsuleBranchStore } from './store'
+import type { BranchRuntimeReconciliationCandidate, StableBranchRuntimeStatus } from './types'
 
 export interface CapsuleBranchRuntimeReconcilerDependencies {
   branches: CapsuleBranchStore

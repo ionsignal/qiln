@@ -14,7 +14,7 @@ import {
   failureMessageFromUnknown as operationFailureMessageFromUnknown,
 } from '../../../failures'
 import { toCapsuleLifecycleState, toCapsuleOperationTransition, type CapsuleOperationReader } from '../../shared'
-import { toJsonObject } from '../../../stores/jsonPersistence'
+import { toJsonObject } from '../../../persistence/json'
 import { decideDestroyNonterminalFailure, inspectDestroyOperationTerminality, isDestroyNonterminalOperationStatus } from '../policy/failure'
 import { inspectDestroyCapsuleBranchLineage } from '../policy/lineage'
 import {

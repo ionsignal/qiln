@@ -10,8 +10,9 @@ import type {
   CreateCapsuleProvisioningFileResource,
   CreateCapsuleVolumeResource,
 } from './types'
-import type { CapsuleResourceDriver } from '../../resources/driver'
-import type { BranchResourceInput, CapsuleBranchResourceStore } from '../../stores'
+import type { CapsuleResourceDriver } from '../../resource/driver'
+import type { CapsuleBranchResourceStore } from '../../resource/store'
+import type { BranchResourceInput } from '../../resource/types'
 
 export interface CreateCapsuleResourceProvisioningDependencies {
   resources: CapsuleBranchResourceStore

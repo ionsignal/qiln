@@ -5,17 +5,17 @@ import {
   type CapsuleBranchResourceStatusValue,
 } from '@qiln/core/server'
 import { IncusError } from '../../../../../errors'
-import { instanceResourceKey, volumeResourceKey } from '../../../resources/identity'
-import { assertCapsuleBranchResourceInventoryMatches } from '../../../resources/inventory'
+import { instanceResourceKey, volumeResourceKey } from '../../../resource/identity'
+import { assertCapsuleBranchResourceInventoryMatches } from '../../../resource/inventory'
 import {
   parseBindMountResourceMetadata,
   parseInstanceResourceMetadata,
   parseProjectResourceMetadata,
   parseProvisioningFileResourceMetadata,
   parseVolumeResourceMetadata,
-} from '../../../resources/metadata'
+} from '../../../resource/metadata'
 import { assertDestroyingCapsuleBranchLineage } from '../policy/lineage'
-import type { CapsuleBranchResourceInventoryRow } from '../../../stores/types'
+import type { CapsuleBranchResourceInventoryRow } from '../../../resource/types'
 import type {
   DestroyCapsuleAcceptedBranch,
   DestroyCapsuleBindMountResource,

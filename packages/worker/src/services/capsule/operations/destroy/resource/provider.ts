@@ -2,7 +2,7 @@ import { CapsuleBranchResourceStatus } from '@qiln/core/server'
 import { IncusError } from '../../../../../errors'
 import { DestroyOperationPhase, buildDestroyFailureDiagnostics, createDestroyCapsuleProviderFailure } from '../execution/diagnostics'
 import type { IncusClient } from '../../../../../incus/client/index'
-import type { CapsuleBranchResourceStore } from '../../../stores'
+import type { CapsuleBranchResourceStore } from '../../../resource/store'
 import type {
   DestroyCapsuleInstanceTarget,
   DestroyCapsuleOperationContext,

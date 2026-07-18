@@ -2,7 +2,7 @@ import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm'
 import { capsuleBranchesTable, capsulesTable, type CapsuleHostDbContract } from '@qiln/core/server'
 import { IncusError } from '../../../errors'
 import { createFailureDetails, failureCodeFromUnknown, failureMessageFromUnknown } from '../failures'
-import { toJsonObject } from './jsonPersistence'
+import { toJsonObject } from '../persistence/json'
 import type {
   BranchRuntimeErrorInput,
   BranchRuntimeErrorResult,

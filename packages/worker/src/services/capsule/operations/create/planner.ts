@@ -7,11 +7,11 @@ import {
   projectResourceKey,
   provisioningFileResourceKey,
   volumeResourceKey,
-} from '../../resources/identity'
-import { createProvisioningFileResourceMetadata } from '../../resources/metadata'
-import { mergeCloudInit } from '../../resources/bootstrap/cloudinit'
-import { resolveFileTarget, type ManagedVolume } from '../../resources/bootstrap/targets'
-import type { CapsuleBranchResourceInventoryEntry } from '../../resources/inventory'
+} from '../../resource/identity'
+import { createProvisioningFileResourceMetadata } from '../../resource/metadata'
+import { mergeCloudInit } from '../../resource/bootstrap/cloudinit'
+import { resolveFileTarget, type ManagedVolume } from '../../resource/bootstrap/targets'
+import type { CapsuleBranchResourceInventoryEntry } from '../../resource/inventory'
 import type {
   CreateCapsuleBindMountResource,
   CreateCapsuleProvisioningFileResource,

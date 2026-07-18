@@ -24,7 +24,7 @@ import {
   type CapsuleOperationReader,
   type PersistedCapsuleOperation,
 } from '../shared'
-import { toJsonObject } from '../../stores/jsonPersistence'
+import { toJsonObject } from '../../persistence/json'
 import type {
   AcceptCreateCapsuleOperationInput,
   CreateCapsuleCommittedBranch,

@@ -1,3 +1,5 @@
+import type { CapsuleBranchStatus } from '@qiln/core/server'
+
 /**
  * Stable Qiln runtime statuses that correspond to positively observed Incus
  * instance states.
@@ -62,4 +64,61 @@ export type CapsuleBranchRuntimeObservation =
   | MissingCapsuleBranchRuntimeState
   | UnsupportedCapsuleBranchRuntimeState
   | UnavailableCapsuleBranchRuntimeState
+
 export type UnconfirmedCapsuleBranchRuntimeObservation = Exclude<CapsuleBranchRuntimeObservation, { kind: 'confirmed' }>
+
+/**
+ * Durable branch identity selected for observation-only startup reconciliation.
+ */
+export interface BranchRuntimeReconciliationCandidate {
+  id: string
+  capsuleId: string
+  ownerId: string
+  name: string
+  status: CapsuleBranchStatus
+}
+
+/**
+ * Committed branch transition context used to perform one provider runtime
+ * mutation.
+ */
+export interface BranchRuntimeTransitionContext {
+  ownerId: string
+  branchId: string
+  capsuleId: string
+  branchName: string
+  previousStatus: 'offline' | 'online'
+  transitionalStatus: 'starting' | 'stopping'
+}
+
+export interface ConfirmedBranchRuntimeStateInput {
+  ownerId: string
+  capsuleId: string
+  branchId: string
+  expectedStatus: CapsuleBranchStatus
+  confirmedStatus: 'online' | 'offline'
+  runtimeIp: string | null
+}
+
+export interface ConfirmedBranchRuntimeStateResult {
+  branchName: string
+  previousStatus: CapsuleBranchStatus
+  status: 'online' | 'offline'
+  statusChanged: boolean
+}
+
+export interface BranchRuntimeErrorInput {
+  ownerId: string
+  capsuleId: string
+  branchId: string
+  expectedStatus: CapsuleBranchStatus
+  error: unknown
+  context: Record<string, unknown>
+}
+
+export interface BranchRuntimeErrorResult {
+  branchName: string
+  previousStatus: CapsuleBranchStatus
+  status: 'error'
+  statusChanged: boolean
+}

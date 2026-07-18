@@ -7,8 +7,8 @@ import type {
   CreateCapsuleInstanceCompensationTarget,
   CreateCapsuleVolumeCompensationTarget,
 } from './executionState'
-import type { CapsuleResourceDriver } from '../../resources/driver'
-import type { CapsuleBranchResourceStore } from '../../stores'
+import type { CapsuleResourceDriver } from '../../resource/driver'
+import type { CapsuleBranchResourceStore } from '../../resource/store'
 
 export interface CreateCapsuleCompensationResult {
   fullyCompensated: boolean

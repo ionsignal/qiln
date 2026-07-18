@@ -1,6 +1,6 @@
 import type { CapsuleHostDbContract } from '@qiln/core/server'
 import { CapsuleSnapshotService } from '../snapshot/service'
-import { CapsuleSnapshotStore } from '../stores/snapshotStore'
+import { CapsuleSnapshotStore } from '../snapshot/store'
 
 export interface ComposeSnapshotCapabilityOptions {
   db: CapsuleHostDbContract

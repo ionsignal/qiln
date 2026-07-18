@@ -7,7 +7,7 @@ import { CapsuleOperationAbandonmentHandlerRegistry } from '../operations/abando
 import { ProviderFreeArchivalOperationLedger } from '../operations/archival/shared/operationLedger'
 import { CapsuleOperationReader } from '../operations/shared/operationReader'
 import { CapsuleOperationStepStore } from '../operations/shared/operationStepStore'
-import { CapsuleBranchResourceStore } from '../stores/branchResourceStore'
+import { CapsuleBranchResourceStore } from '../resource/store'
 import { composeArchiveCapability } from './archive'
 import { composeBranchCapability } from './branch'
 import { composeCreateCapability } from './create'

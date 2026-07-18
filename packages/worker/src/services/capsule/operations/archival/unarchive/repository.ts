@@ -32,7 +32,7 @@ import {
   type CapsuleOperationTransitionOutput,
   type PersistedCapsuleOperation,
 } from '../../shared'
-import { toJsonObject } from '../../../stores/jsonPersistence'
+import { toJsonObject } from '../../../persistence/json'
 import type {
   AcceptUnarchiveCapsuleOperationInput,
   UnarchiveCapsuleAbandonedClassificationResult,

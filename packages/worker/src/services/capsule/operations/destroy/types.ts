@@ -12,7 +12,7 @@ import type {
   ProjectResourceMetadata,
   ProvisioningFileResourceMetadata,
   VolumeResourceMetadata,
-} from '../../resources/types'
+} from '../../resource/types'
 import type { CapsuleOperationTransitionOutput } from '../shared'
 
 export interface SubmitDestroyCapsuleInput {

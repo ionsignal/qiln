@@ -1,7 +1,7 @@
 import { CapsuleSnapshotListOutputSchema, type CapsuleSnapshotListOutput } from '@qiln/core/server'
 import { IncusError } from '../../../errors'
 import type { CapsuleSnapshotRecord } from './types'
-import type { CapsuleSnapshotStore } from '../stores/snapshotStore'
+import type { CapsuleSnapshotStore } from './store'
 
 function toIsoTimestamp(value: Date, field: string): string {
   const timestamp = value.getTime()

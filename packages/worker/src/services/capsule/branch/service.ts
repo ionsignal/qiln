@@ -3,11 +3,10 @@ import { createCapsuleBranchMutationResolutionError } from './resolution'
 import type { CapsuleBranchEventPublisher } from '../events/branch'
 import type { CapsuleBranchRuntimeObserver } from './observer'
 import type { CapsuleBranchRuntimeReconciler } from './reconciler'
-import type { CapsuleBranchStore } from '../stores'
+import type { CapsuleBranchStore } from './store'
 import type { IncusClient } from '../../../incus/client/index'
 import type { ProjectService } from '../../project'
-import type { BranchRuntimeTransitionContext } from '../stores/types'
-import type { BranchRuntimeMutation, BranchRuntimeMutationDefinition, StableBranchRuntimeStatus } from './types'
+import type { BranchRuntimeMutation, BranchRuntimeMutationDefinition, BranchRuntimeTransitionContext, StableBranchRuntimeStatus } from './types'
 
 export interface CapsuleBranchRuntimeServiceDependencies {
   branches: CapsuleBranchStore

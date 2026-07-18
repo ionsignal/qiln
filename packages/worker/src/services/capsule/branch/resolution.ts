@@ -1,6 +1,11 @@
 import { normalizeFailureDetails } from '../failures'
-import type { BranchRuntimeReconciliationCandidate, BranchRuntimeTransitionContext } from '../stores/types'
-import type { BranchRuntimeMutationDefinition, CapsuleBranchRuntimeObservation, UnconfirmedCapsuleBranchRuntimeObservation } from './types'
+import type {
+  BranchRuntimeReconciliationCandidate,
+  BranchRuntimeTransitionContext,
+  BranchRuntimeMutationDefinition,
+  CapsuleBranchRuntimeObservation,
+  UnconfirmedCapsuleBranchRuntimeObservation,
+} from './types'
 
 export const CAPSULE_BRANCH_RUNTIME_RESOLUTION_ERROR_CODE = 'CAPSULE_BRANCH_RUNTIME_UNCERTAIN'
 export const CAPSULE_BRANCH_RUNTIME_INSTANCE_MISSING_ERROR_CODE = 'CAPSULE_BRANCH_RUNTIME_INSTANCE_MISSING'

@@ -1,7 +1,7 @@
 import { asc, eq } from 'drizzle-orm'
 import { capsuleSnapshotsTable, capsulesTable, type CapsuleHostDbContract } from '@qiln/core/server'
 import { IncusError } from '../../../errors'
-import type { CapsuleSnapshotRecord } from '../snapshot/types'
+import type { CapsuleSnapshotRecord } from './types'
 
 /**
  * Persistence boundary for committed logical capsule snapshot history.

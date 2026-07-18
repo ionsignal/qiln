@@ -10,7 +10,7 @@ import type {
 } from '@qiln/core/server'
 import type { IncusFilePushOptions } from '../../../../incus/client/types'
 import type { IncusDeviceMap } from '../../../../schemas/incus'
-import type { ManagedVolume, ProvisioningFileTarget } from '../../resources/bootstrap/targets'
+import type { ManagedVolume, ProvisioningFileTarget } from '../../resource/bootstrap/targets'
 import type { CapsuleOperationTransitionOutput } from '../shared'
 
 export interface SubmitCreateCapsuleInput {

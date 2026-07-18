@@ -6,7 +6,7 @@ import {
   failureCodeFromUnknown as operationFailureCodeFromUnknown,
   failureMessageFromUnknown as operationFailureMessageFromUnknown,
 } from '../../failures'
-import { toJsonObject } from '../../stores/jsonPersistence'
+import { toJsonObject } from '../../persistence/json'
 import type { AbandonedOperationStepFailureInput, CapsuleOperationStepInput } from './types'
 
 const ABANDONED_STEP_ELIGIBLE_STATUSES = [CapsuleOperationStepStatus.PENDING, CapsuleOperationStepStatus.RUNNING] as const

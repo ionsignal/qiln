@@ -9,7 +9,7 @@ import {
 } from '@qiln/core/server'
 import { IncusError, isUniqueConstraintViolation } from '../../../errors'
 import { createFailureDetails, failureCodeFromUnknown, failureMessageFromUnknown } from '../failures'
-import { toJsonObject } from './jsonPersistence'
+import { toJsonObject } from '../persistence/json'
 import type { BranchResourceInput, CapsuleBranchResourceInventoryRow } from './types'
 
 const DEFAULT_RESOURCE_PROVIDER = 'incus'

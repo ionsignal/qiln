@@ -8,7 +8,7 @@ import {
   type CapsuleHostDbContract,
 } from '@qiln/core/server'
 import { IncusError } from '../../../../../errors'
-import type { CapsuleBranchResourceInventoryRow } from '../../../stores/types'
+import type { CapsuleBranchResourceInventoryRow } from '../../../resource/types'
 import type { DestroyCapsuleAcceptedBranch } from '../types'
 
 export type DestroyOperationTransaction = Parameters<Parameters<CapsuleHostDbContract['transaction']>[0]>[0]
