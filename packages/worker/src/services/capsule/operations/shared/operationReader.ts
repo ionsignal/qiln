@@ -1,5 +1,6 @@
 import { and, asc, eq, inArray } from 'drizzle-orm'
 import {
+  CapsuleActorReferenceSchema,
   CapsuleOperationReceiptSchema,
   CapsuleOperationStatus,
   CapsuleOperationSummarySchema,
@@ -90,6 +91,7 @@ export class CapsuleOperationReader {
       id: operation.id,
       capsuleId: operation.capsuleId,
       branchId: operation.branchId,
+      actor: operation.actor,
       type: operation.type,
       status: operation.status,
       acceptedAt: toIsoTimestamp(operation.acceptedAt, 'acceptedAt', timestampContext),
@@ -105,6 +107,10 @@ export class CapsuleOperationReader {
     return {
       id: operation.id,
       ownerId: operation.ownerId,
+      actor: CapsuleActorReferenceSchema.parse({
+        type: operation.actorType,
+        id: operation.actorId,
+      }),
       capsuleId: operation.capsuleId,
       branchId: operation.branchId,
       branchName: operation.branchName,

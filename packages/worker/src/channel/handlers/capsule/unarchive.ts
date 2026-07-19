@@ -17,6 +17,7 @@ export function registerCapsuleUnarchiveHandler(worker: QilnWorkerRuntime): void
     async input => {
       return await worker.capsule.unarchive.submit({
         ownerId: input.target.id,
+        actor: input.actor,
         capsuleId: input.capsuleId,
         idempotencyKey: input.idempotencyKey,
       })

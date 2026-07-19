@@ -1,6 +1,7 @@
 import { sql, defineRelations } from 'drizzle-orm'
 import { pgTable, uuid, text, timestamp } from 'drizzle-orm/pg-core'
 import {
+  capsuleActorTypeEnum,
   capsuleBranchResourceCleanupPolicyEnum,
   capsuleBranchResourceStatusEnum,
   capsuleBranchResourceTypeEnum,
@@ -44,6 +45,7 @@ export const sessions = pgTable('sessions', {
 const capsuleTables = createCapsuleSchema(users.id)
 
 export {
+  capsuleActorTypeEnum,
   capsuleLifecycleStatusEnum,
   capsuleOperationTypeEnum,
   capsuleOperationStatusEnum,
@@ -62,6 +64,7 @@ export const { capsules, capsuleBranches, capsuleOperations, capsuleOperationSte
 export const schema = {
   users,
   sessions,
+  capsuleActorTypeEnum,
   capsuleLifecycleStatusEnum,
   capsuleBranchStatusEnum,
   capsuleOperationTypeEnum,

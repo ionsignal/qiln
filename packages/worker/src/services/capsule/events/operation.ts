@@ -1,4 +1,4 @@
-import { CapsuleOperationEventName, TargetType, type CapsuleChannel, type TargetOwner } from '@qiln/core/server'
+import { CapsuleOperationEventName, TargetType, type CapsuleChannel } from '@qiln/core/server'
 import type { CapsuleOperationTransitionOutput } from '../operations/shared/types'
 
 /**
@@ -19,7 +19,10 @@ export class CapsuleOperationEventPublisher {
     void this.channel
       .publish(CapsuleOperationEventName.OPERATION_CHANGED, {
         type: CapsuleOperationEventName.OPERATION_CHANGED,
-        target: this.ownerTarget(operation.ownerId),
+        target: {
+          type: TargetType.OWNER,
+          id: operation.ownerId,
+        },
         operationId: operation.operationId,
         operationType: operation.operationType,
         operationStatus: operation.operationStatus,
@@ -33,12 +36,5 @@ export class CapsuleOperationEventPublisher {
           message,
         )
       })
-  }
-
-  private ownerTarget(ownerId: string): TargetOwner {
-    return {
-      type: TargetType.OWNER,
-      id: ownerId,
-    }
   }
 }

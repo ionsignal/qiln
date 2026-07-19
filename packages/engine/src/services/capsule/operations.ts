@@ -15,6 +15,7 @@ import {
   GlobalErrorCode,
   TargetType,
   capsuleOperationsTable,
+  type CapsuleActorReference,
   type CapsuleArchiveOperationOutput,
   type CapsuleBlueprintDigest,
   type CapsuleBranchName,
@@ -27,7 +28,6 @@ import {
   type CapsuleOperationStatusValue,
   type CapsuleOperationSummary,
   type CapsuleUnarchiveOperationOutput,
-  type TargetOwner,
 } from '@qiln/core/server'
 
 const CLIENT_SAFE_FAILURE_CODE_PATTERN = /^[A-Z][A-Z0-9_:-]{0,127}$/
@@ -39,6 +39,8 @@ type CapsuleOperationSummaryRow = Pick<
   | 'id'
   | 'capsuleId'
   | 'branchId'
+  | 'actorType'
+  | 'actorId'
   | 'type'
   | 'status'
   | 'acceptedAt'
@@ -49,6 +51,11 @@ type CapsuleOperationSummaryRow = Pick<
   | 'failureCode'
   | 'failureMessage'
 >
+
+export interface CapsuleMutationIdentity {
+  readonly ownerId: string
+  readonly actor: CapsuleActorReference
+}
 
 export interface CapsuleCreateRequest {
   rootBranchName: CapsuleBranchName
@@ -62,10 +69,13 @@ export interface CapsuleCreateRequest {
 /**
  * Public Engine boundary for durable capsule operations.
  *
- * Mutation methods derive owner targets from authenticated Engine context and
- * submit commands through the Capsule Channel. Their responses are durable
- * acceptance receipts and do not claim asynchronous provider execution has
- * completed.
+ * Mutation methods accept authority derived from authenticated Engine context.
+ * Browser input never supplies owner or actor identity. Commands are submitted
+ * through the Capsule Channel with both the authorized owner target and
+ * immutable actor provenance.
+ *
+ * Mutation responses are durable acceptance receipts and do not claim that an
+ * asynchronous provider mutation has completed.
  *
  * Read methods query PostgreSQL directly because durable operation state is
  * authoritative. Client summaries are projected locally from a narrow SQL
@@ -78,9 +88,10 @@ export class CapsuleOperationsService {
     private readonly channel: CapsuleChannel,
   ) {}
 
-  public async create(ownerId: string, input: CapsuleCreateRequest): Promise<CapsuleCreateOutput> {
+  public async create(identity: CapsuleMutationIdentity, input: CapsuleCreateRequest): Promise<CapsuleCreateOutput> {
     const output = await this.channel.command(CapsuleCreateCommandName.CAPSULE_CREATE, {
-      target: this.ownerTarget(ownerId),
+      target: { type: TargetType.OWNER, id: identity.ownerId },
+      actor: identity.actor,
       rootBranchName: CapsuleBranchNameSchema.parse(input.rootBranchName),
       idempotencyKey: input.idempotencyKey,
       blueprintName: input.blueprintName ?? DEFAULT_CAPSULE_BLUEPRINT_NAME,
@@ -92,12 +103,16 @@ export class CapsuleOperationsService {
   }
 
   public async archive(
-    ownerId: string,
+    identity: CapsuleMutationIdentity,
     capsuleId: string,
     idempotencyKey: CapsuleOperationIdempotencyKey,
   ): Promise<CapsuleArchiveOperationOutput> {
     const output = await this.channel.command(CapsuleOperationCommandName.CAPSULE_ARCHIVE, {
-      target: this.ownerTarget(ownerId),
+      target: {
+        type: TargetType.OWNER,
+        id: identity.ownerId,
+      },
+      actor: identity.actor,
       capsuleId,
       idempotencyKey,
     })
@@ -105,12 +120,16 @@ export class CapsuleOperationsService {
   }
 
   public async unarchive(
-    ownerId: string,
+    identity: CapsuleMutationIdentity,
     capsuleId: string,
     idempotencyKey: CapsuleOperationIdempotencyKey,
   ): Promise<CapsuleUnarchiveOperationOutput> {
     const output = await this.channel.command(CapsuleOperationCommandName.CAPSULE_UNARCHIVE, {
-      target: this.ownerTarget(ownerId),
+      target: {
+        type: TargetType.OWNER,
+        id: identity.ownerId,
+      },
+      actor: identity.actor,
       capsuleId,
       idempotencyKey,
     })
@@ -118,12 +137,16 @@ export class CapsuleOperationsService {
   }
 
   public async destroy(
-    ownerId: string,
+    identity: CapsuleMutationIdentity,
     capsuleId: string,
     idempotencyKey: CapsuleOperationIdempotencyKey,
   ): Promise<CapsuleDestroyOperationOutput> {
     const output = await this.channel.command(CapsuleOperationCommandName.CAPSULE_DESTROY, {
-      target: this.ownerTarget(ownerId),
+      target: {
+        type: TargetType.OWNER,
+        id: identity.ownerId,
+      },
+      actor: identity.actor,
       capsuleId,
       idempotencyKey,
     })
@@ -142,6 +165,8 @@ export class CapsuleOperationsService {
         id: capsuleOperationsTable.id,
         capsuleId: capsuleOperationsTable.capsuleId,
         branchId: capsuleOperationsTable.branchId,
+        actorType: capsuleOperationsTable.actorType,
+        actorId: capsuleOperationsTable.actorId,
         type: capsuleOperationsTable.type,
         status: capsuleOperationsTable.status,
         acceptedAt: capsuleOperationsTable.acceptedAt,
@@ -170,6 +195,8 @@ export class CapsuleOperationsService {
         id: capsuleOperationsTable.id,
         capsuleId: capsuleOperationsTable.capsuleId,
         branchId: capsuleOperationsTable.branchId,
+        actorType: capsuleOperationsTable.actorType,
+        actorId: capsuleOperationsTable.actorId,
         type: capsuleOperationsTable.type,
         status: capsuleOperationsTable.status,
         acceptedAt: capsuleOperationsTable.acceptedAt,
@@ -186,18 +213,15 @@ export class CapsuleOperationsService {
     return operations.map(operation => this.toClientSafeSummary(operation))
   }
 
-  private ownerTarget(ownerId: string): TargetOwner {
-    return {
-      type: TargetType.OWNER,
-      id: ownerId,
-    }
-  }
-
   private toClientSafeSummary(operation: CapsuleOperationSummaryRow): CapsuleOperationSummary {
     const summary = {
       id: operation.id,
       capsuleId: operation.capsuleId,
       branchId: operation.branchId,
+      actor: {
+        type: operation.actorType,
+        id: operation.actorId,
+      },
       type: operation.type,
       status: operation.status,
       acceptedAt: this.toIsoTimestamp(operation.acceptedAt, 'acceptedAt', operation.id),

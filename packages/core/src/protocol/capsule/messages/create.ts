@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import {
+  CapsuleActorReferenceSchema,
   CapsuleBlueprintDigestSchema,
   CapsuleCreateReceiptSchema,
   CapsuleOperationIdempotencyKeySchema,
@@ -17,6 +18,9 @@ const CAPSULE_CREATE_ACCEPTANCE_TIMEOUT_MS = 15_000
  *
  * The command returns only after durable operation acceptance. Provider
  * provisioning continues under the Worker operation supervisor.
+ *
+ * Actor provenance must be derived by the authenticated command publisher. It
+ * is validated by the channel and persisted by the Worker during acceptance.
  */
 export const CapsuleCreateCommandName = {
   CAPSULE_CREATE: 'capsule.create',
@@ -29,6 +33,7 @@ export const CapsuleCreateCommandNameValues = [CapsuleCreateCommandName.CAPSULE_
 export const CapsuleCreateInputSchema = z
   .object({
     target: TargetOwnerSchema,
+    actor: CapsuleActorReferenceSchema,
     rootBranchName: z
       .string()
       .min(1)

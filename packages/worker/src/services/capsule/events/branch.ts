@@ -1,4 +1,4 @@
-import { CapsuleBranchEventName, TargetType, type CapsuleBranchStatus, type CapsuleChannel, type TargetOwner } from '@qiln/core/server'
+import { CapsuleBranchEventName, TargetType, type CapsuleBranchStatus, type CapsuleChannel } from '@qiln/core/server'
 
 export interface CommittedCapsuleBranchStateResult {
   branchName: string
@@ -30,7 +30,10 @@ export class CapsuleBranchEventPublisher {
     void this.channel
       .publish(CapsuleBranchEventName.BRANCH_STATE_CHANGED, {
         type: CapsuleBranchEventName.BRANCH_STATE_CHANGED,
-        target: this.ownerTarget(ownerId),
+        target: {
+          type: TargetType.OWNER,
+          id: ownerId,
+        },
         capsuleId,
         name,
         status,
@@ -56,12 +59,5 @@ export class CapsuleBranchEventPublisher {
       return
     }
     this.publishStateChanged(ownerId, capsuleId, result.branchName, result.status)
-  }
-
-  private ownerTarget(ownerId: string): TargetOwner {
-    return {
-      type: TargetType.OWNER,
-      id: ownerId,
-    }
   }
 }

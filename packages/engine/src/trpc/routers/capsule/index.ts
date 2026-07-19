@@ -10,6 +10,7 @@ import {
   DEFAULT_CAPSULE_BLUEPRINT_NAME,
 } from '@qiln/core/server'
 import { protectedProcedure, router } from '../../init'
+import { createUserMutationIdentity } from '../../identity'
 import { handleEngineError } from '../../utils'
 import { capsuleBranchesRouter } from './branches'
 import { capsuleOperationsRouter } from './operations'
@@ -39,7 +40,8 @@ export const capsuleRouter = router({
     .output(CapsuleCreateOutputSchema)
     .mutation(async ({ ctx, input }) => {
       try {
-        return await ctx.engine.capsuleOperations.create(ctx.user.id, input)
+        const identity = createUserMutationIdentity(ctx.user)
+        return await ctx.engine.capsuleOperations.create(identity, input)
       } catch (error: unknown) {
         handleEngineError(error)
       }
@@ -50,7 +52,8 @@ export const capsuleRouter = router({
     .output(CapsuleArchiveOperationOutputSchema)
     .mutation(async ({ ctx, input }) => {
       try {
-        return await ctx.engine.capsuleOperations.archive(ctx.user.id, input.capsuleId, input.idempotencyKey)
+        const identity = createUserMutationIdentity(ctx.user)
+        return await ctx.engine.capsuleOperations.archive(identity, input.capsuleId, input.idempotencyKey)
       } catch (error: unknown) {
         handleEngineError(error)
       }
@@ -61,7 +64,8 @@ export const capsuleRouter = router({
     .output(CapsuleUnarchiveOperationOutputSchema)
     .mutation(async ({ ctx, input }) => {
       try {
-        return await ctx.engine.capsuleOperations.unarchive(ctx.user.id, input.capsuleId, input.idempotencyKey)
+        const identity = createUserMutationIdentity(ctx.user)
+        return await ctx.engine.capsuleOperations.unarchive(identity, input.capsuleId, input.idempotencyKey)
       } catch (error: unknown) {
         handleEngineError(error)
       }
@@ -72,7 +76,8 @@ export const capsuleRouter = router({
     .output(CapsuleDestroyOperationOutputSchema)
     .mutation(async ({ ctx, input }) => {
       try {
-        return await ctx.engine.capsuleOperations.destroy(ctx.user.id, input.capsuleId, input.idempotencyKey)
+        const identity = createUserMutationIdentity(ctx.user)
+        return await ctx.engine.capsuleOperations.destroy(identity, input.capsuleId, input.idempotencyKey)
       } catch (error: unknown) {
         handleEngineError(error)
       }

@@ -9,6 +9,7 @@ import type { SubmitCreateCapsuleInput } from './types'
 
 interface CreateCapsuleRequestIdentity {
   operationType: typeof CapsuleOperationType.CREATE
+  actor: SubmitCreateCapsuleInput['actor']
   rootBranchName: string
   blueprintName: string
   blueprintDigest: string
@@ -38,6 +39,7 @@ export class CreateCapsuleSubmissionService {
     const requestHash = createOperationRequestHash(
       {
         operationType: CapsuleOperationType.CREATE,
+        actor: input.actor,
         rootBranchName: input.rootBranchName,
         blueprintName: input.blueprintName,
         blueprintDigest: input.blueprintDigest,
@@ -52,7 +54,7 @@ export class CreateCapsuleSubmissionService {
      * not depend on the mutable blueprint catalog still containing the original
      * definition.
      */
-    const replay = await this.repository.findIdempotentReplay(input.ownerId, input.idempotencyKey, requestHash)
+    const replay = await this.repository.findIdempotentReplay(input.ownerId, input.actor, input.idempotencyKey, requestHash)
 
     if (replay) {
       return replay.receipt

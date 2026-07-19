@@ -8,6 +8,7 @@ import type { SubmitArchiveCapsuleInput } from './types'
 
 interface ArchiveCapsuleRequestIdentity {
   operationType: typeof CapsuleOperationType.ARCHIVE
+  actor: SubmitArchiveCapsuleInput['actor']
   capsuleId: string
 }
 
@@ -32,6 +33,7 @@ export class CapsuleArchiveSubmissionService {
     const requestHash = createOperationRequestHash(
       {
         operationType: CapsuleOperationType.ARCHIVE,
+        actor: input.actor,
         capsuleId: input.capsuleId,
       } satisfies ArchiveCapsuleRequestIdentity,
       'capsule archive request',

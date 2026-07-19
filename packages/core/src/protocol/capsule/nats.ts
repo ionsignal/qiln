@@ -125,10 +125,11 @@ export class CapsuleNatsChannel implements CapsuleChannel {
   /*
    * TODO: Capsule targets validate routing and payload/subject consistency, but they do not authenticate
    * the command publisher. Qiln currently treats NATS as a private, trusted control plane, and all NATS
-   * publishers are equivalently privileged to request owner-targeted capsule operations.
+   * publishers are equivalently privileged to assert owner targets and operation actor provenance.
    *
    * After MVP, we will enforce producer identity and subject-level publish permissions, then bind Worker
-   * authorization to that authenticated producer identity rather than trusting `input.target.id` alone.
+   * authorization to that authenticated producer identity rather than trusting `input.target` and
+   * `input.actor` assertions alone.
    */
   constructor(config: CapsuleNatsChannelConfig, options: CapsuleNatsChannelOptions = {}) {
     this.loggerPrefix = options.loggerPrefix ?? DEFAULT_LOGGER_PREFIX

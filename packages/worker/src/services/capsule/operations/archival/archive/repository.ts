@@ -76,7 +76,7 @@ export class CapsuleArchiveRepository {
    * protocol.
    */
   public async acceptOrReplay(input: AcceptArchiveCapsuleOperationInput): Promise<ArchiveCapsuleAcceptanceResult> {
-    const replay = await this.findSubmissionReplay(input.ownerId, input.idempotencyKey, input.requestHash)
+    const replay = await this.findSubmissionReplay(input.ownerId, input.actor, input.idempotencyKey, input.requestHash)
 
     if (replay) {
       return replay
@@ -105,6 +105,8 @@ export class CapsuleArchiveRepository {
           .insert(capsuleOperationsTable)
           .values({
             ownerId: input.ownerId,
+            actorType: input.actor.type,
+            actorId: input.actor.id,
             capsuleId: input.capsuleId,
             branchId: null,
             type: CapsuleOperationType.ARCHIVE,
@@ -188,7 +190,7 @@ export class CapsuleArchiveRepository {
         throw error
       }
 
-      const racedReplay = await this.findSubmissionReplay(input.ownerId, input.idempotencyKey, input.requestHash)
+      const racedReplay = await this.findSubmissionReplay(input.ownerId, input.actor, input.idempotencyKey, input.requestHash)
 
       if (racedReplay) {
         return racedReplay
@@ -203,21 +205,21 @@ export class CapsuleArchiveRepository {
 
   private async findSubmissionReplay(
     ownerId: string,
+    actor: AcceptArchiveCapsuleOperationInput['actor'],
     idempotencyKey: string,
     requestHash: CapsuleOperationRequestHash,
   ): Promise<ArchiveCapsuleAcceptanceResult | null> {
     const operation = await this.operationLedger.findSubmissionReplay({
       ownerId,
+      actor,
       idempotencyKey,
       requestHash,
       operationType: CapsuleOperationType.ARCHIVE,
       requestDescription: 'capsule archive',
     })
-
     if (!operation) {
       return null
     }
-
     return await this.loadAcceptanceResult(operation, false, true)
   }
 

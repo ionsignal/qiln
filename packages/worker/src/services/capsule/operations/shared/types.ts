@@ -1,4 +1,5 @@
 import type {
+  CapsuleActorReference,
   CapsuleBlueprint,
   CapsuleOperationStatusValue,
   CapsuleOperationStepStatusValue,
@@ -15,6 +16,7 @@ import type {
 export interface PersistedCapsuleOperation {
   id: string
   ownerId: string
+  actor: CapsuleActorReference
   capsuleId: string
   branchId: string | null
   branchName: string | null
@@ -43,7 +45,8 @@ export interface PersistedCapsuleOperation {
  *
  * Operation-specific repositories may extend their committed outputs with
  * capsule lifecycle or branch state, but the shared publisher consumes only
- * these client-safe fields.
+ * these client-safe fields. Actor provenance is intentionally omitted because
+ * clients refetch authoritative operation summaries after invalidation.
  */
 export interface CapsuleOperationTransitionOutput {
   ownerId: string

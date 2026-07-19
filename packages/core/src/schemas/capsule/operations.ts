@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { CapsuleActorReferenceSchema } from './actor'
 import { CapsuleBranchNameSchema } from './branch'
 
 /**
@@ -137,14 +138,15 @@ export const CapsuleOperationFailureSchema = z
 /**
  * Authoritative client-safe durable operation state.
  *
- * Engine-owned authenticated reads will expose this schema after the Worker
- * operation refactor. Mutation receipts remain intentionally smaller.
+ * Actor provenance identifies the principal that authored the operation and is
+ * intentionally distinct from capsule ownership.
  */
 export const CapsuleOperationSummarySchema = z
   .object({
     id: z.uuid(),
     capsuleId: z.uuid(),
     branchId: z.uuid().nullable(),
+    actor: CapsuleActorReferenceSchema,
     type: CapsuleOperationTypeSchema,
     status: CapsuleOperationStatusSchema,
     acceptedAt: CapsuleOperationTimestampSchema,

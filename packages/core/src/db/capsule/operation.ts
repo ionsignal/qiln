@@ -1,9 +1,10 @@
 import { sql } from 'drizzle-orm'
 import { index, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid, type PgColumn } from 'drizzle-orm/pg-core'
-import { CapsuleOperationStatusValues, CapsuleOperationTypeValues, type CapsuleBlueprint } from '../../schemas'
+import { CapsuleActorTypeValues, CapsuleOperationStatusValues, CapsuleOperationTypeValues, type CapsuleBlueprint } from '../../schemas'
 import { capsuleBranchesTable } from './branch'
 import { capsulesTable } from './capsule'
 
+export const capsuleActorTypeEnum = pgEnum('capsule_actor_type', CapsuleActorTypeValues)
 export const capsuleOperationTypeEnum = pgEnum('capsule_operation_type', CapsuleOperationTypeValues)
 export const capsuleOperationStatusEnum = pgEnum('capsule_operation_status', CapsuleOperationStatusValues)
 
@@ -37,6 +38,10 @@ function createNullableBranchIdColumn(branchIdColumn?: PgColumn) {
  * Acceptance precedes execution. `providerMutationStartedAt` is the operation
  * fence written before the first provider mutation, allowing a restarted Worker
  * to distinguish safe pre-provider failure from provider-state uncertainty.
+ *
+ * Actor provenance is immutable acceptance-time evidence. Actor IDs are
+ * polymorphic references rather than foreign keys so audit history survives
+ * principal retirement.
  */
 export function createCapsuleOperationsTable(ownerIdColumn?: PgColumn, capsuleIdColumn?: PgColumn, branchIdColumn?: PgColumn) {
   const ownerId = createOwnerIdColumn(ownerIdColumn)
@@ -50,6 +55,8 @@ export function createCapsuleOperationsTable(ownerIdColumn?: PgColumn, capsuleId
         .primaryKey()
         .default(sql`uuidv7()`),
       ownerId,
+      actorType: capsuleActorTypeEnum('actor_type').notNull(),
+      actorId: uuid('actor_id').notNull(),
       capsuleId,
       branchId,
       type: capsuleOperationTypeEnum('type').notNull(),
@@ -100,6 +107,7 @@ export function createCapsuleOperationsTable(ownerIdColumn?: PgColumn, capsuleId
     },
     table => [
       index('capsule_operations_owner_status_idx').on(table.ownerId, table.status),
+      index('capsule_operations_actor_idx').on(table.actorType, table.actorId),
       index('capsule_operations_capsule_status_idx').on(table.capsuleId, table.status),
       index('capsule_operations_branch_idx').on(table.branchId),
       index('capsule_operations_provider_mutation_started_idx').on(table.providerMutationStartedAt),

@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import {
+  CapsuleActorReferenceSchema,
   CapsuleArchiveReceiptSchema,
   CapsuleDestroyReceiptSchema,
   CapsuleOperationIdempotencyKeySchema,
@@ -36,9 +37,16 @@ export type CapsuleOperationEventName = (typeof CapsuleOperationEventName)[keyof
 
 export const CapsuleOperationEventNameValues = [CapsuleOperationEventName.OPERATION_CHANGED] as const
 
+/**
+ * Common owner-targeted mutation identity.
+ *
+ * The actor is the authenticated principal that authored the operation. It is
+ * supplied by a trusted server-side publisher rather than by browser input.
+ */
 const CapsuleOperationCommandInputSchema = z
   .object({
     target: TargetOwnerSchema,
+    actor: CapsuleActorReferenceSchema,
     capsuleId: z.uuid(),
     idempotencyKey: CapsuleOperationIdempotencyKeySchema,
   })

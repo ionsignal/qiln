@@ -17,6 +17,7 @@ export function registerCapsuleCreateHandler(worker: QilnWorkerRuntime): void {
     async input => {
       return await worker.capsule.create.submit({
         ownerId: input.target.id,
+        actor: input.actor,
         rootBranchName: input.rootBranchName,
         idempotencyKey: input.idempotencyKey,
         blueprintName: input.blueprintName,

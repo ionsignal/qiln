@@ -44,7 +44,7 @@ export class DestroyCapsuleAcceptancePersistence {
   ) {}
 
   public async acceptOrReplay(input: AcceptDestroyCapsuleOperationInput): Promise<DestroyCapsuleRepositoryResult> {
-    const replay = await this.findSubmissionReplay(input.ownerId, input.idempotencyKey, input.requestHash)
+    const replay = await this.findSubmissionReplay(input.ownerId, input.actor, input.idempotencyKey, input.requestHash)
     if (replay) {
       return replay
     }
@@ -68,6 +68,8 @@ export class DestroyCapsuleAcceptancePersistence {
           .insert(capsuleOperationsTable)
           .values({
             ownerId: input.ownerId,
+            actorType: input.actor.type,
+            actorId: input.actor.id,
             capsuleId: input.capsuleId,
             branchId: null,
             type: CapsuleOperationType.DESTROY,
@@ -177,7 +179,7 @@ export class DestroyCapsuleAcceptancePersistence {
       if (!isUniqueConstraintViolation(error)) {
         throw error
       }
-      const racedReplay = await this.findSubmissionReplay(input.ownerId, input.idempotencyKey, input.requestHash)
+      const racedReplay = await this.findSubmissionReplay(input.ownerId, input.actor, input.idempotencyKey, input.requestHash)
       if (racedReplay) {
         return racedReplay
       }
@@ -190,6 +192,7 @@ export class DestroyCapsuleAcceptancePersistence {
 
   private async findSubmissionReplay(
     ownerId: string,
+    actor: AcceptDestroyCapsuleOperationInput['actor'],
     idempotencyKey: string,
     requestHash: CapsuleOperationRequestHash,
   ): Promise<DestroyCapsuleRepositoryResult | null> {
@@ -199,6 +202,7 @@ export class DestroyCapsuleAcceptancePersistence {
     }
 
     assertOperationReplayIdentity(operation, {
+      actor,
       operationType: CapsuleOperationType.DESTROY,
       requestHash,
       requestDescription: 'capsule destroy',

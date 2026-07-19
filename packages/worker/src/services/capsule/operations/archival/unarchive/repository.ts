@@ -79,16 +79,13 @@ export class CapsuleUnarchiveRepository {
    * after a uniqueness violation closes the concurrent acceptance race.
    */
   public async acceptOrReplay(input: AcceptUnarchiveCapsuleOperationInput): Promise<UnarchiveCapsuleAcceptanceResult> {
-    const replay = await this.findSubmissionReplay(input.ownerId, input.idempotencyKey, input.requestHash)
-
+    const replay = await this.findSubmissionReplay(input.ownerId, input.actor, input.idempotencyKey, input.requestHash)
     if (replay) {
       return replay
     }
-
     try {
       return await this.db.transaction(async tx => {
         const capsule = await lockOwnedArchivalCapsule(tx, input.ownerId, input.capsuleId)
-
         if (capsule.lifecycleStatus !== 'active' || capsule.archivedAt === null) {
           throw new IncusError('Only an active, archived capsule can be unarchived.', 'CONFLICT', {
             ownerId: input.ownerId,
@@ -97,18 +94,18 @@ export class CapsuleUnarchiveRepository {
             archived: capsule.archivedAt !== null,
           })
         }
-
         const branches = await lockArchivalCapsuleBranches(tx, input.capsuleId)
 
         assertValidOfflineBranchLineage(input.ownerId, input.capsuleId, branches)
 
         const originalArchivedAt = capsule.archivedAt
         const now = new Date()
-
         const [operation] = await tx
           .insert(capsuleOperationsTable)
           .values({
             ownerId: input.ownerId,
+            actorType: input.actor.type,
+            actorId: input.actor.id,
             capsuleId: input.capsuleId,
             branchId: null,
             type: CapsuleOperationType.UNARCHIVE,
@@ -126,11 +123,9 @@ export class CapsuleUnarchiveRepository {
             branchId: capsuleOperationsTable.branchId,
             status: capsuleOperationsTable.status,
           })
-
         if (!operation) {
           throw new IncusError('Failed to durably accept the capsule unarchive operation.', 'API_ERROR')
         }
-
         const [unarchivingCapsule] = await tx
           .update(capsulesTable)
           .set({
@@ -198,7 +193,7 @@ export class CapsuleUnarchiveRepository {
         throw error
       }
 
-      const racedReplay = await this.findSubmissionReplay(input.ownerId, input.idempotencyKey, input.requestHash)
+      const racedReplay = await this.findSubmissionReplay(input.ownerId, input.actor, input.idempotencyKey, input.requestHash)
 
       if (racedReplay) {
         return racedReplay
@@ -213,21 +208,21 @@ export class CapsuleUnarchiveRepository {
 
   private async findSubmissionReplay(
     ownerId: string,
+    actor: AcceptUnarchiveCapsuleOperationInput['actor'],
     idempotencyKey: string,
     requestHash: CapsuleOperationRequestHash,
   ): Promise<UnarchiveCapsuleAcceptanceResult | null> {
     const operation = await this.operationLedger.findSubmissionReplay({
       ownerId,
+      actor,
       idempotencyKey,
       requestHash,
       operationType: CapsuleOperationType.UNARCHIVE,
       requestDescription: 'capsule unarchive',
     })
-
     if (!operation) {
       return null
     }
-
     return await this.loadAcceptanceResult(operation, false, true)
   }
 

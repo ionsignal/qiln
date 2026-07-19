@@ -17,6 +17,7 @@ export function registerCapsuleDestroyHandler(worker: QilnWorkerRuntime): void {
     async input => {
       return await worker.capsule.destroy.submit({
         ownerId: input.target.id,
+        actor: input.actor,
         capsuleId: input.capsuleId,
         idempotencyKey: input.idempotencyKey,
       })

@@ -10,12 +10,19 @@ import {
   createCapsuleBranchResourcesTable,
 } from './branchResource'
 import { capsuleLifecycleStatusEnum, capsulesTable, createCapsulesTable } from './capsule'
-import { capsuleOperationStatusEnum, capsuleOperationsTable, capsuleOperationTypeEnum, createCapsuleOperationsTable } from './operation'
+import {
+  capsuleActorTypeEnum,
+  capsuleOperationStatusEnum,
+  capsuleOperationsTable,
+  capsuleOperationTypeEnum,
+  createCapsuleOperationsTable,
+} from './operation'
 import { capsuleOperationStepStatusEnum, capsuleOperationStepsTable, createCapsuleOperationStepsTable } from './operationStep'
 import { capsuleSnapshotsTable, createCapsuleSnapshotsTable } from './snapshot'
 import type { RelationFragmentManyFn, RelationFragmentOneFn } from '../relations'
 
 export {
+  capsuleActorTypeEnum,
   capsuleLifecycleStatusEnum,
   capsuleOperationStatusEnum,
   capsuleOperationStepStatusEnum,

@@ -1,4 +1,4 @@
-import { CapsuleLifecycleEventName, TargetType, type CapsuleChannel, type CapsuleLifecycleState, type TargetOwner } from '@qiln/core/server'
+import { CapsuleLifecycleEventName, TargetType, type CapsuleChannel, type CapsuleLifecycleState } from '@qiln/core/server'
 
 /**
  * Publishes best-effort invalidation hints for committed capsule aggregate
@@ -19,7 +19,10 @@ export class CapsuleLifecycleEventPublisher {
     void this.channel
       .publish(CapsuleLifecycleEventName.LIFECYCLE_CHANGED, {
         type: CapsuleLifecycleEventName.LIFECYCLE_CHANGED,
-        target: this.ownerTarget(ownerId),
+        target: {
+          type: TargetType.OWNER,
+          id: ownerId,
+        },
         capsuleId: state.capsuleId,
         lifecycleStatus: state.lifecycleStatus,
         archivedAt: state.archivedAt,
@@ -33,12 +36,5 @@ export class CapsuleLifecycleEventPublisher {
           message,
         )
       })
-  }
-
-  private ownerTarget(ownerId: string): TargetOwner {
-    return {
-      type: TargetType.OWNER,
-      id: ownerId,
-    }
   }
 }

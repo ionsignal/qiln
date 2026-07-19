@@ -16,6 +16,7 @@ export function registerCapsuleArchiveHandler(worker: QilnWorkerRuntime): void {
     async input => {
       return await worker.capsule.archive.submit({
         ownerId: input.target.id,
+        actor: input.actor,
         capsuleId: input.capsuleId,
         idempotencyKey: input.idempotencyKey,
       })

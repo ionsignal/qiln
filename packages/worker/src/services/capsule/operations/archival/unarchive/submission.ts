@@ -8,6 +8,7 @@ import type { SubmitUnarchiveCapsuleInput } from './types'
 
 interface UnarchiveCapsuleRequestIdentity {
   operationType: typeof CapsuleOperationType.UNARCHIVE
+  actor: SubmitUnarchiveCapsuleInput['actor']
   capsuleId: string
 }
 
@@ -32,6 +33,7 @@ export class CapsuleUnarchiveSubmissionService {
     const requestHash = createOperationRequestHash(
       {
         operationType: CapsuleOperationType.UNARCHIVE,
+        actor: input.actor,
         capsuleId: input.capsuleId,
       } satisfies UnarchiveCapsuleRequestIdentity,
       'capsule unarchive request',

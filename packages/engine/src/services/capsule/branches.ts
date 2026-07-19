@@ -9,7 +9,6 @@ import {
   type CapsuleChannel,
   type CapsuleCommandAck,
   type CapsuleHostDbContract,
-  type TargetOwner,
 } from '@qiln/core/server'
 
 const OPERATIONAL_CAPSULE_LIFECYCLE_STATUSES = ['provisioning', 'active'] as const
@@ -146,7 +145,10 @@ export class CapsuleBranchesService {
 
   public async start(ownerId: string, capsuleId: string, name: string): Promise<CapsuleCommandAck> {
     return await this.channel.command(CapsuleBranchCommandName.BRANCH_START, {
-      target: this.ownerTarget(ownerId),
+      target: {
+        type: TargetType.OWNER,
+        id: ownerId,
+      },
       capsuleId,
       name,
     })
@@ -154,17 +156,13 @@ export class CapsuleBranchesService {
 
   public async stop(ownerId: string, capsuleId: string, name: string): Promise<CapsuleCommandAck> {
     return await this.channel.command(CapsuleBranchCommandName.BRANCH_STOP, {
-      target: this.ownerTarget(ownerId),
+      target: {
+        type: TargetType.OWNER,
+        id: ownerId,
+      },
       capsuleId,
       name,
     })
-  }
-
-  private ownerTarget(ownerId: string): TargetOwner {
-    return {
-      type: TargetType.OWNER,
-      id: ownerId,
-    }
   }
 
   private mapBranchRow(row: CapsuleBranchRow): CapsuleBranchesServiceSummary {

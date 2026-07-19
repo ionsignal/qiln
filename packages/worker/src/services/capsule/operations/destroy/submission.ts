@@ -9,6 +9,7 @@ import type { SubmitDestroyCapsuleInput } from './types'
 
 interface DestroyCapsuleRequestIdentity {
   operationType: typeof CapsuleOperationType.DESTROY
+  actor: SubmitDestroyCapsuleInput['actor']
   capsuleId: string
 }
 
@@ -35,6 +36,7 @@ export class DestroyCapsuleSubmissionService {
     const requestHash = createOperationRequestHash(
       {
         operationType: CapsuleOperationType.DESTROY,
+        actor: input.actor,
         capsuleId: input.capsuleId,
       } satisfies DestroyCapsuleRequestIdentity,
       'capsule destroy request',

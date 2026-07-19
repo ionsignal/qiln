@@ -9,6 +9,7 @@ import {
   capsuleBranchResourcesTable,
   capsuleOperationsTable,
   capsulesTable,
+  type CapsuleActorReference,
   type CapsuleBranchResourceInventoryDigest,
   type CapsuleCreateReceipt,
   type CapsuleHostDbContract,
@@ -77,9 +78,14 @@ export class CreateCapsuleOperationRepository {
    * The submission service calls this before blueprint pinning so a valid
    * replay does not depend on current mutable catalog state. `acceptCreate()`
    * repeats the lookup to provide race-safe durable idempotency.
+   *
+   * Actor identity is checked independently from the request hash. This ensures
+   * another authenticated principal cannot replay an owner's idempotency key,
+   * even if the request-hash construction is changed incorrectly later.
    */
   public async findIdempotentReplay(
     ownerId: string,
+    actor: CapsuleActorReference,
     idempotencyKey: string,
     requestHash: CapsuleOperationRequestHash,
   ): Promise<CreateCapsuleRepositoryResult | null> {
@@ -89,7 +95,7 @@ export class CreateCapsuleOperationRepository {
       return null
     }
 
-    this.assertIdempotentReplay(operation, requestHash)
+    this.assertIdempotentReplay(operation, actor, requestHash)
 
     return await this.loadCreateResult(operation, false, true)
   }
@@ -97,9 +103,13 @@ export class CreateCapsuleOperationRepository {
   /**
    * Atomically accepts a create operation, creates its capsule aggregate and
    * root branch, and links the base operation to that branch.
+   *
+   * Actor provenance is immutable acceptance-time evidence and is persisted in
+   * the same transaction as the operation, capsule, and provisional root
+   * branch.
    */
   public async acceptCreate(input: AcceptCreateCapsuleOperationInput): Promise<CreateCapsuleRepositoryResult> {
-    const replay = await this.findIdempotentReplay(input.ownerId, input.idempotencyKey, input.requestHash)
+    const replay = await this.findIdempotentReplay(input.ownerId, input.actor, input.idempotencyKey, input.requestHash)
 
     if (replay) {
       return replay
@@ -132,6 +142,8 @@ export class CreateCapsuleOperationRepository {
           .insert(capsuleOperationsTable)
           .values({
             ownerId: input.ownerId,
+            actorType: input.actor.type,
+            actorId: input.actor.id,
             capsuleId: capsule.id,
             type: CapsuleOperationType.CREATE,
             status: CapsuleOperationStatus.ACCEPTED,
@@ -243,7 +255,7 @@ export class CreateCapsuleOperationRepository {
        * the preflight lookup. Reloading here is the race-safe half of the
        * idempotency protocol.
        */
-      const racedReplay = await this.findIdempotentReplay(input.ownerId, input.idempotencyKey, input.requestHash)
+      const racedReplay = await this.findIdempotentReplay(input.ownerId, input.actor, input.idempotencyKey, input.requestHash)
 
       if (racedReplay) {
         return racedReplay
@@ -1191,9 +1203,14 @@ export class CreateCapsuleOperationRepository {
     }
   }
 
-  private assertIdempotentReplay(operation: PersistedCapsuleOperation, requestHash: CapsuleOperationRequestHash): void {
+  private assertIdempotentReplay(
+    operation: PersistedCapsuleOperation,
+    actor: CapsuleActorReference,
+    requestHash: CapsuleOperationRequestHash,
+  ): void {
     assertOperationReplayIdentity(operation, {
       operationType: CapsuleOperationType.CREATE,
+      actor,
       requestHash,
       requestDescription: 'capsule create',
     })

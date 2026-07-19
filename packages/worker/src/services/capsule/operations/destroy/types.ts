@@ -1,4 +1,5 @@
 import type {
+  CapsuleActorReference,
   CapsuleBranchResourceInventoryDigest,
   CapsuleBranchResourceStatusValue,
   CapsuleBranchStatus,
@@ -17,6 +18,7 @@ import type { CapsuleOperationTransitionOutput } from '../shared'
 
 export interface SubmitDestroyCapsuleInput {
   ownerId: string
+  actor: CapsuleActorReference
   capsuleId: string
   idempotencyKey: string
 }

@@ -3,6 +3,7 @@ import {
   CapsuleOperationStatus,
   CapsuleOperationType,
   capsuleOperationsTable,
+  type CapsuleActorReference,
   type CapsuleHostDbContract,
   type CapsuleOperationRequestHash,
 } from '@qiln/core/server'
@@ -16,6 +17,7 @@ export type ProviderFreeArchivalOperationType = typeof CapsuleOperationType.ARCH
 
 export interface FindProviderFreeArchivalReplayInput {
   ownerId: string
+  actor: CapsuleActorReference
   idempotencyKey: string
   requestHash: CapsuleOperationRequestHash
   operationType: ProviderFreeArchivalOperationType
@@ -52,9 +54,9 @@ export class ProviderFreeArchivalOperationLedger {
   /**
    * Finds an existing submission and validates its durable idempotency identity.
    *
-   * This deliberately validates only operation type and request hash. Receipt
-   * mapping and operation-specific durable invariants remain the responsibility
-   * of the archive or unarchive repository.
+   * This deliberately validates only operation type, actor, and request hash.
+   * Receipt mapping and operation-specific durable invariants remain the
+   * responsibility of the archive or unarchive repository.
    */
   public async findSubmissionReplay(input: FindProviderFreeArchivalReplayInput): Promise<PersistedCapsuleOperation | null> {
     const operation = await this.reader.loadByOwnerAndIdempotencyKey(input.ownerId, input.idempotencyKey)
@@ -65,6 +67,7 @@ export class ProviderFreeArchivalOperationLedger {
       operationType: input.operationType,
       requestHash: input.requestHash,
       requestDescription: input.requestDescription,
+      actor: input.actor,
     })
     return operation
   }

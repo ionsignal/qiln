@@ -1,4 +1,5 @@
 import type {
+  CapsuleActorReference,
   CapsuleBlueprint,
   CapsuleBlueprintDigest,
   CapsuleBranchResourceCleanupPolicyValue,
@@ -15,6 +16,7 @@ import type { CapsuleOperationTransitionOutput } from '../shared'
 
 export interface SubmitCreateCapsuleInput {
   ownerId: string
+  actor: CapsuleActorReference
   rootBranchName: string
   idempotencyKey: string
   blueprintName: string
