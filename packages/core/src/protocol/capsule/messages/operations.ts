@@ -75,8 +75,10 @@ export type CapsuleDestroyOperationOutput = output<typeof CapsuleDestroyOperatio
 /**
  * Best-effort owner-targeted invalidation event.
  *
- * Clients must refetch durable operation and capsule reads after receiving this
- * event or reconnecting. It is not a replayable source of truth.
+ * The shared operation ledger intentionally contains no operation-specific
+ * branch, snapshot, route, or promotion references. Clients must refetch the
+ * authoritative operation and relevant domain state after receiving this event
+ * or reconnecting.
  */
 export const CapsuleOperationChangedEventSchema = z
   .object({
@@ -86,7 +88,6 @@ export const CapsuleOperationChangedEventSchema = z
     operationType: CapsuleOperationTypeSchema,
     operationStatus: CapsuleOperationStatusSchema,
     capsuleId: z.uuid(),
-    branchId: z.uuid().nullable(),
   })
   .strict()
 

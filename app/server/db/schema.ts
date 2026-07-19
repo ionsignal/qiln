@@ -56,7 +56,15 @@ export {
   capsuleBranchStatusEnum,
 }
 
-export const { capsules, capsuleBranches, capsuleOperations, capsuleOperationSteps, capsuleBranchResources, capsuleSnapshots } = capsuleTables
+export const {
+  capsules,
+  capsuleBranches,
+  capsuleOperations,
+  capsuleCreateOperations,
+  capsuleOperationSteps,
+  capsuleBranchResources,
+  capsuleSnapshots,
+} = capsuleTables
 
 /**
  * Unified physical schema consumed by Drizzle.

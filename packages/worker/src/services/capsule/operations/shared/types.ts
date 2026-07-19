@@ -1,6 +1,5 @@
 import type {
   CapsuleActorReference,
-  CapsuleBlueprint,
   CapsuleOperationStatusValue,
   CapsuleOperationStepStatusValue,
   CapsuleOperationTypeValue,
@@ -12,21 +11,19 @@ import type {
  *
  * PostgreSQL remains authoritative. This record does not authorize execution,
  * replay, retry, aggregate restoration, or provider mutation.
+ *
+ * Operation-specific immutable input and committed-result references belong to
+ * extension tables loaded by operation-specific repositories.
  */
 export interface PersistedCapsuleOperation {
   id: string
   ownerId: string
   actor: CapsuleActorReference
   capsuleId: string
-  branchId: string | null
-  branchName: string | null
   type: CapsuleOperationTypeValue
   status: CapsuleOperationStatusValue
   idempotencyKey: string
   requestHash: string
-  blueprintName: string | null
-  blueprintDigest: string | null
-  blueprintSnapshot: CapsuleBlueprint | null
   acceptedAt: Date
   executionStartedAt: Date | null
   providerMutationStartedAt: Date | null
@@ -44,9 +41,9 @@ export interface PersistedCapsuleOperation {
  * events.
  *
  * Operation-specific repositories may extend their committed outputs with
- * capsule lifecycle or branch state, but the shared publisher consumes only
- * these client-safe fields. Actor provenance is intentionally omitted because
- * clients refetch authoritative operation summaries after invalidation.
+ * capsule lifecycle, branch, snapshot, or route state. The shared publisher
+ * consumes only fields common to every operation. Actor provenance is omitted
+ * because clients refetch authoritative operation summaries after invalidation.
  */
 export interface CapsuleOperationTransitionOutput {
   ownerId: string
@@ -54,7 +51,6 @@ export interface CapsuleOperationTransitionOutput {
   operationType: CapsuleOperationTypeValue
   operationStatus: CapsuleOperationStatusValue
   capsuleId: string
-  branchId: string | null
 }
 
 /**

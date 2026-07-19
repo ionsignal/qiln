@@ -1,6 +1,7 @@
 export * from './branch'
 export * from './branchResource'
 export * from './capsule'
+export * from './createOperation'
 export * from './operation'
 export * from './operationStep'
 export * from './schema'

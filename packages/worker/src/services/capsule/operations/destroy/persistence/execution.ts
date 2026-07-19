@@ -44,12 +44,6 @@ export class DestroyCapsuleExecutionPersistence {
         operationStatus: operation.status,
       })
     }
-    if (operation.branchId !== null) {
-      throw new IncusError('Capsule destroy operation unexpectedly references one branch.', 'CONFLICT', {
-        operationId,
-        branchId: operation.branchId,
-      })
-    }
     if (operation.providerMutationStartedAt !== null) {
       throw new IncusError('Accepted capsule destroy operation already contains provider intent.', 'CONFLICT', {
         operationId,
@@ -87,9 +81,8 @@ export class DestroyCapsuleExecutionPersistence {
   /**
    * Claims one accepted destroy operation for process-local execution.
    *
-   * A destroy operation is capsule-scoped and must not reference one branch.
-   * Both the null branch reference and absence of provider intent are part of
-   * the compare-and-set fence.
+   * A destroy operation is capsule-scoped. Absence of provider intent is part
+   * of the compare-and-set fence.
    */
   public async claimAccepted(operationId: string): Promise<CapsuleOperationTransitionOutput> {
     const now = new Date()
@@ -105,25 +98,17 @@ export class DestroyCapsuleExecutionPersistence {
           eq(capsuleOperationsTable.id, operationId),
           eq(capsuleOperationsTable.type, CapsuleOperationType.DESTROY),
           eq(capsuleOperationsTable.status, CapsuleOperationStatus.ACCEPTED),
-          isNull(capsuleOperationsTable.branchId),
           isNull(capsuleOperationsTable.providerMutationStartedAt),
         ),
       )
       .returning({
         ownerId: capsuleOperationsTable.ownerId,
         capsuleId: capsuleOperationsTable.capsuleId,
-        branchId: capsuleOperationsTable.branchId,
         status: capsuleOperationsTable.status,
       })
     if (!claimed) {
       throw new IncusError('Capsule destroy operation could not be claimed from accepted to running.', 'CONFLICT', {
         operationId,
-      })
-    }
-    if (claimed.branchId !== null) {
-      throw new IncusError('Claimed capsule destroy operation unexpectedly references one branch.', 'CONFLICT', {
-        operationId,
-        branchId: claimed.branchId,
       })
     }
     return toCapsuleOperationTransition({
@@ -132,7 +117,6 @@ export class DestroyCapsuleExecutionPersistence {
       operationType: CapsuleOperationType.DESTROY,
       operationStatus: claimed.status,
       capsuleId: claimed.capsuleId,
-      branchId: null,
     })
   }
 
@@ -155,7 +139,6 @@ export class DestroyCapsuleExecutionPersistence {
           eq(capsuleOperationsTable.id, operationId),
           eq(capsuleOperationsTable.type, CapsuleOperationType.DESTROY),
           eq(capsuleOperationsTable.status, CapsuleOperationStatus.RUNNING),
-          isNull(capsuleOperationsTable.branchId),
           isNull(capsuleOperationsTable.providerMutationStartedAt),
         ),
       )

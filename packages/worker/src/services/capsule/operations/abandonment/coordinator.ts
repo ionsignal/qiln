@@ -106,7 +106,6 @@ export class CapsuleOperationAbandonmentCoordinator {
           operationId: committedOperation.operationId,
           operationType: committedOperation.operationType,
           capsuleId: committedOperation.capsuleId,
-          branchId: committedOperation.branchId,
           previousOperationStatus: discoveredOperation.status,
           classifiedOperationStatus: committedOperation.operationStatus,
           providerIntentCommitted: discoveredOperation.providerMutationStartedAt !== null,

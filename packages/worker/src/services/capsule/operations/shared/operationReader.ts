@@ -18,6 +18,10 @@ const NONTERMINAL_OPERATION_STATUSES = [CapsuleOperationStatus.ACCEPTED, Capsule
 /**
  * Generic read-only access to durable capsule operations.
  *
+ * This reader intentionally loads only base-ledger fields that are meaningful
+ * across every operation type. Operation-specific repositories are responsible
+ * for joining and validating their extension rows.
+ *
  * This reader does not make idempotency decisions, mutate durable state,
  * classify abandoned operations, or construct operation-specific receipts.
  */
@@ -90,7 +94,6 @@ export class CapsuleOperationReader {
     return CapsuleOperationSummarySchema.parse({
       id: operation.id,
       capsuleId: operation.capsuleId,
-      branchId: operation.branchId,
       actor: operation.actor,
       type: operation.type,
       status: operation.status,
@@ -112,15 +115,10 @@ export class CapsuleOperationReader {
         id: operation.actorId,
       }),
       capsuleId: operation.capsuleId,
-      branchId: operation.branchId,
-      branchName: operation.branchName,
       type: operation.type,
       status: operation.status,
       idempotencyKey: operation.idempotencyKey,
       requestHash: operation.requestHash,
-      blueprintName: operation.blueprintName,
-      blueprintDigest: operation.blueprintDigest,
-      blueprintSnapshot: operation.blueprintSnapshot,
       acceptedAt: operation.acceptedAt,
       executionStartedAt: operation.executionStartedAt,
       providerMutationStartedAt: operation.providerMutationStartedAt,

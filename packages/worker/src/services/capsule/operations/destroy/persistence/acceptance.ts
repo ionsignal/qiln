@@ -71,7 +71,6 @@ export class DestroyCapsuleAcceptancePersistence {
             actorType: input.actor.type,
             actorId: input.actor.id,
             capsuleId: input.capsuleId,
-            branchId: null,
             type: CapsuleOperationType.DESTROY,
             status: CapsuleOperationStatus.ACCEPTED,
             idempotencyKey: input.idempotencyKey,
@@ -84,18 +83,11 @@ export class DestroyCapsuleAcceptancePersistence {
             id: capsuleOperationsTable.id,
             ownerId: capsuleOperationsTable.ownerId,
             capsuleId: capsuleOperationsTable.capsuleId,
-            branchId: capsuleOperationsTable.branchId,
             status: capsuleOperationsTable.status,
           })
 
         if (!operation) {
           throw new IncusError('Failed to durably accept the capsule destroy operation.', 'API_ERROR')
-        }
-        if (operation.branchId !== null) {
-          throw new IncusError('Accepted capsule destroy operation unexpectedly references one branch.', 'CONFLICT', {
-            operationId: operation.id,
-            branchId: operation.branchId,
-          })
         }
         const [destroyingCapsule] = await tx
           .update(capsulesTable)
@@ -164,7 +156,6 @@ export class DestroyCapsuleAcceptancePersistence {
             operationType: CapsuleOperationType.DESTROY,
             operationStatus: operation.status,
             capsuleId: operation.capsuleId,
-            branchId: null,
           }),
           capsule: toCapsuleLifecycleState({
             capsuleId: operation.capsuleId,
@@ -216,12 +207,6 @@ export class DestroyCapsuleAcceptancePersistence {
     newlyAccepted: boolean,
     replayed: boolean,
   ): Promise<DestroyCapsuleRepositoryResult> {
-    if (operation.branchId !== null) {
-      throw new IncusError('Capsule destroy operation unexpectedly references one branch.', 'CONFLICT', {
-        operationId: operation.id,
-        branchId: operation.branchId,
-      })
-    }
     const [capsule] = await this.db
       .select({
         lifecycleStatus: capsulesTable.lifecycleStatus,
@@ -261,7 +246,6 @@ export class DestroyCapsuleAcceptancePersistence {
         operationType: CapsuleOperationType.DESTROY,
         operationStatus: operation.status,
         capsuleId: operation.capsuleId,
-        branchId: null,
       }),
       capsule: toCapsuleLifecycleState({
         capsuleId: operation.capsuleId,

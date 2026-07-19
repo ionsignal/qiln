@@ -1,4 +1,4 @@
-import { and, eq, isNotNull, isNull } from 'drizzle-orm'
+import { and, eq, isNotNull } from 'drizzle-orm'
 import {
   CapsuleOperationStatus,
   CapsuleOperationType,
@@ -37,11 +37,10 @@ const planner = new DestroyCapsulePlanner()
 export async function completeDestroyCapsule(db: CapsuleHostDbContract, operationId: string): Promise<DestroyCapsuleTerminalResult> {
   return await db.transaction(async tx => {
     const operation = await lockDestroyOperation(tx, operationId)
-    if (operation.status !== CapsuleOperationStatus.RUNNING || operation.providerMutationStartedAt === null || operation.branchId !== null) {
+    if (operation.status !== CapsuleOperationStatus.RUNNING || operation.providerMutationStartedAt === null) {
       throw new IncusError('Capsule destroy operation is not eligible for successful completion.', 'CONFLICT', {
         operationId,
         operationStatus: operation.status,
-        branchId: operation.branchId,
         hasProviderIntent: operation.providerMutationStartedAt !== null,
       })
     }
@@ -78,7 +77,6 @@ export async function completeDestroyCapsule(db: CapsuleHostDbContract, operatio
           eq(capsuleOperationsTable.id, operationId),
           eq(capsuleOperationsTable.type, CapsuleOperationType.DESTROY),
           eq(capsuleOperationsTable.status, CapsuleOperationStatus.RUNNING),
-          isNull(capsuleOperationsTable.branchId),
           isNotNull(capsuleOperationsTable.providerMutationStartedAt),
         ),
       )
@@ -140,7 +138,6 @@ export async function completeDestroyCapsule(db: CapsuleHostDbContract, operatio
         operationType: CapsuleOperationType.DESTROY,
         operationStatus: CapsuleOperationStatus.COMPLETED,
         capsuleId: operation.capsuleId,
-        branchId: null,
       }),
       capsule: toCapsuleLifecycleState({
         capsuleId: operation.capsuleId,

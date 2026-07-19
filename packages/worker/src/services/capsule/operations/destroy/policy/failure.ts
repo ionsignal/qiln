@@ -17,7 +17,6 @@ export type DestroyOperationTerminality =
 
 export interface DestroyFailureOperationEvidence {
   operationStatus: DestroyNonterminalOperationStatus
-  branchId: string | null
   providerMutationStartedAt: Date | null
 }
 
@@ -36,10 +35,6 @@ export type DestroyCleanupRequiredReason =
   | {
       code: 'provider_intent_present'
       providerMutationStartedAt: Date
-    }
-  | {
-      code: 'operation_branch_reference_present'
-      branchId: string
     }
   | {
       code: 'capsule_lifecycle_mismatch'
@@ -105,7 +100,6 @@ export function isDestroyNonterminalOperationStatus(
  * Safe restoration requires all of the following:
  *
  * - no operation-wide provider-intent fence;
- * - no branch reference on the capsule-scoped operation;
  * - the capsule remains in its destroying lifecycle fence;
  * - the capsule remains archived;
  * - every branch remains in the expected destroying lineage;
@@ -121,12 +115,6 @@ export function decideDestroyNonterminalFailure(evidence: DestroyNonterminalFail
     reasons.push({
       code: 'provider_intent_present',
       providerMutationStartedAt: evidence.operation.providerMutationStartedAt,
-    })
-  }
-  if (evidence.operation.branchId !== null) {
-    reasons.push({
-      code: 'operation_branch_reference_present',
-      branchId: evidence.operation.branchId,
     })
   }
   if (evidence.capsule.lifecycleStatus !== 'destroying') {
@@ -166,9 +154,6 @@ export function decideDestroyNonterminalFailure(evidence: DestroyNonterminalFail
     kind: 'cleanup_required',
     reasons,
     providerOwnershipUncertain,
-    // Preserve the existing diagnostic distinction: contradictory evidence
-    // before provider intent is an invariant violation, while committed
-    // provider intent makes provider ownership uncertain.
     invariantViolation: !providerOwnershipUncertain,
   }
 }

@@ -71,7 +71,6 @@ export class DestroyCapsuleClassificationPersistence {
       const decision = decideDestroyNonterminalFailure({
         operation: {
           operationStatus: terminality.operationStatus,
-          branchId: operation.branchId,
           providerMutationStartedAt: operation.providerMutationStartedAt,
         },
         capsule: {
@@ -87,7 +86,6 @@ export class DestroyCapsuleClassificationPersistence {
         previousOperationStatus: operation.status,
         providerIntentPresent: operation.providerMutationStartedAt !== null,
         providerMutationStartedAt: operation.providerMutationStartedAt?.toISOString() ?? null,
-        operationBranchId: operation.branchId,
         capsuleLifecycleStatus: capsule.lifecycleStatus,
         capsuleArchived: capsule.archivedAt !== null,
         destroyingBranchLineage: lineage,
@@ -155,7 +153,6 @@ export class DestroyCapsuleClassificationPersistence {
     if (
       !isDestroyNonterminalOperationStatus(operation.status) ||
       operation.providerMutationStartedAt !== null ||
-      operation.branchId !== null ||
       capsule.lifecycleStatus !== 'destroying' ||
       capsule.archivedAt === null ||
       !lineage.valid
@@ -163,7 +160,6 @@ export class DestroyCapsuleClassificationPersistence {
       throw new IncusError('Capsule destroy durable evidence does not prove a safe pre-provider failure.', 'CONFLICT', {
         operationId: operation.id,
         operationStatus: operation.status,
-        branchId: operation.branchId,
         providerMutationStartedAt: operation.providerMutationStartedAt?.toISOString() ?? null,
         capsuleLifecycleStatus: capsule.lifecycleStatus,
         capsuleArchived: capsule.archivedAt !== null,
@@ -188,7 +184,6 @@ export class DestroyCapsuleClassificationPersistence {
           eq(capsuleOperationsTable.id, operation.id),
           eq(capsuleOperationsTable.type, CapsuleOperationType.DESTROY),
           inArray(capsuleOperationsTable.status, NONTERMINAL_DESTROY_STATUSES),
-          isNull(capsuleOperationsTable.branchId),
           isNull(capsuleOperationsTable.providerMutationStartedAt),
         ),
       )
@@ -257,7 +252,6 @@ export class DestroyCapsuleClassificationPersistence {
         operationType: CapsuleOperationType.DESTROY,
         operationStatus: CapsuleOperationStatus.FAILED,
         capsuleId: operation.capsuleId,
-        branchId: null,
       }),
       capsule: toCapsuleLifecycleState({
         capsuleId: operation.capsuleId,
@@ -377,7 +371,6 @@ export class DestroyCapsuleClassificationPersistence {
         operationType: CapsuleOperationType.DESTROY,
         operationStatus: CapsuleOperationStatus.CLEANUP_REQUIRED,
         capsuleId: operation.capsuleId,
-        branchId: operation.branchId,
       }),
       capsule: toCapsuleLifecycleState({
         capsuleId: operation.capsuleId,

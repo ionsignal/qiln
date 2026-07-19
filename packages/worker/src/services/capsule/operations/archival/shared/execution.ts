@@ -111,7 +111,7 @@ export class ProviderFreeArchivalOperationExecution<
     this.assertTransitionIdentity(operationId, executionInput, operation)
     if (operation.operationStatus !== CapsuleOperationStatus.RUNNING) {
       throw new Error(
-        `${this.definition.loggerPrefix} ${this.definition.operationDescription} claim for operation '${operationId} ' ` +
+        `${this.definition.loggerPrefix} ${this.definition.operationDescription} claim for operation '${operationId}' ` +
           `returned status '${operation.operationStatus}' instead of '${CapsuleOperationStatus.RUNNING}'.`,
       )
     }
@@ -142,9 +142,6 @@ export class ProviderFreeArchivalOperationExecution<
     if (operation.operationType !== this.definition.operationType) {
       mismatches.push('operationType')
     }
-    if (operation.branchId !== null) {
-      mismatches.push('branchId')
-    }
     if (executionInput !== null) {
       if (operation.ownerId !== executionInput.ownerId) {
         mismatches.push('ownerId')
@@ -161,8 +158,8 @@ export class ProviderFreeArchivalOperationExecution<
       [
         `${this.definition.loggerPrefix} ${this.definition.operationDescription} operation transition failed identity validation.`,
         `Mismatched fields: ${mismatches.join(', ')}.`,
-        `Expected operation '${operationId}' of type '${this.definition.operationType}' with no branch reference.`,
-        `Received operation '${operation.operationId}' of type '${operation.operationType}' with branch '${operation.branchId ?? 'null'}'.`,
+        `Expected operation '${operationId}' of type '${this.definition.operationType}'.`,
+        `Received operation '${operation.operationId}' of type '${operation.operationType}'.`,
       ].join(' '),
     )
   }

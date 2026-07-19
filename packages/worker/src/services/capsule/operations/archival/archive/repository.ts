@@ -108,7 +108,6 @@ export class CapsuleArchiveRepository {
             actorType: input.actor.type,
             actorId: input.actor.id,
             capsuleId: input.capsuleId,
-            branchId: null,
             type: CapsuleOperationType.ARCHIVE,
             status: CapsuleOperationStatus.ACCEPTED,
             idempotencyKey: input.idempotencyKey,
@@ -121,7 +120,6 @@ export class CapsuleArchiveRepository {
             id: capsuleOperationsTable.id,
             ownerId: capsuleOperationsTable.ownerId,
             capsuleId: capsuleOperationsTable.capsuleId,
-            branchId: capsuleOperationsTable.branchId,
             status: capsuleOperationsTable.status,
           })
 
@@ -153,13 +151,6 @@ export class CapsuleArchiveRepository {
           throw new IncusError('Failed to transition the capsule into its archive mutation fence.', 'CONFLICT', {
             ownerId: input.ownerId,
             capsuleId: input.capsuleId,
-          })
-        }
-
-        if (operation.branchId !== null) {
-          throw new IncusError('Accepted capsule archive operation unexpectedly references a branch.', 'CONFLICT', {
-            operationId: operation.id,
-            branchId: operation.branchId,
           })
         }
 
@@ -270,11 +261,10 @@ export class CapsuleArchiveRepository {
     return await this.db.transaction(async tx => {
       const operation = await this.lockArchiveOperation(tx, operationId)
 
-      if (operation.status !== CapsuleOperationStatus.RUNNING || operation.providerMutationStartedAt !== null || operation.branchId !== null) {
+      if (operation.status !== CapsuleOperationStatus.RUNNING || operation.providerMutationStartedAt !== null) {
         throw new IncusError('Capsule archive operation is not eligible for successful completion.', 'CONFLICT', {
           operationId,
           operationStatus: operation.status,
-          branchId: operation.branchId,
           hasProviderIntent: operation.providerMutationStartedAt !== null,
         })
       }
@@ -307,7 +297,6 @@ export class CapsuleArchiveRepository {
             eq(capsuleOperationsTable.id, operationId),
             eq(capsuleOperationsTable.type, CapsuleOperationType.ARCHIVE),
             eq(capsuleOperationsTable.status, CapsuleOperationStatus.RUNNING),
-            isNull(capsuleOperationsTable.branchId),
             isNull(capsuleOperationsTable.providerMutationStartedAt),
           ),
         )
@@ -397,11 +386,7 @@ export class CapsuleArchiveRepository {
       const lineage = inspectOfflineBranchLineage(operation.ownerId, operation.capsuleId, branches)
 
       const safeProviderFreeFailure =
-        operation.providerMutationStartedAt === null &&
-        operation.branchId === null &&
-        capsule.lifecycleStatus === 'archiving' &&
-        capsule.archivedAt === null &&
-        lineage.valid
+        operation.providerMutationStartedAt === null && capsule.lifecycleStatus === 'archiving' && capsule.archivedAt === null && lineage.valid
 
       if (!safeProviderFreeFailure) {
         return await this.markCleanupRequiredInTransaction(tx, operation, capsule, error, {
@@ -410,7 +395,6 @@ export class CapsuleArchiveRepository {
           invariantViolation: true,
           previousOperationStatus: operation.status,
           providerIntentPresent: operation.providerMutationStartedAt !== null,
-          operationBranchId: operation.branchId,
           capsuleLifecycleStatus: capsule.lifecycleStatus,
           capsuleArchived: capsule.archivedAt !== null,
           offlineBranchLineage: lineage,
@@ -468,11 +452,7 @@ export class CapsuleArchiveRepository {
       const lineage = inspectOfflineBranchLineage(operation.ownerId, operation.capsuleId, branches)
 
       const safeProviderFreeClassification =
-        operation.providerMutationStartedAt === null &&
-        operation.branchId === null &&
-        capsule.lifecycleStatus === 'archiving' &&
-        capsule.archivedAt === null &&
-        lineage.valid
+        operation.providerMutationStartedAt === null && capsule.lifecycleStatus === 'archiving' && capsule.archivedAt === null && lineage.valid
 
       if (!safeProviderFreeClassification) {
         const invariantError = {
@@ -487,7 +467,6 @@ export class CapsuleArchiveRepository {
           classification: 'abandoned_archive_operation',
           invariantViolation: true,
           providerIntentPresent: operation.providerMutationStartedAt !== null,
-          operationBranchId: operation.branchId,
           capsuleLifecycleStatus: capsule.lifecycleStatus,
           capsuleArchived: capsule.archivedAt !== null,
           offlineBranchLineage: lineage,
@@ -536,10 +515,9 @@ export class CapsuleArchiveRepository {
       })
     }
 
-    if (operation.providerMutationStartedAt !== null || operation.branchId !== null) {
-      throw new IncusError('Provider-free capsule archive failure contains contradictory operation evidence.', 'CONFLICT', {
+    if (operation.providerMutationStartedAt !== null) {
+      throw new IncusError('Provider-free capsule archive failure contains contradictory provider-intent evidence.', 'CONFLICT', {
         operationId: operation.id,
-        branchId: operation.branchId,
         providerMutationStartedAt: operation.providerMutationStartedAt?.toISOString() ?? null,
       })
     }
@@ -562,7 +540,6 @@ export class CapsuleArchiveRepository {
           eq(capsuleOperationsTable.id, operation.id),
           eq(capsuleOperationsTable.type, CapsuleOperationType.ARCHIVE),
           inArray(capsuleOperationsTable.status, NONTERMINAL_ARCHIVE_STATUSES),
-          isNull(capsuleOperationsTable.branchId),
           isNull(capsuleOperationsTable.providerMutationStartedAt),
         ),
       )
@@ -716,22 +693,13 @@ export class CapsuleArchiveRepository {
     newlyAccepted: boolean,
     replayed: boolean,
   ): Promise<ArchiveCapsuleAcceptanceResult> {
-    if (operation.branchId !== null) {
-      throw new IncusError('Capsule archive operation unexpectedly references a branch.', 'CONFLICT', {
-        operationId: operation.id,
-        branchId: operation.branchId,
-      })
-    }
-
     const capsule = await readOwnedArchivalCapsule(this.db, operation.ownerId, operation.capsuleId)
-
     if (!capsule) {
       throw new IncusError('Capsule archive operation references a missing capsule aggregate.', 'API_ERROR', {
         operationId: operation.id,
         capsuleId: operation.capsuleId,
       })
     }
-
     return {
       newlyAccepted,
       receipt: this.createReceipt({
@@ -782,7 +750,6 @@ export class CapsuleArchiveRepository {
       operationType: CapsuleOperationType.ARCHIVE,
       operationStatus: input.operationStatus,
       capsuleId: input.capsuleId,
-      branchId: null,
     })
   }
 

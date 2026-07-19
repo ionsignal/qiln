@@ -99,12 +99,6 @@ export class ProviderFreeArchivalOperationLedger {
         operationStatus: operation.status,
       })
     }
-    if (operation.branchId !== null) {
-      throw new IncusError(`${input.operationDescription} operation unexpectedly references a capsule branch.`, 'CONFLICT', {
-        operationId: input.operationId,
-        branchId: operation.branchId,
-      })
-    }
     if (operation.providerMutationStartedAt !== null) {
       throw new IncusError(`${input.operationDescription} operation unexpectedly contains provider intent.`, 'CONFLICT', {
         operationId: input.operationId,
@@ -118,8 +112,8 @@ export class ProviderFreeArchivalOperationLedger {
    * Claims one accepted provider-free archival operation for process-local
    * execution.
    *
-   * The branch-reference and provider-intent predicates are part of the update
-   * fence so contradictory durable evidence cannot transition into `running`.
+   * Absence of provider intent is part of the update fence so contradictory
+   * durable evidence cannot transition into `running`.
    */
   public async claimAccepted(input: ClaimProviderFreeArchivalOperationInput): Promise<CapsuleOperationTransitionOutput> {
     const now = new Date()
@@ -135,14 +129,12 @@ export class ProviderFreeArchivalOperationLedger {
           eq(capsuleOperationsTable.id, input.operationId),
           eq(capsuleOperationsTable.type, input.operationType),
           eq(capsuleOperationsTable.status, CapsuleOperationStatus.ACCEPTED),
-          isNull(capsuleOperationsTable.branchId),
           isNull(capsuleOperationsTable.providerMutationStartedAt),
         ),
       )
       .returning({
         ownerId: capsuleOperationsTable.ownerId,
         capsuleId: capsuleOperationsTable.capsuleId,
-        branchId: capsuleOperationsTable.branchId,
         operationStatus: capsuleOperationsTable.status,
       })
     if (!claimed) {
@@ -151,19 +143,12 @@ export class ProviderFreeArchivalOperationLedger {
         operationType: input.operationType,
       })
     }
-    if (claimed.branchId !== null) {
-      throw new IncusError(`${input.operationDescription} claim returned an unexpected capsule branch reference.`, 'CONFLICT', {
-        operationId: input.operationId,
-        branchId: claimed.branchId,
-      })
-    }
     return toCapsuleOperationTransition({
       ownerId: claimed.ownerId,
       operationId: input.operationId,
       operationType: input.operationType,
       operationStatus: claimed.operationStatus,
       capsuleId: claimed.capsuleId,
-      branchId: null,
     })
   }
 }

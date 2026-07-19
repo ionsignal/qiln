@@ -1,15 +1,20 @@
 import { and, asc, eq, inArray, isNull, or } from 'drizzle-orm'
 import {
   CapsuleBlueprintDigestSchema,
+  CapsuleBlueprintSchema,
   CapsuleCreateReceiptSchema,
   CapsuleLifecycleStateSchema,
   CapsuleOperationStatus,
   CapsuleOperationType,
   capsuleBranchesTable,
   capsuleBranchResourcesTable,
+  capsuleCreateOperationsTable,
   capsuleOperationsTable,
   capsulesTable,
+  digestCanonicalJsonValue,
   type CapsuleActorReference,
+  type CapsuleBlueprint,
+  type CapsuleBlueprintDigest,
   type CapsuleBranchResourceInventoryDigest,
   type CapsuleCreateReceipt,
   type CapsuleHostDbContract,
@@ -38,6 +43,7 @@ const NONTERMINAL_CREATE_STATUSES = [CapsuleOperationStatus.ACCEPTED, CapsuleOpe
 
 type CreateTransaction = Parameters<Parameters<CapsuleHostDbContract['transaction']>[0]>[0]
 type PersistedCreateOperation = typeof capsuleOperationsTable.$inferSelect
+type PersistedCreateOperationExtension = typeof capsuleCreateOperationsTable.$inferSelect
 type PersistedCapsule = typeof capsulesTable.$inferSelect
 type PersistedCapsuleBranch = typeof capsuleBranchesTable.$inferSelect
 
@@ -51,6 +57,13 @@ interface PreProviderResourceEvidence {
   lastOperationId: string | null
 }
 
+interface ValidatedCreateOperationDetails {
+  extension: PersistedCreateOperationExtension
+  rootBranch: PersistedCapsuleBranch
+  blueprintDigest: CapsuleBlueprintDigest
+  blueprintSnapshot: CapsuleBlueprint
+}
+
 function isNonterminalCreateStatus(status: CapsuleOperationStatusValue): status is (typeof NONTERMINAL_CREATE_STATUSES)[number] {
   return status === CapsuleOperationStatus.ACCEPTED || status === CapsuleOperationStatus.RUNNING
 }
@@ -58,9 +71,14 @@ function isNonterminalCreateStatus(status: CapsuleOperationStatusValue): status 
 /**
  * Owns every create-specific operation and aggregate transaction.
  *
+ * The shared operation ledger contains only fields meaningful across every
+ * operation type. Immutable create input and the committed root-branch
+ * reference live in `capsule_create_operations`.
+ *
  * This repository is the authoritative persistence boundary for create
- * acceptance, immutable execution input, mutation fences, terminal aggregate
- * transitions, and abandoned-create classification.
+ * acceptance, extension validation, immutable execution input, mutation
+ * fences, terminal aggregate transitions, and abandoned-create
+ * classification.
  */
 export class CreateCapsuleOperationRepository {
   constructor(
@@ -102,11 +120,10 @@ export class CreateCapsuleOperationRepository {
 
   /**
    * Atomically accepts a create operation, creates its capsule aggregate and
-   * root branch, and links the base operation to that branch.
+   * root branch, and records its immutable create extension.
    *
-   * Actor provenance is immutable acceptance-time evidence and is persisted in
-   * the same transaction as the operation, capsule, and provisional root
-   * branch.
+   * Actor provenance, the base operation, immutable create input, capsule, and
+   * provisional root branch are committed in one transaction.
    */
   public async acceptCreate(input: AcceptCreateCapsuleOperationInput): Promise<CreateCapsuleRepositoryResult> {
     const replay = await this.findIdempotentReplay(input.ownerId, input.actor, input.idempotencyKey, input.requestHash)
@@ -149,23 +166,22 @@ export class CreateCapsuleOperationRepository {
             status: CapsuleOperationStatus.ACCEPTED,
             idempotencyKey: input.idempotencyKey,
             requestHash: input.requestHash,
-            branchName: input.rootBranchName,
-            blueprintName: input.blueprintName,
-            blueprintDigest: input.blueprintDigest,
-            blueprintSnapshot: input.blueprintSnapshot,
             acceptedAt: now,
             createdAt: now,
             updatedAt: now,
           })
           .returning({
             id: capsuleOperationsTable.id,
+            ownerId: capsuleOperationsTable.ownerId,
+            capsuleId: capsuleOperationsTable.capsuleId,
+            status: capsuleOperationsTable.status,
           })
 
         if (!operation) {
           throw new IncusError('Failed to accept the durable capsule create operation.', 'API_ERROR')
         }
 
-        const [branch] = await tx
+        const [rootBranch] = await tx
           .insert(capsuleBranchesTable)
           .values({
             ownerId: input.ownerId,
@@ -187,29 +203,33 @@ export class CreateCapsuleOperationRepository {
             status: capsuleBranchesTable.status,
           })
 
-        if (!branch) {
+        if (!rootBranch) {
           throw new IncusError('Failed to create the provisional capsule root branch.', 'API_ERROR')
         }
 
-        const linkedOperations = await tx
-          .update(capsuleOperationsTable)
-          .set({
-            branchId: branch.id,
-            updatedAt: now,
+        const [createExtension] = await tx
+          .insert(capsuleCreateOperationsTable)
+          .values({
+            operationId: operation.id,
+            rootBranchId: rootBranch.id,
+            rootBranchName: input.rootBranchName,
+            blueprintName: input.blueprintName,
+            blueprintDigest: input.blueprintDigest,
+            blueprintSnapshot: input.blueprintSnapshot,
+            cpu: input.cpu,
+            memory: input.memory,
           })
-          .where(
-            and(
-              eq(capsuleOperationsTable.id, operation.id),
-              eq(capsuleOperationsTable.status, CapsuleOperationStatus.ACCEPTED),
-              isNull(capsuleOperationsTable.branchId),
-            ),
-          )
           .returning({
-            id: capsuleOperationsTable.id,
+            operationId: capsuleCreateOperationsTable.operationId,
+            rootBranchId: capsuleCreateOperationsTable.rootBranchId,
           })
 
-        if (linkedOperations.length !== 1) {
-          throw new IncusError('Failed to link the accepted create operation to its root branch.', 'CONFLICT')
+        if (!createExtension || createExtension.operationId !== operation.id || createExtension.rootBranchId !== rootBranch.id) {
+          throw new IncusError('Failed to record immutable capsule create operation input.', 'API_ERROR', {
+            operationId: operation.id,
+            capsuleId: capsule.id,
+            rootBranchId: rootBranch.id,
+          })
         }
 
         return {
@@ -217,18 +237,17 @@ export class CreateCapsuleOperationRepository {
           receipt: this.createCreateReceipt({
             operationId: operation.id,
             capsuleId: capsule.id,
-            rootBranchId: branch.id,
-            rootBranchName: branch.name,
-            operationStatus: CapsuleOperationStatus.ACCEPTED,
+            rootBranchId: rootBranch.id,
+            rootBranchName: rootBranch.name,
+            operationStatus: operation.status,
             replayed: false,
           }),
           operation: toCapsuleOperationTransition({
-            ownerId: input.ownerId,
+            ownerId: operation.ownerId,
             operationId: operation.id,
-            capsuleId: capsule.id,
-            branchId: branch.id,
+            capsuleId: operation.capsuleId,
             operationType: CapsuleOperationType.CREATE,
-            operationStatus: CapsuleOperationStatus.ACCEPTED,
+            operationStatus: operation.status,
           }),
           capsule: CapsuleLifecycleStateSchema.parse({
             capsuleId: capsule.id,
@@ -242,7 +261,7 @@ export class CreateCapsuleOperationRepository {
               entityId: capsule.id,
             }),
           }),
-          branch,
+          branch: rootBranch,
         }
       })
     } catch (error: unknown) {
@@ -276,7 +295,8 @@ export class CreateCapsuleOperationRepository {
    * Reloads immutable create execution input exclusively from PostgreSQL.
    *
    * The executor receives only the operation ID and cannot retain or reuse the
-   * original transport payload.
+   * original transport payload. Provider work is authorized only after the
+   * base operation, create extension, and root branch agree.
    */
   public async loadAcceptedExecutionInput(operationId: string): Promise<CreateCapsuleExecutionInput> {
     const operation = await this.reader.loadById(operationId)
@@ -308,53 +328,13 @@ export class CreateCapsuleOperationRepository {
       })
     }
 
-    if (
-      !operation.branchId ||
-      !operation.branchName ||
-      !operation.blueprintName ||
-      !operation.blueprintDigest ||
-      !operation.blueprintSnapshot
-    ) {
-      throw new IncusError('Capsule create operation is missing durable execution input.', 'API_ERROR', {
-        operationId,
-        hasBranchId: operation.branchId !== null,
-        hasBranchName: operation.branchName !== null,
-        hasBlueprintName: operation.blueprintName !== null,
-        hasBlueprintDigest: operation.blueprintDigest !== null,
-        hasBlueprintSnapshot: operation.blueprintSnapshot !== null,
-      })
-    }
+    const details = await this.loadValidatedCreateOperationDetails(operation)
 
-    const [branch] = await this.db
-      .select({
-        id: capsuleBranchesTable.id,
-        capsuleId: capsuleBranchesTable.capsuleId,
-        ownerId: capsuleBranchesTable.ownerId,
-        name: capsuleBranchesTable.name,
-        status: capsuleBranchesTable.status,
-        isRootBranch: capsuleBranchesTable.isRootBranch,
-        blueprintName: capsuleBranchesTable.blueprintName,
-        blueprintDigest: capsuleBranchesTable.blueprintDigest,
-        cpu: capsuleBranchesTable.cpu,
-        memory: capsuleBranchesTable.memory,
-      })
-      .from(capsuleBranchesTable)
-      .where(eq(capsuleBranchesTable.id, operation.branchId))
-      .limit(1)
-
-    if (
-      !branch ||
-      branch.ownerId !== operation.ownerId ||
-      branch.capsuleId !== operation.capsuleId ||
-      branch.name !== operation.branchName ||
-      branch.status !== 'provisioning' ||
-      !branch.isRootBranch ||
-      branch.blueprintName !== operation.blueprintName ||
-      branch.blueprintDigest !== operation.blueprintDigest
-    ) {
-      throw new IncusError('Capsule create root branch identity does not match its accepted operation.', 'CONFLICT', {
+    if (details.rootBranch.status !== 'provisioning') {
+      throw new IncusError('Capsule create root branch is not in its provisioning state.', 'CONFLICT', {
         operationId,
-        branchId: operation.branchId,
+        rootBranchId: details.rootBranch.id,
+        rootBranchStatus: details.rootBranch.status,
       })
     }
 
@@ -362,13 +342,13 @@ export class CreateCapsuleOperationRepository {
       operationId: operation.id,
       capsuleId: operation.capsuleId,
       ownerId: operation.ownerId,
-      rootBranchId: branch.id,
-      rootBranchName: branch.name,
-      blueprintName: operation.blueprintName,
-      blueprintDigest: CapsuleBlueprintDigestSchema.parse(operation.blueprintDigest),
-      blueprintSnapshot: operation.blueprintSnapshot,
-      cpu: branch.cpu,
-      memory: branch.memory,
+      rootBranchId: details.extension.rootBranchId,
+      rootBranchName: details.extension.rootBranchName,
+      blueprintName: details.extension.blueprintName,
+      blueprintDigest: details.blueprintDigest,
+      blueprintSnapshot: details.blueprintSnapshot,
+      cpu: details.extension.cpu,
+      memory: details.extension.memory,
     }
   }
 
@@ -396,7 +376,6 @@ export class CreateCapsuleOperationRepository {
       .returning({
         ownerId: capsuleOperationsTable.ownerId,
         capsuleId: capsuleOperationsTable.capsuleId,
-        branchId: capsuleOperationsTable.branchId,
       })
 
     if (!claimed) {
@@ -409,7 +388,6 @@ export class CreateCapsuleOperationRepository {
       ownerId: claimed.ownerId,
       operationId,
       capsuleId: claimed.capsuleId,
-      branchId: claimed.branchId,
       operationType: CapsuleOperationType.CREATE,
       operationStatus: CapsuleOperationStatus.RUNNING,
     })
@@ -492,35 +470,35 @@ export class CreateCapsuleOperationRepository {
 
   /**
    * Atomically commits successful capsule creation.
+   *
+   * The transaction locks and validates the create extension before committing
+   * terminal aggregate state. Process-local execution input is not accepted as
+   * completion authority.
    */
   public async completeCreate(operationId: string): Promise<CreateCapsuleTerminalResult> {
     return await this.db.transaction(async tx => {
       const operation = await this.lockCreateOperation(tx, operationId)
 
-      if (operation.status !== CapsuleOperationStatus.RUNNING || operation.providerMutationStartedAt === null || operation.branchId === null) {
+      if (operation.status !== CapsuleOperationStatus.RUNNING || operation.providerMutationStartedAt === null) {
         throw new IncusError('Capsule create operation is not eligible for successful completion.', 'CONFLICT', {
           operationId,
           operationStatus: operation.status,
           hasProviderIntent: operation.providerMutationStartedAt !== null,
-          branchId: operation.branchId,
         })
       }
 
+      const extension = await this.lockCreateOperationExtension(tx, operation.id)
       const capsule = await this.lockCapsule(tx, operation.ownerId, operation.capsuleId)
-      const branch = await this.lockRootBranch(tx, operation.ownerId, operation.capsuleId, operation.branchId)
+      const rootBranch = await this.lockBranchById(tx, extension.rootBranchId)
 
-      if (
-        capsule.lifecycleStatus !== 'provisioning' ||
-        capsule.archivedAt !== null ||
-        branch.status !== 'provisioning' ||
-        operation.branchName !== branch.name
-      ) {
+      this.assertCreateOperationExtensionConsistency(operation, extension, [rootBranch])
+
+      if (capsule.lifecycleStatus !== 'provisioning' || capsule.archivedAt !== null || rootBranch.status !== 'provisioning') {
         throw new IncusError('Capsule create aggregate is not eligible for completion.', 'CONFLICT', {
           operationId,
           capsuleStatus: capsule.lifecycleStatus,
-          branchStatus: branch.status,
-          operationBranchName: operation.branchName,
-          rootBranchName: branch.name,
+          branchStatus: rootBranch.status,
+          rootBranchId: rootBranch.id,
         })
       }
 
@@ -576,10 +554,11 @@ export class CreateCapsuleOperationRepository {
         })
         .where(
           and(
-            eq(capsuleBranchesTable.id, branch.id),
+            eq(capsuleBranchesTable.id, rootBranch.id),
             eq(capsuleBranchesTable.ownerId, operation.ownerId),
             eq(capsuleBranchesTable.capsuleId, operation.capsuleId),
             eq(capsuleBranchesTable.status, 'provisioning'),
+            eq(capsuleBranchesTable.isRootBranch, true),
           ),
         )
         .returning({
@@ -600,7 +579,6 @@ export class CreateCapsuleOperationRepository {
           ownerId: operation.ownerId,
           operationId,
           capsuleId: operation.capsuleId,
-          branchId: branch.id,
           operationType: CapsuleOperationType.CREATE,
           operationStatus: CapsuleOperationStatus.COMPLETED,
         }),
@@ -637,6 +615,10 @@ export class CreateCapsuleOperationRepository {
    * before provider intent. Branch resource rows are not allowed before that
    * fence; their presence makes provider ownership ambiguous and forces
    * cleanup-required classification.
+   *
+   * Missing or contradictory create-extension evidence also forces
+   * cleanup-required classification. Incomplete immutable input cannot
+   * authorize an ordinary pre-provider failure path.
    */
   public async failBeforeProviderMutation(
     operationId: string,
@@ -653,12 +635,13 @@ export class CreateCapsuleOperationRepository {
         })
       }
 
+      const extension = await this.lockCreateOperationExtensionIfPresent(tx, operation.id)
       const capsule = await this.lockCapsule(tx, operation.ownerId, operation.capsuleId)
       const rootBranches = await this.lockRootBranchesForClassification(tx, operation.ownerId, operation.capsuleId)
-      const rootBranch = rootBranches.length === 1 ? rootBranches[0]! : null
-      const resourceEvidence = await this.lockPreProviderResourceEvidence(tx, operation.id, rootBranch?.id ?? null)
+      const rootBranch = this.selectRootBranchForClassification(extension, rootBranches)
+      const resourceEvidence = await this.lockPreProviderResourceEvidence(tx, operation.id, extension?.rootBranchId ?? rootBranch?.id ?? null)
 
-      const contradictions = this.collectPreProviderContradictions(operation, capsule, rootBranches, resourceEvidence)
+      const contradictions = this.collectPreProviderContradictions(operation, extension, capsule, rootBranches, resourceEvidence)
 
       if (contradictions.length > 0) {
         return await this.markCleanupRequiredInTransaction(tx, operation, capsule, rootBranch, error, {
@@ -666,6 +649,9 @@ export class CreateCapsuleOperationRepository {
           classification: 'pre_provider_create_failure',
           safePreProviderFailure: false,
           contradictions,
+          createExtensionPresent: extension !== null,
+          createExtensionRootBranchId: extension?.rootBranchId ?? null,
+          rootBranchCount: rootBranches.length,
           resourceEvidence: resourceEvidence.map(resource => ({
             resourceId: resource.id,
             branchId: resource.branchId,
@@ -678,8 +664,8 @@ export class CreateCapsuleOperationRepository {
         })
       }
 
-      if (!rootBranch) {
-        throw new IncusError('Safe pre-provider create failure requires exactly one durable root branch.', 'CONFLICT', {
+      if (!extension || !rootBranch) {
+        throw new IncusError('Safe pre-provider create failure requires complete create-extension and root-branch evidence.', 'CONFLICT', {
           operationId,
           capsuleId: operation.capsuleId,
         })
@@ -691,6 +677,7 @@ export class CreateCapsuleOperationRepository {
         safePreProviderFailure: true,
         providerIntentCommitted: false,
         resourceEvidenceCount: 0,
+        rootBranchId: extension.rootBranchId,
       })
       const now = new Date()
 
@@ -745,7 +732,7 @@ export class CreateCapsuleOperationRepository {
         })
         .where(
           and(
-            eq(capsuleBranchesTable.id, rootBranch.id),
+            eq(capsuleBranchesTable.id, extension.rootBranchId),
             eq(capsuleBranchesTable.ownerId, operation.ownerId),
             eq(capsuleBranchesTable.capsuleId, operation.capsuleId),
             eq(capsuleBranchesTable.status, 'provisioning'),
@@ -763,7 +750,7 @@ export class CreateCapsuleOperationRepository {
         throw new IncusError('Failed to atomically finalize the pre-provider capsule create failure.', 'CONFLICT', {
           operationId,
           capsuleId: operation.capsuleId,
-          rootBranchId: rootBranch.id,
+          rootBranchId: extension.rootBranchId,
         })
       }
 
@@ -772,7 +759,6 @@ export class CreateCapsuleOperationRepository {
           ownerId: operation.ownerId,
           operationId,
           capsuleId: operation.capsuleId,
-          branchId: rootBranch.id,
           operationType: CapsuleOperationType.CREATE,
           operationStatus: CapsuleOperationStatus.FAILED,
         }),
@@ -800,6 +786,11 @@ export class CreateCapsuleOperationRepository {
   /**
    * Finalizes a failed create after every proven same-process provider creation
    * was successfully compensated.
+   *
+   * Complete extension and branch identity remain required. If that evidence is
+   * missing or contradictory, the executor's fallback cleanup-required path
+   * performs aggregate classification without claiming an ordinary compensated
+   * failure.
    */
   public async failAfterSuccessfulCompensation(
     operationId: string,
@@ -811,25 +802,26 @@ export class CreateCapsuleOperationRepository {
     return await this.db.transaction(async tx => {
       const operation = await this.lockCreateOperation(tx, operationId)
 
-      if (operation.status !== CapsuleOperationStatus.RUNNING || operation.branchId === null || operation.providerMutationStartedAt === null) {
+      if (operation.status !== CapsuleOperationStatus.RUNNING || operation.providerMutationStartedAt === null) {
         throw new IncusError('Capsule create operation is not eligible for compensated failure.', 'CONFLICT', {
           operationId,
           operationStatus: operation.status,
-          branchId: operation.branchId,
           providerIntentCommitted: operation.providerMutationStartedAt !== null,
         })
       }
 
+      const extension = await this.lockCreateOperationExtension(tx, operation.id)
       const capsule = await this.lockCapsule(tx, operation.ownerId, operation.capsuleId)
-      const branch = await this.lockRootBranch(tx, operation.ownerId, operation.capsuleId, operation.branchId)
+      const rootBranch = await this.lockBranchById(tx, extension.rootBranchId)
 
-      if (capsule.lifecycleStatus !== 'provisioning' || branch.status !== 'provisioning' || operation.branchName !== branch.name) {
+      this.assertCreateOperationExtensionConsistency(operation, extension, [rootBranch])
+
+      if (capsule.lifecycleStatus !== 'provisioning' || rootBranch.status !== 'provisioning') {
         throw new IncusError('Capsule create aggregate cannot be classified as a compensated failure.', 'CONFLICT', {
           operationId,
           capsuleStatus: capsule.lifecycleStatus,
-          branchStatus: branch.status,
-          operationBranchName: operation.branchName,
-          rootBranchName: branch.name,
+          branchStatus: rootBranch.status,
+          rootBranchId: rootBranch.id,
         })
       }
 
@@ -885,10 +877,11 @@ export class CreateCapsuleOperationRepository {
         })
         .where(
           and(
-            eq(capsuleBranchesTable.id, branch.id),
+            eq(capsuleBranchesTable.id, rootBranch.id),
             eq(capsuleBranchesTable.ownerId, operation.ownerId),
             eq(capsuleBranchesTable.capsuleId, operation.capsuleId),
             eq(capsuleBranchesTable.status, 'provisioning'),
+            eq(capsuleBranchesTable.isRootBranch, true),
           ),
         )
         .returning({
@@ -909,7 +902,6 @@ export class CreateCapsuleOperationRepository {
           ownerId: operation.ownerId,
           operationId,
           capsuleId: operation.capsuleId,
-          branchId: branch.id,
           operationType: CapsuleOperationType.CREATE,
           operationStatus: CapsuleOperationStatus.FAILED,
         }),
@@ -932,6 +924,10 @@ export class CreateCapsuleOperationRepository {
 
   /**
    * Marks a nonterminal create operation and its aggregate cleanup-required.
+   *
+   * Cleanup classification deliberately tolerates a missing or contradictory
+   * create extension. Such evidence is exactly why provider ownership or
+   * aggregate identity may require manual inspection.
    */
   public async markCleanupRequired(
     operationId: string,
@@ -948,11 +944,17 @@ export class CreateCapsuleOperationRepository {
         })
       }
 
+      const extension = await this.lockCreateOperationExtensionIfPresent(tx, operation.id)
       const capsule = await this.lockCapsule(tx, operation.ownerId, operation.capsuleId)
-      const branch =
-        operation.branchId === null ? null : await this.lockRootBranch(tx, operation.ownerId, operation.capsuleId, operation.branchId)
+      const rootBranches = await this.lockRootBranchesForClassification(tx, operation.ownerId, operation.capsuleId)
+      const rootBranch = this.selectRootBranchForClassification(extension, rootBranches)
 
-      return await this.markCleanupRequiredInTransaction(tx, operation, capsule, branch, error, context)
+      return await this.markCleanupRequiredInTransaction(tx, operation, capsule, rootBranch, error, {
+        ...context,
+        createExtensionPresent: extension !== null,
+        createExtensionRootBranchId: extension?.rootBranchId ?? null,
+        rootBranchCount: rootBranches.length,
+      })
     })
   }
 
@@ -964,8 +966,8 @@ export class CreateCapsuleOperationRepository {
    * Classifies a nonterminal create operation left by an earlier Worker.
    *
    * No executor is invoked and no provider state is inspected. Accepted or
-   * running operations without provider intent use the same pre-provider
-   * terminalization transaction as live executor failures.
+   * running operations without provider intent use the same durable
+   * pre-provider classification transaction as live executor failures.
    */
   public async classifyAbandoned(operationId: string): Promise<CreateCapsuleTerminalResult | null> {
     const operation = await this.reader.loadById(operationId)
@@ -1006,7 +1008,7 @@ export class CreateCapsuleOperationRepository {
     tx: CreateTransaction,
     operation: PersistedCreateOperation,
     capsule: PersistedCapsule,
-    branch: PersistedCapsuleBranch | null,
+    rootBranch: PersistedCapsuleBranch | null,
     error: unknown,
     context: Record<string, unknown>,
   ): Promise<CreateCapsuleTerminalResult> {
@@ -1056,7 +1058,7 @@ export class CreateCapsuleOperationRepository {
 
     let cleanupBranch: CreateCapsuleCommittedBranch | null = null
 
-    if (branch && branch.status !== 'destroyed') {
+    if (rootBranch && rootBranch.status !== 'destroyed') {
       const [updatedBranch] = await tx
         .update(capsuleBranchesTable)
         .set({
@@ -1066,7 +1068,7 @@ export class CreateCapsuleOperationRepository {
         })
         .where(
           and(
-            eq(capsuleBranchesTable.id, branch.id),
+            eq(capsuleBranchesTable.id, rootBranch.id),
             eq(capsuleBranchesTable.ownerId, operation.ownerId),
             eq(capsuleBranchesTable.capsuleId, operation.capsuleId),
           ),
@@ -1079,12 +1081,12 @@ export class CreateCapsuleOperationRepository {
         })
 
       cleanupBranch = updatedBranch ?? null
-    } else if (branch) {
+    } else if (rootBranch) {
       cleanupBranch = {
-        id: branch.id,
-        capsuleId: operation.capsuleId,
-        name: branch.name,
-        status: branch.status,
+        id: rootBranch.id,
+        capsuleId: rootBranch.capsuleId,
+        name: rootBranch.name,
+        status: rootBranch.status,
       }
     }
 
@@ -1099,7 +1101,6 @@ export class CreateCapsuleOperationRepository {
         ownerId: operation.ownerId,
         operationId: operation.id,
         capsuleId: operation.capsuleId,
-        branchId: branch?.id ?? operation.branchId,
         operationType: CapsuleOperationType.CREATE,
         operationStatus: CapsuleOperationStatus.CLEANUP_REQUIRED,
       }),
@@ -1128,11 +1129,14 @@ export class CreateCapsuleOperationRepository {
     newlyAccepted: boolean,
     replayed: boolean,
   ): Promise<CreateCapsuleRepositoryResult> {
-    if (!operation.branchId || !operation.branchName) {
-      throw new IncusError('Capsule create operation cannot produce a receipt without its durable root branch.', 'API_ERROR', {
+    if (operation.type !== CapsuleOperationType.CREATE) {
+      throw new IncusError('Operation is not a capsule create operation.', 'CONFLICT', {
         operationId: operation.id,
+        operationType: operation.type,
       })
     }
+
+    const details = await this.loadValidatedCreateOperationDetails(operation)
 
     const [capsule] = await this.db
       .select({
@@ -1144,28 +1148,11 @@ export class CreateCapsuleOperationRepository {
       .where(and(eq(capsulesTable.id, operation.capsuleId), eq(capsulesTable.ownerId, operation.ownerId)))
       .limit(1)
 
-    const [branch] = await this.db
-      .select({
-        id: capsuleBranchesTable.id,
-        capsuleId: capsuleBranchesTable.capsuleId,
-        name: capsuleBranchesTable.name,
-        status: capsuleBranchesTable.status,
-      })
-      .from(capsuleBranchesTable)
-      .where(
-        and(
-          eq(capsuleBranchesTable.id, operation.branchId),
-          eq(capsuleBranchesTable.ownerId, operation.ownerId),
-          eq(capsuleBranchesTable.capsuleId, operation.capsuleId),
-        ),
-      )
-      .limit(1)
-
-    if (!capsule || !branch) {
-      throw new IncusError('Capsule create operation references missing durable aggregate state.', 'API_ERROR', {
+    if (!capsule) {
+      throw new IncusError('Capsule create operation references a missing capsule aggregate.', 'API_ERROR', {
         operationId: operation.id,
         capsuleId: operation.capsuleId,
-        rootBranchId: operation.branchId,
+        rootBranchId: details.extension.rootBranchId,
       })
     }
 
@@ -1174,8 +1161,8 @@ export class CreateCapsuleOperationRepository {
       receipt: this.createCreateReceipt({
         operationId: operation.id,
         capsuleId: operation.capsuleId,
-        rootBranchId: branch.id,
-        rootBranchName: branch.name,
+        rootBranchId: details.extension.rootBranchId,
+        rootBranchName: details.extension.rootBranchName,
         operationStatus: operation.status,
         replayed,
       }),
@@ -1183,7 +1170,6 @@ export class CreateCapsuleOperationRepository {
         ownerId: operation.ownerId,
         operationId: operation.id,
         capsuleId: operation.capsuleId,
-        branchId: branch.id,
         operationType: CapsuleOperationType.CREATE,
         operationStatus: operation.status,
       }),
@@ -1199,7 +1185,44 @@ export class CreateCapsuleOperationRepository {
           entityId: operation.capsuleId,
         }),
       }),
-      branch,
+      branch: {
+        id: details.rootBranch.id,
+        capsuleId: details.rootBranch.capsuleId,
+        name: details.rootBranch.name,
+        status: details.rootBranch.status,
+      },
+    }
+  }
+
+  private async loadValidatedCreateOperationDetails(operation: PersistedCapsuleOperation): Promise<ValidatedCreateOperationDetails> {
+    const extension = await this.loadCreateOperationExtension(operation.id)
+
+    if (!extension) {
+      throw new IncusError('Capsule create operation is missing its immutable create extension.', 'API_ERROR', {
+        operationId: operation.id,
+        capsuleId: operation.capsuleId,
+      })
+    }
+
+    const rootBranch = await this.loadBranchById(extension.rootBranchId)
+
+    if (!rootBranch) {
+      throw new IncusError('Capsule create operation references a missing root branch.', 'API_ERROR', {
+        operationId: operation.id,
+        capsuleId: operation.capsuleId,
+        rootBranchId: extension.rootBranchId,
+      })
+    }
+
+    this.assertCreateOperationExtensionConsistency(operation, extension, [rootBranch])
+
+    const pinnedBlueprint = this.parseAndValidatePinnedBlueprint(extension)
+
+    return {
+      extension,
+      rootBranch,
+      blueprintDigest: pinnedBlueprint.blueprintDigest,
+      blueprintSnapshot: pinnedBlueprint.blueprintSnapshot,
     }
   }
 
@@ -1236,16 +1259,172 @@ export class CreateCapsuleOperationRepository {
   }
 
   // ---------------------------------------------------------------------------
+  // Private create-extension validation
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Validates the immutable relationship among the base operation, its create
+   * extension, the root branch, and the pinned blueprint snapshot.
+   *
+   * This is repository policy because PostgreSQL foreign keys cannot enforce
+   * the base operation's `create` discriminator or cross-table immutable field
+   * agreement.
+   */
+  private assertCreateOperationExtensionConsistency(
+    operation: Pick<PersistedCapsuleOperation, 'id' | 'ownerId' | 'capsuleId' | 'type'>,
+    extension: PersistedCreateOperationExtension,
+    rootBranches: readonly PersistedCapsuleBranch[],
+  ): void {
+    const contradictions = this.collectCreateOperationExtensionContradictions(operation, extension, rootBranches)
+
+    if (contradictions.length === 0) {
+      return
+    }
+
+    throw new IncusError('Capsule create operation extension does not match its durable operation and root branch.', 'CONFLICT', {
+      operationId: operation.id,
+      capsuleId: operation.capsuleId,
+      rootBranchId: extension.rootBranchId,
+      contradictions,
+    })
+  }
+
+  private collectCreateOperationExtensionContradictions(
+    operation: Pick<PersistedCapsuleOperation, 'id' | 'ownerId' | 'capsuleId' | 'type'>,
+    extension: PersistedCreateOperationExtension | null,
+    rootBranches: readonly PersistedCapsuleBranch[],
+  ): string[] {
+    const contradictions: string[] = []
+
+    if (operation.type !== CapsuleOperationType.CREATE) {
+      contradictions.push('base_operation_type_is_not_create')
+    }
+
+    if (!extension) {
+      contradictions.push('create_extension_missing')
+    }
+
+    if (rootBranches.length !== 1) {
+      contradictions.push('root_branch_count_invalid')
+    }
+
+    if (!extension) {
+      return contradictions
+    }
+
+    if (extension.operationId !== operation.id) {
+      contradictions.push('create_extension_operation_id_mismatch')
+    }
+
+    const rootBranch = rootBranches.find(branch => branch.id === extension.rootBranchId)
+
+    if (!rootBranch) {
+      contradictions.push('create_extension_root_branch_reference_mismatch')
+      return contradictions
+    }
+
+    if (!rootBranch.isRootBranch) {
+      contradictions.push('referenced_branch_is_not_root')
+    }
+
+    if (rootBranch.ownerId !== operation.ownerId) {
+      contradictions.push('root_branch_owner_mismatch')
+    }
+
+    if (rootBranch.capsuleId !== operation.capsuleId) {
+      contradictions.push('root_branch_capsule_mismatch')
+    }
+
+    if (rootBranch.name !== extension.rootBranchName) {
+      contradictions.push('root_branch_name_mismatch')
+    }
+
+    if (rootBranch.blueprintName !== extension.blueprintName) {
+      contradictions.push('root_branch_blueprint_name_mismatch')
+    }
+
+    if (rootBranch.blueprintDigest !== extension.blueprintDigest) {
+      contradictions.push('root_branch_blueprint_digest_mismatch')
+    }
+
+    if (rootBranch.cpu !== extension.cpu) {
+      contradictions.push('root_branch_cpu_mismatch')
+    }
+
+    if (rootBranch.memory !== extension.memory) {
+      contradictions.push('root_branch_memory_mismatch')
+    }
+
+    try {
+      this.parseAndValidatePinnedBlueprint(extension)
+    } catch {
+      contradictions.push('create_extension_blueprint_pin_invalid')
+    }
+
+    return contradictions
+  }
+
+  private parseAndValidatePinnedBlueprint(extension: PersistedCreateOperationExtension): {
+    blueprintDigest: CapsuleBlueprintDigest
+    blueprintSnapshot: CapsuleBlueprint
+  } {
+    const parsedDigest = CapsuleBlueprintDigestSchema.safeParse(extension.blueprintDigest)
+
+    if (!parsedDigest.success) {
+      throw new IncusError('Capsule create operation contains an invalid blueprint digest.', 'CONFLICT', {
+        operationId: extension.operationId,
+        blueprintDigest: extension.blueprintDigest,
+      })
+    }
+
+    const parsedBlueprint = CapsuleBlueprintSchema.safeParse(extension.blueprintSnapshot)
+
+    if (!parsedBlueprint.success) {
+      throw new IncusError('Capsule create operation contains an invalid pinned blueprint snapshot.', 'CONFLICT', {
+        operationId: extension.operationId,
+        blueprintName: extension.blueprintName,
+      })
+    }
+
+    if (parsedBlueprint.data.name !== extension.blueprintName) {
+      throw new IncusError('Capsule create operation blueprint snapshot name does not match its immutable blueprint identity.', 'CONFLICT', {
+        operationId: extension.operationId,
+        blueprintName: extension.blueprintName,
+        blueprintSnapshotName: parsedBlueprint.data.name,
+      })
+    }
+
+    const actualDigest = digestCanonicalJsonValue(parsedBlueprint.data, {
+      context: `capsule create operation '${extension.operationId}' pinned blueprint`,
+    })
+
+    if (actualDigest !== parsedDigest.data) {
+      throw new IncusError('Capsule create operation blueprint snapshot does not match its immutable digest.', 'CONFLICT', {
+        operationId: extension.operationId,
+        blueprintName: extension.blueprintName,
+        expectedDigest: parsedDigest.data,
+        actualDigest,
+      })
+    }
+
+    return {
+      blueprintDigest: parsedDigest.data,
+      blueprintSnapshot: parsedBlueprint.data,
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Private pre-provider safety proof
   // ---------------------------------------------------------------------------
 
   private collectPreProviderContradictions(
     operation: PersistedCreateOperation,
+    extension: PersistedCreateOperationExtension | null,
     capsule: PersistedCapsule,
     rootBranches: readonly PersistedCapsuleBranch[],
     resourceEvidence: readonly PreProviderResourceEvidence[],
   ): string[] {
-    const contradictions: string[] = []
+    const contradictions = this.collectCreateOperationExtensionContradictions(operation, extension, rootBranches)
 
     if (operation.providerMutationStartedAt !== null) {
       contradictions.push('provider_intent_present')
@@ -1259,28 +1438,10 @@ export class CreateCapsuleOperationRepository {
       contradictions.push('capsule_unexpectedly_archived')
     }
 
-    if (rootBranches.length !== 1) {
-      contradictions.push('root_branch_count_invalid')
-    }
+    const rootBranch = extension ? rootBranches.find(branch => branch.id === extension.rootBranchId) : null
 
-    const rootBranch = rootBranches.length === 1 ? rootBranches[0]! : null
-
-    if (rootBranch) {
-      if (operation.branchId !== rootBranch.id) {
-        contradictions.push('operation_root_branch_link_mismatch')
-      }
-
-      if (operation.branchName !== rootBranch.name) {
-        contradictions.push('operation_root_branch_name_mismatch')
-      }
-
-      if (rootBranch.status !== 'provisioning') {
-        contradictions.push('root_branch_not_provisioning')
-      }
-
-      if (rootBranch.ownerId !== operation.ownerId || rootBranch.capsuleId !== operation.capsuleId) {
-        contradictions.push('root_branch_aggregate_identity_mismatch')
-      }
+    if (rootBranch && rootBranch.status !== 'provisioning') {
+      contradictions.push('root_branch_not_provisioning')
     }
 
     if (resourceEvidence.length > 0) {
@@ -1288,6 +1449,21 @@ export class CreateCapsuleOperationRepository {
     }
 
     return contradictions
+  }
+
+  private selectRootBranchForClassification(
+    extension: PersistedCreateOperationExtension | null,
+    rootBranches: readonly PersistedCapsuleBranch[],
+  ): PersistedCapsuleBranch | null {
+    if (extension) {
+      const referencedRootBranch = rootBranches.find(branch => branch.id === extension.rootBranchId)
+
+      if (referencedRootBranch) {
+        return referencedRootBranch
+      }
+    }
+
+    return rootBranches.length === 1 ? rootBranches[0]! : null
   }
 
   private async lockPreProviderResourceEvidence(
@@ -1314,6 +1490,26 @@ export class CreateCapsuleOperationRepository {
       .where(evidencePredicate)
       .orderBy(asc(capsuleBranchResourcesTable.id))
       .for('update')
+  }
+
+  // ---------------------------------------------------------------------------
+  // Private read helpers
+  // ---------------------------------------------------------------------------
+
+  private async loadCreateOperationExtension(operationId: string): Promise<PersistedCreateOperationExtension | null> {
+    const [extension] = await this.db
+      .select()
+      .from(capsuleCreateOperationsTable)
+      .where(eq(capsuleCreateOperationsTable.operationId, operationId))
+      .limit(1)
+
+    return extension ?? null
+  }
+
+  private async loadBranchById(branchId: string): Promise<PersistedCapsuleBranch | null> {
+    const [branch] = await this.db.select().from(capsuleBranchesTable).where(eq(capsuleBranchesTable.id, branchId)).limit(1)
+
+    return branch ?? null
   }
 
   // ---------------------------------------------------------------------------
@@ -1356,6 +1552,32 @@ export class CreateCapsuleOperationRepository {
     return operation
   }
 
+  private async lockCreateOperationExtension(tx: CreateTransaction, operationId: string): Promise<PersistedCreateOperationExtension> {
+    const extension = await this.lockCreateOperationExtensionIfPresent(tx, operationId)
+
+    if (!extension) {
+      throw new IncusError('Capsule create operation is missing its immutable create extension.', 'CONFLICT', {
+        operationId,
+      })
+    }
+
+    return extension
+  }
+
+  private async lockCreateOperationExtensionIfPresent(
+    tx: CreateTransaction,
+    operationId: string,
+  ): Promise<PersistedCreateOperationExtension | null> {
+    const [extension] = await tx
+      .select()
+      .from(capsuleCreateOperationsTable)
+      .where(eq(capsuleCreateOperationsTable.operationId, operationId))
+      .for('update')
+      .limit(1)
+
+    return extension ?? null
+  }
+
   private async lockCapsule(tx: CreateTransaction, ownerId: string, capsuleId: string): Promise<PersistedCapsule> {
     const [capsule] = await tx
       .select()
@@ -1374,25 +1596,11 @@ export class CreateCapsuleOperationRepository {
     return capsule
   }
 
-  private async lockRootBranch(tx: CreateTransaction, ownerId: string, capsuleId: string, branchId: string): Promise<PersistedCapsuleBranch> {
-    const [branch] = await tx
-      .select()
-      .from(capsuleBranchesTable)
-      .where(
-        and(
-          eq(capsuleBranchesTable.id, branchId),
-          eq(capsuleBranchesTable.ownerId, ownerId),
-          eq(capsuleBranchesTable.capsuleId, capsuleId),
-          eq(capsuleBranchesTable.isRootBranch, true),
-        ),
-      )
-      .for('update')
-      .limit(1)
+  private async lockBranchById(tx: CreateTransaction, branchId: string): Promise<PersistedCapsuleBranch> {
+    const [branch] = await tx.select().from(capsuleBranchesTable).where(eq(capsuleBranchesTable.id, branchId)).for('update').limit(1)
 
     if (!branch) {
-      throw new IncusError('Capsule root branch was not found.', 'NOT_FOUND', {
-        ownerId,
-        capsuleId,
+      throw new IncusError('Capsule create operation root branch was not found.', 'NOT_FOUND', {
         branchId,
       })
     }

@@ -32,20 +32,15 @@ function assertCreateAbandonmentRelationships(result: CreateCapsuleTerminalResul
       `[CreateCapsuleAbandonmentHandler] Branch '${result.branch.id}' belongs to capsule '${result.branch.capsuleId}', but operation '${result.operation.operationId}' belongs to capsule '${result.operation.capsuleId}'.`,
     )
   }
-  if (result.operation.branchId !== result.branch.id) {
-    throw new Error(
-      `[CreateCapsuleAbandonmentHandler] Operation '${result.operation.operationId}' references branch '${result.operation.branchId ?? 'null'}', but its committed branch result is '${result.branch.id}'.`,
-    )
-  }
 }
 
 /**
  * Applies create-specific startup abandonment policy.
  *
  * The create repository owns the classification transaction and decides whether
- * the durable evidence proves a safe pre-provider failure or requires manual
- * cleanup. This adapter publishes invalidations only from the repository's
- * committed result.
+ * the durable base operation, create extension, root branch, and provider fence
+ * prove a safe pre-provider failure or require manual cleanup. This adapter
+ * publishes invalidations only from the repository's committed result.
  */
 export class CreateCapsuleAbandonmentHandler implements CapsuleOperationAbandonmentHandler {
   public readonly operationType = CapsuleOperationType.CREATE

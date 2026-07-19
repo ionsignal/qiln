@@ -107,7 +107,6 @@ export class CapsuleUnarchiveRepository {
             actorType: input.actor.type,
             actorId: input.actor.id,
             capsuleId: input.capsuleId,
-            branchId: null,
             type: CapsuleOperationType.UNARCHIVE,
             status: CapsuleOperationStatus.ACCEPTED,
             idempotencyKey: input.idempotencyKey,
@@ -120,7 +119,6 @@ export class CapsuleUnarchiveRepository {
             id: capsuleOperationsTable.id,
             ownerId: capsuleOperationsTable.ownerId,
             capsuleId: capsuleOperationsTable.capsuleId,
-            branchId: capsuleOperationsTable.branchId,
             status: capsuleOperationsTable.status,
           })
         if (!operation) {
@@ -156,13 +154,6 @@ export class CapsuleUnarchiveRepository {
             capsuleId: input.capsuleId,
             originalArchivedAt: originalArchivedAt.toISOString(),
             committedArchivedAt: unarchivingCapsule?.archivedAt?.toISOString() ?? null,
-          })
-        }
-
-        if (operation.branchId !== null) {
-          throw new IncusError('Accepted capsule unarchive operation unexpectedly references a branch.', 'CONFLICT', {
-            operationId: operation.id,
-            branchId: operation.branchId,
           })
         }
 
@@ -276,11 +267,10 @@ export class CapsuleUnarchiveRepository {
     return await this.db.transaction(async tx => {
       const operation = await this.lockUnarchiveOperation(tx, operationId)
 
-      if (operation.status !== CapsuleOperationStatus.RUNNING || operation.providerMutationStartedAt !== null || operation.branchId !== null) {
+      if (operation.status !== CapsuleOperationStatus.RUNNING || operation.providerMutationStartedAt !== null) {
         throw new IncusError('Capsule unarchive operation is not eligible for successful completion.', 'CONFLICT', {
           operationId,
           operationStatus: operation.status,
-          branchId: operation.branchId,
           hasProviderIntent: operation.providerMutationStartedAt !== null,
         })
       }
@@ -313,7 +303,6 @@ export class CapsuleUnarchiveRepository {
             eq(capsuleOperationsTable.id, operationId),
             eq(capsuleOperationsTable.type, CapsuleOperationType.UNARCHIVE),
             eq(capsuleOperationsTable.status, CapsuleOperationStatus.RUNNING),
-            isNull(capsuleOperationsTable.branchId),
             isNull(capsuleOperationsTable.providerMutationStartedAt),
           ),
         )
@@ -406,7 +395,6 @@ export class CapsuleUnarchiveRepository {
 
       const safeProviderFreeFailure =
         operation.providerMutationStartedAt === null &&
-        operation.branchId === null &&
         capsule.lifecycleStatus === 'unarchiving' &&
         originalArchivedAt !== null &&
         lineage.valid
@@ -418,7 +406,6 @@ export class CapsuleUnarchiveRepository {
           invariantViolation: true,
           previousOperationStatus: operation.status,
           providerIntentPresent: operation.providerMutationStartedAt !== null,
-          operationBranchId: operation.branchId,
           capsuleLifecycleStatus: capsule.lifecycleStatus,
           capsuleArchived: originalArchivedAt !== null,
           offlineBranchLineage: lineage,
@@ -480,7 +467,6 @@ export class CapsuleUnarchiveRepository {
 
       if (
         operation.providerMutationStartedAt !== null ||
-        operation.branchId !== null ||
         capsule.lifecycleStatus !== 'unarchiving' ||
         originalArchivedAt === null ||
         !lineage.valid
@@ -497,7 +483,6 @@ export class CapsuleUnarchiveRepository {
           classification: 'abandoned_unarchive_operation',
           invariantViolation: true,
           providerIntentPresent: operation.providerMutationStartedAt !== null,
-          operationBranchId: operation.branchId,
           capsuleLifecycleStatus: capsule.lifecycleStatus,
           capsuleArchived: originalArchivedAt !== null,
           offlineBranchLineage: lineage,
@@ -548,17 +533,15 @@ export class CapsuleUnarchiveRepository {
       })
     }
 
-    if (operation.providerMutationStartedAt !== null || operation.branchId !== null) {
-      throw new IncusError('Provider-free capsule unarchive failure contains contradictory operation evidence.', 'CONFLICT', {
+    if (operation.providerMutationStartedAt !== null) {
+      throw new IncusError('Provider-free capsule unarchive failure contains contradictory provider-intent evidence.', 'CONFLICT', {
         operationId: operation.id,
-        branchId: operation.branchId,
         providerMutationStartedAt: operation.providerMutationStartedAt?.toISOString() ?? null,
       })
     }
 
     const failureDetails = createOperationFailureDetails(error, context)
     const now = new Date()
-
     const [failedOperation] = await tx
       .update(capsuleOperationsTable)
       .set({
@@ -574,7 +557,6 @@ export class CapsuleUnarchiveRepository {
           eq(capsuleOperationsTable.id, operation.id),
           eq(capsuleOperationsTable.type, CapsuleOperationType.UNARCHIVE),
           inArray(capsuleOperationsTable.status, NONTERMINAL_UNARCHIVE_STATUSES),
-          isNull(capsuleOperationsTable.branchId),
           isNull(capsuleOperationsTable.providerMutationStartedAt),
         ),
       )
@@ -734,22 +716,13 @@ export class CapsuleUnarchiveRepository {
     newlyAccepted: boolean,
     replayed: boolean,
   ): Promise<UnarchiveCapsuleAcceptanceResult> {
-    if (operation.branchId !== null) {
-      throw new IncusError('Capsule unarchive operation unexpectedly references a branch.', 'CONFLICT', {
-        operationId: operation.id,
-        branchId: operation.branchId,
-      })
-    }
-
     const capsule = await readOwnedArchivalCapsule(this.db, operation.ownerId, operation.capsuleId)
-
     if (!capsule) {
       throw new IncusError('Capsule unarchive operation references a missing capsule aggregate.', 'API_ERROR', {
         operationId: operation.id,
         capsuleId: operation.capsuleId,
       })
     }
-
     return {
       newlyAccepted,
       receipt: this.createReceipt({
@@ -800,7 +773,6 @@ export class CapsuleUnarchiveRepository {
       operationType: CapsuleOperationType.UNARCHIVE,
       operationStatus: input.operationStatus,
       capsuleId: input.capsuleId,
-      branchId: null,
     })
   }
 

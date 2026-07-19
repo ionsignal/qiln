@@ -38,7 +38,6 @@ type CapsuleOperationSummaryRow = Pick<
   typeof capsuleOperationsTable.$inferSelect,
   | 'id'
   | 'capsuleId'
-  | 'branchId'
   | 'actorType'
   | 'actorId'
   | 'type'
@@ -80,7 +79,8 @@ export interface CapsuleCreateRequest {
  * Read methods query PostgreSQL directly because durable operation state is
  * authoritative. Client summaries are projected locally from a narrow SQL
  * selection that deliberately excludes request hashes, idempotency keys,
- * blueprint snapshots, raw failure details, and provider diagnostics.
+ * operation-specific extension data, raw failure details, and provider
+ * diagnostics.
  */
 export class CapsuleOperationsService {
   constructor(
@@ -90,7 +90,10 @@ export class CapsuleOperationsService {
 
   public async create(identity: CapsuleMutationIdentity, input: CapsuleCreateRequest): Promise<CapsuleCreateOutput> {
     const output = await this.channel.command(CapsuleCreateCommandName.CAPSULE_CREATE, {
-      target: { type: TargetType.OWNER, id: identity.ownerId },
+      target: {
+        type: TargetType.OWNER,
+        id: identity.ownerId,
+      },
       actor: identity.actor,
       rootBranchName: CapsuleBranchNameSchema.parse(input.rootBranchName),
       idempotencyKey: input.idempotencyKey,
@@ -164,7 +167,6 @@ export class CapsuleOperationsService {
       .select({
         id: capsuleOperationsTable.id,
         capsuleId: capsuleOperationsTable.capsuleId,
-        branchId: capsuleOperationsTable.branchId,
         actorType: capsuleOperationsTable.actorType,
         actorId: capsuleOperationsTable.actorId,
         type: capsuleOperationsTable.type,
@@ -194,7 +196,6 @@ export class CapsuleOperationsService {
       .select({
         id: capsuleOperationsTable.id,
         capsuleId: capsuleOperationsTable.capsuleId,
-        branchId: capsuleOperationsTable.branchId,
         actorType: capsuleOperationsTable.actorType,
         actorId: capsuleOperationsTable.actorId,
         type: capsuleOperationsTable.type,
@@ -217,7 +218,6 @@ export class CapsuleOperationsService {
     const summary = {
       id: operation.id,
       capsuleId: operation.capsuleId,
-      branchId: operation.branchId,
       actor: {
         type: operation.actorType,
         id: operation.actorId,

@@ -140,12 +140,14 @@ export const CapsuleOperationFailureSchema = z
  *
  * Actor provenance identifies the principal that authored the operation and is
  * intentionally distinct from capsule ownership.
+ *
+ * Operation-specific domain references are exposed through operation-specific
+ * receipts and domain reads rather than through this shared summary.
  */
 export const CapsuleOperationSummarySchema = z
   .object({
     id: z.uuid(),
     capsuleId: z.uuid(),
-    branchId: z.uuid().nullable(),
     actor: CapsuleActorReferenceSchema,
     type: CapsuleOperationTypeSchema,
     status: CapsuleOperationStatusSchema,

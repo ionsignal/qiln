@@ -6,8 +6,9 @@ import type { CapsuleOperationTransitionOutput } from '../operations/shared/type
  * transitions.
  *
  * The transition must come from committed repository output or a fresh durable
- * read after commit. The publisher deliberately accepts no provider data,
- * failure diagnostics, request context, or original command payload.
+ * read after commit. The publisher deliberately accepts no operation-specific
+ * domain references, provider data, failure diagnostics, request context, or
+ * original command payload.
  *
  * Consumers must refetch PostgreSQL-authoritative operation state after
  * receiving an event. Event delivery and ordering are not guaranteed.
@@ -27,7 +28,6 @@ export class CapsuleOperationEventPublisher {
         operationType: operation.operationType,
         operationStatus: operation.operationStatus,
         capsuleId: operation.capsuleId,
-        branchId: operation.branchId,
       })
       .catch((error: unknown) => {
         const message = error instanceof Error ? error.message : 'Unknown operation event publishing error'

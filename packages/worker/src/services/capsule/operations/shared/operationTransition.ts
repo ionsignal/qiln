@@ -7,12 +7,14 @@ export interface CapsuleOperationTransitionInput {
   operationType: CapsuleOperationTypeValue
   operationStatus: CapsuleOperationStatusValue
   capsuleId: string
-  branchId: string | null
 }
 
 /**
- * Maps a committed operation record into the narrow identity used by
+ * Maps a committed base-operation record into the narrow identity used by
  * invalidation publishers and operation-specific repository results.
+ *
+ * Operation-specific branch, snapshot, route, and promotion references belong
+ * to their extension tables and domain-result projections.
  *
  * Callers remain responsible for choosing the operation type and committed
  * status. This helper performs no lifecycle policy, database work, or event
@@ -25,6 +27,5 @@ export function toCapsuleOperationTransition(input: CapsuleOperationTransitionIn
     operationType: input.operationType,
     operationStatus: input.operationStatus,
     capsuleId: input.capsuleId,
-    branchId: input.branchId,
   }
 }
