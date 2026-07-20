@@ -182,14 +182,14 @@ export class CapsuleOperationsService {
       .from(capsuleOperationsTable)
       .where(and(eq(capsuleOperationsTable.id, operationId), eq(capsuleOperationsTable.ownerId, ownerId)))
       .limit(1)
-    return operation ? this.toClientSafeSummary(operation) : null
+    return operation ? this.toSummary(operation) : null
   }
 
   /**
    * Lists authoritative operation history for one owner-scoped capsule.
    *
-   * Missing and foreign capsule identities both produce an empty result. This
-   * avoids disclosing whether another owner's capsule exists.
+   * Missing and foreign capsule identities both produce an empty result. This avoids disclosing whether
+   * another owner's capsule exists.
    */
   public async list(ownerId: string, capsuleId: string): Promise<CapsuleOperationSummary[]> {
     const operations = await this.db
@@ -211,10 +211,13 @@ export class CapsuleOperationsService {
       .from(capsuleOperationsTable)
       .where(and(eq(capsuleOperationsTable.ownerId, ownerId), eq(capsuleOperationsTable.capsuleId, capsuleId)))
       .orderBy(asc(capsuleOperationsTable.acceptedAt), asc(capsuleOperationsTable.id))
-    return operations.map(operation => this.toClientSafeSummary(operation))
+    return operations.map(operation => this.toSummary(operation))
   }
 
-  private toClientSafeSummary(operation: CapsuleOperationSummaryRow): CapsuleOperationSummary {
+  // TODO(projections): Define a shared convention for explicit, pure server-side projectors that map narrow
+  // persistence selections into Zod-validated, client-safe contracts without exposing provider diagnostics
+  // or secret fields.
+  private toSummary(operation: CapsuleOperationSummaryRow): CapsuleOperationSummary {
     const summary = {
       id: operation.id,
       capsuleId: operation.capsuleId,
@@ -229,7 +232,7 @@ export class CapsuleOperationsService {
       providerMutationStartedAt: this.toNullableIsoTimestamp(operation.providerMutationStartedAt, 'providerMutationStartedAt', operation.id),
       completedAt: this.toNullableIsoTimestamp(operation.completedAt, 'completedAt', operation.id),
       failedAt: this.toNullableIsoTimestamp(operation.failedAt, 'failedAt', operation.id),
-      failure: this.toClientSafeFailure(operation),
+      failure: this.toFailure(operation),
     }
     const parsed = CapsuleOperationSummarySchema.safeParse(summary)
     if (!parsed.success) {
@@ -245,7 +248,7 @@ export class CapsuleOperationsService {
     return parsed.data
   }
 
-  private toClientSafeFailure(operation: CapsuleOperationSummaryRow): CapsuleOperationFailure | null {
+  private toFailure(operation: CapsuleOperationSummaryRow): CapsuleOperationFailure | null {
     const hasFailureData = operation.failedAt !== null || operation.failureCode !== null || operation.failureMessage !== null
     if (!hasFailureData) {
       return null

@@ -22,8 +22,8 @@ function toIsoTimestamp(value: Date, field: string): string {
 export class CapsuleSnapshotService {
   constructor(private readonly snapshots: CapsuleSnapshotStore) {}
 
-  public async list(capsuleId: string): Promise<CapsuleSnapshotListOutput> {
-    const snapshots = await this.snapshots.listSnapshotsForCapsule(capsuleId)
+  public async listForOwner(ownerId: string, capsuleId: string): Promise<CapsuleSnapshotListOutput> {
+    const snapshots = await this.snapshots.listSnapshotsForOwnedCapsule(ownerId, capsuleId)
     return CapsuleSnapshotListOutputSchema.parse(snapshots.map(snapshot => this.toSummary(snapshot)))
   }
 

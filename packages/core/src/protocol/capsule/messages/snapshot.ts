@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { CapsuleSnapshotListOutputSchema } from '../../../schemas'
-import { TargetCapsuleSchema, TargetType } from '../targets'
+import { TargetOwnerSchema, TargetType } from '../targets'
 import { defineCapsuleCommand } from './definitions'
 import type { input, output, ZodType } from 'zod'
 import type { CapsuleCommandDefinition, CapsuleEventDefinition } from './definitions'
@@ -17,29 +17,32 @@ export const CapsuleSnapshotCommandName = {
 } as const
 
 export type CapsuleSnapshotCommandName = (typeof CapsuleSnapshotCommandName)[keyof typeof CapsuleSnapshotCommandName]
-
 export const CapsuleSnapshotCommandNameValues = [CapsuleSnapshotCommandName.SNAPSHOTS_LIST] as const
 
 /**
- * Lists all committed logical snapshot records, including archived history, for
- * one capsule aggregate.
+ * Common owner-scoped snapshot command identity.
+ *
+ * The owner target is the NATS routing and authorization scope. `capsuleId`
+ * identifies the requested capsule resource, but never acts as authorization
+ * scope or replaces the Worker's independent durable ownership verification.
+ *
+ * Future snapshot capture commands will extend this schema with a source branch
+ * reference and capture-specific immutable input.
  */
-export const CapsuleSnapshotsListInputSchema = z
+export const CapsuleSnapshotOwnerScopedInputSchema = z
   .object({
-    target: TargetCapsuleSchema,
+    target: TargetOwnerSchema,
+    capsuleId: z.uuid(),
   })
   .strict()
 
+export const CapsuleSnapshotsListInputSchema = CapsuleSnapshotOwnerScopedInputSchema
 export const CapsuleSnapshotsListOutputSchema = CapsuleSnapshotListOutputSchema
-
 export type CapsuleSnapshotsListInput = input<typeof CapsuleSnapshotsListInputSchema>
 export type CapsuleSnapshotsList = output<typeof CapsuleSnapshotsListInputSchema>
 export type CapsuleSnapshotsListOutput = output<typeof CapsuleSnapshotsListOutputSchema>
-
 export const CapsuleSnapshotEventName = {} as const
-
 export type CapsuleSnapshotEventName = (typeof CapsuleSnapshotEventName)[keyof typeof CapsuleSnapshotEventName]
-
 export const CapsuleSnapshotEventNameValues = [] as const
 
 export const CapsuleSnapshotCommandDefinitions = {
@@ -50,7 +53,7 @@ export const CapsuleSnapshotCommandDefinitions = {
     outputSchema: CapsuleSnapshotsListOutputSchema,
     timeoutMs: CAPSULE_SNAPSHOTS_LIST_TIMEOUT_MS,
     target: {
-      type: TargetType.CAPSULE,
+      type: TargetType.OWNER,
       resolve(payload: CapsuleSnapshotsList) {
         return payload.target
       },
@@ -59,5 +62,4 @@ export const CapsuleSnapshotCommandDefinitions = {
 } as const satisfies Record<CapsuleSnapshotCommandName, CapsuleCommandDefinition>
 
 export const CapsuleSnapshotEventDefinitions = {} as const satisfies Record<CapsuleSnapshotEventName, CapsuleEventDefinition>
-
 export const CapsuleSnapshotEventSchemas = [] as const satisfies readonly ZodType[]

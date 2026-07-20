@@ -1,22 +1,25 @@
 import { and, eq } from 'drizzle-orm'
 import {
-  CapsuleChannelError,
-  CapsuleChannelErrorCode,
   CapsuleSnapshotCommandName,
+  GlobalError,
+  GlobalErrorCode,
   TargetType,
   capsulesTable,
   type CapsuleChannel,
   type CapsuleHostDbContract,
   type CapsuleSnapshotListOutput,
-  type TargetCapsule,
 } from '@qiln/core/server'
 
 /**
  * Public Engine boundary for committed capsule snapshot history.
  *
- * Snapshot commands are capsule-targeted at the protocol layer, so the Engine first proves authenticated
- * ownership without exposing whether a foreign capsule exists. Snapshot capture and physical snapshot
- * mutation remain intentionally outside this read-only service.
+ * Snapshot commands are owner-targeted at the protocol layer. The Engine
+ * derives that target from authenticated context and proves local visibility
+ * before dispatch. The Worker independently verifies durable ownership before
+ * reading snapshot history.
+ *
+ * Snapshot capture and physical snapshot mutation remain intentionally outside
+ * this read-only service.
  */
 export class CapsuleSnapshotsService {
   constructor(
@@ -25,13 +28,23 @@ export class CapsuleSnapshotsService {
   ) {}
 
   public async list(ownerId: string, capsuleId: string): Promise<CapsuleSnapshotListOutput> {
-    await this.assertCapsuleOwnership(ownerId, capsuleId)
+    await this.assertOwnedCapsule(ownerId, capsuleId)
     return await this.channel.command(CapsuleSnapshotCommandName.SNAPSHOTS_LIST, {
-      target: this.capsuleTarget(capsuleId),
+      target: {
+        type: TargetType.OWNER,
+        id: ownerId,
+      },
+      capsuleId,
     })
   }
 
-  private async assertCapsuleOwnership(ownerId: string, capsuleId: string): Promise<void> {
+  /**
+   * Provides defense in depth at the authenticated Engine boundary.
+   *
+   * The Worker remains authoritative and repeats this ownership proof before
+   * reading durable snapshot state.
+   */
+  private async assertOwnedCapsule(ownerId: string, capsuleId: string): Promise<void> {
     const [capsule] = await this.db
       .select({
         id: capsulesTable.id,
@@ -40,19 +53,9 @@ export class CapsuleSnapshotsService {
       .where(and(eq(capsulesTable.id, capsuleId), eq(capsulesTable.ownerId, ownerId)))
       .limit(1)
     if (!capsule) {
-      throw new CapsuleChannelError('Capsule not found or access denied.', {
-        code: CapsuleChannelErrorCode.NOT_FOUND,
-        details: {
-          capsuleId,
-        },
+      throw new GlobalError('Capsule not found or access denied.', GlobalErrorCode.NOT_FOUND, {
+        capsuleId,
       })
-    }
-  }
-
-  private capsuleTarget(capsuleId: string): TargetCapsule {
-    return {
-      type: TargetType.CAPSULE,
-      id: capsuleId,
     }
   }
 }

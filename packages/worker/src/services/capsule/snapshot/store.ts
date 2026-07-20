@@ -1,10 +1,13 @@
-import { asc, eq } from 'drizzle-orm'
+import { and, asc, eq } from 'drizzle-orm'
 import { capsuleSnapshotsTable, capsulesTable, type CapsuleHostDbContract } from '@qiln/core/server'
 import { IncusError } from '../../../errors'
 import type { CapsuleSnapshotRecord } from './types'
 
 /**
  * Persistence boundary for committed logical capsule snapshot history.
+ *
+ * Snapshot history reads prove capsule ownership before querying snapshot rows.
+ * Missing and foreign capsules are intentionally indistinguishable.
  *
  * This store intentionally has no writer. Snapshot capture must later validate
  * source-branch membership, artifact manifests, and physical references in one
@@ -13,21 +16,19 @@ import type { CapsuleSnapshotRecord } from './types'
 export class CapsuleSnapshotStore {
   constructor(private readonly db: CapsuleHostDbContract) {}
 
-  public async listSnapshotsForCapsule(capsuleId: string): Promise<CapsuleSnapshotRecord[]> {
+  public async listSnapshotsForOwnedCapsule(ownerId: string, capsuleId: string): Promise<CapsuleSnapshotRecord[]> {
     const [capsule] = await this.db
       .select({
         id: capsulesTable.id,
       })
       .from(capsulesTable)
-      .where(eq(capsulesTable.id, capsuleId))
+      .where(and(eq(capsulesTable.id, capsuleId), eq(capsulesTable.ownerId, ownerId)))
       .limit(1)
-
     if (!capsule) {
       throw new IncusError('Capsule not found.', 'NOT_FOUND', {
         capsuleId,
       })
     }
-
     return await this.db
       .select({
         id: capsuleSnapshotsTable.id,
@@ -39,7 +40,7 @@ export class CapsuleSnapshotStore {
         archivedAt: capsuleSnapshotsTable.archivedAt,
       })
       .from(capsuleSnapshotsTable)
-      .where(eq(capsuleSnapshotsTable.capsuleId, capsuleId))
+      .where(eq(capsuleSnapshotsTable.capsuleId, capsule.id))
       .orderBy(asc(capsuleSnapshotsTable.createdAt), asc(capsuleSnapshotsTable.id))
   }
 }
