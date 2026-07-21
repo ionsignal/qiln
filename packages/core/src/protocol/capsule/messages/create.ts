@@ -1,11 +1,7 @@
 import { z } from 'zod'
-import {
-  CapsuleActorReferenceSchema,
-  CapsuleBlueprintDigestSchema,
-  CapsuleCreateReceiptSchema,
-  CapsuleOperationIdempotencyKeySchema,
-  DEFAULT_CAPSULE_BLUEPRINT_NAME,
-} from '../../../schemas'
+import { CapsuleBlueprintDigestSchema, DEFAULT_CAPSULE_BLUEPRINT_NAME } from '../../../schemas/blueprint/catalog'
+import { CapsuleActorReferenceSchema } from '../../../schemas/capsule/actor'
+import { CapsuleCreateReceiptSchema, CapsuleOperationIdempotencyKeySchema } from '../../../schemas/capsule/operations'
 import { TargetOwnerSchema, TargetType } from '../targets'
 import { defineCapsuleCommand } from './definitions'
 import type { input, output } from 'zod'

@@ -15,22 +15,15 @@ export const CapsuleSubjectKind = {
 export type CapsuleSubjectKind = (typeof CapsuleSubjectKind)[keyof typeof CapsuleSubjectKind]
 
 export interface ParsedCapsuleSubject {
-  subject: string
   kind: CapsuleSubjectKind
-  prefix: string
   target: Target
   operation: string
 }
 
 /**
- * NATS subjects are dot-tokenized. Capsule targets must remain concrete tokens
- * so ownership/capsule/system checks cannot be bypassed by ambiguous subject parsing.
+ * NATS subjects are dot-tokenized. Capsule targets must remain concrete tokens so
+ * ownership/capsule/system checks cannot be bypassed by ambiguous subject parsing.
  */
-export function isValidCapsuleSubjectTarget(target: unknown): target is Target {
-  const parsed = TargetSchema.safeParse(target)
-  return parsed.success
-}
-
 export function assertCapsuleSubjectTarget(target: unknown, context: string): asserts target is Target {
   assertTarget(target, context)
 }
@@ -80,18 +73,14 @@ export function parseCapsuleSubject(subject: string): ParsedCapsuleSubject | nul
   }
   if (prefix === CAPSULE_COMMAND_SUBJECT_PREFIX) {
     return {
-      subject,
       kind: CapsuleSubjectKind.COMMAND,
-      prefix,
       target: target.data,
       operation,
     }
   }
   if (prefix === CAPSULE_EVENT_SUBJECT_PREFIX) {
     return {
-      subject,
       kind: CapsuleSubjectKind.EVENT,
-      prefix,
       target: target.data,
       operation,
     }

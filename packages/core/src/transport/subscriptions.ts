@@ -3,10 +3,6 @@ import type { Subscription } from '@nats-io/transport-node'
 export class NatsSubscriptionTracker {
   private readonly subscriptions = new Set<Subscription>()
 
-  get size(): number {
-    return this.subscriptions.size
-  }
-
   track<TSubscription extends Subscription>(subscription: TSubscription): TSubscription {
     this.subscriptions.add(subscription)
     return subscription

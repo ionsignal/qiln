@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { CapsuleBlueprintDigestSchema } from '../blueprints'
+import { CapsuleBlueprintDigestSchema } from '../blueprint/catalog'
 
 export const CapsuleBranchResourceType = {
   INCUS_PROJECT: 'incus_project',

@@ -1,11 +1,13 @@
 import { z } from 'zod'
-import { CapsuleBlueprintManifestSchema } from '../../../schemas'
+import { CapsuleBlueprintManifestSchema } from '../../../schemas/blueprint/catalog'
 import { TargetSystemSchema, TargetType } from '../targets'
 import { defineCapsuleCommand } from './definitions'
 import type { input, output } from 'zod'
 import type { CapsuleCommandDefinition } from './definitions'
 
 const CAPSULE_BLUEPRINTS_LIST_TIMEOUT_MS = 15_000
+
+export type CapsuleBlueprintCommandName = (typeof CapsuleBlueprintCommandName)[keyof typeof CapsuleBlueprintCommandName]
 
 /**
  * Blueprint command names are scoped to worker-authoritative capsule blueprint
@@ -14,8 +16,6 @@ const CAPSULE_BLUEPRINTS_LIST_TIMEOUT_MS = 15_000
 export const CapsuleBlueprintCommandName = {
   BLUEPRINTS_LIST: 'capsule.blueprints.list',
 } as const
-
-export type CapsuleBlueprintCommandName = (typeof CapsuleBlueprintCommandName)[keyof typeof CapsuleBlueprintCommandName]
 
 export const CapsuleBlueprintCommandNameValues = [CapsuleBlueprintCommandName.BLUEPRINTS_LIST] as const
 

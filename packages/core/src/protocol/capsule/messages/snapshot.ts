@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { CapsuleSnapshotListOutputSchema } from '../../../schemas'
+import { CapsuleSnapshotListOutputSchema } from '../../../schemas/capsule/snapshots'
 import { TargetOwnerSchema, TargetType } from '../targets'
 import { defineCapsuleCommand } from './definitions'
 import type { input, output, ZodType } from 'zod'
@@ -17,17 +17,14 @@ export const CapsuleSnapshotCommandName = {
 } as const
 
 export type CapsuleSnapshotCommandName = (typeof CapsuleSnapshotCommandName)[keyof typeof CapsuleSnapshotCommandName]
+
 export const CapsuleSnapshotCommandNameValues = [CapsuleSnapshotCommandName.SNAPSHOTS_LIST] as const
 
 /**
  * Common owner-scoped snapshot command identity.
  *
- * The owner target is the NATS routing and authorization scope. `capsuleId`
- * identifies the requested capsule resource, but never acts as authorization
- * scope or replaces the Worker's independent durable ownership verification.
- *
- * Future snapshot capture commands will extend this schema with a source branch
- * reference and capture-specific immutable input.
+ * The owner target is the routing and authorization scope. `capsuleId` identifies the requested capsule but n
+ * ever replaces independent durable ownership verification.
  */
 export const CapsuleSnapshotOwnerScopedInputSchema = z
   .object({
@@ -38,11 +35,15 @@ export const CapsuleSnapshotOwnerScopedInputSchema = z
 
 export const CapsuleSnapshotsListInputSchema = CapsuleSnapshotOwnerScopedInputSchema
 export const CapsuleSnapshotsListOutputSchema = CapsuleSnapshotListOutputSchema
+
 export type CapsuleSnapshotsListInput = input<typeof CapsuleSnapshotsListInputSchema>
 export type CapsuleSnapshotsList = output<typeof CapsuleSnapshotsListInputSchema>
 export type CapsuleSnapshotsListOutput = output<typeof CapsuleSnapshotsListOutputSchema>
+
 export const CapsuleSnapshotEventName = {} as const
+
 export type CapsuleSnapshotEventName = (typeof CapsuleSnapshotEventName)[keyof typeof CapsuleSnapshotEventName]
+
 export const CapsuleSnapshotEventNameValues = [] as const
 
 export const CapsuleSnapshotCommandDefinitions = {
@@ -62,4 +63,5 @@ export const CapsuleSnapshotCommandDefinitions = {
 } as const satisfies Record<CapsuleSnapshotCommandName, CapsuleCommandDefinition>
 
 export const CapsuleSnapshotEventDefinitions = {} as const satisfies Record<CapsuleSnapshotEventName, CapsuleEventDefinition>
+
 export const CapsuleSnapshotEventSchemas = [] as const satisfies readonly ZodType[]

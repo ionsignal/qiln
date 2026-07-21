@@ -13,7 +13,6 @@ export const TargetType = {
 } as const
 
 export type TargetTypeValue = (typeof TargetType)[keyof typeof TargetType]
-export type TargetType = TargetTypeValue
 
 export const TargetTypeValues = [TargetType.OWNER, TargetType.CAPSULE, TargetType.SYSTEM] as const
 export const TargetTypeSchema = z.enum(TargetTypeValues)
@@ -65,7 +64,7 @@ export const TargetSchema = z.discriminatedUnion('type', [TargetOwnerSchema, Tar
 
 export type TargetOwner = z.infer<typeof TargetOwnerSchema>
 export type TargetCapsule = z.infer<typeof TargetCapsuleSchema>
-export type SystemTarget = z.infer<typeof TargetSystemSchema>
+export type TargetSystem = z.infer<typeof TargetSystemSchema>
 export type Target = z.infer<typeof TargetSchema>
 
 export function isTargetEqual(left: Target, right: Target): boolean {

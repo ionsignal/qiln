@@ -1,5 +1,10 @@
 import { z } from 'zod'
-import { CapsuleBranchNameSchema, CapsuleBranchStatusSchema, type CapsuleBranchName, type CapsuleBranchStatus } from '../../../schemas'
+import {
+  CapsuleBranchNameSchema,
+  CapsuleBranchStatusSchema,
+  type CapsuleBranchName,
+  type CapsuleBranchStatus,
+} from '../../../schemas/capsule/branch'
 import { TargetOwnerSchema, TargetType } from '../targets'
 import { CapsuleCommandAckSchema, defineCapsuleCommand, defineCapsuleEvent } from './definitions'
 import type { input, output } from 'zod'
@@ -41,10 +46,12 @@ export const CapsuleBranchCommandBaseSchema = z
   .strict()
 
 export const CapsuleBranchStartInputSchema = CapsuleBranchCommandBaseSchema
+
 export type CapsuleBranchStartInput = input<typeof CapsuleBranchStartInputSchema>
 export type CapsuleBranchStart = output<typeof CapsuleBranchStartInputSchema>
 
 export const CapsuleBranchStopInputSchema = CapsuleBranchCommandBaseSchema
+
 export type CapsuleBranchStopInput = input<typeof CapsuleBranchStopInputSchema>
 export type CapsuleBranchStop = output<typeof CapsuleBranchStopInputSchema>
 

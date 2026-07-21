@@ -1,7 +1,7 @@
 import { z } from 'zod'
-import { CapsuleLifecycleStateSchema } from '../../../schemas'
 import { TargetOwnerSchema, TargetType } from '../targets'
 import { defineCapsuleEvent } from './definitions'
+import { CapsuleLifecycleStateSchema } from '../../../schemas/capsule/lifecycle'
 import type { CapsuleEventDefinition } from './definitions'
 
 /**

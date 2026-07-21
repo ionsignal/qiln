@@ -1,9 +1,10 @@
 export * from './errors'
-export * from './schemas'
+export * from './schemas/client'
 export * from './protocol/capsule/targets'
 export * from './protocol/capsule/messages'
 
 export { CapsuleChannelError, CapsuleChannelErrorCodeSchema } from './protocol/capsule/channel'
+
 export type {
   CapsuleChannel,
   CapsuleChannelErrorOptions,

@@ -113,14 +113,15 @@ function validationDetails(error: ZodErrorLike): Record<string, unknown> {
  *
  * Product code should not construct subjects or transport envelopes directly.
  *
- * This class owns the capsule subject family, request/reply envelope, validation, and target checks for
- * capsule branch commands/events. Raw NATS plumbing lives in `transport/nats` so future protocol adapters
- * can reuse connection mechanics without inheriting capsule semantics.
+ * This class owns the capsule subject family, request/reply envelope,
+ * validation, and target checks for capsule commands and events. Raw NATS
+ * plumbing lives in `transport` so future protocol adapters can reuse
+ * connection mechanics without inheriting capsule semantics.
  */
 export class CapsuleNatsChannel implements CapsuleChannel {
   private readonly connection: NatsConnectionManager
+  private readonly commandQueue: string
   private readonly loggerPrefix: string
-  private readonly commands: string
 
   /*
    * TODO: Capsule targets validate routing and payload/subject consistency, but they do not authenticate
@@ -133,7 +134,7 @@ export class CapsuleNatsChannel implements CapsuleChannel {
    */
   constructor(config: CapsuleNatsChannelConfig, options: CapsuleNatsChannelOptions = {}) {
     this.loggerPrefix = options.loggerPrefix ?? DEFAULT_LOGGER_PREFIX
-    this.commands = options.commandQueue ?? DEFAULT_COMMAND_QUEUE
+    this.commandQueue = options.commandQueue ?? DEFAULT_COMMAND_QUEUE
     this.connection = new NatsConnectionManager(config, {
       loggerPrefix: this.loggerPrefix,
     })
@@ -154,7 +155,7 @@ export class CapsuleNatsChannel implements CapsuleChannel {
   ): void {
     const definition = getCapsuleCommandDefinition(name)
     const subject = buildCapsuleCommandHandlerSubject(definition.target.type, name)
-    const queue = options.queue ?? this.commands
+    const queue = options.queue ?? this.commandQueue
     const sub = queue ? this.connection.subscribe(subject, { queue }) : this.connection.subscribe(subject)
     void this.runCommandResponder(sub, name, handler, options)
   }

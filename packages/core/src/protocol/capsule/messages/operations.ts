@@ -1,13 +1,13 @@
 import { z } from 'zod'
+import { CapsuleActorReferenceSchema } from '../../../schemas/capsule/actor'
 import {
-  CapsuleActorReferenceSchema,
   CapsuleArchiveReceiptSchema,
   CapsuleDestroyReceiptSchema,
   CapsuleOperationIdempotencyKeySchema,
   CapsuleOperationStatusSchema,
   CapsuleOperationTypeSchema,
   CapsuleUnarchiveReceiptSchema,
-} from '../../../schemas'
+} from '../../../schemas/capsule/operations'
 import { TargetOwnerSchema, TargetType } from '../targets'
 import { defineCapsuleCommand, defineCapsuleEvent } from './definitions'
 import type { input, output } from 'zod'
@@ -40,8 +40,7 @@ export const CapsuleOperationEventNameValues = [CapsuleOperationEventName.OPERAT
 /**
  * Common owner-targeted mutation identity.
  *
- * The actor is the authenticated principal that authored the operation. It is
- * supplied by a trusted server-side publisher rather than by browser input.
+ * The actor is supplied by a trusted server-side publisher rather than browser input.
  */
 const CapsuleOperationCommandInputSchema = z
   .object({
@@ -75,10 +74,7 @@ export type CapsuleDestroyOperationOutput = output<typeof CapsuleDestroyOperatio
 /**
  * Best-effort owner-targeted invalidation event.
  *
- * The shared operation ledger intentionally contains no operation-specific
- * branch, snapshot, route, or promotion references. Clients must refetch the
- * authoritative operation and relevant domain state after receiving this event
- * or reconnecting.
+ * Clients must refetch authoritative operation and domain state after receiving this event or reconnecting.
  */
 export const CapsuleOperationChangedEventSchema = z
   .object({

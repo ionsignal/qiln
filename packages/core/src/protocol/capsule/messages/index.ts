@@ -93,7 +93,6 @@ export const CapsuleCommandDefinitions = {
 export type CapsuleCommandRegistry = typeof CapsuleCommandDefinitions
 export type CapsuleCommandDefinitionFor<TName extends CapsuleCommandName> = CapsuleCommandRegistry[TName]
 export type AnyCapsuleCommandDefinition = CapsuleCommandRegistry[keyof CapsuleCommandRegistry]
-export const CapsuleCommandDefinitionList = Object.values(CapsuleCommandDefinitions) as readonly AnyCapsuleCommandDefinition[]
 
 export const CapsuleEventDefinitions = {
   ...CapsuleBranchEventDefinitions,
@@ -105,7 +104,6 @@ export const CapsuleEventDefinitions = {
 export type CapsuleEventRegistry = typeof CapsuleEventDefinitions
 export type CapsuleEventDefinitionFor<TName extends CapsuleEventName> = CapsuleEventRegistry[TName]
 export type AnyCapsuleEventDefinition = CapsuleEventRegistry[keyof CapsuleEventRegistry]
-export const CapsuleEventDefinitionList = Object.values(CapsuleEventDefinitions) as readonly AnyCapsuleEventDefinition[]
 
 const CapsuleEventSchemas = [
   ...CapsuleBranchEventSchemas,

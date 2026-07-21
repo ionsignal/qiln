@@ -1,3 +1,5 @@
+schema_version: 1
+
 name: n8n-comfyui-capsule
 display_name: AI Workflow Capsule (n8n & ComfyUI)
 description: Dual n8n and ComfyUI capsule blueprint with durable branch storage and read-only shared model mount.
@@ -19,12 +21,13 @@ provisioning:
       shifted: true
       readonly: true
 
+  # TODO:
   files:
-    - path: /workspace/models
-      type: directory
-      uid: 1000
-      gid: 1000
-      mode: '0755'
+    # - path: /workspace/models
+    #   type: directory
+    #   uid: 1000
+    #   gid: 1000
+    #   mode: '0755'
 
     - path: /workspace/workflows
       type: directory
@@ -50,7 +53,7 @@ provisioning:
     #     # ComfyUI environment paths
     #     COMFYUI_EXTRA_MODEL_PATHS=/workspace/extra_model_paths.yaml
 
-    # Inform ComfyUI how to locate models in the read-only mount
+    # Inform ComfyUI how to locate models in the read-only external mount.
     - path: /workspace/extra_model_paths.yaml
       uid: 1000
       gid: 1000
@@ -62,7 +65,7 @@ provisioning:
           loras: loras/
           vae: vae/
 
-instance_template:
+runtime:
   config:
     security.privileged: 'false'
     security.nesting: 'false'
@@ -80,6 +83,32 @@ instance_template:
       type: disk
       pool: is-nvme-pool
       path: /
+
+snapshot_capture:
+  policy_version: 1
+
+  artifact_roots:
+    - id: workspace
+      volume: workspace
+      required: true
+      required_paths:
+        - path: workflows
+          type: directory
+        - path: outputs
+          type: directory
+        - path: extra_model_paths.yaml
+          type: file
+
+  # Required external mounts are not traversed as ordinary artifacts. A future
+  # capture operation must record an immutable dependency reference before the
+  # resulting snapshot can become a branch-fork source.
+  external_mounts:
+    - volume: shared-models
+      required: true
+
+  # Repository locations remain empty until the n8n and ComfyUI installation
+  # layout is explicitly defined by the capsule runtime.
+  git_repositories: []
 
 # Application routing
 application:

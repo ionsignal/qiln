@@ -7,14 +7,11 @@ import { digestCanonicalJsonValue } from '../digest/canonical'
 import {
   CapsuleBlueprintDigestSchema,
   CapsuleBlueprintManifestSchema,
-  CapsuleBlueprintPinSchema,
-  CapsuleBlueprintSchema,
-  type CapsuleBlueprint,
   type CapsuleBlueprintDigest,
   type CapsuleBlueprintManifest,
   type CapsuleBlueprintManifestItem,
-  type CapsuleBlueprintPin,
-} from '../schemas'
+} from '../schemas/blueprint/catalog'
+import { CapsuleBlueprintPinSchema, CapsuleBlueprintSchema, type CapsuleBlueprint, type CapsuleBlueprintPin } from '../schemas/blueprint/schema'
 
 const DEFAULT_LOGGER_PREFIX = '[CapsuleBlueprintRegistry]'
 
@@ -64,6 +61,30 @@ function compareStableString(left: string, right: string): number {
   return 0
 }
 
+/**
+ * Recursively freezes validated JSON-compatible registry output.
+ *
+ * Blueprint values contain only plain objects, arrays, and JSON primitives
+ * after Zod validation. Freezing them prevents callers from mutating reviewed
+ * definitions or generated pins after their digest has been verified.
+ */
+function deepFreeze<T>(value: T): T {
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      deepFreeze(item)
+    }
+    Object.freeze(value)
+    return value
+  }
+  if (isRecord(value)) {
+    for (const child of Object.values(value)) {
+      deepFreeze(child)
+    }
+    Object.freeze(value)
+  }
+  return value
+}
+
 function digestCanonicalValue(value: unknown): CapsuleBlueprintDigest {
   const digest = digestCanonicalJsonValue(value, {
     context: 'capsule blueprint digest input',
@@ -96,14 +117,16 @@ export class CapsuleBlueprintRegistry {
   /**
    * Loads all YAML capsule blueprints from a directory into memory.
    *
-   * The cache is replaced only after the entire directory loads successfully, so
-   * a failed reload cannot leave callers with a partially loaded registry.
+   * The cache is replaced only after the entire directory loads successfully,
+   * so a failed reload cannot leave a partially loaded registry.
    */
   public async load(directory: string): Promise<void> {
     const resolvedDirectory = path.resolve(directory)
     const nextCache = new Map<string, CapsuleBlueprint>()
     try {
-      const entries = await fs.readdir(resolvedDirectory, { withFileTypes: true })
+      const entries = await fs.readdir(resolvedDirectory, {
+        withFileTypes: true,
+      })
       const yamlFiles = entries
         .filter(dirent => dirent.isFile() && (dirent.name.endsWith('.yaml') || dirent.name.endsWith('.yml')))
         .map(dirent => dirent.name)
@@ -120,7 +143,7 @@ export class CapsuleBlueprintRegistry {
             ...validationDetails(result.error),
           })
         }
-        const blueprint = result.data
+        const blueprint = deepFreeze(result.data)
         if (nextCache.has(blueprint.name)) {
           throw new GlobalError(`Duplicate capsule blueprint '${blueprint.name}'.`, GlobalErrorCode.CONFLICT, {
             name: blueprint.name,
@@ -156,10 +179,7 @@ export class CapsuleBlueprintRegistry {
   }
 
   /**
-   * Resolves a caller-reviewed blueprint digest to a durable blueprint pin.
-   *
-   * The worker uses this before accepting branch creation. Once accepted, the operation stores the returned
-   * validated blueprint snapshot so later audit and cleanup accounting are not tied to mutable YAML catalog state.
+   * Resolves a caller-reviewed blueprint digest to an immutable durable blueprint pin.
    */
   public pin(name: string, digest: string): CapsuleBlueprintPin {
     const parsedDigest = CapsuleBlueprintDigestSchema.safeParse(digest)
@@ -196,32 +216,23 @@ export class CapsuleBlueprintRegistry {
         validationDetails(parsedPin.error),
       )
     }
-    return parsedPin.data
+    return deepFreeze(parsedPin.data)
   }
 
-  /**
-   * Retrieves a validated capsule blueprint by name.
-   */
   public get(name: string): CapsuleBlueprint | undefined {
     return this.cache.get(name)
   }
 
-  /**
-   * Lists all loaded capsule blueprints.
-   */
   public list(): CapsuleBlueprint[] {
-    return Array.from(this.cache.values())
+    return deepFreeze(Array.from(this.cache.values()))
   }
 
   /**
-   * Returns a client-safe manifest of provisionable capsule blueprints.
-   *
-   * The manifest intentionally contains summaries and stable digests rather than
-   * full provisioning details. Branch creation can later use these digests to
-   * verify the selected worker blueprint before mutation.
+   * Returns an immutable client-safe manifest of provisionable capsule
+   * blueprints.
    */
   public manifest(): CapsuleBlueprintManifest {
-    const blueprints = this.list()
+    const blueprints = Array.from(this.cache.values())
       .sort((left, right) => compareStableString(left.name, right.name))
       .map<CapsuleBlueprintManifestItem>(blueprint => ({
         name: blueprint.name,
@@ -246,7 +257,7 @@ export class CapsuleBlueprintRegistry {
         validationDetails(parsed.error),
       )
     }
-    return parsed.data
+    return deepFreeze(parsed.data)
   }
 
   private parseBlueprintYaml(content: string, file: string, filePath: string): unknown {

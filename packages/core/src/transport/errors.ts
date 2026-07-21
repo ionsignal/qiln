@@ -8,8 +8,6 @@ export const NatsTransportErrorCode = {
   REQUEST_ERROR: 'REQUEST_ERROR',
   PUBLISH_ERROR: 'PUBLISH_ERROR',
   RESPOND_ERROR: 'RESPOND_ERROR',
-  SUBSCRIPTION_ERROR: 'SUBSCRIPTION_ERROR',
-  SHUTDOWN_ERROR: 'SHUTDOWN_ERROR',
 } as const
 
 export type NatsTransportErrorCode = (typeof NatsTransportErrorCode)[keyof typeof NatsTransportErrorCode]

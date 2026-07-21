@@ -38,10 +38,6 @@ export class NatsConnectionManager {
     return this.abortController.signal
   }
 
-  get isStarted(): boolean {
-    return this.started
-  }
-
   async start(): Promise<void> {
     if (this.started) {
       return

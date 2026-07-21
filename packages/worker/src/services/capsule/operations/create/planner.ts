@@ -135,7 +135,7 @@ export class CreateCapsuleResourcePlanner {
     managedVolumes.sort((left, right) => right.mountPath.length - left.mountPath.length)
 
     const config: Record<string, string> = {
-      ...blueprint.instance_template.config,
+      ...blueprint.runtime.config,
       'environment.QILN_TENANT_ID': rootBranchName,
       'limits.cpu': cpu,
       'limits.memory': memory,
@@ -147,7 +147,7 @@ export class CreateCapsuleResourcePlanner {
     }
 
     const devices: IncusDeviceMap = {
-      ...blueprint.instance_template.devices,
+      ...blueprint.runtime.devices,
       ...dynamicDevices,
     }
 
