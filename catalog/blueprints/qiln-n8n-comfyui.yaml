@@ -7,9 +7,13 @@ image_alias: qiln-noble-python-node
 
 provisioning:
   volumes:
+    # The seed contains normal, commit-pinned n8n and ComfyUI Git repositories.
+    # Each branch receives its own writable ZFS clone rather than sharing source
+    # files through a bind mount.
     - name: workspace
-      type: empty
+      type: clone
       pool: is-nvme-pool
+      source_volume: qiln-n8n-c9d4de11-comfyui-306af3a8-v1
       mount_path: /workspace
       shifted: true
       readonly: false
@@ -21,40 +25,64 @@ provisioning:
       shifted: true
       readonly: true
 
-  # TODO:
   files:
-    # - path: /workspace/models
-    #   type: directory
-    #   uid: 1000
-    #   gid: 1000
-    #   mode: '0755'
-
-    - path: /workspace/workflows
+    - path: /workspace/capsule
       type: directory
       uid: 1000
       gid: 1000
       mode: '0755'
 
-    - path: /workspace/outputs
+    - path: /workspace/capsule/n8n
       type: directory
       uid: 1000
       gid: 1000
       mode: '0755'
 
-    # - path: /workspace/workflows/app.env
-    #   uid: 1000
-    #   gid: 1000
-    #   mode: '0600'
-    #   content: |
-    #     # n8n isolation configurations
-    #     N8N_ENCRYPTION_KEY={{ secrets.n8n_encryption_key }}
-    #     N8N_DATABASE_PROVIDER=sqlite
-    #     N8N_DATABASE_PATH=/workspace/n8n/database.sqlite
-    #     # ComfyUI environment paths
-    #     COMFYUI_EXTRA_MODEL_PATHS=/workspace/extra_model_paths.yaml
+    - path: /workspace/capsule/n8n/workflows
+      type: directory
+      uid: 1000
+      gid: 1000
+      mode: '0755'
 
-    # Inform ComfyUI how to locate models in the read-only external mount.
-    - path: /workspace/extra_model_paths.yaml
+    - path: /workspace/capsule/comfyui
+      type: directory
+      uid: 1000
+      gid: 1000
+      mode: '0755'
+
+    - path: /workspace/capsule/comfyui/graphs
+      type: directory
+      uid: 1000
+      gid: 1000
+      mode: '0755'
+
+    - path: /workspace/capsule/comfyui/config
+      type: directory
+      uid: 1000
+      gid: 1000
+      mode: '0755'
+
+    - path: /workspace/capsule/routes
+      type: directory
+      uid: 1000
+      gid: 1000
+      mode: '0755'
+
+    - path: /workspace/capsule/tests
+      type: directory
+      uid: 1000
+      gid: 1000
+      mode: '0755'
+
+    - path: /workspace/capsule/shared
+      type: directory
+      uid: 1000
+      gid: 1000
+      mode: '0755'
+
+    # The future ComfyUI launcher must pass this file explicitly through
+    # ComfyUI's extra-model-path configuration option.
+    - path: /workspace/capsule/comfyui/config/extra_model_paths.yaml
       uid: 1000
       gid: 1000
       mode: '0644'
@@ -92,25 +120,62 @@ snapshot_capture:
       volume: workspace
       required: true
       required_paths:
-        - path: workflows
+        - path: apps/n8n
           type: directory
-        - path: outputs
-          type: directory
-        - path: extra_model_paths.yaml
+        - path: apps/n8n/package.json
           type: file
+        - path: apps/comfyui
+          type: directory
+        - path: apps/comfyui/main.py
+          type: file
+        - path: capsule/n8n/workflows
+          type: directory
+        - path: capsule/comfyui/graphs
+          type: directory
+        - path: capsule/comfyui/config
+          type: directory
+        - path: capsule/comfyui/config/extra_model_paths.yaml
+          type: file
+        - path: capsule/routes
+          type: directory
+        - path: capsule/tests
+          type: directory
+        - path: capsule/shared
+          type: directory
 
-  # Required external mounts are not traversed as ordinary artifacts. A future
-  # capture operation must record an immutable dependency reference before the
-  # resulting snapshot can become a branch-fork source.
+  # This mount is an external immutable dependency boundary. It is not
+  # traversed as ordinary artifact content. The logical identity is resolved
+  # to an immutable vault reference during future snapshot capture.
   external_mounts:
     - volume: shared-models
       required: true
+      dependency:
+        kind: model_vault
+        logical_id: shared-models
 
-  # Repository locations remain empty until the n8n and ComfyUI installation
-  # layout is explicitly defined by the capsule runtime.
-  git_repositories: []
+  # Git records add repository semantics to the canonical filesystem manifest;
+  # they do not replace filesystem artifact collection.
+  git_repositories:
+    - id: n8n
+      artifact_root_id: workspace
+      path: apps/n8n
+      required: true
+    - id: comfyui
+      artifact_root_id: workspace
+      path: apps/comfyui
+      required: true
 
-# Application routing
+  # `artifact_capture` covers canonical filesystem collection only. It does
+  # not claim production restoration, promotion, or rollback readiness.
+  #
+  # n8n remains evaluation-only until Qiln has deterministic export/import,
+  # credential-reference projection, and runtime-state handling.
+  application_capabilities:
+    - application: comfyui
+      support: artifact_capture
+    - application: n8n
+      support: evaluation_only
+
 application:
   ports:
     - name: n8n-ingress

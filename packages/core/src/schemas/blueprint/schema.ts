@@ -12,6 +12,11 @@ import {
 
 export const CAPSULE_BLUEPRINT_SCHEMA_VERSION = 1 as const
 
+function isSameOrAncestorPath(left: string, right: string): boolean {
+  const relationship = classifyAbsolutePosixPathRelationship(left, right)
+  return relationship === 'equal' || relationship === 'ancestor'
+}
+
 export const CapsuleBlueprintSchema = z
   .object({
     schema_version: z.literal(CAPSULE_BLUEPRINT_SCHEMA_VERSION),
@@ -95,6 +100,35 @@ export const CapsuleBlueprintSchema = z
       } else {
         artifactRootVolumes.add(root.volume)
       }
+
+      const requiredPathIndexes = new Map<string, number>()
+      root.required_paths.forEach((requiredPath, requiredPathIndex) => {
+        const existingRequiredPathIndex = requiredPathIndexes.get(requiredPath.path)
+        if (existingRequiredPathIndex !== undefined) {
+          context.addIssue({
+            code: 'custom',
+            path: ['snapshot_capture', 'artifact_roots', index, 'required_paths', requiredPathIndex, 'path'],
+            message: `Required artifact path '${requiredPath.path}' already appears at index ${existingRequiredPathIndex}.`,
+          })
+        } else {
+          requiredPathIndexes.set(requiredPath.path, requiredPathIndex)
+        }
+      })
+
+      const exclusionPathIndexes = new Map<string, number>()
+      root.exclusions.forEach((exclusion, exclusionIndex) => {
+        const existingExclusionIndex = exclusionPathIndexes.get(exclusion.path)
+        if (existingExclusionIndex !== undefined) {
+          context.addIssue({
+            code: 'custom',
+            path: ['snapshot_capture', 'artifact_roots', index, 'exclusions', exclusionIndex, 'path'],
+            message: `Artifact exclusion path '${exclusion.path}' already appears at index ${existingExclusionIndex}.`,
+          })
+        } else {
+          exclusionPathIndexes.set(exclusion.path, exclusionIndex)
+        }
+      })
+
       const volume = volumesByName.get(root.volume)
       if (!volume) {
         context.addIssue({
@@ -118,19 +152,83 @@ export const CapsuleBlueprintSchema = z
         volume: root.volume,
         mountPath: volume.mount_path,
       })
-      const requiredPathIndexes = new Map<string, number>()
-      root.required_paths.forEach((requiredPath, requiredPathIndex) => {
-        const existingRequiredPathIndex = requiredPathIndexes.get(requiredPath.path)
-        if (existingRequiredPathIndex !== undefined) {
+
+      for (let requiredIndex = 0; requiredIndex < root.required_paths.length; requiredIndex++) {
+        const requiredPath = root.required_paths[requiredIndex]!
+        if (requiredPath.type !== 'file') {
+          continue
+        }
+        const absoluteRequiredPath = joinAbsoluteAndRelativePosixPath(volume.mount_path, requiredPath.path)
+        for (let comparedIndex = 0; comparedIndex < root.required_paths.length; comparedIndex++) {
+          if (comparedIndex === requiredIndex) {
+            continue
+          }
+          const comparedPath = root.required_paths[comparedIndex]!
+          const absoluteComparedPath = joinAbsoluteAndRelativePosixPath(volume.mount_path, comparedPath.path)
+          if (classifyAbsolutePosixPathRelationship(absoluteRequiredPath, absoluteComparedPath) !== 'ancestor') {
+            continue
+          }
           context.addIssue({
             code: 'custom',
-            path: ['snapshot_capture', 'artifact_roots', index, 'required_paths', requiredPathIndex, 'path'],
-            message: `Required artifact path '${requiredPath.path}' already appears at index ${existingRequiredPathIndex}.`,
+            path: ['snapshot_capture', 'artifact_roots', index, 'required_paths', comparedIndex, 'path'],
+            message: `Required artifact path '${comparedPath.path}' cannot be nested beneath required file '${requiredPath.path}'.`,
           })
-        } else {
-          requiredPathIndexes.set(requiredPath.path, requiredPathIndex)
         }
+      }
+
+      for (let leftIndex = 0; leftIndex < root.exclusions.length; leftIndex++) {
+        const left = root.exclusions[leftIndex]!
+        const absoluteLeftPath = joinAbsoluteAndRelativePosixPath(volume.mount_path, left.path)
+        for (let rightIndex = leftIndex + 1; rightIndex < root.exclusions.length; rightIndex++) {
+          const right = root.exclusions[rightIndex]!
+          const absoluteRightPath = joinAbsoluteAndRelativePosixPath(volume.mount_path, right.path)
+
+          if (classifyAbsolutePosixPathRelationship(absoluteLeftPath, absoluteRightPath) === 'disjoint') {
+            continue
+          }
+          context.addIssue({
+            code: 'custom',
+            path: ['snapshot_capture', 'artifact_roots', index, 'exclusions', rightIndex, 'path'],
+            message: `Artifact exclusions '${left.path}' and '${right.path}' overlap. Exclusions must be disjoint.`,
+          })
+        }
+      }
+
+      root.required_paths.forEach((requiredPath, requiredPathIndex) => {
+        const absoluteRequiredPath = joinAbsoluteAndRelativePosixPath(volume.mount_path, requiredPath.path)
+        root.exclusions.forEach((exclusion, exclusionIndex) => {
+          const absoluteExclusionPath = joinAbsoluteAndRelativePosixPath(volume.mount_path, exclusion.path)
+          if (isSameOrAncestorPath(absoluteExclusionPath, absoluteRequiredPath)) {
+            context.addIssue({
+              code: 'custom',
+              path: ['snapshot_capture', 'artifact_roots', index, 'exclusions', exclusionIndex, 'path'],
+              message: `Artifact exclusion '${exclusion.path}' cannot equal or contain required artifact path '${requiredPath.path}'.`,
+            })
+            return
+          }
+          if (requiredPath.type === 'file' && isSameOrAncestorPath(absoluteRequiredPath, absoluteExclusionPath)) {
+            context.addIssue({
+              code: 'custom',
+              path: ['snapshot_capture', 'artifact_roots', index, 'exclusions', exclusionIndex, 'path'],
+              message: `Artifact exclusion '${exclusion.path}' cannot be nested beneath required file '${requiredPath.path}'.`,
+            })
+          }
+        })
       })
+    })
+
+    const applicationCapabilityIndexes = new Map<string, number>()
+    blueprint.snapshot_capture.application_capabilities.forEach((capability, index) => {
+      const existingCapabilityIndex = applicationCapabilityIndexes.get(capability.application)
+      if (existingCapabilityIndex !== undefined) {
+        context.addIssue({
+          code: 'custom',
+          path: ['snapshot_capture', 'application_capabilities', index, 'application'],
+          message: `Snapshot capture capability for application '${capability.application}' already appears at index ${existingCapabilityIndex}.`,
+        })
+      } else {
+        applicationCapabilityIndexes.set(capability.application, index)
+      }
     })
 
     for (let leftIndex = 0; leftIndex < resolvedArtifactRoots.length; leftIndex++) {
@@ -310,6 +408,23 @@ export const CapsuleBlueprintSchema = z
           })
         }
       })
+
+      root.exclusions.forEach((exclusion, exclusionIndex) => {
+        const absoluteExclusionPath = joinAbsoluteAndRelativePosixPath(resolvedRoot.mountPath, exclusion.path)
+        const boundary = resolvedExternalMounts.find(
+          externalMount =>
+            externalMount.artifactRootId === root.id &&
+            classifyAbsolutePosixPathRelationship(absoluteExclusionPath, externalMount.mountPath) !== 'disjoint',
+        )
+
+        if (boundary) {
+          context.addIssue({
+            code: 'custom',
+            path: ['snapshot_capture', 'artifact_roots', rootIndex, 'exclusions', exclusionIndex, 'path'],
+            message: `Artifact exclusion '${exclusion.path}' overlaps external mount boundary '${boundary.volume}'.`,
+          })
+        }
+      })
     })
 
     const gitRepositoryIndexesById = new Map<string, number>()
@@ -359,6 +474,33 @@ export const CapsuleBlueprintSchema = z
           message: `Git repository '${repository.id}' overlaps external mount boundary '${conflictingExternalMount.volume}'. Git repositories and external mount boundaries must be disjoint.`,
         })
       }
+
+      root.required_paths.forEach(requiredPath => {
+        if (requiredPath.type !== 'file') {
+          return
+        }
+        const absoluteRequiredPath = joinAbsoluteAndRelativePosixPath(resolvedRoot.mountPath, requiredPath.path)
+        if (!isSameOrAncestorPath(absoluteRequiredPath, absoluteRepositoryPath)) {
+          return
+        }
+        context.addIssue({
+          code: 'custom',
+          path: ['snapshot_capture', 'git_repositories', index, 'path'],
+          message: `Git repository '${repository.id}' cannot equal or be nested beneath required file '${requiredPath.path}'.`,
+        })
+      })
+
+      root.exclusions.forEach((exclusion, exclusionIndex) => {
+        const absoluteExclusionPath = joinAbsoluteAndRelativePosixPath(resolvedRoot.mountPath, exclusion.path)
+        if (!isSameOrAncestorPath(absoluteExclusionPath, absoluteRepositoryPath)) {
+          return
+        }
+        context.addIssue({
+          code: 'custom',
+          path: ['snapshot_capture', 'artifact_roots', resolvedRoot.index, 'exclusions', exclusionIndex, 'path'],
+          message: `Artifact exclusion '${exclusion.path}' cannot equal or contain Git repository '${repository.id}'.`,
+        })
+      })
 
       /**
        * Declared repositories are intentionally not rejected for strict
