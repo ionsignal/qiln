@@ -22,7 +22,8 @@ export type QilnMenuOption = MenuOption & {
   isRootAction?: boolean
 }
 
-const renderLink = (label: string, href: string) => () => h(ALink, { href, style: 'text-decoration: none;' }, () => label)
+const renderLink = (label: string, href: string) => () =>
+  h(ALink, { href, style: 'text-decoration: none;' }, () => label)
 const renderIcon = (path: string) => () => h(Icon, { path, size: 14 })
 
 const renderCategoryLabel = (label: string) => (): VNodeChild =>

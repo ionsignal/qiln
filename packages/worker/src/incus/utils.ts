@@ -2,11 +2,11 @@ import type { IncusNetworkInterface } from '../schemas/incus'
 import type { IncusFilePushOptions } from './client/types'
 
 /**
- * Pure utility to extract the primary IPv4 address from an Incus network state object.
- * Safely ignores loopback interfaces and non-global scopes.
+ * Pure utility to extract the primary IPv4 address from an Incus network state
+ * object. Safely ignores loopback interfaces and non-global scopes.
  *
- * @param network The strictly typed network record from IncusState
- * @returns The IPv4 address string, or null if not yet assigned
+ * @param network The strictly typed network record from IncusState.
+ * @returns The IPv4 address string, or null if not yet assigned.
  */
 export function extractIpv4(network?: Record<string, IncusNetworkInterface>): string | null {
   if (!network) return null

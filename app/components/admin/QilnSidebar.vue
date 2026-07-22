@@ -35,8 +35,15 @@
   import { NLayoutSider, NMenu, NText } from 'naive-ui'
   import { useQilnNavigation } from '../../composables/useQilnNavigation'
 
-  const { activeContext, currentMenuTree, activeMenuKey, resolvedExpandedKeys, handleExpandedKeysChange, renderExpandIcon, menuNodeProps } =
-    useQilnNavigation()
+  const {
+    activeContext,
+    currentMenuTree,
+    activeMenuKey,
+    resolvedExpandedKeys,
+    handleExpandedKeysChange,
+    renderExpandIcon,
+    menuNodeProps,
+  } = useQilnNavigation()
   const isCollapsed = ref(false)
   const sidebarTitle = computed(() => {
     if (activeContext.value === 'operations') {

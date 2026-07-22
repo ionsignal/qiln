@@ -1,5 +1,9 @@
 import { z } from 'zod'
-import { CapsuleBlueprintCommandDefinitions, CapsuleBlueprintCommandName, CapsuleBlueprintCommandNameValues } from './blueprints'
+import {
+  CapsuleBlueprintCommandDefinitions,
+  CapsuleBlueprintCommandName,
+  CapsuleBlueprintCommandNameValues,
+} from './blueprints'
 import {
   CapsuleBranchCommandDefinitions,
   CapsuleBranchCommandName,
@@ -145,7 +149,9 @@ function assertCapsuleDefinitionRegistry(
   }
   for (const [key, definition] of Object.entries(definitions)) {
     if (key !== definition.name) {
-      throw new Error(`[CapsuleProtocol] ${label} definition registry key '${key}' does not match definition name '${definition.name}'.`)
+      throw new Error(
+        `[CapsuleProtocol] ${label} definition registry key '${key}' does not match definition name '${definition.name}'.`,
+      )
     }
     if (!expectedNames.has(definition.name)) {
       throw new Error(`[CapsuleProtocol] ${label} definition '${definition.name}' is not listed in ${label} names.`)
@@ -168,7 +174,9 @@ export function isCapsuleEventName(name: string): name is CapsuleEventName {
   return Object.prototype.hasOwnProperty.call(CapsuleEventDefinitions, name)
 }
 
-export function getCapsuleCommandDefinition<TName extends CapsuleCommandName>(name: TName): CapsuleCommandDefinitionFor<TName>
+export function getCapsuleCommandDefinition<TName extends CapsuleCommandName>(
+  name: TName,
+): CapsuleCommandDefinitionFor<TName>
 export function getCapsuleCommandDefinition(name: string): AnyCapsuleCommandDefinition | undefined
 export function getCapsuleCommandDefinition(name: string): AnyCapsuleCommandDefinition | undefined {
   if (!isCapsuleCommandName(name)) {

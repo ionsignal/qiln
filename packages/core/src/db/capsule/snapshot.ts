@@ -55,8 +55,8 @@ export function createCapsuleSnapshotsTable(capsuleIdColumn?: PgColumn, sourceBr
 }
 
 /**
- * Package-local Drizzle table for direct Core/Worker reads against the host-owned
- * physical table. The host-composed schema owns the users foreign key through
- * the capsule aggregate.
+ * Package-local Drizzle table for direct Core/Worker reads against the
+ * host-owned physical table. The host-composed schema owns the users foreign
+ * key through the capsule aggregate.
  */
 export const capsuleSnapshotsTable = createCapsuleSnapshotsTable(capsulesTable.id, capsuleBranchesTable.id)

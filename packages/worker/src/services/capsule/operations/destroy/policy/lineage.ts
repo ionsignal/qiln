@@ -38,7 +38,9 @@ export function inspectDestroyCapsuleBranchLineage(
   const valid =
     branches.length > 0 &&
     rootBranchCount === 1 &&
-    branches.every(branch => branch.ownerId === ownerId && branch.capsuleId === capsuleId && branch.status === requiredStatus)
+    branches.every(
+      branch => branch.ownerId === ownerId && branch.capsuleId === capsuleId && branch.status === requiredStatus,
+    )
   return {
     valid,
     branchCount: branches.length,

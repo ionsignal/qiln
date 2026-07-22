@@ -1,6 +1,10 @@
 import { CapsuleBranchResourceStatus } from '@qiln/core/server'
 import { IncusError } from '../../../../../errors'
-import { DestroyOperationPhase, buildDestroyFailureDiagnostics, createDestroyCapsuleProviderFailure } from '../execution/diagnostics'
+import {
+  DestroyOperationPhase,
+  buildDestroyFailureDiagnostics,
+  createDestroyCapsuleProviderFailure,
+} from '../execution/diagnostics'
 import type { IncusClient } from '../../../../../incus/client/index'
 import type { CapsuleBranchResourceStore } from '../../../resource/store'
 import type {
@@ -25,20 +29,31 @@ export interface DestroyCapsuleProviderDependencies {
 export class DestroyCapsuleProvider {
   constructor(private readonly dependencies: DestroyCapsuleProviderDependencies) {}
 
-  public async deleteInstances(context: DestroyCapsuleOperationContext, targets: readonly DestroyCapsuleInstanceTarget[]): Promise<void> {
+  public async deleteInstances(
+    context: DestroyCapsuleOperationContext,
+    targets: readonly DestroyCapsuleInstanceTarget[],
+  ): Promise<void> {
     for (const target of targets) {
       await this.deleteInstance(context, target)
     }
   }
 
-  public async deleteVolumes(context: DestroyCapsuleOperationContext, targets: readonly DestroyCapsuleVolumeTarget[]): Promise<void> {
+  public async deleteVolumes(
+    context: DestroyCapsuleOperationContext,
+    targets: readonly DestroyCapsuleVolumeTarget[],
+  ): Promise<void> {
     for (const target of targets) {
       await this.deleteVolume(context, target)
     }
   }
 
-  public async finalizeDerivedResources(context: DestroyCapsuleOperationContext, plan: DestroyCapsulePlan): Promise<void> {
-    const rows = await this.dependencies.resources.listBranchResourceInventories(plan.branches.map(branchPlan => branchPlan.branch.id))
+  public async finalizeDerivedResources(
+    context: DestroyCapsuleOperationContext,
+    plan: DestroyCapsulePlan,
+  ): Promise<void> {
+    const rows = await this.dependencies.resources.listBranchResourceInventories(
+      plan.branches.map(branchPlan => branchPlan.branch.id),
+    )
     const rowsById = new Map(rows.map(row => [row.id, row]))
     for (const file of plan.provisioningFiles) {
       this.assertBackingResourceTerminal(file, rowsById)
@@ -46,7 +61,10 @@ export class DestroyCapsuleProvider {
     }
   }
 
-  private async deleteInstance(context: DestroyCapsuleOperationContext, target: DestroyCapsuleInstanceTarget): Promise<void> {
+  private async deleteInstance(
+    context: DestroyCapsuleOperationContext,
+    target: DestroyCapsuleInstanceTarget,
+  ): Promise<void> {
     await this.dependencies.resources.recordBranchResourceDeleteIntent(target.id, context.operationId)
     const project = this.dependencies.incus.UseProject(target.namespace)
     try {
@@ -80,16 +98,20 @@ export class DestroyCapsuleProvider {
           throw error
         }
       } else if (providerState !== 'Stopped') {
-        throw new IncusError('Managed capsule instance is in an unsupported state for fail-closed deletion.', 'CONFLICT', {
-          capsuleId: context.capsuleId,
-          branchId: target.branchId,
-          branchName: target.branchName,
-          resourceId: target.id,
-          resourceKey: target.resourceKey,
-          namespace: target.namespace,
-          instanceName: target.instanceName,
-          providerState,
-        })
+        throw new IncusError(
+          'Managed capsule instance is in an unsupported state for fail-closed deletion.',
+          'CONFLICT',
+          {
+            capsuleId: context.capsuleId,
+            branchId: target.branchId,
+            branchName: target.branchName,
+            resourceId: target.id,
+            resourceKey: target.resourceKey,
+            namespace: target.namespace,
+            instanceName: target.instanceName,
+            providerState,
+          },
+        )
       }
       try {
         await project.instances.delete(target.instanceName)
@@ -105,7 +127,11 @@ export class DestroyCapsuleProvider {
         throw error
       }
 
-      await this.dependencies.resources.recordBranchResourceDeleteOutcome(target.id, context.operationId, CapsuleBranchResourceStatus.DELETED)
+      await this.dependencies.resources.recordBranchResourceDeleteOutcome(
+        target.id,
+        context.operationId,
+        CapsuleBranchResourceStatus.DELETED,
+      )
     } catch (error: unknown) {
       await this.recordDeleteFailureBestEffort(
         context,
@@ -118,7 +144,10 @@ export class DestroyCapsuleProvider {
     }
   }
 
-  private async deleteVolume(context: DestroyCapsuleOperationContext, target: DestroyCapsuleVolumeTarget): Promise<void> {
+  private async deleteVolume(
+    context: DestroyCapsuleOperationContext,
+    target: DestroyCapsuleVolumeTarget,
+  ): Promise<void> {
     await this.dependencies.resources.recordBranchResourceDeleteIntent(target.id, context.operationId)
     const project = this.dependencies.incus.UseProject(target.namespace)
     try {
@@ -135,7 +164,11 @@ export class DestroyCapsuleProvider {
         }
         throw error
       }
-      await this.dependencies.resources.recordBranchResourceDeleteOutcome(target.id, context.operationId, CapsuleBranchResourceStatus.DELETED)
+      await this.dependencies.resources.recordBranchResourceDeleteOutcome(
+        target.id,
+        context.operationId,
+        CapsuleBranchResourceStatus.DELETED,
+      )
     } catch (error: unknown) {
       await this.recordDeleteFailureBestEffort(
         context,
@@ -148,9 +181,15 @@ export class DestroyCapsuleProvider {
     }
   }
 
-  private assertBackingResourceTerminal(file: DestroyCapsuleProvisioningFileResource, rowsById: ReadonlyMap<string, { status: string }>): void {
+  private assertBackingResourceTerminal(
+    file: DestroyCapsuleProvisioningFileResource,
+    rowsById: ReadonlyMap<string, { status: string }>,
+  ): void {
     const backing = rowsById.get(file.backingResourceId)
-    if (!backing || (backing.status !== CapsuleBranchResourceStatus.DELETED && backing.status !== CapsuleBranchResourceStatus.MISSING)) {
+    if (
+      !backing ||
+      (backing.status !== CapsuleBranchResourceStatus.DELETED && backing.status !== CapsuleBranchResourceStatus.MISSING)
+    ) {
       throw new IncusError('Provisioning-file backing resource has no terminal destroy outcome.', 'CONFLICT', {
         branchId: file.branchId,
         branchName: file.branchName,
@@ -202,10 +241,13 @@ export class DestroyCapsuleProvider {
         }),
       )
     } catch (persistenceError: unknown) {
-      console.error(`[DestroyCapsuleProvider] Failed to persist provider deletion failure for resource '${target.id}'.`, {
-        providerFailure,
-        persistenceError,
-      })
+      console.error(
+        `[DestroyCapsuleProvider] Failed to persist provider deletion failure for resource '${target.id}'.`,
+        {
+          providerFailure,
+          persistenceError,
+        },
+      )
     }
   }
 

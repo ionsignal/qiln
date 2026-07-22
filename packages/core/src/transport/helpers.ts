@@ -52,7 +52,12 @@ export async function requestJson(
   return decoded.data
 }
 
-export function publishJson(manager: NatsConnectionManager, subject: string, payload: unknown, options: NatsPublishJsonOptions = {}): void {
+export function publishJson(
+  manager: NatsConnectionManager,
+  subject: string,
+  payload: unknown,
+  options: NatsPublishJsonOptions = {},
+): void {
   const nc = manager.requireConnection()
   const context = options.context ?? `NATS publish '${subject}'`
   const encoded = encodeJson(payload, context)

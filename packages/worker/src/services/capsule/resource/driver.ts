@@ -19,7 +19,13 @@ export class CapsuleResourceDriver {
       if (!volume.sourceVolume) {
         throw new IncusError(`Clone volume '${volume.volumeName}' is missing a source volume.`, 'VALIDATION_ERROR')
       }
-      await project.storage.clone(volume.pool, volume.sourceVolume, volume.volumeName, volume.config, volume.sourceProject)
+      await project.storage.clone(
+        volume.pool,
+        volume.sourceVolume,
+        volume.volumeName,
+        volume.config,
+        volume.sourceProject,
+      )
       return
     }
     await project.storage.create(volume.pool, volume.volumeName, volume.config)
@@ -45,10 +51,20 @@ export class CapsuleResourceDriver {
     await project.instances.delete(instanceName)
   }
 
-  public async writeProvisioningFile(namespace: string, branchName: string, file: ProvisioningFileWriteInput): Promise<void> {
+  public async writeProvisioningFile(
+    namespace: string,
+    branchName: string,
+    file: ProvisioningFileWriteInput,
+  ): Promise<void> {
     const project = this.incus.UseProject(namespace)
     if (file.target.target === 'volume') {
-      await project.storage.files.write(file.target.pool, file.target.volumeName, file.target.internalPath, file.content, file.options)
+      await project.storage.files.write(
+        file.target.pool,
+        file.target.volumeName,
+        file.target.internalPath,
+        file.content,
+        file.options,
+      )
       return
     }
     await project.files.write(branchName, file.path, file.content, file.options)

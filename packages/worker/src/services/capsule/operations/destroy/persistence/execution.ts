@@ -8,7 +8,11 @@ import {
   type CapsuleHostDbContract,
 } from '@qiln/core/server'
 import { IncusError } from '../../../../../errors'
-import { toCapsuleOperationTransition, type CapsuleOperationReader, type CapsuleOperationTransitionOutput } from '../../shared'
+import {
+  toCapsuleOperationTransition,
+  type CapsuleOperationReader,
+  type CapsuleOperationTransitionOutput,
+} from '../../shared'
 import { assertDestroyingCapsuleBranchLineage } from '../policy/lineage'
 import type { DestroyCapsuleAcceptedBranch, DestroyCapsuleExecutionInput } from '../types'
 

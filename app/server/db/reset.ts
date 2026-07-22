@@ -3,7 +3,7 @@ import postgres from 'postgres'
 import type { EnvironmentConfig } from '@/types'
 
 /**
- * Database Reset Script
+ * Database Reset Script.
  */
 async function reset() {
   console.log('[Reset] Loading configuration...')

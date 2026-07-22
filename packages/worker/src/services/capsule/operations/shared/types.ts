@@ -43,7 +43,8 @@ export interface PersistedCapsuleOperation {
  * Operation-specific repositories may extend their committed outputs with
  * capsule lifecycle, branch, snapshot, or route state. The shared publisher
  * consumes only fields common to every operation. Actor provenance is omitted
- * because clients refetch authoritative operation summaries after invalidation.
+ * because clients refetch authoritative operation summaries after
+ * invalidation.
  */
 export interface CapsuleOperationTransitionOutput {
   ownerId: string

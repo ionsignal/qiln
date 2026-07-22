@@ -1,4 +1,9 @@
-import type { CapsuleActorReference, CapsuleLifecycleState, CapsuleOperationRequestHash, CapsuleUnarchiveReceipt } from '@qiln/core/server'
+import type {
+  CapsuleActorReference,
+  CapsuleLifecycleState,
+  CapsuleOperationRequestHash,
+  CapsuleUnarchiveReceipt,
+} from '@qiln/core/server'
 import type { CapsuleOperationTransitionOutput } from '../../shared'
 import type { ProviderFreeArchivalTerminalResult } from '../shared/execution'
 

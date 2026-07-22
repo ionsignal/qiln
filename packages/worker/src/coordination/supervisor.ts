@@ -46,11 +46,12 @@ export class OperationSupervisor {
    *
    * A false result means either:
    *
-   * - the same operation ID is already tracked by this process; or
-   * - shutdown has started and no new work may be scheduled.
+   * - The same operation ID is already tracked by this process; or.
+   * - Shutdown has started and no new work may be scheduled.
    *
    * The caller must preserve the durable accepted operation in both cases. It
-   * must not invoke the executor directly or create an untracked fallback task.
+   * must not invoke the executor directly or create an untracked fallback
+   * task.
    */
   public schedule(operationId: string, execute: () => Promise<void>): boolean {
     if (this.shuttingDown || this.executions.has(operationId)) {
@@ -149,10 +150,16 @@ export class OperationSupervisor {
     try {
       const notification = this.onOperationRejected(operationId, error)
       void Promise.resolve(notification).catch((notificationError: unknown) => {
-        console.error(`${this.loggerPrefix} Operation rejection diagnostic hook failed for '${operationId}'.`, notificationError)
+        console.error(
+          `${this.loggerPrefix} Operation rejection diagnostic hook failed for '${operationId}'.`,
+          notificationError,
+        )
       })
     } catch (notificationError: unknown) {
-      console.error(`${this.loggerPrefix} Operation rejection diagnostic hook threw for '${operationId}'.`, notificationError)
+      console.error(
+        `${this.loggerPrefix} Operation rejection diagnostic hook threw for '${operationId}'.`,
+        notificationError,
+      )
     }
   }
 

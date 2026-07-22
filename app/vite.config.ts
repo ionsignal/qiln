@@ -4,9 +4,9 @@ import vue from '@vitejs/plugin-vue'
 import { defineConfig, type UserConfig, type Plugin } from 'vite'
 
 /**
- * Resolves the conflict between Vike's legacy `manualChunks` and our modern Rolldown
- * `codeSplitting` configuration. This is a temporary solution until Vike completely
- * supports Vite v8/v9 out-of-the-box.
+ * Resolves the conflict between Vike's legacy `manualChunks` and our modern
+ * Rolldown `codeSplitting` configuration. This is a temporary solution until
+ * Vike completely supports Vite v8/v9 out-of-the-box.
  */
 function silenceVikeManualChunksWarning(): Plugin {
   return {
@@ -32,7 +32,8 @@ function silenceVikeManualChunksWarning(): Plugin {
 
 /**
  * Intercepts explicit CSS imports from our local packages during development
- * and serves an empty string. This prevents CSS duplication without needing dummy files.
+ * and serves an empty string. This prevents CSS duplication without needing
+ * dummy files.
  */
 function ignorePackageCssInDev(isDev: boolean): Plugin {
   return {
@@ -57,12 +58,7 @@ function ignorePackageCssInDev(isDev: boolean): Plugin {
 export default defineConfig(({ isSsrBuild, command }): UserConfig => {
   const isDev = command === 'serve'
   return {
-    plugins: [
-      !process.env.VITEST && vike(),
-      vue(),
-      silenceVikeManualChunksWarning(),
-      ignorePackageCssInDev(isDev),
-    ],
+    plugins: [!process.env.VITEST && vike(), vue(), silenceVikeManualChunksWarning(), ignorePackageCssInDev(isDev)],
     build: {
       target: 'esnext',
       chunkSizeWarningLimit: isSsrBuild ? 1500 : 900,
@@ -78,7 +74,10 @@ export default defineConfig(({ isSsrBuild, command }): UserConfig => {
               { name: 'vendor-vue', test: /[\\/]node_modules[\\/](@vue|vue)[\\/]/ },
               { name: 'vendor-vike', test: /[\\/]node_modules[\\/]vike[\\/]/ },
               // UI Framework & Ecosystem (Bundling Naive UI with its strict dependencies)
-              { name: 'vendor-naive-ui', test: /[\\/]node_modules[\\/](naive-ui|vueuc|@css-render|vfonts|date-fns)[\\/]/ },
+              {
+                name: 'vendor-naive-ui',
+                test: /[\\/]node_modules[\\/](naive-ui|vueuc|@css-render|vfonts|date-fns)[\\/]/,
+              },
               // Icons (Isolate to prevent cache busting the main vendor chunk when adding icons)
               { name: 'vendor-icons', test: /[\\/]node_modules[\\/]@mdi[\\/]js[\\/]/ },
               // API & Validation

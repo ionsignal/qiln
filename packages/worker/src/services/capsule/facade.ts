@@ -27,8 +27,8 @@ export interface CapsuleServiceCapabilities {
  * Small public facade for the Worker capsule domain.
  *
  * Each mutation remains implemented by its operation-specific vertical slice.
- * This facade only exposes those capabilities and delegates startup
- * abandonment classification to the shared coordinator.
+ * This facade only exposes those capabilities and delegates startup abandonment
+ * classification to the shared coordinator.
  */
 export class CapsuleService {
   public readonly create: CreateCapsuleSubmissionService

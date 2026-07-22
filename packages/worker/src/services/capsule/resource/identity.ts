@@ -24,7 +24,12 @@ export function bindMountResourceKey(namespace: string, hostPath: string, mountP
   return `incus:bind-mount:${namespace}:${hostPath}:${mountPath}`
 }
 
-export function provisioningFileResourceKey(namespace: string, branchName: string, filePath: string, target: ProvisioningFileTarget): string {
+export function provisioningFileResourceKey(
+  namespace: string,
+  branchName: string,
+  filePath: string,
+  target: ProvisioningFileTarget,
+): string {
   if (target.target === 'volume') {
     return [
       'incus',

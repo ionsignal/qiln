@@ -1,6 +1,11 @@
 import { z } from 'zod'
 import { IncusError } from '../../errors'
-import { IncusProjectSchema, IncusProjectCreatePayloadSchema, type IncusProject, type IncusProjectCreatePayload } from '../../schemas/incus'
+import {
+  IncusProjectSchema,
+  IncusProjectCreatePayloadSchema,
+  type IncusProject,
+  type IncusProjectCreatePayload,
+} from '../../schemas/incus'
 import type { IIncusTransport } from './types'
 
 /**

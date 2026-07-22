@@ -2,7 +2,15 @@ import { ref, shallowRef, computed, provide, inject, watch, type ComputedRef, ty
 import { resolveDirectory, resolveFileMetadata } from '../utils/mockFilesystem'
 import { getFileType, formatFileSize } from '../utils/fileUtils'
 import { useMessage } from 'naive-ui'
-import type { EditorTab, FileBrowserMode, FileBrowserVault, FileEntry, FileInspectorTarget, FileSortKey, FileSortOrder } from '../types'
+import type {
+  EditorTab,
+  FileBrowserMode,
+  FileBrowserVault,
+  FileEntry,
+  FileInspectorTarget,
+  FileSortKey,
+  FileSortOrder,
+} from '../types'
 
 export interface FileBrowserStatusBarInfo {
   label: string

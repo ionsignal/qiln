@@ -1,12 +1,22 @@
 import { sql } from 'drizzle-orm'
 import { index, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid, type PgColumn } from 'drizzle-orm/pg-core'
-import { CapsuleBranchResourceCleanupPolicyValues, CapsuleBranchResourceStatusValues, CapsuleBranchResourceTypeValues } from '../../schemas'
+import {
+  CapsuleBranchResourceCleanupPolicyValues,
+  CapsuleBranchResourceStatusValues,
+  CapsuleBranchResourceTypeValues,
+} from '../../schemas'
 import { capsuleBranchesTable } from './branch'
 import { capsuleOperationsTable } from './operation'
 
 export const capsuleBranchResourceTypeEnum = pgEnum('capsule_branch_resource_type', CapsuleBranchResourceTypeValues)
-export const capsuleBranchResourceStatusEnum = pgEnum('capsule_branch_resource_status', CapsuleBranchResourceStatusValues)
-export const capsuleBranchResourceCleanupPolicyEnum = pgEnum('capsule_branch_resource_cleanup_policy', CapsuleBranchResourceCleanupPolicyValues)
+export const capsuleBranchResourceStatusEnum = pgEnum(
+  'capsule_branch_resource_status',
+  CapsuleBranchResourceStatusValues,
+)
+export const capsuleBranchResourceCleanupPolicyEnum = pgEnum(
+  'capsule_branch_resource_cleanup_policy',
+  CapsuleBranchResourceCleanupPolicyValues,
+)
 
 function createOwnerIdColumn(ownerIdColumn?: PgColumn) {
   return ownerIdColumn
@@ -41,7 +51,11 @@ function createNullableOperationIdColumn(columnName: string, operationIdColumn?:
  * resource. Destroy can delete only resources whose durable inventory, cleanup
  * policy, and provider state satisfy fail-closed ownership checks.
  */
-export function createCapsuleBranchResourcesTable(ownerIdColumn?: PgColumn, branchIdColumn?: PgColumn, operationIdColumn?: PgColumn) {
+export function createCapsuleBranchResourcesTable(
+  ownerIdColumn?: PgColumn,
+  branchIdColumn?: PgColumn,
+  operationIdColumn?: PgColumn,
+) {
   const ownerId = createOwnerIdColumn(ownerIdColumn)
   const branchId = createNullableBranchIdColumn(branchIdColumn)
   const lastOperationId = createNullableOperationIdColumn('last_operation_id', operationIdColumn)
@@ -86,10 +100,17 @@ export function createCapsuleBranchResourcesTable(ownerIdColumn?: PgColumn, bran
       index('capsule_branch_resources_created_by_operation_idx').on(table.createdByOperationId),
       index('capsule_branch_resources_last_operation_idx').on(table.lastOperationId),
       index('capsule_branch_resources_resource_key_idx').on(table.resourceKey),
-      uniqueIndex('capsule_branch_resources_operation_key_unique_idx').on(table.createdByOperationId, table.resourceKey),
+      uniqueIndex('capsule_branch_resources_operation_key_unique_idx').on(
+        table.createdByOperationId,
+        table.resourceKey,
+      ),
       uniqueIndex('capsule_branch_resources_branch_key_unique_idx').on(table.branchId, table.resourceKey),
     ],
   )
 }
 
-export const capsuleBranchResourcesTable = createCapsuleBranchResourcesTable(undefined, capsuleBranchesTable.id, capsuleOperationsTable.id)
+export const capsuleBranchResourcesTable = createCapsuleBranchResourcesTable(
+  undefined,
+  capsuleBranchesTable.id,
+  capsuleOperationsTable.id,
+)

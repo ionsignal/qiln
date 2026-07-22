@@ -40,7 +40,8 @@ export const CapsuleOperationEventNameValues = [CapsuleOperationEventName.OPERAT
 /**
  * Common owner-targeted mutation identity.
  *
- * The actor is supplied by a trusted server-side publisher rather than browser input.
+ * The actor is supplied by a trusted server-side publisher rather than browser
+ * input.
  */
 const CapsuleOperationCommandInputSchema = z
   .object({
@@ -74,7 +75,8 @@ export type CapsuleDestroyOperationOutput = output<typeof CapsuleDestroyOperatio
 /**
  * Best-effort owner-targeted invalidation event.
  *
- * Clients must refetch authoritative operation and domain state after receiving this event or reconnecting.
+ * Clients must refetch authoritative operation and domain state after receiving
+ * this event or reconnecting.
  */
 export const CapsuleOperationChangedEventSchema = z
   .object({

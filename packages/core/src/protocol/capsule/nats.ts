@@ -160,7 +160,10 @@ export class CapsuleNatsChannel implements CapsuleChannel {
     void this.runCommandResponder(sub, name, handler, options)
   }
 
-  async command<TName extends CapsuleCommandName>(name: TName, inputValue: CapsuleCommandInput<TName>): Promise<CapsuleCommandOutput<TName>> {
+  async command<TName extends CapsuleCommandName>(
+    name: TName,
+    inputValue: CapsuleCommandInput<TName>,
+  ): Promise<CapsuleCommandOutput<TName>> {
     const definition = getCapsuleCommandDefinition(name)
     const parsedInput = this.safeParseCommandInput(definition, inputValue)
     if (!parsedInput.ok) {
@@ -315,9 +318,13 @@ export class CapsuleNatsChannel implements CapsuleChannel {
   ): Promise<CapsuleRpcEnvelope> {
     const parsedSubject = parseCapsuleSubject(msg.subject)
     if (!parsedSubject || parsedSubject.kind !== CapsuleSubjectKind.COMMAND || parsedSubject.operation !== name) {
-      return this.failureEnvelope(CapsuleChannelErrorCode.BAD_REQUEST, `Malformed capsule command subject for '${name}'.`, {
-        subject: msg.subject,
-      })
+      return this.failureEnvelope(
+        CapsuleChannelErrorCode.BAD_REQUEST,
+        `Malformed capsule command subject for '${name}'.`,
+        {
+          subject: msg.subject,
+        },
+      )
     }
     const definition = getCapsuleCommandDefinition(name)
     const decoded = decodeMessageJson(msg, {
@@ -325,13 +332,21 @@ export class CapsuleNatsChannel implements CapsuleChannel {
       emptyFallback: {},
     })
     if (!decoded.ok) {
-      return this.failureEnvelope(CapsuleChannelErrorCode.BAD_REQUEST, `Malformed JSON payload for capsule command '${name}'.`, {
-        parseError: this.transportErrorDetails(decoded.error),
-      })
+      return this.failureEnvelope(
+        CapsuleChannelErrorCode.BAD_REQUEST,
+        `Malformed JSON payload for capsule command '${name}'.`,
+        {
+          parseError: this.transportErrorDetails(decoded.error),
+        },
+      )
     }
     const parsedInput = this.safeParseCommandInput(definition, decoded.data)
     if (!parsedInput.ok) {
-      return this.failureEnvelope(CapsuleChannelErrorCode.BAD_REQUEST, `Invalid payload for capsule command '${name}'.`, parsedInput.details)
+      return this.failureEnvelope(
+        CapsuleChannelErrorCode.BAD_REQUEST,
+        `Invalid payload for capsule command '${name}'.`,
+        parsedInput.details,
+      )
     }
     const expectedTarget = this.safeResolveDefinitionTarget(definition, parsedInput.data)
     if (!expectedTarget.ok) {
@@ -342,10 +357,14 @@ export class CapsuleNatsChannel implements CapsuleChannel {
       )
     }
     if (!isTargetEqual(parsedSubject.target, expectedTarget.data)) {
-      return this.failureEnvelope(CapsuleChannelErrorCode.FORBIDDEN, `Capsule command '${name}' target does not match payload target.`, {
-        subjectTarget: parsedSubject.target,
-        expectedTarget: expectedTarget.data,
-      })
+      return this.failureEnvelope(
+        CapsuleChannelErrorCode.FORBIDDEN,
+        `Capsule command '${name}' target does not match payload target.`,
+        {
+          subjectTarget: parsedSubject.target,
+          expectedTarget: expectedTarget.data,
+        },
+      )
     }
     try {
       const result = await handler(parsedInput.data, {
@@ -354,8 +373,14 @@ export class CapsuleNatsChannel implements CapsuleChannel {
       })
       const parsedOutput = this.safeParseCommandOutput(definition, result)
       if (!parsedOutput.ok) {
-        console.error(`${this.loggerPrefix} Output validation failed for capsule command '${name}'.`, parsedOutput.details)
-        return this.failureEnvelope(CapsuleChannelErrorCode.INTERNAL_ERROR, `Invalid output for capsule command '${name}'.`)
+        console.error(
+          `${this.loggerPrefix} Output validation failed for capsule command '${name}'.`,
+          parsedOutput.details,
+        )
+        return this.failureEnvelope(
+          CapsuleChannelErrorCode.INTERNAL_ERROR,
+          `Invalid output for capsule command '${name}'.`,
+        )
       }
       return createCapsuleRpcSuccessEnvelope(parsedOutput.data)
     } catch (error: unknown) {
@@ -365,7 +390,9 @@ export class CapsuleNatsChannel implements CapsuleChannel {
 
   private mapCommandError(error: unknown, options: CapsuleCommandHandlerOptions): CapsuleRpcFailureEnvelope {
     try {
-      const failure = options.mapError ? options.mapError(error) : toCapsuleCommandFailure(error, 'Internal capsule command handler error.')
+      const failure = options.mapError
+        ? options.mapError(error)
+        : toCapsuleCommandFailure(error, 'Internal capsule command handler error.')
       return createCapsuleRpcFailureEnvelope(failure)
     } catch (mapperError: unknown) {
       return this.failureEnvelope(CapsuleChannelErrorCode.INTERNAL_ERROR, 'Capsule command error mapper failed.', {
@@ -398,7 +425,10 @@ export class CapsuleNatsChannel implements CapsuleChannel {
     }
     const parsedEvent = CapsuleEventSchema.safeParse(decoded.data)
     if (!parsedEvent.success) {
-      console.warn(`${this.loggerPrefix} Dropping malformed capsule event '${definition.name}'.`, validationDetails(parsedEvent.error))
+      console.warn(
+        `${this.loggerPrefix} Dropping malformed capsule event '${definition.name}'.`,
+        validationDetails(parsedEvent.error),
+      )
       return null
     }
     if (parsedEvent.data.type !== definition.name) {
@@ -410,14 +440,20 @@ export class CapsuleNatsChannel implements CapsuleChannel {
     }
     const expectedTarget = this.safeResolveDefinitionTarget(definition, parsedEvent.data)
     if (!expectedTarget.ok) {
-      console.warn(`${this.loggerPrefix} Dropping capsule event '${definition.name}' because target resolution failed.`, expectedTarget.details)
+      console.warn(
+        `${this.loggerPrefix} Dropping capsule event '${definition.name}' because target resolution failed.`,
+        expectedTarget.details,
+      )
       return null
     }
     if (!isTargetEqual(parsedSubject.target, expectedTarget.data)) {
-      console.warn(`${this.loggerPrefix} Dropping capsule event '${definition.name}' whose subject target does not match payload target.`, {
-        subjectTarget: parsedSubject.target,
-        expectedTarget: expectedTarget.data,
-      })
+      console.warn(
+        `${this.loggerPrefix} Dropping capsule event '${definition.name}' whose subject target does not match payload target.`,
+        {
+          subjectTarget: parsedSubject.target,
+          expectedTarget: expectedTarget.data,
+        },
+      )
       return null
     }
     return {
@@ -532,7 +568,11 @@ export class CapsuleNatsChannel implements CapsuleChannel {
     }
   }
 
-  private failureEnvelope(code: CapsuleChannelErrorCode, message: string, details?: unknown): CapsuleRpcFailureEnvelope {
+  private failureEnvelope(
+    code: CapsuleChannelErrorCode,
+    message: string,
+    details?: unknown,
+  ): CapsuleRpcFailureEnvelope {
     return createCapsuleRpcFailureEnvelope(details === undefined ? { code, message } : { code, message, details })
   }
 
@@ -540,10 +580,16 @@ export class CapsuleNatsChannel implements CapsuleChannel {
     try {
       respondNatsJson(msg, payload, {
         context: `capsule RPC response on subject '${msg.subject}'`,
-        fallbackPayload: this.failureEnvelope(CapsuleChannelErrorCode.INTERNAL_ERROR, 'Capsule command returned a non-serializable response.'),
+        fallbackPayload: this.failureEnvelope(
+          CapsuleChannelErrorCode.INTERNAL_ERROR,
+          'Capsule command returned a non-serializable response.',
+        ),
       })
     } catch (error: unknown) {
-      console.error(`${this.loggerPrefix} Failed to serialize/send capsule RPC response on subject '${msg.subject}'.`, error)
+      console.error(
+        `${this.loggerPrefix} Failed to serialize/send capsule RPC response on subject '${msg.subject}'.`,
+        error,
+      )
     }
   }
 

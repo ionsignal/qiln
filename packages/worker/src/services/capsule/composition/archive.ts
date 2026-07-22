@@ -24,8 +24,8 @@ export interface ComposedArchiveCapability {
 /**
  * Composes the provider-free archive operation vertical slice.
  *
- * Archive lifecycle eligibility, timestamp policy, terminal classification,
- * and abandonment policy remain owned by the archive repository and handler.
+ * Archive lifecycle eligibility, timestamp policy, terminal classification, and
+ * abandonment policy remain owned by the archive repository and handler.
  */
 export function composeArchiveCapability(options: ComposeArchiveCapabilityOptions): ComposedArchiveCapability {
   const repository = new CapsuleArchiveRepository(options.db, options.operationLedger)

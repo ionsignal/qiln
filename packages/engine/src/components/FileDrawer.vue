@@ -44,7 +44,10 @@
           <!-- Action Bar -->
           <n-flex justify="space-between" align="center" class="action-bar">
             <n-button-group>
-              <n-tooltip trigger="hover" placement="bottom" v-if="target.type === 'file' && ['text', 'config'].includes(target.fileType)">
+              <n-tooltip
+                trigger="hover"
+                placement="bottom"
+                v-if="target.type === 'file' && ['text', 'config'].includes(target.fileType)">
                 <template #trigger>
                   <n-button secondary type="info" size="small" @click="handleEdit">
                     <template #icon><icon :path="mdiPencil" /></template>

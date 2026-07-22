@@ -46,19 +46,21 @@ export const authRouter = router({
       return { success: true }
     }),
 
-  login: publicProcedure.input(z.object({ email: z.string().email(), password: z.string() })).mutation(async ({ ctx, input }) => {
-    const user = await ctx.db.query.users.findFirst({
-      where: {
-        email: input.email,
-      },
-    })
-    if (!user || !(await bcrypt.compare(input.password, user.password))) {
-      throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Invalid credentials.' })
-    }
-    // Use session plugin to regenerate session
-    await ctx.fastify.req.session.regenerate(user.id)
-    return { success: true }
-  }),
+  login: publicProcedure
+    .input(z.object({ email: z.string().email(), password: z.string() }))
+    .mutation(async ({ ctx, input }) => {
+      const user = await ctx.db.query.users.findFirst({
+        where: {
+          email: input.email,
+        },
+      })
+      if (!user || !(await bcrypt.compare(input.password, user.password))) {
+        throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Invalid credentials.' })
+      }
+      // Use session plugin to regenerate session
+      await ctx.fastify.req.session.regenerate(user.id)
+      return { success: true }
+    }),
 
   logout: publicProcedure.mutation(async ({ ctx }) => {
     // Use session plugin to destroy session

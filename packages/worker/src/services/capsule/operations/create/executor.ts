@@ -41,9 +41,9 @@ export interface CreateCapsuleExecutorDependencies {
  * The executor receives only the operation ID. It reloads the complete
  * immutable execution input from PostgreSQL before claiming the operation.
  *
- * The workflow remains explicit here. Plain resource-provisioning functions
- * own focused per-resource mechanics but cannot reorder, skip, resume, retry,
- * or independently terminalize the create operation.
+ * The workflow remains explicit here. Plain resource-provisioning functions own
+ * focused per-resource mechanics but cannot reorder, skip, resume, retry, or
+ * independently terminalize the create operation.
  */
 export class CreateCapsuleExecutor {
   private readonly planner = new CreateCapsuleResourcePlanner()
@@ -195,7 +195,10 @@ export class CreateCapsuleExecutor {
       if (state.completionCommitted) {
         // Aggregate completion already committed. Step-accounting or
         // post-commit invalidation failure cannot reverse the completed create.
-        console.error(`[CreateCapsuleExecutor] Capsule create '${operationId}' completed, but post-commit accounting failed.`, error)
+        console.error(
+          `[CreateCapsuleExecutor] Capsule create '${operationId}' completed, but post-commit accounting failed.`,
+          error,
+        )
         return
       }
 
@@ -204,10 +207,21 @@ export class CreateCapsuleExecutor {
     }
   }
 
-  private async recordResourceInventoryProof(context: CreateCapsuleOperationContext, plan: CreateCapsuleResourcePlan): Promise<void> {
-    const digest = createCapsuleBranchResourceInventoryDigest(createResourceInventoryEntries(plan), 'capsule create planned resource inventory')
+  private async recordResourceInventoryProof(
+    context: CreateCapsuleOperationContext,
+    plan: CreateCapsuleResourcePlan,
+  ): Promise<void> {
+    const digest = createCapsuleBranchResourceInventoryDigest(
+      createResourceInventoryEntries(plan),
+      'capsule create planned resource inventory',
+    )
 
-    await this.dependencies.repository.recordResourceInventoryProof(context.ownerId, context.operationId, context.rootBranchId, digest)
+    await this.dependencies.repository.recordResourceInventoryProof(
+      context.ownerId,
+      context.operationId,
+      context.rootBranchId,
+      digest,
+    )
   }
 
   private async resolveFailure(
@@ -340,13 +354,20 @@ export class CreateCapsuleExecutor {
     })
 
     try {
-      const failed = await this.dependencies.repository.failAfterSuccessfulCompensation(context.operationId, error, failureContext)
+      const failed = await this.dependencies.repository.failAfterSuccessfulCompensation(
+        context.operationId,
+        error,
+        failureContext,
+      )
       this.publishTerminalResult(failed)
     } catch (terminalizationError: unknown) {
-      console.error(`[CreateCapsuleExecutor] Failed to persist compensated create failure for '${context.operationId}'.`, {
-        createError: error,
-        terminalizationError,
-      })
+      console.error(
+        `[CreateCapsuleExecutor] Failed to persist compensated create failure for '${context.operationId}'.`,
+        {
+          createError: error,
+          terminalizationError,
+        },
+      )
 
       await this.markCleanupRequired(
         context.operationId,

@@ -6,7 +6,12 @@ import type { CapsuleBranchRuntimeReconciler } from './reconciler'
 import type { CapsuleBranchStore } from './store'
 import type { IncusClient } from '../../../incus/client/index'
 import type { ProjectService } from '../../project'
-import type { BranchRuntimeMutation, BranchRuntimeMutationDefinition, BranchRuntimeTransitionContext, StableBranchRuntimeStatus } from './types'
+import type {
+  BranchRuntimeMutation,
+  BranchRuntimeMutationDefinition,
+  BranchRuntimeTransitionContext,
+  StableBranchRuntimeStatus,
+} from './types'
 
 export interface CapsuleBranchRuntimeServiceDependencies {
   branches: CapsuleBranchStore
@@ -26,8 +31,8 @@ export interface CapsuleBranchRuntimeServiceDependencies {
  * rollbacks.
  *
  * Branch creation and branch-fork policy do not belong here. The capsule create
- * operation owns creation of the initial root branch, while a future branch-fork
- * operation will own creation from a committed snapshot.
+ * operation owns creation of the initial root branch, while a future
+ * branch-fork operation will own creation from a committed snapshot.
  */
 export class CapsuleBranchRuntimeService {
   constructor(private readonly dependencies: CapsuleBranchRuntimeServiceDependencies) {}
@@ -104,7 +109,12 @@ export class CapsuleBranchRuntimeService {
     transition: BranchRuntimeTransitionContext,
     definition: BranchRuntimeMutationDefinition,
   ): Promise<CapsuleCommandAck> {
-    this.dependencies.events.publishStateChanged(transition.ownerId, transition.capsuleId, transition.branchName, definition.transitionalStatus)
+    this.dependencies.events.publishStateChanged(
+      transition.ownerId,
+      transition.capsuleId,
+      transition.branchName,
+      definition.transitionalStatus,
+    )
     try {
       await this.mutateProviderRuntime(transition, definition.mutation)
     } catch (providerError: unknown) {
@@ -124,11 +134,19 @@ export class CapsuleBranchRuntimeService {
         ok: true,
       }
     } catch (persistenceError: unknown) {
-      return await this.resolveMutationOutcome(transition, definition, persistenceError, 'confirmed_state_persistence_failed')
+      return await this.resolveMutationOutcome(
+        transition,
+        definition,
+        persistenceError,
+        'confirmed_state_persistence_failed',
+      )
     }
   }
 
-  private async mutateProviderRuntime(transition: BranchRuntimeTransitionContext, mutation: BranchRuntimeMutation): Promise<void> {
+  private async mutateProviderRuntime(
+    transition: BranchRuntimeTransitionContext,
+    mutation: BranchRuntimeMutation,
+  ): Promise<void> {
     const namespace = this.dependencies.project.getNamespace(transition.ownerId)
     const project = this.dependencies.incus.UseProject(namespace)
     if (mutation === 'start') {
@@ -189,7 +207,13 @@ export class CapsuleBranchRuntimeService {
         throw mutationError
       }
     }
-    const runtimeError = createCapsuleBranchMutationResolutionError(transition, definition, observation, mutationError, failureStage)
+    const runtimeError = createCapsuleBranchMutationResolutionError(
+      transition,
+      definition,
+      observation,
+      mutationError,
+      failureStage,
+    )
     try {
       const result = await this.dependencies.branches.recordRuntimeError({
         ownerId: transition.ownerId,

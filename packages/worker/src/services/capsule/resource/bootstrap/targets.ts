@@ -19,7 +19,8 @@ export type ProvisioningFileTarget =
 
 /**
  * Evaluates a file path against a sorted list of managed volumes to determine
- * whether provisioning should target an offline custom volume or the instance rootfs.
+ * whether provisioning should target an offline custom volume or the instance
+ * rootfs.
  */
 export function resolveFileTarget(filePath: string, managedVolumes: ManagedVolume[]): ProvisioningFileTarget {
   const normalizedFilePath = path.posix.normalize(filePath)

@@ -47,8 +47,14 @@ export default {
   },
   multipart: {
     directory: process.env.UPLOAD_DIRECTORY ?? defaultMultipartLimits.directory,
-    maxFieldSizeBytes: parseInt(process.env.UPLOAD_MAX_FIELD_SIZE_BYTES ?? String(defaultMultipartLimits.maxFieldSizeBytes), 10),
-    maxFileSizeBytes: parseInt(process.env.UPLOAD_MAX_FILE_SIZE_BYTES ?? String(defaultMultipartLimits.maxFileSizeBytes), 10),
+    maxFieldSizeBytes: parseInt(
+      process.env.UPLOAD_MAX_FIELD_SIZE_BYTES ?? String(defaultMultipartLimits.maxFieldSizeBytes),
+      10,
+    ),
+    maxFileSizeBytes: parseInt(
+      process.env.UPLOAD_MAX_FILE_SIZE_BYTES ?? String(defaultMultipartLimits.maxFileSizeBytes),
+      10,
+    ),
     maxFiles: parseInt(process.env.UPLOAD_MAX_FILES ?? String(defaultMultipartLimits.maxFiles), 10),
     maxParts: parseInt(process.env.UPLOAD_MAX_PARTS ?? String(defaultMultipartLimits.maxParts), 10),
     maxHeaderPairs: parseInt(process.env.UPLOAD_MAX_HEADER_PAIRS ?? String(defaultMultipartLimits.maxHeaderPairs), 10),
@@ -72,7 +78,9 @@ export default {
     token: process.env.NATS_TOKEN || undefined,
   },
   incus: {
-    socketPath: process.env.INCUS_URL ? undefined : process.env.INCUS_SOCKET_PATH || '/var/snap/incus/common/incus/unix.socket',
+    socketPath: process.env.INCUS_URL
+      ? undefined
+      : process.env.INCUS_SOCKET_PATH || '/var/snap/incus/common/incus/unix.socket',
     url: process.env.INCUS_URL,
     cert: decodeBase64(process.env.INCUS_CLIENT_CERT_B64),
     key: decodeBase64(process.env.INCUS_CLIENT_KEY_B64),

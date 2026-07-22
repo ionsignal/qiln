@@ -4,7 +4,8 @@
 export class IncusError extends Error {
   constructor(
     message: string,
-    public readonly code: 'TRANSPORT_ERROR' | 'API_ERROR' | 'VALIDATION_ERROR' | 'NOT_FOUND' | 'CONFLICT' | 'FORBIDDEN' = 'API_ERROR',
+    public readonly code:
+      'TRANSPORT_ERROR' | 'API_ERROR' | 'VALIDATION_ERROR' | 'NOT_FOUND' | 'CONFLICT' | 'FORBIDDEN' = 'API_ERROR',
     public readonly details?: unknown,
   ) {
     super(message)
@@ -43,7 +44,8 @@ export function readIncusErrorDetailCode(error: IncusError): string | number | u
 }
 
 /**
- * Safely traverses Drizzle's error wrapping to identify Postgres unique constraint violations.
+ * Safely traverses Drizzle's error wrapping to identify Postgres unique
+ * constraint violations.
  *
  * @param err The unknown error object caught in a try/catch.
  * @param constraintName Optional specific constraint name to check against.

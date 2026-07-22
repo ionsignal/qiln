@@ -81,5 +81,7 @@ export function isTimeoutLike(error: unknown): boolean {
   const name = error.name.toLowerCase()
   const message = error.message.toLowerCase()
   const code = hasStringCode(error) ? error.code.toLowerCase() : ''
-  return name.includes(DEFAULT_TIMEOUT_TEXT) || message.includes(DEFAULT_TIMEOUT_TEXT) || code.includes(DEFAULT_TIMEOUT_TEXT)
+  return (
+    name.includes(DEFAULT_TIMEOUT_TEXT) || message.includes(DEFAULT_TIMEOUT_TEXT) || code.includes(DEFAULT_TIMEOUT_TEXT)
+  )
 }

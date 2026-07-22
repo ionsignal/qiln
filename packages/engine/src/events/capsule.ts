@@ -18,9 +18,9 @@ export interface CapsuleEventHubOptions {
 /**
  * Engine-local fanout layer for validated Capsule Channel events.
  *
- * This replaces the engine Fastify dispatcher bridge. NATS payload validation and
- * subject/target validation happen in `CapsuleNatsChannel`; this hub only handles
- * owner-scoped subscription lifecycle and bounded per-client queues.
+ * This replaces the engine Fastify dispatcher bridge. NATS payload validation
+ * and subject/target validation happen in `CapsuleNatsChannel`; this hub only
+ * handles owner-scoped subscription lifecycle and bounded per-client queues.
  */
 export class CapsuleEventHub {
   private readonly subscribers = new Set<CapsuleEventSubscriber>()
@@ -108,7 +108,9 @@ export class CapsuleEventHub {
 
   private async run(signal: AbortSignal): Promise<void> {
     try {
-      for await (const envelope of this.channel.subscribe((_event, currentEnvelope) => currentEnvelope.target.type === TargetType.OWNER)) {
+      for await (const envelope of this.channel.subscribe(
+        (_event, currentEnvelope) => currentEnvelope.target.type === TargetType.OWNER,
+      )) {
         if (signal.aborted) {
           break
         }
@@ -131,7 +133,9 @@ export class CapsuleEventHub {
       }
       if (subscriber.queue.length >= this.maxQueueSize) {
         subscriber.queue.shift()
-        console.warn(`${this.loggerPrefix} Queue for owner ${subscriber.ownerId} exceeded ${this.maxQueueSize}. Dropping oldest event.`)
+        console.warn(
+          `${this.loggerPrefix} Queue for owner ${subscriber.ownerId} exceeded ${this.maxQueueSize}. Dropping oldest event.`,
+        )
       }
       subscriber.queue.push(envelope.event)
       this.wakeSubscriber(subscriber)

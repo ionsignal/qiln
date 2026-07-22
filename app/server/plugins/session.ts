@@ -8,8 +8,8 @@ import type { AuthenticatedUser } from '@/types/entities'
 import type { CookiesConfig } from '@/types/config'
 
 /**
- * Session Class
- * Manages the lifecycle of a user session, bridging Drizzle and Fastify.
+ * Session Class Manages the lifecycle of a user session, bridging Drizzle and
+ * Fastify.
  */
 export class Session {
   private _user: AuthenticatedUser | null = null
@@ -53,8 +53,8 @@ export class Session {
   }
 
   /**
-   * Sliding Window Expiration:
-   * Extends the session validity if we are past the halfway point of the maxAge.
+   * Sliding Window Expiration: Extends the session validity if we are past the
+   * halfway point of the maxAge.
    */
   async touch() {
     if (!this._sessionId || !this._expiresAt) return

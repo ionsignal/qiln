@@ -27,7 +27,11 @@ const CapsuleCreateMutationInputSchema = z
   .object({
     rootBranchName: CapsuleBranchNameSchema,
     idempotencyKey: CapsuleOperationIdempotencyKeySchema,
-    blueprintName: z.string().trim().min(1, 'Capsule blueprint name cannot be empty.').default(DEFAULT_CAPSULE_BLUEPRINT_NAME),
+    blueprintName: z
+      .string()
+      .trim()
+      .min(1, 'Capsule blueprint name cannot be empty.')
+      .default(DEFAULT_CAPSULE_BLUEPRINT_NAME),
     blueprintDigest: CapsuleBlueprintDigestSchema,
     cpu: z.string().trim().min(1, 'CPU limit cannot be empty.').default('4'),
     memory: z.string().trim().min(1, 'Memory limit cannot be empty.').default('4GB'),

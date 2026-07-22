@@ -17,7 +17,9 @@
             placeholder="••••••••"
             @keydown.enter="handleLogin" />
         </n-form-item>
-        <n-button block type="primary" attr-type="submit" :loading="loading" style="margin-top: 12px">Access System</n-button>
+        <n-button block type="primary" attr-type="submit" :loading="loading" style="margin-top: 12px">
+          Access System
+        </n-button>
       </n-form>
     </n-card>
   </div>

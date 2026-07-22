@@ -6,7 +6,11 @@ import {
   type CapsuleOperationAbandonmentClassificationResult,
   type CapsuleOperationAbandonmentHandler,
 } from '../abandonment'
-import type { CapsuleBranchEventPublisher, CapsuleLifecycleEventPublisher, CapsuleOperationEventPublisher } from '../../events'
+import type {
+  CapsuleBranchEventPublisher,
+  CapsuleLifecycleEventPublisher,
+  CapsuleOperationEventPublisher,
+} from '../../events'
 import type { PersistedCapsuleOperation } from '../shared'
 import type { CreateCapsuleOperationRepository } from './repository'
 import type { CreateCapsuleTerminalResult } from './types'
@@ -47,7 +51,9 @@ export class CreateCapsuleAbandonmentHandler implements CapsuleOperationAbandonm
 
   constructor(private readonly dependencies: CreateCapsuleAbandonmentHandlerDependencies) {}
 
-  public async classify(operation: PersistedCapsuleOperation): Promise<CapsuleOperationAbandonmentClassificationResult> {
+  public async classify(
+    operation: PersistedCapsuleOperation,
+  ): Promise<CapsuleOperationAbandonmentClassificationResult> {
     assertAbandonedOperationType(operation, this.operationType)
 
     const result = await this.dependencies.repository.classifyAbandoned(operation.id)

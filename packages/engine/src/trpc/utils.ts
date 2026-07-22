@@ -109,8 +109,9 @@ function handleCapsuleChannelError(error: CapsuleChannelError): never {
 /**
  * Centralized error handler for the QilnEngine tRPC boundary.
  *
- * Infrastructure-specific Worker errors cross the Capsule Channel as validated `CapsuleChannelError` instances.
- * The Engine does not depend on Incus error classes or provider implementation details.
+ * Infrastructure-specific Worker errors cross the Capsule Channel as validated
+ * `CapsuleChannelError` instances. The Engine does not depend on Incus error
+ * classes or provider implementation details.
  */
 export function handleEngineError(error: unknown): never {
   if (error instanceof TRPCError) {

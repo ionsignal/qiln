@@ -9,8 +9,10 @@ import type {
 
 export const CAPSULE_BRANCH_RUNTIME_RESOLUTION_ERROR_CODE = 'CAPSULE_BRANCH_RUNTIME_UNCERTAIN'
 export const CAPSULE_BRANCH_RUNTIME_INSTANCE_MISSING_ERROR_CODE = 'CAPSULE_BRANCH_RUNTIME_INSTANCE_MISSING'
-export const CAPSULE_BRANCH_RUNTIME_PROVIDER_STATE_UNSUPPORTED_ERROR_CODE = 'CAPSULE_BRANCH_RUNTIME_PROVIDER_STATE_UNSUPPORTED'
-export const CAPSULE_BRANCH_RUNTIME_OBSERVATION_UNAVAILABLE_ERROR_CODE = 'CAPSULE_BRANCH_RUNTIME_OBSERVATION_UNAVAILABLE'
+export const CAPSULE_BRANCH_RUNTIME_PROVIDER_STATE_UNSUPPORTED_ERROR_CODE =
+  'CAPSULE_BRANCH_RUNTIME_PROVIDER_STATE_UNSUPPORTED'
+export const CAPSULE_BRANCH_RUNTIME_OBSERVATION_UNAVAILABLE_ERROR_CODE =
+  'CAPSULE_BRANCH_RUNTIME_OBSERVATION_UNAVAILABLE'
 
 /**
  * Durable branch-runtime diagnostic used when Qiln cannot prove one of the
@@ -35,7 +37,9 @@ export class CapsuleBranchRuntimeResolutionError extends Error {
  * Converts a normalized provider observation into persistence-safe diagnostic
  * context.
  */
-export function describeCapsuleBranchRuntimeObservation(observation: CapsuleBranchRuntimeObservation): Record<string, unknown> {
+export function describeCapsuleBranchRuntimeObservation(
+  observation: CapsuleBranchRuntimeObservation,
+): Record<string, unknown> {
   switch (observation.kind) {
     case 'confirmed':
       return {

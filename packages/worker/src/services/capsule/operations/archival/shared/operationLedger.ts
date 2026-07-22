@@ -13,7 +13,8 @@ import { toCapsuleOperationTransition } from '../../shared/operationTransition'
 import type { CapsuleOperationReader } from '../../shared/operationReader'
 import type { CapsuleOperationTransitionOutput, PersistedCapsuleOperation } from '../../shared/types'
 
-export type ProviderFreeArchivalOperationType = typeof CapsuleOperationType.ARCHIVE | typeof CapsuleOperationType.UNARCHIVE
+export type ProviderFreeArchivalOperationType =
+  typeof CapsuleOperationType.ARCHIVE | typeof CapsuleOperationType.UNARCHIVE
 
 export interface FindProviderFreeArchivalReplayInput {
   ownerId: string
@@ -52,13 +53,16 @@ export class ProviderFreeArchivalOperationLedger {
   ) {}
 
   /**
-   * Finds an existing submission and validates its durable idempotency identity.
+   * Finds an existing submission and validates its durable idempotency
+   * identity.
    *
    * This deliberately validates only operation type, actor, and request hash.
    * Receipt mapping and operation-specific durable invariants remain the
    * responsibility of the archive or unarchive repository.
    */
-  public async findSubmissionReplay(input: FindProviderFreeArchivalReplayInput): Promise<PersistedCapsuleOperation | null> {
+  public async findSubmissionReplay(
+    input: FindProviderFreeArchivalReplayInput,
+  ): Promise<PersistedCapsuleOperation | null> {
     const operation = await this.reader.loadByOwnerAndIdempotencyKey(input.ownerId, input.idempotencyKey)
     if (!operation) {
       return null
@@ -79,7 +83,9 @@ export class ProviderFreeArchivalOperationLedger {
    * Archive and unarchive executors receive only the operation ID. They cannot
    * use the original command payload as execution input.
    */
-  public async loadAcceptedExecution(input: LoadAcceptedProviderFreeArchivalOperationInput): Promise<PersistedCapsuleOperation> {
+  public async loadAcceptedExecution(
+    input: LoadAcceptedProviderFreeArchivalOperationInput,
+  ): Promise<PersistedCapsuleOperation> {
     const operation = await this.reader.loadById(input.operationId)
     if (!operation) {
       throw new IncusError(`${input.operationDescription} operation was not found.`, 'NOT_FOUND', {
@@ -100,10 +106,14 @@ export class ProviderFreeArchivalOperationLedger {
       })
     }
     if (operation.providerMutationStartedAt !== null) {
-      throw new IncusError(`${input.operationDescription} operation unexpectedly contains provider intent.`, 'CONFLICT', {
-        operationId: input.operationId,
-        providerMutationStartedAt: operation.providerMutationStartedAt.toISOString(),
-      })
+      throw new IncusError(
+        `${input.operationDescription} operation unexpectedly contains provider intent.`,
+        'CONFLICT',
+        {
+          operationId: input.operationId,
+          providerMutationStartedAt: operation.providerMutationStartedAt.toISOString(),
+        },
+      )
     }
     return operation
   }
@@ -115,7 +125,9 @@ export class ProviderFreeArchivalOperationLedger {
    * Absence of provider intent is part of the update fence so contradictory
    * durable evidence cannot transition into `running`.
    */
-  public async claimAccepted(input: ClaimProviderFreeArchivalOperationInput): Promise<CapsuleOperationTransitionOutput> {
+  public async claimAccepted(
+    input: ClaimProviderFreeArchivalOperationInput,
+  ): Promise<CapsuleOperationTransitionOutput> {
     const now = new Date()
     const [claimed] = await this.db
       .update(capsuleOperationsTable)
@@ -138,10 +150,14 @@ export class ProviderFreeArchivalOperationLedger {
         operationStatus: capsuleOperationsTable.status,
       })
     if (!claimed) {
-      throw new IncusError(`${input.operationDescription} operation could not be claimed from accepted to running.`, 'CONFLICT', {
-        operationId: input.operationId,
-        operationType: input.operationType,
-      })
+      throw new IncusError(
+        `${input.operationDescription} operation could not be claimed from accepted to running.`,
+        'CONFLICT',
+        {
+          operationId: input.operationId,
+          operationType: input.operationType,
+        },
+      )
     }
     return toCapsuleOperationTransition({
       ownerId: claimed.ownerId,

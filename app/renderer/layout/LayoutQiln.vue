@@ -47,7 +47,11 @@
                     </n-badge>
                     <n-dropdown placement="bottom-end" :options="userMenuOptions" @select="handleUserMenuSelect">
                       <div class="user-profile-trigger">
-                        <n-avatar round size="small" src="https://i.pravatar.cc/150?img=32" fallback-src="https://i.pravatar.cc/150?img=3" />
+                        <n-avatar
+                          round
+                          size="small"
+                          src="https://i.pravatar.cc/150?img=32"
+                          fallback-src="https://i.pravatar.cc/150?img=3" />
                         <icon :path="mdiChevronDown" :size="16" style="opacity: 0.5" />
                       </div>
                     </n-dropdown>
@@ -58,7 +62,10 @@
               <n-layout has-sider position="absolute" style="top: 48px; bottom: 0">
                 <qiln-rail />
                 <qiln-sidebar />
-                <n-layout-content native-scrollbar style="border-top: 1px solid rgba(255, 255, 255, 0.08)" content-style="padding: 32px;">
+                <n-layout-content
+                  native-scrollbar
+                  style="border-top: 1px solid rgba(255, 255, 255, 0.08)"
+                  content-style="padding: 32px;">
                   <slot />
                 </n-layout-content>
               </n-layout>
@@ -75,7 +82,16 @@
   import 'vfonts/FiraCode.css'
   import { h, computed, ref, onMounted, onUnmounted, defineComponent } from 'vue'
   import { navigate } from 'vike/client/router'
-  import { mdiBellOutline, mdiChevronDown, mdiCog, mdiConsoleLine, mdiCubeOutline, mdiHome, mdiLogout, mdiMagnify } from '@mdi/js'
+  import {
+    mdiBellOutline,
+    mdiChevronDown,
+    mdiCog,
+    mdiConsoleLine,
+    mdiCubeOutline,
+    mdiHome,
+    mdiLogout,
+    mdiMagnify,
+  } from '@mdi/js'
   import {
     NConfigProvider,
     NGlobalStyle,

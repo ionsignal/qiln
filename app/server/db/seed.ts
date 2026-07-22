@@ -61,7 +61,7 @@ async function seed() {
             avatar: user.avatar,
           },
         })
-        
+
       if (isDev) {
         credentialsLog.push(`[Seed] ${user.username.padEnd(15)} | ${user.email.padEnd(25)} | ${randomPassword}`)
       }

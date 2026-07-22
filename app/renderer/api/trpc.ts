@@ -6,7 +6,8 @@ import type { AppRouter } from '@server/trpc'
 const transformer = superjson
 
 /**
- * robustly determines the HTTP URL based on environment.
+ * Robustly determines the HTTP URL based on environment.
+ *
  * - Dev: Points to the separate backend port (3002).
  * - Prod: Uses relative path (served by Fastify).
  */
@@ -15,8 +16,8 @@ const getHttpUrl = () => {
 }
 
 /**
- * Factory function to construct the tRPC link chain.
- * Isolates browser-specific logic (WebSockets) from server-side logic (SSR).
+ * Factory function to construct the tRPC link chain. Isolates browser-specific
+ * logic (WebSockets) from server-side logic (SSR).
  */
 function getLinks(): TRPCLink<AppRouter>[] {
   // Server-Side: HTTP Only (No WebSocket support needed/possible)

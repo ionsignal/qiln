@@ -15,13 +15,13 @@ function createOwnerIdColumn(ownerIdColumn?: PgColumn) {
 /**
  * Creates the durable capsule aggregate table.
  *
- * Logical archive state is represented by `archivedAt` and remains reversible. Destroyed, creation-failed,
- * and cleanup-required capsules remain durable for audit rather than being physically removed.
+ * Logical archive state is represented by `archivedAt` and remains reversible.
+ * Destroyed, creation-failed, and cleanup-required capsules remain durable for
+ * audit rather than being physically removed.
  *
  * TODO(capsule-naming): Add a durable user-facing capsule name/handle to this
  * aggregate. Branch names must remain scoped to a capsule and cannot serve as
  * the capsule identity once snapshot-based forks exist.
- *
  */
 export function createCapsulesTable(ownerIdColumn?: PgColumn) {
   const ownerId = createOwnerIdColumn(ownerIdColumn)

@@ -22,7 +22,8 @@ export class IncusStorageFilesClient {
   }
 
   /**
-   * Pushes a file directly to a custom storage volume disk, injecting X-INCUS headers for ownership.
+   * Pushes a file directly to a custom storage volume disk, injecting X-INCUS
+   * headers for ownership.
    */
   public async write(
     pool: string,

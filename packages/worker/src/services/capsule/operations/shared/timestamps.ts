@@ -31,6 +31,10 @@ export function toIsoTimestamp(value: Date, field: string, context: TimestampCon
   return value.toISOString()
 }
 
-export function toNullableIsoTimestamp(value: Date | null, field: string, context: TimestampConversionContext = {}): string | null {
+export function toNullableIsoTimestamp(
+  value: Date | null,
+  field: string,
+  context: TimestampConversionContext = {},
+): string | null {
   return value === null ? null : toIsoTimestamp(value, field, context)
 }

@@ -72,7 +72,9 @@ export class NatsConnectionManager {
     try {
       await nc.drain()
     } catch {
-      console.warn(`${this.loggerPrefix} Drain errors during shutdown are expected when the connection is already closing.`)
+      console.warn(
+        `${this.loggerPrefix} Drain errors during shutdown are expected when the connection is already closing.`,
+      )
     } finally {
       this.nc = null
       this.started = false

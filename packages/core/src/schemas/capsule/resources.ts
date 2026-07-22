@@ -32,7 +32,8 @@ export const CapsuleBranchResourceStatus = {
   ERROR: 'error',
 } as const
 
-export type CapsuleBranchResourceStatusValue = (typeof CapsuleBranchResourceStatus)[keyof typeof CapsuleBranchResourceStatus]
+export type CapsuleBranchResourceStatusValue =
+  (typeof CapsuleBranchResourceStatus)[keyof typeof CapsuleBranchResourceStatus]
 
 export const CapsuleBranchResourceStatusValues = [
   CapsuleBranchResourceStatus.PLANNED,

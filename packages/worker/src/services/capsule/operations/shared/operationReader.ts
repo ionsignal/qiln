@@ -25,15 +25,24 @@ export class CapsuleOperationReader {
   constructor(private readonly db: CapsuleHostDbContract) {}
 
   public async loadById(operationId: string): Promise<PersistedCapsuleOperation | null> {
-    const [operation] = await this.db.select().from(capsuleOperationsTable).where(eq(capsuleOperationsTable.id, operationId)).limit(1)
-    return operation ? this.toPersistedOperation(operation) : null
-  }
-
-  public async loadByOwnerAndIdempotencyKey(ownerId: string, idempotencyKey: string): Promise<PersistedCapsuleOperation | null> {
     const [operation] = await this.db
       .select()
       .from(capsuleOperationsTable)
-      .where(and(eq(capsuleOperationsTable.ownerId, ownerId), eq(capsuleOperationsTable.idempotencyKey, idempotencyKey)))
+      .where(eq(capsuleOperationsTable.id, operationId))
+      .limit(1)
+    return operation ? this.toPersistedOperation(operation) : null
+  }
+
+  public async loadByOwnerAndIdempotencyKey(
+    ownerId: string,
+    idempotencyKey: string,
+  ): Promise<PersistedCapsuleOperation | null> {
+    const [operation] = await this.db
+      .select()
+      .from(capsuleOperationsTable)
+      .where(
+        and(eq(capsuleOperationsTable.ownerId, ownerId), eq(capsuleOperationsTable.idempotencyKey, idempotencyKey)),
+      )
       .limit(1)
     return operation ? this.toPersistedOperation(operation) : null
   }

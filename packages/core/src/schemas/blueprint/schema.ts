@@ -194,7 +194,7 @@ export const CapsuleBlueprintSchema = z
         }
       }
 
-      root.required_paths.forEach((requiredPath, requiredPathIndex) => {
+      root.required_paths.forEach((requiredPath, _) => {
         const absoluteRequiredPath = joinAbsoluteAndRelativePosixPath(volume.mount_path, requiredPath.path)
         root.exclusions.forEach((exclusion, exclusionIndex) => {
           const absoluteExclusionPath = joinAbsoluteAndRelativePosixPath(volume.mount_path, exclusion.path)

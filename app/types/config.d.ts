@@ -105,4 +105,14 @@ declare module 'fastify' {
   }
 }
 
-export type { EnvironmentConfig, Config, Server, CookiesConfig, MultipartConfig, MailgunConfig, NatsConfig, DatabaseConfig, WorkerConfig }
+export type {
+  EnvironmentConfig,
+  Config,
+  Server,
+  CookiesConfig,
+  MultipartConfig,
+  MailgunConfig,
+  NatsConfig,
+  DatabaseConfig,
+  WorkerConfig,
+}

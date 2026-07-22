@@ -18,7 +18,10 @@ export const CapsuleRpcFailureEnvelopeSchema = z
   })
   .strict()
 
-export const CapsuleRpcEnvelopeSchema = z.discriminatedUnion('success', [CapsuleRpcSuccessEnvelopeSchema, CapsuleRpcFailureEnvelopeSchema])
+export const CapsuleRpcEnvelopeSchema = z.discriminatedUnion('success', [
+  CapsuleRpcSuccessEnvelopeSchema,
+  CapsuleRpcFailureEnvelopeSchema,
+])
 
 export type CapsuleRpcSuccessEnvelope<TData = unknown> = {
   success: true

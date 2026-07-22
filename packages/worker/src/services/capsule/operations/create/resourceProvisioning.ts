@@ -19,7 +19,8 @@ export interface CreateCapsuleResourceProvisioningDependencies {
   driver: CapsuleResourceDriver
 }
 
-type CreateCapsuleDirectResourceMutationStep = typeof CreateCapsuleStepKey.CREATE_VOLUMES | typeof CreateCapsuleStepKey.CREATE_INSTANCE
+type CreateCapsuleDirectResourceMutationStep =
+  typeof CreateCapsuleStepKey.CREATE_VOLUMES | typeof CreateCapsuleStepKey.CREATE_INSTANCE
 
 /**
  * Ensures the owner-scoped provider namespace and records that the namespace is
@@ -186,11 +187,15 @@ export async function writeProvisioningFiles(
   const instanceResourceId = state.compensation.getCreatedInstanceResourceId()
 
   if (!instanceResourceId) {
-    throw new IncusError('Capsule root instance ownership was not durably recorded before provisioning files.', 'API_ERROR', {
-      operationId: context.operationId,
-      capsuleId: context.capsuleId,
-      rootBranchId: context.rootBranchId,
-    })
+    throw new IncusError(
+      'Capsule root instance ownership was not durably recorded before provisioning files.',
+      'API_ERROR',
+      {
+        operationId: context.operationId,
+        capsuleId: context.capsuleId,
+        rootBranchId: context.rootBranchId,
+      },
+    )
   }
 
   for (const file of files) {
@@ -213,7 +218,14 @@ export async function writeProvisioningFiles(
       await dependencies.resources.recordBranchResourceCreateOutcome(resourceId, context.operationId)
     } catch (error: unknown) {
       if (providerMutationAttempted) {
-        await recordProvisioningFileFailureBestEffort(dependencies.resources, context, resourceId, file.resourceKey, error, state)
+        await recordProvisioningFileFailureBestEffort(
+          dependencies.resources,
+          context,
+          resourceId,
+          file.resourceKey,
+          error,
+          state,
+        )
       }
 
       throw error
@@ -254,11 +266,15 @@ function resolveProvisioningFileBackingResourceId(
   const backingResourceId = state.compensation.getCreatedVolumeResourceId(file.target.pool, file.target.volumeName)
 
   if (!backingResourceId) {
-    throw new IncusError('Provisioning file targets a managed volume without durable ownership proof.', 'VALIDATION_ERROR', {
-      resourceKey: file.resourceKey,
-      pool: file.target.pool,
-      volumeName: file.target.volumeName,
-    })
+    throw new IncusError(
+      'Provisioning file targets a managed volume without durable ownership proof.',
+      'VALIDATION_ERROR',
+      {
+        resourceKey: file.resourceKey,
+        pool: file.target.pool,
+        volumeName: file.target.volumeName,
+      },
+    )
   }
 
   return backingResourceId
@@ -294,7 +310,10 @@ async function recordDirectResourceCreateFailureBestEffort(
       }),
     )
   } catch (persistenceError: unknown) {
-    console.error(`[CreateCapsuleResourceProvisioning] Failed to persist create failure for resource '${resourceId}'.`, persistenceError)
+    console.error(
+      `[CreateCapsuleResourceProvisioning] Failed to persist create failure for resource '${resourceId}'.`,
+      persistenceError,
+    )
   }
 }
 
@@ -341,6 +360,9 @@ async function markResourceErrorBestEffort(
   try {
     await resources.markBranchResourceError(resourceId, error, context)
   } catch (persistenceError: unknown) {
-    console.error(`[CreateCapsuleResourceProvisioning] Failed to persist resource error for '${resourceId}'.`, persistenceError)
+    console.error(
+      `[CreateCapsuleResourceProvisioning] Failed to persist resource error for '${resourceId}'.`,
+      persistenceError,
+    )
   }
 }

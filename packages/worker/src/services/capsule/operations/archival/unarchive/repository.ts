@@ -45,7 +45,9 @@ const NONTERMINAL_UNARCHIVE_STATUSES = [CapsuleOperationStatus.ACCEPTED, Capsule
 
 type PersistedUnarchiveOperation = typeof capsuleOperationsTable.$inferSelect
 
-function isNonterminalUnarchiveStatus(status: CapsuleOperationStatusValue): status is (typeof NONTERMINAL_UNARCHIVE_STATUSES)[number] {
+function isNonterminalUnarchiveStatus(
+  status: CapsuleOperationStatusValue,
+): status is (typeof NONTERMINAL_UNARCHIVE_STATUSES)[number] {
   return status === CapsuleOperationStatus.ACCEPTED || status === CapsuleOperationStatus.RUNNING
 }
 
@@ -149,12 +151,16 @@ export class CapsuleUnarchiveRepository {
           unarchivingCapsule.archivedAt === null ||
           !isSameTimestamp(originalArchivedAt, unarchivingCapsule.archivedAt)
         ) {
-          throw new IncusError('Failed to enter the capsule unarchive mutation fence while preserving its archive timestamp.', 'CONFLICT', {
-            ownerId: input.ownerId,
-            capsuleId: input.capsuleId,
-            originalArchivedAt: originalArchivedAt.toISOString(),
-            committedArchivedAt: unarchivingCapsule?.archivedAt?.toISOString() ?? null,
-          })
+          throw new IncusError(
+            'Failed to enter the capsule unarchive mutation fence while preserving its archive timestamp.',
+            'CONFLICT',
+            {
+              ownerId: input.ownerId,
+              capsuleId: input.capsuleId,
+              originalArchivedAt: originalArchivedAt.toISOString(),
+              committedArchivedAt: unarchivingCapsule?.archivedAt?.toISOString() ?? null,
+            },
+          )
         }
 
         return {
@@ -184,7 +190,12 @@ export class CapsuleUnarchiveRepository {
         throw error
       }
 
-      const racedReplay = await this.findSubmissionReplay(input.ownerId, input.actor, input.idempotencyKey, input.requestHash)
+      const racedReplay = await this.findSubmissionReplay(
+        input.ownerId,
+        input.actor,
+        input.idempotencyKey,
+        input.requestHash,
+      )
 
       if (racedReplay) {
         return racedReplay
@@ -534,10 +545,14 @@ export class CapsuleUnarchiveRepository {
     }
 
     if (operation.providerMutationStartedAt !== null) {
-      throw new IncusError('Provider-free capsule unarchive failure contains contradictory provider-intent evidence.', 'CONFLICT', {
-        operationId: operation.id,
-        providerMutationStartedAt: operation.providerMutationStartedAt?.toISOString() ?? null,
-      })
+      throw new IncusError(
+        'Provider-free capsule unarchive failure contains contradictory provider-intent evidence.',
+        'CONFLICT',
+        {
+          operationId: operation.id,
+          providerMutationStartedAt: operation.providerMutationStartedAt?.toISOString() ?? null,
+        },
+      )
     }
 
     const failureDetails = createOperationFailureDetails(error, context)
@@ -549,7 +564,8 @@ export class CapsuleUnarchiveRepository {
         failedAt: now,
         failureCode: operationFailureCodeFromUnknown(error),
         failureMessage: operationFailureMessageFromUnknown(error, fallbackMessage),
-        failureDetails: failureDetails === undefined ? undefined : toJsonObject(failureDetails, 'capsule unarchive failure details'),
+        failureDetails:
+          failureDetails === undefined ? undefined : toJsonObject(failureDetails, 'capsule unarchive failure details'),
         updatedAt: now,
       })
       .where(
@@ -637,8 +653,14 @@ export class CapsuleUnarchiveRepository {
         status: CapsuleOperationStatus.CLEANUP_REQUIRED,
         failedAt: now,
         failureCode: operationFailureCodeFromUnknown(error),
-        failureMessage: operationFailureMessageFromUnknown(error, 'Capsule unarchive requires manual cleanup and inspection.'),
-        failureDetails: failureDetails === undefined ? undefined : toJsonObject(failureDetails, 'capsule unarchive cleanup-required details'),
+        failureMessage: operationFailureMessageFromUnknown(
+          error,
+          'Capsule unarchive requires manual cleanup and inspection.',
+        ),
+        failureDetails:
+          failureDetails === undefined
+            ? undefined
+            : toJsonObject(failureDetails, 'capsule unarchive cleanup-required details'),
         updatedAt: now,
       })
       .where(
@@ -682,10 +704,14 @@ export class CapsuleUnarchiveRepository {
         })
 
       if (!cleanupCapsule) {
-        throw new IncusError('Failed to mark the capsule cleanup-required after an unarchive invariant violation.', 'CONFLICT', {
-          operationId: operation.id,
-          capsuleId: operation.capsuleId,
-        })
+        throw new IncusError(
+          'Failed to mark the capsule cleanup-required after an unarchive invariant violation.',
+          'CONFLICT',
+          {
+            operationId: operation.id,
+            capsuleId: operation.capsuleId,
+          },
+        )
       }
 
       committedCapsule = cleanupCapsule
@@ -780,7 +806,10 @@ export class CapsuleUnarchiveRepository {
   // Locking
   // ---------------------------------------------------------------------------
 
-  private async lockUnarchiveOperation(tx: ArchivalOperationTransaction, operationId: string): Promise<PersistedUnarchiveOperation> {
+  private async lockUnarchiveOperation(
+    tx: ArchivalOperationTransaction,
+    operationId: string,
+  ): Promise<PersistedUnarchiveOperation> {
     const operation = await this.lockUnarchiveOperationIfPresent(tx, operationId)
 
     if (!operation) {
@@ -803,7 +832,12 @@ export class CapsuleUnarchiveRepository {
     tx: ArchivalOperationTransaction,
     operationId: string,
   ): Promise<PersistedUnarchiveOperation | null> {
-    const [operation] = await tx.select().from(capsuleOperationsTable).where(eq(capsuleOperationsTable.id, operationId)).for('update').limit(1)
+    const [operation] = await tx
+      .select()
+      .from(capsuleOperationsTable)
+      .where(eq(capsuleOperationsTable.id, operationId))
+      .for('update')
+      .limit(1)
 
     return operation ?? null
   }

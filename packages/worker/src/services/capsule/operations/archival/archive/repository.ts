@@ -45,7 +45,9 @@ const NONTERMINAL_ARCHIVE_STATUSES = [CapsuleOperationStatus.ACCEPTED, CapsuleOp
 
 type PersistedArchiveOperation = typeof capsuleOperationsTable.$inferSelect
 
-function isNonterminalArchiveStatus(status: CapsuleOperationStatusValue): status is (typeof NONTERMINAL_ARCHIVE_STATUSES)[number] {
+function isNonterminalArchiveStatus(
+  status: CapsuleOperationStatusValue,
+): status is (typeof NONTERMINAL_ARCHIVE_STATUSES)[number] {
   return status === CapsuleOperationStatus.ACCEPTED || status === CapsuleOperationStatus.RUNNING
 }
 
@@ -70,10 +72,9 @@ export class CapsuleArchiveRepository {
   /**
    * Durably accepts or replays one archive operation.
    *
-   * The initial replay lookup avoids an unnecessary acceptance transaction.
-   * The lookup after a uniqueness violation closes the concurrent acceptance
-   * race. These are the two deliberate halves of the durable idempotency
-   * protocol.
+   * The initial replay lookup avoids an unnecessary acceptance transaction. The
+   * lookup after a uniqueness violation closes the concurrent acceptance race.
+   * These are the two deliberate halves of the durable idempotency protocol.
    */
   public async acceptOrReplay(input: AcceptArchiveCapsuleOperationInput): Promise<ArchiveCapsuleAcceptanceResult> {
     const replay = await this.findSubmissionReplay(input.ownerId, input.actor, input.idempotencyKey, input.requestHash)
@@ -181,7 +182,12 @@ export class CapsuleArchiveRepository {
         throw error
       }
 
-      const racedReplay = await this.findSubmissionReplay(input.ownerId, input.actor, input.idempotencyKey, input.requestHash)
+      const racedReplay = await this.findSubmissionReplay(
+        input.ownerId,
+        input.actor,
+        input.idempotencyKey,
+        input.requestHash,
+      )
 
       if (racedReplay) {
         return racedReplay
@@ -386,7 +392,10 @@ export class CapsuleArchiveRepository {
       const lineage = inspectOfflineBranchLineage(operation.ownerId, operation.capsuleId, branches)
 
       const safeProviderFreeFailure =
-        operation.providerMutationStartedAt === null && capsule.lifecycleStatus === 'archiving' && capsule.archivedAt === null && lineage.valid
+        operation.providerMutationStartedAt === null &&
+        capsule.lifecycleStatus === 'archiving' &&
+        capsule.archivedAt === null &&
+        lineage.valid
 
       if (!safeProviderFreeFailure) {
         return await this.markCleanupRequiredInTransaction(tx, operation, capsule, error, {
@@ -452,7 +461,10 @@ export class CapsuleArchiveRepository {
       const lineage = inspectOfflineBranchLineage(operation.ownerId, operation.capsuleId, branches)
 
       const safeProviderFreeClassification =
-        operation.providerMutationStartedAt === null && capsule.lifecycleStatus === 'archiving' && capsule.archivedAt === null && lineage.valid
+        operation.providerMutationStartedAt === null &&
+        capsule.lifecycleStatus === 'archiving' &&
+        capsule.archivedAt === null &&
+        lineage.valid
 
       if (!safeProviderFreeClassification) {
         const invariantError = {
@@ -516,10 +528,14 @@ export class CapsuleArchiveRepository {
     }
 
     if (operation.providerMutationStartedAt !== null) {
-      throw new IncusError('Provider-free capsule archive failure contains contradictory provider-intent evidence.', 'CONFLICT', {
-        operationId: operation.id,
-        providerMutationStartedAt: operation.providerMutationStartedAt?.toISOString() ?? null,
-      })
+      throw new IncusError(
+        'Provider-free capsule archive failure contains contradictory provider-intent evidence.',
+        'CONFLICT',
+        {
+          operationId: operation.id,
+          providerMutationStartedAt: operation.providerMutationStartedAt?.toISOString() ?? null,
+        },
+      )
     }
 
     const failureDetails = createOperationFailureDetails(error, context)
@@ -532,7 +548,8 @@ export class CapsuleArchiveRepository {
         failedAt: now,
         failureCode: operationFailureCodeFromUnknown(error),
         failureMessage: operationFailureMessageFromUnknown(error, fallbackMessage),
-        failureDetails: failureDetails === undefined ? undefined : toJsonObject(failureDetails, 'capsule archive failure details'),
+        failureDetails:
+          failureDetails === undefined ? undefined : toJsonObject(failureDetails, 'capsule archive failure details'),
         updatedAt: now,
       })
       .where(
@@ -614,8 +631,14 @@ export class CapsuleArchiveRepository {
         status: CapsuleOperationStatus.CLEANUP_REQUIRED,
         failedAt: now,
         failureCode: operationFailureCodeFromUnknown(error),
-        failureMessage: operationFailureMessageFromUnknown(error, 'Capsule archive requires manual cleanup and inspection.'),
-        failureDetails: failureDetails === undefined ? undefined : toJsonObject(failureDetails, 'capsule archive cleanup-required details'),
+        failureMessage: operationFailureMessageFromUnknown(
+          error,
+          'Capsule archive requires manual cleanup and inspection.',
+        ),
+        failureDetails:
+          failureDetails === undefined
+            ? undefined
+            : toJsonObject(failureDetails, 'capsule archive cleanup-required details'),
         updatedAt: now,
       })
       .where(
@@ -659,10 +682,14 @@ export class CapsuleArchiveRepository {
         })
 
       if (!cleanupCapsule) {
-        throw new IncusError('Failed to mark the capsule cleanup-required after an archive invariant violation.', 'CONFLICT', {
-          operationId: operation.id,
-          capsuleId: operation.capsuleId,
-        })
+        throw new IncusError(
+          'Failed to mark the capsule cleanup-required after an archive invariant violation.',
+          'CONFLICT',
+          {
+            operationId: operation.id,
+            capsuleId: operation.capsuleId,
+          },
+        )
       }
 
       committedCapsule = cleanupCapsule
@@ -757,7 +784,10 @@ export class CapsuleArchiveRepository {
   // Locking
   // ---------------------------------------------------------------------------
 
-  private async lockArchiveOperation(tx: ArchivalOperationTransaction, operationId: string): Promise<PersistedArchiveOperation> {
+  private async lockArchiveOperation(
+    tx: ArchivalOperationTransaction,
+    operationId: string,
+  ): Promise<PersistedArchiveOperation> {
     const operation = await this.lockArchiveOperationIfPresent(tx, operationId)
 
     if (!operation) {
@@ -780,7 +810,12 @@ export class CapsuleArchiveRepository {
     tx: ArchivalOperationTransaction,
     operationId: string,
   ): Promise<PersistedArchiveOperation | null> {
-    const [operation] = await tx.select().from(capsuleOperationsTable).where(eq(capsuleOperationsTable.id, operationId)).for('update').limit(1)
+    const [operation] = await tx
+      .select()
+      .from(capsuleOperationsTable)
+      .where(eq(capsuleOperationsTable.id, operationId))
+      .for('update')
+      .limit(1)
 
     return operation ?? null
   }

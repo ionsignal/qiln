@@ -16,12 +16,21 @@ export class IncusFilesClient {
   }
 
   /**
-   * Pushes a file to the container disk, injecting X-INCUS headers for ownership.
+   * Pushes a file to the container disk, injecting X-INCUS headers for
+   * ownership.
    */
-  public async write(instance: string, path: string, content: Uint8Array | string, options: IncusFilePushOptions = {}): Promise<void> {
+  public async write(
+    instance: string,
+    path: string,
+    content: Uint8Array | string,
+    options: IncusFilePushOptions = {},
+  ): Promise<void> {
     const queryPath = encodeURIComponent(path)
     const headers = buildIncusFileHeaders(options)
-    await this.transport.raw(`/instances/${encodeURIComponent(instance)}/files?path=${queryPath}`, 'POST', { body: content, headers })
+    await this.transport.raw(`/instances/${encodeURIComponent(instance)}/files?path=${queryPath}`, 'POST', {
+      body: content,
+      headers,
+    })
   }
 
   /**

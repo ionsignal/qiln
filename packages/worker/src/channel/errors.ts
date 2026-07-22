@@ -1,4 +1,10 @@
-import { CapsuleChannelErrorCode, GlobalError, GlobalErrorCode, toCapsuleCommandFailure, type CapsuleCommandFailure } from '@qiln/core/server'
+import {
+  CapsuleChannelErrorCode,
+  GlobalError,
+  GlobalErrorCode,
+  toCapsuleCommandFailure,
+  type CapsuleCommandFailure,
+} from '@qiln/core/server'
 import { IncusError } from '../errors'
 
 function incusErrorDetails(error: IncusError): Record<string, unknown> {
@@ -43,11 +49,13 @@ function mapGlobalErrorCode(code: GlobalErrorCode): CapsuleChannelErrorCode {
 }
 
 /**
- * Maps privileged worker/runtime failures into the Capsule Channel failure model.
+ * Maps privileged worker/runtime failures into the Capsule Channel failure
+ * model.
  *
  * Command handlers should throw domain/runtime errors. The channel owns the RPC
- * envelope and validates success outputs, so business failures must travel through
- * this mapper rather than through `{ success: false }` command return unions.
+ * envelope and validates success outputs, so business failures must travel
+ * through this mapper rather than through `{ success: false }` command return
+ * unions.
  */
 export function mapWorkerCapsuleCommandError(error: unknown): CapsuleCommandFailure {
   if (error instanceof IncusError) {

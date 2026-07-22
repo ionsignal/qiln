@@ -156,7 +156,9 @@ export const CapsuleBlueprintSnapshotCaptureApplicationSupportValues = [
   CapsuleBlueprintSnapshotCaptureApplicationSupport.EVALUATION_ONLY,
 ] as const
 
-export const CapsuleBlueprintSnapshotCaptureApplicationSupportSchema = z.enum(CapsuleBlueprintSnapshotCaptureApplicationSupportValues)
+export const CapsuleBlueprintSnapshotCaptureApplicationSupportSchema = z.enum(
+  CapsuleBlueprintSnapshotCaptureApplicationSupportValues,
+)
 
 /**
  * Makes application-specific snapshot-capture limits explicit in the pinned
@@ -191,5 +193,7 @@ export type CapsuleBlueprintModelVaultDependency = z.infer<typeof CapsuleBluepri
 export type CapsuleBlueprintExternalMountDependency = z.infer<typeof CapsuleBlueprintExternalMountDependencySchema>
 export type CapsuleBlueprintExternalMount = z.infer<typeof CapsuleBlueprintExternalMountSchema>
 export type CapsuleBlueprintGitRepository = z.infer<typeof CapsuleBlueprintGitRepositorySchema>
-export type CapsuleBlueprintSnapshotCaptureApplicationCapability = z.infer<typeof CapsuleBlueprintSnapshotCaptureApplicationCapabilitySchema>
+export type CapsuleBlueprintSnapshotCaptureApplicationCapability = z.infer<
+  typeof CapsuleBlueprintSnapshotCaptureApplicationCapabilitySchema
+>
 export type CapsuleBlueprintSnapshotCapturePolicy = z.infer<typeof CapsuleBlueprintSnapshotCapturePolicySchema>

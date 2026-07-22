@@ -32,7 +32,9 @@
       </n-flex>
     </n-flex>
     <template #action>
-      <n-button block type="primary" size="small" @click="$emit('create-capsule', blueprint.name)">Create Capsule</n-button>
+      <n-button block type="primary" size="small" @click="$emit('create-capsule', blueprint.name)">
+        Create Capsule
+      </n-button>
     </template>
   </n-card>
 </template>

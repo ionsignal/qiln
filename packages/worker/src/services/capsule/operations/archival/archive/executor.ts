@@ -22,7 +22,10 @@ export interface CapsuleArchiveExecutorDependencies {
  * policy, and terminal classification.
  */
 export class CapsuleArchiveExecutor {
-  private readonly execution: ProviderFreeArchivalOperationExecution<ArchiveCapsuleExecutionInput, ArchiveCapsuleTerminalResult>
+  private readonly execution: ProviderFreeArchivalOperationExecution<
+    ArchiveCapsuleExecutionInput,
+    ArchiveCapsuleTerminalResult
+  >
 
   constructor(private readonly dependencies: CapsuleArchiveExecutorDependencies) {
     this.execution = new ProviderFreeArchivalOperationExecution({

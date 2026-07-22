@@ -71,7 +71,11 @@ function digestNormalizedCapsuleArtifactManifest(manifest: CapsuleArtifactManife
 export function normalizeCapsuleArtifactManifest(value: unknown): CapsuleArtifactManifest {
   const parsed = CapsuleArtifactManifestSchema.safeParse(value)
   if (!parsed.success) {
-    throw new GlobalError('Capsule artifact manifest failed validation.', GlobalErrorCode.BAD_REQUEST, validationDetails(parsed.error))
+    throw new GlobalError(
+      'Capsule artifact manifest failed validation.',
+      GlobalErrorCode.BAD_REQUEST,
+      validationDetails(parsed.error),
+    )
   }
   const normalized = {
     schemaVersion: parsed.data.schemaVersion,

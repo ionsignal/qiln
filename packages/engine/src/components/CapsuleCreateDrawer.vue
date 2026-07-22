@@ -14,12 +14,24 @@
           <n-text v-if="selectedBlueprint" depth="3" class="blueprint-digest">Digest: {{ shortSelectedDigest }}</n-text>
         </n-form-item>
         <n-form-item label="Root Branch CPU Limit" path="cpu">
-          <n-slider v-model:value="form.cpu" :min="1" :max="16" :marks="{ 1: '1', 4: '4', 8: '8', 16: '16' }" :disabled="isSubmitting" />
+          <n-slider
+            v-model:value="form.cpu"
+            :min="1"
+            :max="16"
+            :marks="{ 1: '1', 4: '4', 8: '8', 16: '16' }"
+            :disabled="isSubmitting" />
         </n-form-item>
         <n-form-item label="Root Branch Memory Limit (GB)" path="memory">
-          <n-slider v-model:value="form.memory" :min="1" :max="32" :marks="{ 1: '1', 8: '8', 16: '16', 32: '32' }" :disabled="isSubmitting" />
+          <n-slider
+            v-model:value="form.memory"
+            :min="1"
+            :max="32"
+            :marks="{ 1: '1', 8: '8', 16: '16', 32: '32' }"
+            :disabled="isSubmitting" />
         </n-form-item>
-        <n-button block type="primary" attr-type="submit" :loading="isSubmitting" style="margin-top: 24px">Create Capsule</n-button>
+        <n-button block type="primary" attr-type="submit" :loading="isSubmitting" style="margin-top: 24px">
+          Create Capsule
+        </n-button>
       </n-form>
     </n-drawer-content>
   </n-drawer>
@@ -27,7 +39,18 @@
 
 <script setup lang="ts">
   import { computed, ref, watch } from 'vue'
-  import { NButton, NDrawer, NDrawerContent, NForm, NFormItem, NInput, NSelect, NSlider, NText, useMessage } from 'naive-ui'
+  import {
+    NButton,
+    NDrawer,
+    NDrawerContent,
+    NForm,
+    NFormItem,
+    NInput,
+    NSelect,
+    NSlider,
+    NText,
+    useMessage,
+  } from 'naive-ui'
   import { isTRPCClientError } from '@trpc/client'
   import {
     CapsuleOperationIdempotencyKeySchema,
@@ -115,7 +138,10 @@
   }
 
   function resolveInitialBlueprint(): string {
-    if (props.preselectedBlueprint && props.blueprints.some(blueprint => blueprint.name === props.preselectedBlueprint)) {
+    if (
+      props.preselectedBlueprint &&
+      props.blueprints.some(blueprint => blueprint.name === props.preselectedBlueprint)
+    ) {
       return props.preselectedBlueprint
     }
     return props.blueprints[0]?.name ?? ''

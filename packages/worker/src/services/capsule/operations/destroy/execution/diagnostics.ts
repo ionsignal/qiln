@@ -93,7 +93,9 @@ export function buildDestroyFailureDiagnostics(input: DestroyFailureDiagnosticsI
   return context
 }
 
-export function createDestroyCapsuleProviderFailure(input: DestroyCapsuleProviderFailureInput): DestroyCapsuleProviderFailure {
+export function createDestroyCapsuleProviderFailure(
+  input: DestroyCapsuleProviderFailureInput,
+): DestroyCapsuleProviderFailure {
   const failure: DestroyCapsuleProviderFailure = {
     phase: input.phase,
     action: input.action,

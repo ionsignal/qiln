@@ -4,8 +4,8 @@ import { z } from 'zod'
  * Durable principal types that may author capsule operations.
  *
  * Owner identity and actor identity are intentionally distinct. The owner
- * controls the capsule aggregate, while the actor identifies the principal
- * that requested one durable mutation.
+ * controls the capsule aggregate, while the actor identifies the principal that
+ * requested one durable mutation.
  */
 export const CapsuleActorType = {
   USER: 'user',

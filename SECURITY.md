@@ -9,4 +9,3 @@ If you believe you have found a security issue related to Qiln, contact:
 security@ionsignal.com
 
 Please do not open public GitHub issues for suspected vulnerabilities.
-

@@ -8,8 +8,8 @@ export interface BaseEvent {
 }
 
 /**
- * The ultimate union of all possible events in the application.
- * The Vue frontend will receive this type from the tRPC subscription.
+ * The ultimate union of all possible events in the application. The Vue
+ * frontend will receive this type from the tRPC subscription.
  */
 export type AppEvent = CapsuleEvent
 

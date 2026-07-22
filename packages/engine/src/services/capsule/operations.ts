@@ -188,8 +188,8 @@ export class CapsuleOperationsService {
   /**
    * Lists authoritative operation history for one owner-scoped capsule.
    *
-   * Missing and foreign capsule identities both produce an empty result. This avoids disclosing whether
-   * another owner's capsule exists.
+   * Missing and foreign capsule identities both produce an empty result. This
+   * avoids disclosing whether another owner's capsule exists.
    */
   public async list(ownerId: string, capsuleId: string): Promise<CapsuleOperationSummary[]> {
     const operations = await this.db
@@ -229,38 +229,51 @@ export class CapsuleOperationsService {
       status: operation.status,
       acceptedAt: this.toIsoTimestamp(operation.acceptedAt, 'acceptedAt', operation.id),
       executionStartedAt: this.toNullableIsoTimestamp(operation.executionStartedAt, 'executionStartedAt', operation.id),
-      providerMutationStartedAt: this.toNullableIsoTimestamp(operation.providerMutationStartedAt, 'providerMutationStartedAt', operation.id),
+      providerMutationStartedAt: this.toNullableIsoTimestamp(
+        operation.providerMutationStartedAt,
+        'providerMutationStartedAt',
+        operation.id,
+      ),
       completedAt: this.toNullableIsoTimestamp(operation.completedAt, 'completedAt', operation.id),
       failedAt: this.toNullableIsoTimestamp(operation.failedAt, 'failedAt', operation.id),
       failure: this.toFailure(operation),
     }
     const parsed = CapsuleOperationSummarySchema.safeParse(summary)
     if (!parsed.success) {
-      throw new GlobalError('Durable capsule operation state failed client-safe summary validation.', GlobalErrorCode.INTERNAL_ERROR, {
-        operationId: operation.id,
-        validation: parsed.error.issues.map(issue => ({
-          code: issue.code,
-          path: issue.path.map(segment => String(segment)),
-          message: issue.message,
-        })),
-      })
+      throw new GlobalError(
+        'Durable capsule operation state failed client-safe summary validation.',
+        GlobalErrorCode.INTERNAL_ERROR,
+        {
+          operationId: operation.id,
+          validation: parsed.error.issues.map(issue => ({
+            code: issue.code,
+            path: issue.path.map(segment => String(segment)),
+            message: issue.message,
+          })),
+        },
+      )
     }
     return parsed.data
   }
 
   private toFailure(operation: CapsuleOperationSummaryRow): CapsuleOperationFailure | null {
-    const hasFailureData = operation.failedAt !== null || operation.failureCode !== null || operation.failureMessage !== null
+    const hasFailureData =
+      operation.failedAt !== null || operation.failureCode !== null || operation.failureMessage !== null
     if (!hasFailureData) {
       return null
     }
     if (operation.failedAt === null || operation.failureCode === null || operation.failureMessage === null) {
-      throw new GlobalError('Durable capsule operation contains incomplete failure state.', GlobalErrorCode.INTERNAL_ERROR, {
-        operationId: operation.id,
-        operationStatus: operation.status,
-        hasFailedAt: operation.failedAt !== null,
-        hasFailureCode: operation.failureCode !== null,
-        hasFailureMessage: operation.failureMessage !== null,
-      })
+      throw new GlobalError(
+        'Durable capsule operation contains incomplete failure state.',
+        GlobalErrorCode.INTERNAL_ERROR,
+        {
+          operationId: operation.id,
+          operationStatus: operation.status,
+          hasFailedAt: operation.failedAt !== null,
+          hasFailureCode: operation.failureCode !== null,
+          hasFailureMessage: operation.failureMessage !== null,
+        },
+      )
     }
     const failure = {
       code: this.clientSafeFailureCode(operation.status, operation.failureCode),
@@ -269,14 +282,18 @@ export class CapsuleOperationsService {
     }
     const parsed = CapsuleOperationFailureSchema.safeParse(failure)
     if (!parsed.success) {
-      throw new GlobalError('Durable capsule operation failure failed client-safe validation.', GlobalErrorCode.INTERNAL_ERROR, {
-        operationId: operation.id,
-        validation: parsed.error.issues.map(issue => ({
-          code: issue.code,
-          path: issue.path.map(segment => String(segment)),
-          message: issue.message,
-        })),
-      })
+      throw new GlobalError(
+        'Durable capsule operation failure failed client-safe validation.',
+        GlobalErrorCode.INTERNAL_ERROR,
+        {
+          operationId: operation.id,
+          validation: parsed.error.issues.map(issue => ({
+            code: issue.code,
+            path: issue.path.map(segment => String(segment)),
+            message: issue.message,
+          })),
+        },
+      )
     }
     return parsed.data
   }
@@ -286,7 +303,9 @@ export class CapsuleOperationsService {
     if (CLIENT_SAFE_FAILURE_CODE_PATTERN.test(normalizedCode)) {
       return normalizedCode
     }
-    return status === CapsuleOperationStatus.CLEANUP_REQUIRED ? DEFAULT_CLIENT_CLEANUP_CODE : DEFAULT_CLIENT_FAILURE_CODE
+    return status === CapsuleOperationStatus.CLEANUP_REQUIRED
+      ? DEFAULT_CLIENT_CLEANUP_CODE
+      : DEFAULT_CLIENT_FAILURE_CODE
   }
 
   private clientSafeFailureMessage(status: CapsuleOperationStatusValue): string {
@@ -298,18 +317,26 @@ export class CapsuleOperationsService {
 
   private toIsoTimestamp(value: Date, field: string, operationId: string): string {
     if (!(value instanceof Date)) {
-      throw new GlobalError('Durable capsule operation contains a non-Date timestamp.', GlobalErrorCode.INTERNAL_ERROR, {
-        operationId,
-        field,
-        valueType: typeof value,
-      })
+      throw new GlobalError(
+        'Durable capsule operation contains a non-Date timestamp.',
+        GlobalErrorCode.INTERNAL_ERROR,
+        {
+          operationId,
+          field,
+          valueType: typeof value,
+        },
+      )
     }
     const timestamp = value.getTime()
     if (!Number.isFinite(timestamp)) {
-      throw new GlobalError('Durable capsule operation contains an invalid timestamp.', GlobalErrorCode.INTERNAL_ERROR, {
-        operationId,
-        field,
-      })
+      throw new GlobalError(
+        'Durable capsule operation contains an invalid timestamp.',
+        GlobalErrorCode.INTERNAL_ERROR,
+        {
+          operationId,
+          field,
+        },
+      )
     }
     return value.toISOString()
   }

@@ -20,7 +20,8 @@ export class IncusStorageClient {
   }
 
   /**
-   * Creates an empty custom storage volume (e.g., for 'world' or 'config' data).
+   * Creates an empty custom storage volume (e.g., for 'world' or 'config'
+   * data).
    */
   public async create(pool: string, name: string, config?: Record<string, string>): Promise<void> {
     const rawPayload: IncusVolumeCreatePayload = {
@@ -33,11 +34,14 @@ export class IncusStorageClient {
     if (!parsed.success) {
       throw new IncusError('Invalid Incus Volume Create Payload', 'VALIDATION_ERROR', z.treeifyError(parsed.error))
     }
-    await this.transport.operation(`/storage-pools/${encodeURIComponent(pool)}/volumes/custom`, 'POST', { body: parsed.data })
+    await this.transport.operation(`/storage-pools/${encodeURIComponent(pool)}/volumes/custom`, 'POST', {
+      body: parsed.data,
+    })
   }
 
   /**
-   * Performs a near-instant ZFS CoW (Copy-on-Write) clone of an existing volume.
+   * Performs a near-instant ZFS CoW (Copy-on-Write) clone of an existing
+   * volume.
    */
   public async clone(
     pool: string,
@@ -70,13 +74,18 @@ export class IncusStorageClient {
     if (!parsed.success) {
       throw new IncusError('Invalid Incus Volume Clone Payload', 'VALIDATION_ERROR', z.treeifyError(parsed.error))
     }
-    await this.transport.operation(`/storage-pools/${encodeURIComponent(pool)}/volumes/custom`, 'POST', { body: parsed.data })
+    await this.transport.operation(`/storage-pools/${encodeURIComponent(pool)}/volumes/custom`, 'POST', {
+      body: parsed.data,
+    })
   }
 
   /**
    * Deletes a custom storage volume.
    */
   public async delete(pool: string, name: string): Promise<void> {
-    await this.transport.operation(`/storage-pools/${encodeURIComponent(pool)}/volumes/custom/${encodeURIComponent(name)}`, 'DELETE')
+    await this.transport.operation(
+      `/storage-pools/${encodeURIComponent(pool)}/volumes/custom/${encodeURIComponent(name)}`,
+      'DELETE',
+    )
   }
 }

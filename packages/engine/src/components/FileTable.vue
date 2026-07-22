@@ -178,7 +178,11 @@
     { label: 'Download', key: 'download', icon: () => h(Icon, { path: mdiDownload, size: 16 }) },
     { label: 'Rename', key: 'rename', icon: () => h(Icon, { path: mdiPencil, size: 16 }) },
     { type: 'divider', key: 'd1' },
-    { label: 'Delete', key: 'delete', icon: () => h(Icon, { path: mdiDelete, size: 16, style: 'color: var(--n-error-color)' }) },
+    {
+      label: 'Delete',
+      key: 'delete',
+      icon: () => h(Icon, { path: mdiDelete, size: 16, style: 'color: var(--n-error-color)' }),
+    },
   ])
 
   function handleContextMenuSelect(key: string) {

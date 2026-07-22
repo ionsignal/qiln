@@ -47,13 +47,23 @@ export class CapsuleChannelError extends Error {
   }
 }
 
-export type CapsuleCommandInput<TName extends CapsuleCommandName> = input<(typeof CapsuleCommandDefinitions)[TName]['inputSchema']>
-export type CapsuleCommandParsedInput<TName extends CapsuleCommandName> = output<(typeof CapsuleCommandDefinitions)[TName]['inputSchema']>
-export type CapsuleCommandRawOutput<TName extends CapsuleCommandName> = input<(typeof CapsuleCommandDefinitions)[TName]['outputSchema']>
-export type CapsuleCommandOutput<TName extends CapsuleCommandName> = output<(typeof CapsuleCommandDefinitions)[TName]['outputSchema']>
+export type CapsuleCommandInput<TName extends CapsuleCommandName> = input<
+  (typeof CapsuleCommandDefinitions)[TName]['inputSchema']
+>
+export type CapsuleCommandParsedInput<TName extends CapsuleCommandName> = output<
+  (typeof CapsuleCommandDefinitions)[TName]['inputSchema']
+>
+export type CapsuleCommandRawOutput<TName extends CapsuleCommandName> = input<
+  (typeof CapsuleCommandDefinitions)[TName]['outputSchema']
+>
+export type CapsuleCommandOutput<TName extends CapsuleCommandName> = output<
+  (typeof CapsuleCommandDefinitions)[TName]['outputSchema']
+>
 
 export type CapsuleEventInput<TName extends CapsuleEventName> = input<(typeof CapsuleEventDefinitions)[TName]['schema']>
-export type CapsuleEventOutput<TName extends CapsuleEventName> = output<(typeof CapsuleEventDefinitions)[TName]['schema']>
+export type CapsuleEventOutput<TName extends CapsuleEventName> = output<
+  (typeof CapsuleEventDefinitions)[TName]['schema']
+>
 
 export interface CapsuleCommandContext<TName extends CapsuleCommandName = CapsuleCommandName> {
   target: Target
@@ -88,8 +98,15 @@ export type CapsuleEventFilter = (event: CapsuleEvent, envelope: CapsuleEventEnv
 export interface CapsuleChannel {
   start(): Promise<void>
   shutdown(): Promise<void>
-  command<TName extends CapsuleCommandName>(name: TName, inputValue: CapsuleCommandInput<TName>): Promise<CapsuleCommandOutput<TName>>
-  handle<TName extends CapsuleCommandName>(name: TName, handler: CapsuleCommandHandler<TName>, options?: CapsuleCommandHandlerOptions): void
+  command<TName extends CapsuleCommandName>(
+    name: TName,
+    inputValue: CapsuleCommandInput<TName>,
+  ): Promise<CapsuleCommandOutput<TName>>
+  handle<TName extends CapsuleCommandName>(
+    name: TName,
+    handler: CapsuleCommandHandler<TName>,
+    options?: CapsuleCommandHandlerOptions,
+  ): void
   publish<TName extends CapsuleEventName>(name: TName, eventValue: CapsuleEventInput<TName>): Promise<void>
   subscribe(filter?: CapsuleEventFilter): AsyncIterable<CapsuleEventEnvelope>
 }
@@ -116,7 +133,10 @@ export function detailsFromUnknown(value: unknown): Record<string, unknown> | un
   }
 }
 
-export function toCapsuleCommandFailure(error: unknown, fallbackMessage = 'Capsule command failed.'): CapsuleCommandFailure {
+export function toCapsuleCommandFailure(
+  error: unknown,
+  fallbackMessage = 'Capsule command failed.',
+): CapsuleCommandFailure {
   if (error instanceof CapsuleChannelError) {
     if (error.details === undefined) {
       return {

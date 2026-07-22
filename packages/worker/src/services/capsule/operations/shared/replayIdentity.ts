@@ -25,7 +25,10 @@ export interface ExpectedOperationReplayIdentity {
  * may perform an early lookup before consulting mutable inputs, while
  * repositories must still repeat the lookup for race-safe durable acceptance.
  */
-export function assertOperationReplayIdentity(operation: PersistedOperationReplayIdentity, expected: ExpectedOperationReplayIdentity): void {
+export function assertOperationReplayIdentity(
+  operation: PersistedOperationReplayIdentity,
+  expected: ExpectedOperationReplayIdentity,
+): void {
   if (operation.type !== expected.operationType) {
     throw new IncusError('Idempotency key was already used for another capsule operation type.', 'CONFLICT', {
       operationId: operation.id,
@@ -40,9 +43,13 @@ export function assertOperationReplayIdentity(operation: PersistedOperationRepla
     })
   }
   if (operation.requestHash !== expected.requestHash) {
-    throw new IncusError(`Idempotency key was already used with different ${expected.requestDescription} input.`, 'CONFLICT', {
-      operationId: operation.id,
-      operationType: operation.type,
-    })
+    throw new IncusError(
+      `Idempotency key was already used with different ${expected.requestDescription} input.`,
+      'CONFLICT',
+      {
+        operationId: operation.id,
+        operationType: operation.type,
+      },
+    )
   }
 }

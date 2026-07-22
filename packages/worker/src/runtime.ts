@@ -46,7 +46,9 @@ function detailsFromUnknown(value: unknown): Record<string, unknown> {
 
 function resolveWorkerRuntimeConfig(config?: WorkerRuntimeConfig): ResolvedWorkerRuntimeConfig {
   if (!config?.database?.url) {
-    throw new Error(`${WORKER_LOG_PREFIX} Missing required configuration: config.database.url is required for Worker mutation authority.`)
+    throw new Error(
+      `${WORKER_LOG_PREFIX} Missing required configuration: config.database.url is required for Worker mutation authority.`,
+    )
   }
   if (!config.nats) {
     throw new Error(`${WORKER_LOG_PREFIX} Missing required configuration: config.nats is required.`)
@@ -121,7 +123,9 @@ export class QilnWorkerRuntime {
 
   public async start(): Promise<void> {
     if (this.disposed) {
-      throw new Error(`${WORKER_LOG_PREFIX} Cannot start a disposed Worker runtime. Create a new runtime instance instead.`)
+      throw new Error(
+        `${WORKER_LOG_PREFIX} Cannot start a disposed Worker runtime. Create a new runtime instance instead.`,
+      )
     }
     if (this.started) {
       return
@@ -196,7 +200,9 @@ export class QilnWorkerRuntime {
 
       this.throwIfFailStopped()
       this.started = true
-      console.log(`${WORKER_LOG_PREFIX} Runtime started with mutation authority on PostgreSQL backend ${this.authority.recordedBackendPid}.`)
+      console.log(
+        `${WORKER_LOG_PREFIX} Runtime started with mutation authority on PostgreSQL backend ${this.authority.recordedBackendPid}.`,
+      )
     } catch (error: unknown) {
       await this.disposeAfterStartupFailure(error)
       throw error
@@ -297,11 +303,14 @@ export class QilnWorkerRuntime {
    * or start a replacement Worker.
    */
   private handleFatalAuthorityLoss(error: AuthorityLossError): void {
-    const failStopError = new WorkerRuntimeFailStopError('Worker PostgreSQL mutation authority was lost or became ambiguous.', {
-      authorityError: detailsFromUnknown(error),
-      activeOperationIds: this.supervisor.activeOperationIds(),
-      recordedBackendPid: this.authority.recordedBackendPid,
-    })
+    const failStopError = new WorkerRuntimeFailStopError(
+      'Worker PostgreSQL mutation authority was lost or became ambiguous.',
+      {
+        authorityError: detailsFromUnknown(error),
+        activeOperationIds: this.supervisor.activeOperationIds(),
+        recordedBackendPid: this.authority.recordedBackendPid,
+      },
+    )
 
     this.markFailStopped(failStopError)
     this.supervisor.beginShutdown()

@@ -42,8 +42,11 @@ function clientSafeFailureMessage(status: CapsuleOperationStatusValue): string {
  * provider diagnostics, host details, or paths. The durable code is retained
  * only when it fits the narrow client-safe code vocabulary.
  */
-export function toClientSafeOperationFailure(operation: PersistedOperationFailureFields): CapsuleOperationFailure | null {
-  const hasFailureData = operation.failedAt !== null || operation.failureCode !== null || operation.failureMessage !== null
+export function toClientSafeOperationFailure(
+  operation: PersistedOperationFailureFields,
+): CapsuleOperationFailure | null {
+  const hasFailureData =
+    operation.failedAt !== null || operation.failureCode !== null || operation.failureMessage !== null
   if (!hasFailureData) {
     return null
   }

@@ -84,7 +84,8 @@ function branchIdentityMatches(branch: CapsuleBranchSummary, input: CapsuleBranc
 
 /**
  * Capsule events are invalidation hints rather than an authoritative state
- * stream. Consumers refetch PostgreSQL-backed branch state after receiving one.
+ * stream. Consumers refetch PostgreSQL-backed branch state after receiving
+ * one.
  */
 function invalidatesBranchCollection(event: CapsuleEvent): boolean {
   return (
@@ -110,7 +111,10 @@ export function provideCapsules(options: ProvideCapsulesOptions): CapsuleContext
     return options.branches.value.find(branch => branchIdentityMatches(branch, input))
   }
 
-  function updateBranch(input: CapsuleBranchInput, update: (branch: CapsuleBranchSummary) => CapsuleBranchSummary): boolean {
+  function updateBranch(
+    input: CapsuleBranchInput,
+    update: (branch: CapsuleBranchSummary) => CapsuleBranchSummary,
+  ): boolean {
     let updated = false
     options.branches.value = options.branches.value.map(branch => {
       if (!branchIdentityMatches(branch, input)) {

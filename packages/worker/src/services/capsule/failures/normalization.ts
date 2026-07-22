@@ -99,7 +99,12 @@ function resolveNormalizationOptions(options: FailureNormalizationOptions): Requ
   }
 }
 
-function normalizeUnknown(value: unknown, options: Required<FailureNormalizationOptions>, depth: number, seen: WeakSet<object>): JsonValue {
+function normalizeUnknown(
+  value: unknown,
+  options: Required<FailureNormalizationOptions>,
+  depth: number,
+  seen: WeakSet<object>,
+): JsonValue {
   if (depth >= options.maxDepth) {
     return '[MaxDepth]'
   }
@@ -154,7 +159,12 @@ function normalizeUnknown(value: unknown, options: Required<FailureNormalization
   }
 }
 
-function normalizeError(error: Error, options: Required<FailureNormalizationOptions>, depth: number, seen: WeakSet<object>): JsonObject {
+function normalizeError(
+  error: Error,
+  options: Required<FailureNormalizationOptions>,
+  depth: number,
+  seen: WeakSet<object>,
+): JsonObject {
   const normalized: JsonObject = {
     name: error.name || 'Error',
     message: error.message,
@@ -198,7 +208,10 @@ function normalizeError(error: Error, options: Required<FailureNormalizationOpti
  * durable Worker diagnostics but does not replace strict domain persistence
  * validation or client-facing sanitization.
  */
-export function normalizeFailureDetails(value: unknown, options: FailureNormalizationOptions = {}): Record<string, unknown> | undefined {
+export function normalizeFailureDetails(
+  value: unknown,
+  options: FailureNormalizationOptions = {},
+): Record<string, unknown> | undefined {
   const normalizedOptions = resolveNormalizationOptions(options)
   if (value === undefined || value === null) {
     return undefined
@@ -241,7 +254,10 @@ export function failureMessageFromUnknown(value: unknown, fallback = 'Unknown ca
  * Raw diagnostics remain server-side and must pass through operation-specific
  * sanitization before being exposed to clients.
  */
-export function createFailureDetails(error: unknown, context?: Record<string, unknown>): Record<string, unknown> | undefined {
+export function createFailureDetails(
+  error: unknown,
+  context?: Record<string, unknown>,
+): Record<string, unknown> | undefined {
   const errorDetails = normalizeFailureDetails(error)
   const contextDetails = context === undefined ? undefined : normalizeFailureDetails(context)
   if (errorDetails === undefined && contextDetails === undefined) {

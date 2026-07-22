@@ -48,7 +48,11 @@ function compareStableString(left: string, right: string): number {
   return 0
 }
 
-function createInventoryValidationError(message: string, context: string, details: Record<string, unknown>): IncusError {
+function createInventoryValidationError(
+  message: string,
+  context: string,
+  details: Record<string, unknown>,
+): IncusError {
   return new IncusError(message, 'VALIDATION_ERROR', {
     context,
     ...details,
@@ -63,9 +67,13 @@ function normalizeInventoryEntries(
   const normalized = entries.map((entry, index) => {
     const entryContext = `${context}.resources[${index}]`
     if (entry.provider.trim() === '') {
-      throw createInventoryValidationError('Capsule branch resource inventory provider cannot be empty.', entryContext, {
-        resourceKey: entry.resourceKey,
-      })
+      throw createInventoryValidationError(
+        'Capsule branch resource inventory provider cannot be empty.',
+        entryContext,
+        {
+          resourceKey: entry.resourceKey,
+        },
+      )
     }
     if (entry.resourceKey.trim() === '') {
       throw createInventoryValidationError('Capsule branch resource inventory key cannot be empty.', entryContext, {
@@ -73,17 +81,25 @@ function normalizeInventoryEntries(
       })
     }
     if (!isPlainRecord(entry.metadata)) {
-      throw createInventoryValidationError('Capsule branch resource inventory metadata must be a plain JSON object.', entryContext, {
-        provider: entry.provider,
-        resourceKey: entry.resourceKey,
-      })
+      throw createInventoryValidationError(
+        'Capsule branch resource inventory metadata must be a plain JSON object.',
+        entryContext,
+        {
+          provider: entry.provider,
+          resourceKey: entry.resourceKey,
+        },
+      )
     }
     const identity = `${entry.provider}\u0000${entry.resourceKey}`
     if (identities.has(identity)) {
-      throw createInventoryValidationError('Capsule branch resource inventory contains a duplicate resource identity.', entryContext, {
-        provider: entry.provider,
-        resourceKey: entry.resourceKey,
-      })
+      throw createInventoryValidationError(
+        'Capsule branch resource inventory contains a duplicate resource identity.',
+        entryContext,
+        {
+          provider: entry.provider,
+          resourceKey: entry.resourceKey,
+        },
+      )
     }
     identities.add(identity)
     return {
@@ -119,9 +135,13 @@ export function createCapsuleBranchResourceInventoryDigest(
   })
   const parsedDigest = CapsuleBranchResourceInventoryDigestSchema.safeParse(digest)
   if (!parsedDigest.success) {
-    throw createInventoryValidationError('Generated capsule branch resource inventory digest failed validation.', context, {
-      digest,
-    })
+    throw createInventoryValidationError(
+      'Generated capsule branch resource inventory digest failed validation.',
+      context,
+      {
+        digest,
+      },
+    )
   }
   return parsedDigest.data
 }
@@ -145,11 +165,15 @@ export function assertCapsuleBranchResourceInventoryMatches(
   try {
     actualDigest = createCapsuleBranchResourceInventoryDigest(entries, 'capsule branch durable resource inventory')
   } catch (error: unknown) {
-    throw new IncusError('Capsule branch durable resource inventory is invalid. Manual review is required.', 'CONFLICT', {
-      expectedDigest: parsedExpectedDigest.data,
-      resourceCount: entries.length,
-      reason: error instanceof Error ? error.message : 'Unknown inventory normalization failure.',
-    })
+    throw new IncusError(
+      'Capsule branch durable resource inventory is invalid. Manual review is required.',
+      'CONFLICT',
+      {
+        expectedDigest: parsedExpectedDigest.data,
+        resourceCount: entries.length,
+        reason: error instanceof Error ? error.message : 'Unknown inventory normalization failure.',
+      },
+    )
   }
   if (actualDigest !== parsedExpectedDigest.data) {
     throw new IncusError(

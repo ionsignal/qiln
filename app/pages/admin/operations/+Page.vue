@@ -9,7 +9,8 @@
         <n-text style="font-weight: 600">Operations surface coming next</n-text>
       </template>
       <n-text depth="3" style="font-size: 13px">
-        This page will collect capsule lifecycle events, golden test outcomes, route alias promotion records, and rollback audit history.
+        This page will collect capsule lifecycle events, golden test outcomes, route alias promotion records, and
+        rollback audit history.
       </n-text>
     </n-card>
   </n-flex>

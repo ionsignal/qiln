@@ -71,7 +71,11 @@ export type VolumeResourceMetadata = z.infer<typeof VolumeResourceMetadataSchema
 export type BindMountResourceMetadata = z.infer<typeof BindMountResourceMetadataSchema>
 export type ProvisioningFileResourceMetadata = z.infer<typeof ProvisioningFileResourceMetadataSchema>
 
-function parseResourceMetadata<TSchema extends z.ZodType>(schema: TSchema, value: unknown, context: string): z.infer<TSchema> {
+function parseResourceMetadata<TSchema extends z.ZodType>(
+  schema: TSchema,
+  value: unknown,
+  context: string,
+): z.infer<TSchema> {
   const parsed = schema.safeParse(value)
   if (!parsed.success) {
     throw new IncusError(`Invalid ${context}.`, 'VALIDATION_ERROR', z.treeifyError(parsed.error))
@@ -96,7 +100,11 @@ export function parseBindMountResourceMetadata(value: unknown): BindMountResourc
 }
 
 export function parseProvisioningFileResourceMetadata(value: unknown): ProvisioningFileResourceMetadata {
-  return parseResourceMetadata(ProvisioningFileResourceMetadataSchema, value, 'capsule branch provisioning file resource metadata')
+  return parseResourceMetadata(
+    ProvisioningFileResourceMetadataSchema,
+    value,
+    'capsule branch provisioning file resource metadata',
+  )
 }
 
 export function createProvisioningFileResourceMetadata(

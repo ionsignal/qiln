@@ -28,11 +28,11 @@ import type { AcceptDestroyCapsuleOperationInput, DestroyCapsuleRepositoryResult
  *
  * The complete acceptance transaction covers:
  *
- * - capsule and branch locking;
- * - lifecycle and lineage eligibility;
- * - operation insertion;
- * - capsule and branch mutation fences;
- * - committed receipt and invalidation-source mapping.
+ * - Capsule and branch locking;
+ * - Lifecycle and lineage eligibility;
+ * - Operation insertion;
+ * - Capsule and branch mutation fences;
+ * - Committed receipt and invalidation-source mapping.
  *
  * The replay lookup after a uniqueness violation closes the concurrent
  * acceptance race without weakening idempotency identity validation.
@@ -135,12 +135,16 @@ export class DestroyCapsuleAcceptancePersistence {
             status: capsuleBranchesTable.status,
           })
         if (transitionedBranches.length !== branches.length) {
-          throw new IncusError('Failed to transition every capsule branch into the destroy mutation fence.', 'CONFLICT', {
-            ownerId: input.ownerId,
-            capsuleId: input.capsuleId,
-            expectedBranchCount: branches.length,
-            transitionedBranchCount: transitionedBranches.length,
-          })
+          throw new IncusError(
+            'Failed to transition every capsule branch into the destroy mutation fence.',
+            'CONFLICT',
+            {
+              ownerId: input.ownerId,
+              capsuleId: input.capsuleId,
+              expectedBranchCount: branches.length,
+              transitionedBranchCount: transitionedBranches.length,
+            },
+          )
         }
         return {
           newlyAccepted: true,
@@ -170,7 +174,12 @@ export class DestroyCapsuleAcceptancePersistence {
       if (!isUniqueConstraintViolation(error)) {
         throw error
       }
-      const racedReplay = await this.findSubmissionReplay(input.ownerId, input.actor, input.idempotencyKey, input.requestHash)
+      const racedReplay = await this.findSubmissionReplay(
+        input.ownerId,
+        input.actor,
+        input.idempotencyKey,
+        input.requestHash,
+      )
       if (racedReplay) {
         return racedReplay
       }
@@ -230,7 +239,12 @@ export class DestroyCapsuleAcceptancePersistence {
         status: capsuleBranchesTable.status,
       })
       .from(capsuleBranchesTable)
-      .where(and(eq(capsuleBranchesTable.capsuleId, operation.capsuleId), eq(capsuleBranchesTable.ownerId, operation.ownerId)))
+      .where(
+        and(
+          eq(capsuleBranchesTable.capsuleId, operation.capsuleId),
+          eq(capsuleBranchesTable.ownerId, operation.ownerId),
+        ),
+      )
       .orderBy(asc(capsuleBranchesTable.id))
     return {
       newlyAccepted,

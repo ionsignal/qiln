@@ -4,7 +4,7 @@ import { drizzle } from 'drizzle-orm/postgres-js'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
 /**
- * Database Type
+ * Database Type.
  */
 export type Database = PostgresJsDatabase<typeof relations>
 

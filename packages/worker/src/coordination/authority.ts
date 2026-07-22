@@ -7,8 +7,9 @@ const DATABASE_CLOSE_TIMEOUT_SECONDS = 5
 /**
  * Two-key advisory locks are represented by `objsubid = 2` in `pg_locks`.
  *
- * These fixed positive 32-bit values identify the mutation-capable Qiln Worker for the current PostgreSQL database.
- * PostgreSQL advisory locks are scoped to one database and one physical session.
+ * These fixed positive 32-bit values identify the mutation-capable Qiln Worker
+ * for the current PostgreSQL database. PostgreSQL advisory locks are scoped to
+ * one database and one physical session.
  */
 const MUTATION_AUTHORITY_LOCK_CLASS_ID = 1_366_970_788
 const MUTATION_AUTHORITY_LOCK_OBJECT_ID = 1
@@ -147,10 +148,11 @@ export class WorkerAuthority {
   }
 
   /**
-   * Acquires exclusive Worker mutation authority on a reserved physical PostgreSQL connection.
+   * Acquires exclusive Worker mutation authority on a reserved physical
+   * PostgreSQL connection.
    *
-   * A failed acquisition closes the candidate connection. No command handler or provider
-   * mutation may be enabled before this method succeeds.
+   * A failed acquisition closes the candidate connection. No command handler or
+   * provider mutation may be enabled before this method succeeds.
    */
   public async acquire(): Promise<void> {
     if (this.state === 'held') {
@@ -186,11 +188,14 @@ export class WorkerAuthority {
       assertBackendPid(row.backendPid, 'acquiring Worker mutation authority')
 
       if (row.acquired !== true) {
-        throw new AuthorityAcquisitionError('Another mutation-capable Qiln Worker already holds authority for this database.', {
-          backendPid: row.backendPid,
-          lockClassId: MUTATION_AUTHORITY_LOCK_CLASS_ID,
-          lockObjectId: MUTATION_AUTHORITY_LOCK_OBJECT_ID,
-        })
+        throw new AuthorityAcquisitionError(
+          'Another mutation-capable Qiln Worker already holds authority for this database.',
+          {
+            backendPid: row.backendPid,
+            lockClassId: MUTATION_AUTHORITY_LOCK_CLASS_ID,
+            lockObjectId: MUTATION_AUTHORITY_LOCK_OBJECT_ID,
+          },
+        )
       }
       this.client = client
       this.connection = connection
@@ -265,9 +270,12 @@ export class WorkerAuthority {
       }
     }
     if (this.isLost) {
-      throw new AuthorityLossError('Normal Worker authority release is prohibited because ownership was lost during shutdown verification.', {
-        recordedBackendPid: this.backendPid,
-      })
+      throw new AuthorityLossError(
+        'Normal Worker authority release is prohibited because ownership was lost during shutdown verification.',
+        {
+          recordedBackendPid: this.backendPid,
+        },
+      )
     }
     const connection = this.connection
     const client = this.client
@@ -301,11 +309,14 @@ export class WorkerAuthority {
       assertBackendPid(row.backendPid, 'releasing Worker mutation authority')
 
       if (row.backendPid !== expectedBackendPid || row.released !== true) {
-        throw new AuthorityLossError('Worker mutation-authority release could not be proven on the original PostgreSQL session.', {
-          recordedBackendPid: expectedBackendPid,
-          actualBackendPid: row.backendPid,
-          released: row.released,
-        })
+        throw new AuthorityLossError(
+          'Worker mutation-authority release could not be proven on the original PostgreSQL session.',
+          {
+            recordedBackendPid: expectedBackendPid,
+            actualBackendPid: row.backendPid,
+            released: row.released,
+          },
+        )
       }
     } catch (error: unknown) {
       const lossError = this.toLossError(error, 'Worker mutation authority became ambiguous during normal release.')
@@ -436,7 +447,10 @@ export class WorkerAuthority {
     })
   }
 
-  private async closeCandidateConnection(connection: ReservedPostgresConnection | null, client: PostgresClient): Promise<void> {
+  private async closeCandidateConnection(
+    connection: ReservedPostgresConnection | null,
+    client: PostgresClient,
+  ): Promise<void> {
     if (connection) {
       try {
         connection.release()

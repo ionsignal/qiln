@@ -15,8 +15,14 @@ import type { BranchResourceInput, CapsuleBranchResourceInventoryRow } from './t
 const DEFAULT_RESOURCE_PROVIDER = 'incus'
 const CREATE_INTENT_ELIGIBLE_RESOURCE_STATUSES = [CapsuleBranchResourceStatus.PLANNED] as const
 const DIRECT_DELETE_INTENT_ELIGIBLE_RESOURCE_STATUSES = [CapsuleBranchResourceStatus.CREATED] as const
-const DIRECT_DELETE_RESOURCE_TYPES = [CapsuleBranchResourceType.INCUS_INSTANCE, CapsuleBranchResourceType.ZFS_VOLUME] as const
-const DIRECT_DELETE_OUTCOME_RESOURCE_STATUSES = [CapsuleBranchResourceStatus.DELETED, CapsuleBranchResourceStatus.MISSING] as const
+const DIRECT_DELETE_RESOURCE_TYPES = [
+  CapsuleBranchResourceType.INCUS_INSTANCE,
+  CapsuleBranchResourceType.ZFS_VOLUME,
+] as const
+const DIRECT_DELETE_OUTCOME_RESOURCE_STATUSES = [
+  CapsuleBranchResourceStatus.DELETED,
+  CapsuleBranchResourceStatus.MISSING,
+] as const
 const BOOTSTRAP_DERIVED_DELETE_ELIGIBLE_RESOURCE_STATUSES = [
   CapsuleBranchResourceStatus.PLANNED,
   CapsuleBranchResourceStatus.CREATING,
@@ -26,7 +32,10 @@ const BOOTSTRAP_DERIVED_DELETE_ELIGIBLE_RESOURCE_STATUSES = [
 
 type DirectDeleteOutcomeResourceStatus = (typeof DIRECT_DELETE_OUTCOME_RESOURCE_STATUSES)[number]
 
-function normalizedMetadata(metadata: Record<string, unknown> | null | undefined, context: string): Record<string, unknown> | null {
+function normalizedMetadata(
+  metadata: Record<string, unknown> | null | undefined,
+  context: string,
+): Record<string, unknown> | null {
   return metadata === null || metadata === undefined ? null : toJsonObject(metadata, context)
 }
 
@@ -159,10 +168,14 @@ export class CapsuleBranchResourceStore {
         id: capsuleBranchResourcesTable.id,
       })
     if (updatedResources.length !== 1) {
-      throw new IncusError('Failed to persist capsule branch resource adoption. Manual review is required.', 'CONFLICT', {
-        resourceId,
-        operationId,
-      })
+      throw new IncusError(
+        'Failed to persist capsule branch resource adoption. Manual review is required.',
+        'CONFLICT',
+        {
+          resourceId,
+          operationId,
+        },
+      )
     }
   }
 
@@ -185,10 +198,14 @@ export class CapsuleBranchResourceStore {
         id: capsuleBranchResourcesTable.id,
       })
     if (updatedResources.length !== 1) {
-      throw new IncusError('Failed to persist capsule branch resource create intent. Manual review is required.', 'CONFLICT', {
-        resourceId,
-        operationId,
-      })
+      throw new IncusError(
+        'Failed to persist capsule branch resource create intent. Manual review is required.',
+        'CONFLICT',
+        {
+          resourceId,
+          operationId,
+        },
+      )
     }
   }
 
@@ -215,10 +232,14 @@ export class CapsuleBranchResourceStore {
         id: capsuleBranchResourcesTable.id,
       })
     if (updatedResources.length !== 1) {
-      throw new IncusError('Failed to persist capsule branch resource create outcome. Manual review is required.', 'CONFLICT', {
-        resourceId,
-        operationId,
-      })
+      throw new IncusError(
+        'Failed to persist capsule branch resource create outcome. Manual review is required.',
+        'CONFLICT',
+        {
+          resourceId,
+          operationId,
+        },
+      )
     }
   }
 
@@ -237,7 +258,8 @@ export class CapsuleBranchResourceStore {
         updatedAt: new Date(),
         failureCode: failureCodeFromUnknown(error),
         failureMessage: failureMessageFromUnknown(error, 'Unknown capsule branch resource create failure.'),
-        failureDetails: details === undefined ? undefined : toJsonObject(details, 'capsule branch resource create failure details'),
+        failureDetails:
+          details === undefined ? undefined : toJsonObject(details, 'capsule branch resource create failure details'),
       })
       .where(
         and(
@@ -251,10 +273,14 @@ export class CapsuleBranchResourceStore {
         id: capsuleBranchResourcesTable.id,
       })
     if (updatedResources.length !== 1) {
-      throw new IncusError('Failed to persist capsule branch resource create failure. Manual review is required.', 'CONFLICT', {
-        resourceId,
-        operationId,
-      })
+      throw new IncusError(
+        'Failed to persist capsule branch resource create failure. Manual review is required.',
+        'CONFLICT',
+        {
+          resourceId,
+          operationId,
+        },
+      )
     }
   }
 
@@ -278,10 +304,14 @@ export class CapsuleBranchResourceStore {
         id: capsuleBranchResourcesTable.id,
       })
     if (updatedResources.length !== 1) {
-      throw new IncusError('Failed to persist capsule branch resource delete intent. Manual review is required.', 'CONFLICT', {
-        resourceId,
-        operationId,
-      })
+      throw new IncusError(
+        'Failed to persist capsule branch resource delete intent. Manual review is required.',
+        'CONFLICT',
+        {
+          resourceId,
+          operationId,
+        },
+      )
     }
   }
 
@@ -313,11 +343,15 @@ export class CapsuleBranchResourceStore {
         id: capsuleBranchResourcesTable.id,
       })
     if (updatedResources.length !== 1) {
-      throw new IncusError('Failed to persist capsule branch resource delete outcome. Manual review is required.', 'CONFLICT', {
-        resourceId,
-        operationId,
-        outcome,
-      })
+      throw new IncusError(
+        'Failed to persist capsule branch resource delete outcome. Manual review is required.',
+        'CONFLICT',
+        {
+          resourceId,
+          operationId,
+          outcome,
+        },
+      )
     }
   }
 
@@ -336,7 +370,8 @@ export class CapsuleBranchResourceStore {
         updatedAt: new Date(),
         failureCode: failureCodeFromUnknown(error),
         failureMessage: failureMessageFromUnknown(error, 'Unknown capsule branch resource delete failure.'),
-        failureDetails: details === undefined ? undefined : toJsonObject(details, 'capsule branch resource delete failure details'),
+        failureDetails:
+          details === undefined ? undefined : toJsonObject(details, 'capsule branch resource delete failure details'),
       })
       .where(
         and(
@@ -351,10 +386,14 @@ export class CapsuleBranchResourceStore {
         id: capsuleBranchResourcesTable.id,
       })
     if (updatedResources.length !== 1) {
-      throw new IncusError('Failed to persist capsule branch resource delete failure. Manual review is required.', 'CONFLICT', {
-        resourceId,
-        operationId,
-      })
+      throw new IncusError(
+        'Failed to persist capsule branch resource delete failure. Manual review is required.',
+        'CONFLICT',
+        {
+          resourceId,
+          operationId,
+        },
+      )
     }
   }
 
@@ -431,7 +470,11 @@ export class CapsuleBranchResourceStore {
     }
   }
 
-  public async markBranchResourceError(resourceId: string, error: unknown, context?: Record<string, unknown>): Promise<void> {
+  public async markBranchResourceError(
+    resourceId: string,
+    error: unknown,
+    context?: Record<string, unknown>,
+  ): Promise<void> {
     const details = createFailureDetails(error, context)
     const updateData: {
       status: typeof CapsuleBranchResourceStatus.ERROR
@@ -493,7 +536,9 @@ export class CapsuleBranchResourceStore {
       .orderBy(asc(capsuleBranchResourcesTable.createdAt), asc(capsuleBranchResourcesTable.id))
   }
 
-  public async listBranchResourceInventories(branchIds: readonly string[]): Promise<CapsuleBranchResourceInventoryRow[]> {
+  public async listBranchResourceInventories(
+    branchIds: readonly string[],
+  ): Promise<CapsuleBranchResourceInventoryRow[]> {
     if (branchIds.length === 0) {
       return []
     }
@@ -514,7 +559,11 @@ export class CapsuleBranchResourceStore {
       })
       .from(capsuleBranchResourcesTable)
       .where(inArray(capsuleBranchResourcesTable.branchId, [...branchIds]))
-      .orderBy(asc(capsuleBranchResourcesTable.branchId), asc(capsuleBranchResourcesTable.createdAt), asc(capsuleBranchResourcesTable.id))
+      .orderBy(
+        asc(capsuleBranchResourcesTable.branchId),
+        asc(capsuleBranchResourcesTable.createdAt),
+        asc(capsuleBranchResourcesTable.id),
+      )
   }
 
   private assertExistingResourceIdentity(
@@ -532,8 +581,16 @@ export class CapsuleBranchResourceStore {
   ): void {
     const expectedProvider = input.provider ?? DEFAULT_RESOURCE_PROVIDER
     const expectedMetadata = normalizedMetadata(input.metadata, 'requested capsule branch resource metadata')
-    const existingIdentityDigest = resourceIdentityDigest(existing.provider, existing.metadata, 'existing capsule branch resource identity')
-    const expectedIdentityDigest = resourceIdentityDigest(expectedProvider, expectedMetadata, 'requested capsule branch resource identity')
+    const existingIdentityDigest = resourceIdentityDigest(
+      existing.provider,
+      existing.metadata,
+      'existing capsule branch resource identity',
+    )
+    const expectedIdentityDigest = resourceIdentityDigest(
+      expectedProvider,
+      expectedMetadata,
+      'requested capsule branch resource identity',
+    )
     if (
       existing.ownerId !== input.ownerId ||
       existing.branchId !== input.branchId ||
@@ -544,11 +601,15 @@ export class CapsuleBranchResourceStore {
       existing.resourceKey !== input.resourceKey ||
       existingIdentityDigest !== expectedIdentityDigest
     ) {
-      throw new IncusError('Existing capsule branch resource identity does not match the requested durable inventory entry.', 'CONFLICT', {
-        operationId: input.operationId,
-        branchId: input.branchId,
-        resourceKey: input.resourceKey,
-      })
+      throw new IncusError(
+        'Existing capsule branch resource identity does not match the requested durable inventory entry.',
+        'CONFLICT',
+        {
+          operationId: input.operationId,
+          branchId: input.branchId,
+          resourceKey: input.resourceKey,
+        },
+      )
     }
   }
 }

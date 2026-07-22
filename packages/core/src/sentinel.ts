@@ -13,9 +13,10 @@ export interface SmartSentinelOptions {
 }
 
 /**
- * A Vite plugin that monitors a specific output chunk during watch mode.
- * It computes a SHA-256 hash of the compiled code and only triggers a host
- * server restart if the backend logic actually changed, ignoring frontend-only HMR builds.
+ * A Vite plugin that monitors a specific output chunk during watch mode. It
+ * computes a SHA-256 hash of the compiled code and only triggers a host server
+ * restart if the backend logic actually changed, ignoring frontend-only HMR
+ * builds.
  */
 export function sentinel(options: SmartSentinelOptions = {}): Plugin {
   const chunkName = options.chunkName ?? 'server.js'

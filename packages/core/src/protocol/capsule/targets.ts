@@ -29,7 +29,9 @@ export function isSubjectSafeTargetId(id: string): boolean {
 
 export function assertSubjectSafeTargetId(id: string, context = 'capsule target id'): asserts id is string {
   if (!isSubjectSafeTargetId(id)) {
-    throw new Error(`${context} must be a concrete NATS subject token: non-empty, trimmed, and without '.', '*', or '>'.`)
+    throw new Error(
+      `${context} must be a concrete NATS subject token: non-empty, trimmed, and without '.', '*', or '>'.`,
+    )
   }
 }
 

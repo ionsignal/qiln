@@ -23,8 +23,9 @@ export const CapsuleSnapshotCommandNameValues = [CapsuleSnapshotCommandName.SNAP
 /**
  * Common owner-scoped snapshot command identity.
  *
- * The owner target is the routing and authorization scope. `capsuleId` identifies the requested capsule but n
- * ever replaces independent durable ownership verification.
+ * The owner target is the routing and authorization scope. `capsuleId`
+ * identifies the requested capsule but n ever replaces independent durable
+ * ownership verification.
  */
 export const CapsuleSnapshotOwnerScopedInputSchema = z
   .object({
@@ -62,6 +63,9 @@ export const CapsuleSnapshotCommandDefinitions = {
   }),
 } as const satisfies Record<CapsuleSnapshotCommandName, CapsuleCommandDefinition>
 
-export const CapsuleSnapshotEventDefinitions = {} as const satisfies Record<CapsuleSnapshotEventName, CapsuleEventDefinition>
+export const CapsuleSnapshotEventDefinitions = {} as const satisfies Record<
+  CapsuleSnapshotEventName,
+  CapsuleEventDefinition
+>
 
 export const CapsuleSnapshotEventSchemas = [] as const satisfies readonly ZodType[]

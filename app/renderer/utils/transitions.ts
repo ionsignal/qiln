@@ -10,8 +10,9 @@ export type TransitionEventMap = {
 type Handler = () => void
 
 /**
- * A lightweight, dependency-free Pub/Sub Event Bus for cross-boundary communication.
- * Primarily used to trigger the Naive UI Loading Bar during Vike client-side routing.
+ * A lightweight, dependency-free Pub/Sub Event Bus for cross-boundary
+ * communication. Primarily used to trigger the Naive UI Loading Bar during Vike
+ * client-side routing.
  */
 class TransitionBus {
   private listeners: Record<keyof TransitionEventMap, Handler[]> = {

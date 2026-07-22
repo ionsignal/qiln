@@ -8,8 +8,8 @@ import type { MockFsNode } from '../types'
 
 /**
  * Recursively builds a TreeOption[] structure from a MockFsNode dictionary.
- * Strictly filters out files, ensuring only directories are rendered in the tree.
- * Used to map filesystem data to Naive UI's n-tree component.
+ * Strictly filters out files, ensuring only directories are rendered in the
+ * tree. Used to map filesystem data to Naive UI's n-tree component.
  */
 export function buildDirectoryTreeOptions(node: MockFsNode, currentPath: string): TreeOption[] {
   if (!node.children) return []

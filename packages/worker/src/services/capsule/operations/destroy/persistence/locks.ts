@@ -22,11 +22,16 @@ export type PersistedDestroyCapsule = typeof capsulesTable.$inferSelect
  * identity check. The caller remains responsible for operation status,
  * provider-intent, lifecycle, and terminal-classification policy.
  */
-export async function lockDestroyOperation(tx: DestroyOperationTransaction, operationId: string): Promise<PersistedDestroyOperation> {
+export async function lockDestroyOperation(
+  tx: DestroyOperationTransaction,
+  operationId: string,
+): Promise<PersistedDestroyOperation> {
   const [operation] = await tx
     .select()
     .from(capsuleOperationsTable)
-    .where(and(eq(capsuleOperationsTable.id, operationId), eq(capsuleOperationsTable.type, CapsuleOperationType.DESTROY)))
+    .where(
+      and(eq(capsuleOperationsTable.id, operationId), eq(capsuleOperationsTable.type, CapsuleOperationType.DESTROY)),
+    )
     .for('update')
     .limit(1)
   if (!operation) {
@@ -70,7 +75,10 @@ export async function lockOwnedDestroyCapsule(
  * contradictory branch evidence must be available to operation-specific
  * fail-closed policy.
  */
-export async function lockDestroyCapsuleBranches(tx: DestroyOperationTransaction, capsuleId: string): Promise<DestroyCapsuleAcceptedBranch[]> {
+export async function lockDestroyCapsuleBranches(
+  tx: DestroyOperationTransaction,
+  capsuleId: string,
+): Promise<DestroyCapsuleAcceptedBranch[]> {
   return await tx
     .select({
       id: capsuleBranchesTable.id,
@@ -123,6 +131,10 @@ export async function lockDestroyBranchResourceInventories(
     })
     .from(capsuleBranchResourcesTable)
     .where(inArray(capsuleBranchResourcesTable.branchId, [...branchIds]))
-    .orderBy(asc(capsuleBranchResourcesTable.branchId), asc(capsuleBranchResourcesTable.createdAt), asc(capsuleBranchResourcesTable.id))
+    .orderBy(
+      asc(capsuleBranchResourcesTable.branchId),
+      asc(capsuleBranchResourcesTable.createdAt),
+      asc(capsuleBranchResourcesTable.id),
+    )
     .for('update')
 }

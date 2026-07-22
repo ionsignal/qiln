@@ -1,6 +1,11 @@
 import { z } from 'zod'
 import { absolutePosixParentPath, isAbsolutePosixPathAtOrBelow } from '../../posix'
-import { CapsuleArtifactEntrySchema, CapsuleArtifactEntryType, CapsuleArtifactLogicalPathSchema, CapsuleArtifactRootIdSchema } from './entry'
+import {
+  CapsuleArtifactEntrySchema,
+  CapsuleArtifactEntryType,
+  CapsuleArtifactLogicalPathSchema,
+  CapsuleArtifactRootIdSchema,
+} from './entry'
 
 export const CAPSULE_ARTIFACT_MANIFEST_SCHEMA_VERSION = 1 as const
 
@@ -18,23 +23,23 @@ export const CapsuleArtifactManifestRootSchema = z
  *
  * Represented semantics:
  *
- * - regular files;
- * - directories, including empty directories;
- * - canonical logical paths;
+ * - Regular files;
+ * - Directories, including empty directories;
+ * - Canonical logical paths;
  * - POSIX mode;
  * - UID and GID;
- * - canonical modified time;
- * - regular-file byte size;
- * - regular-file content digest.
+ * - Canonical modified time;
+ * - Regular-file byte size;
+ * - Regular-file content digest.
  *
  * Deliberately unsupported semantics:
  *
- * - symlinks;
- * - devices, sockets, and FIFOs;
+ * - Symlinks;
+ * - Devices, sockets, and FIFOs;
  * - ACLs and extended attributes;
- * - hard-link topology;
- * - sparse extents;
- * - provider filesystem implementation details.
+ * - Hard-link topology;
+ * - Sparse extents;
+ * - Provider filesystem implementation details.
  *
  * Physical provider snapshots may preserve additional filesystem state, but the
  * canonical manifest does not claim semantics it does not model. A V1 collector
@@ -145,7 +150,11 @@ export const CapsuleArtifactManifestSchema = z
 
     manifest.entries.forEach((entry, index) => {
       const root = rootsById.get(entry.rootId)
-      if (!root || entry.logicalPath === root.logicalPath || !isAbsolutePosixPathAtOrBelow(entry.logicalPath, root.logicalPath)) {
+      if (
+        !root ||
+        entry.logicalPath === root.logicalPath ||
+        !isAbsolutePosixPathAtOrBelow(entry.logicalPath, root.logicalPath)
+      ) {
         return
       }
       const parentPath = absolutePosixParentPath(entry.logicalPath)

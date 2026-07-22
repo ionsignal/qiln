@@ -31,15 +31,17 @@ export class IncusClient {
   }
 
   /**
-   * Gracefully closes the WebSocket event stream and rejects all in-flight operations.
+   * Gracefully closes the WebSocket event stream and rejects all in-flight
+   * operations.
    */
   public destroy(): void {
     return this.transport.destroy()
   }
 
   /**
-   * Returns a set of sub-clients that are strictly scoped to a specific Incus project,
-   * reusing the underlying WebSocket connection to prevent resource exhaustion.
+   * Returns a set of sub-clients that are strictly scoped to a specific Incus
+   * project, reusing the underlying WebSocket connection to prevent resource
+   * exhaustion.
    */
   public UseProject(project: string) {
     const scopedTransport = new ScopedIncusTransport(this.transport, project)

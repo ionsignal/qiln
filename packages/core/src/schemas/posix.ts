@@ -3,9 +3,8 @@ export type AbsolutePosixPathRelationship = 'equal' | 'ancestor' | 'descendant' 
 /**
  * Determines whether a string is a canonical absolute POSIX path.
  *
- * Canonical paths have one leading slash, no trailing slash except for `/`,
- * and no empty, current-directory, parent-directory, or null-containing
- * segments.
+ * Canonical paths have one leading slash, no trailing slash except for `/`, and
+ * no empty, current-directory, parent-directory, or null-containing segments.
  */
 export function isCanonicalAbsolutePosixPath(value: string): boolean {
   if (value === '/') {

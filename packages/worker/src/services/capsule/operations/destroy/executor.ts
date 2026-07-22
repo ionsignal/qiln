@@ -66,9 +66,15 @@ export class DestroyCapsuleExecutor {
           branchCount: executionContext.branches.length,
         },
         async () => {
-          const rows = await this.dependencies.resources.listBranchResourceInventories(executionContext.branches.map(branch => branch.id))
-
-          return this.planner.createPlan(executionContext.ownerId, executionContext.capsuleId, executionContext.branches, rows)
+          const rows = await this.dependencies.resources.listBranchResourceInventories(
+            executionContext.branches.map(branch => branch.id),
+          )
+          return this.planner.createPlan(
+            executionContext.ownerId,
+            executionContext.capsuleId,
+            executionContext.branches,
+            rows,
+          )
         },
       )
 
@@ -118,7 +124,9 @@ export class DestroyCapsuleExecutor {
           resourceCount: plannedResources.resourceIds.size,
         },
         async () => {
-          const rows = await this.dependencies.resources.listBranchResourceInventories(executionContext.branches.map(branch => branch.id))
+          const rows = await this.dependencies.resources.listBranchResourceInventories(
+            executionContext.branches.map(branch => branch.id),
+          )
 
           /**
            * This is an early diagnostic and durable step-accounting boundary.
@@ -150,7 +158,15 @@ export class DestroyCapsuleExecutor {
       }
       const failedPhase = state.currentPhase
       const failedStepKey = state.currentStepKey
-      const classified = await this.classifyFailure(operationId, context, state, plan, executionError, failedPhase, failedStepKey)
+      const classified = await this.classifyFailure(
+        operationId,
+        context,
+        state,
+        plan,
+        executionError,
+        failedPhase,
+        failedStepKey,
+      )
       if (!classified) {
         /**
          * A null classification result means PostgreSQL already contains a
@@ -213,9 +229,12 @@ export class DestroyCapsuleExecutor {
       throw classificationError
     }
     if (terminal === null) {
-      console.warn(`[DestroyCapsuleExecutor] Destroy operation '${operationId}' was already terminal during failure classification.`, {
-        failedPhase,
-      })
+      console.warn(
+        `[DestroyCapsuleExecutor] Destroy operation '${operationId}' was already terminal during failure classification.`,
+        {
+          failedPhase,
+        },
+      )
       return false
     }
     this.publishTerminalResult(terminal)
@@ -252,7 +271,12 @@ export class DestroyCapsuleExecutor {
     this.dependencies.operationEvents.publishChanged(result.operation)
     this.dependencies.lifecycleEvents.publishChanged(result.operation.ownerId, result.capsule)
     for (const branch of result.branches) {
-      this.dependencies.branchEvents.publishStateChanged(result.operation.ownerId, branch.capsuleId, branch.name, branch.status)
+      this.dependencies.branchEvents.publishStateChanged(
+        result.operation.ownerId,
+        branch.capsuleId,
+        branch.name,
+        branch.status,
+      )
     }
   }
 }

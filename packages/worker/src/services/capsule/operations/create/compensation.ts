@@ -1,6 +1,10 @@
 import { CapsuleBranchResourceStatus } from '@qiln/core/server'
 import { IncusError } from '../../../../errors'
-import { CreateCapsuleFailurePhase, createCreateCapsuleCompensationFailure, type CreateCapsuleCompensationFailure } from './failureContext'
+import {
+  CreateCapsuleFailurePhase,
+  createCreateCapsuleCompensationFailure,
+  type CreateCapsuleCompensationFailure,
+} from './failureContext'
 import type {
   CreateCapsuleCompensationScope,
   CreateCapsuleCompensationTarget,
@@ -61,7 +65,10 @@ export class CreateCapsuleCompensation {
         continue
       }
       try {
-        await this.dependencies.resources.recordCreateCompensatedDerivedResourceDeletion(file.resourceId, context.operationId)
+        await this.dependencies.resources.recordCreateCompensatedDerivedResourceDeletion(
+          file.resourceId,
+          context.operationId,
+        )
       } catch (error: unknown) {
         failures.push(
           createCreateCapsuleCompensationFailure({
@@ -80,7 +87,10 @@ export class CreateCapsuleCompensation {
     }
   }
 
-  private async compensateDirectTarget(context: CreateCapsuleCompensationContext, target: CreateCapsuleCompensationTarget): Promise<void> {
+  private async compensateDirectTarget(
+    context: CreateCapsuleCompensationContext,
+    target: CreateCapsuleCompensationTarget,
+  ): Promise<void> {
     if (target.kind === 'instance') {
       await this.compensateInstance(context, target)
       return
@@ -89,7 +99,10 @@ export class CreateCapsuleCompensation {
     await this.compensateVolume(context, target)
   }
 
-  private async compensateInstance(context: CreateCapsuleCompensationContext, target: CreateCapsuleInstanceCompensationTarget): Promise<void> {
+  private async compensateInstance(
+    context: CreateCapsuleCompensationContext,
+    target: CreateCapsuleInstanceCompensationTarget,
+  ): Promise<void> {
     await this.dependencies.resources.recordBranchResourceDeleteIntent(target.resourceId, context.operationId)
 
     try {
@@ -115,7 +128,10 @@ export class CreateCapsuleCompensation {
     }
   }
 
-  private async compensateVolume(context: CreateCapsuleCompensationContext, target: CreateCapsuleVolumeCompensationTarget): Promise<void> {
+  private async compensateVolume(
+    context: CreateCapsuleCompensationContext,
+    target: CreateCapsuleVolumeCompensationTarget,
+  ): Promise<void> {
     await this.dependencies.resources.recordBranchResourceDeleteIntent(target.resourceId, context.operationId)
 
     try {
@@ -144,7 +160,11 @@ export class CreateCapsuleCompensation {
     }
   }
 
-  private async recordDeleteFailureBestEffort(operationId: string, target: CreateCapsuleCompensationTarget, error: unknown): Promise<void> {
+  private async recordDeleteFailureBestEffort(
+    operationId: string,
+    target: CreateCapsuleCompensationTarget,
+    error: unknown,
+  ): Promise<void> {
     try {
       await this.dependencies.resources.recordBranchResourceDeleteFailure(target.resourceId, operationId, error, {
         operationId,
@@ -154,7 +174,10 @@ export class CreateCapsuleCompensation {
         resourceKey: target.resourceKey,
       })
     } catch (persistenceError: unknown) {
-      console.error(`[CreateCapsuleCompensation] Failed to persist compensation failure for resource '${target.resourceId}'.`, persistenceError)
+      console.error(
+        `[CreateCapsuleCompensation] Failed to persist compensation failure for resource '${target.resourceId}'.`,
+        persistenceError,
+      )
     }
   }
 

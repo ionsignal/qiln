@@ -15,7 +15,11 @@ import {
 } from '../../../failures'
 import { toCapsuleLifecycleState, toCapsuleOperationTransition, type CapsuleOperationReader } from '../../shared'
 import { toJsonObject } from '../../../persistence/json'
-import { decideDestroyNonterminalFailure, inspectDestroyOperationTerminality, isDestroyNonterminalOperationStatus } from '../policy/failure'
+import {
+  decideDestroyNonterminalFailure,
+  inspectDestroyOperationTerminality,
+  isDestroyNonterminalOperationStatus,
+} from '../policy/failure'
 import { inspectDestroyCapsuleBranchLineage } from '../policy/lineage'
 import {
   lockDestroyCapsuleBranches,
@@ -25,7 +29,11 @@ import {
   type PersistedDestroyCapsule,
   type PersistedDestroyOperation,
 } from './locks'
-import type { DestroyCapsuleAbandonedClassificationResult, DestroyCapsuleAcceptedBranch, DestroyCapsuleTerminalResult } from '../types'
+import type {
+  DestroyCapsuleAbandonedClassificationResult,
+  DestroyCapsuleAcceptedBranch,
+  DestroyCapsuleTerminalResult,
+} from '../types'
 
 const NONTERMINAL_DESTROY_STATUSES = [CapsuleOperationStatus.ACCEPTED, CapsuleOperationStatus.RUNNING] as const
 
@@ -122,12 +130,16 @@ export class DestroyCapsuleClassificationPersistence {
     if (terminality.kind === 'already_terminal') {
       return null
     }
-    const abandonedError = new IncusError('Capsule destroy operation was abandoned by a previous Worker process.', 'API_ERROR', {
-      operationId,
-      capsuleId: operation.capsuleId,
-      providerMutationStartedAt: operation.providerMutationStartedAt,
-      policy: 'no_provider_mutation_after_restart',
-    })
+    const abandonedError = new IncusError(
+      'Capsule destroy operation was abandoned by a previous Worker process.',
+      'API_ERROR',
+      {
+        operationId,
+        capsuleId: operation.capsuleId,
+        providerMutationStartedAt: operation.providerMutationStartedAt,
+        policy: 'no_provider_mutation_after_restart',
+      },
+    )
     return await this.classifyExecutionFailure(operationId, abandonedError, {
       operationId,
       capsuleId: operation.capsuleId,
@@ -176,7 +188,10 @@ export class DestroyCapsuleClassificationPersistence {
         failedAt: now,
         failureCode: operationFailureCodeFromUnknown(error),
         failureMessage: operationFailureMessageFromUnknown(error, 'Capsule destroy failed before provider mutation.'),
-        failureDetails: failureDetails === undefined ? undefined : toJsonObject(failureDetails, 'capsule destroy pre-provider failure details'),
+        failureDetails:
+          failureDetails === undefined
+            ? undefined
+            : toJsonObject(failureDetails, 'capsule destroy pre-provider failure details'),
         updatedAt: now,
       })
       .where(
@@ -236,14 +251,18 @@ export class DestroyCapsuleClassificationPersistence {
       restoredCapsule.archivedAt.getTime() !== originalArchivedAt.getTime() ||
       restoredBranches.length !== branches.length
     ) {
-      throw new IncusError('Failed to atomically restore capsule state after pre-provider destroy failure.', 'CONFLICT', {
-        operationId: operation.id,
-        capsuleId: operation.capsuleId,
-        expectedBranchCount: branches.length,
-        restoredBranchCount: restoredBranches.length,
-        originalArchivedAt: originalArchivedAt.toISOString(),
-        restoredArchivedAt: restoredCapsule?.archivedAt?.toISOString() ?? null,
-      })
+      throw new IncusError(
+        'Failed to atomically restore capsule state after pre-provider destroy failure.',
+        'CONFLICT',
+        {
+          operationId: operation.id,
+          capsuleId: operation.capsuleId,
+          expectedBranchCount: branches.length,
+          restoredBranchCount: restoredBranches.length,
+          originalArchivedAt: originalArchivedAt.toISOString(),
+          restoredArchivedAt: restoredCapsule?.archivedAt?.toISOString() ?? null,
+        },
+      )
     }
     return {
       operation: toCapsuleOperationTransition({
@@ -288,8 +307,14 @@ export class DestroyCapsuleClassificationPersistence {
         status: CapsuleOperationStatus.CLEANUP_REQUIRED,
         failedAt: now,
         failureCode: operationFailureCodeFromUnknown(error),
-        failureMessage: operationFailureMessageFromUnknown(error, 'Capsule destroy requires manual cleanup and inspection.'),
-        failureDetails: failureDetails === undefined ? undefined : toJsonObject(failureDetails, 'capsule destroy cleanup-required details'),
+        failureMessage: operationFailureMessageFromUnknown(
+          error,
+          'Capsule destroy requires manual cleanup and inspection.',
+        ),
+        failureDetails:
+          failureDetails === undefined
+            ? undefined
+            : toJsonObject(failureDetails, 'capsule destroy cleanup-required details'),
         updatedAt: now,
       })
       .where(
@@ -333,10 +358,14 @@ export class DestroyCapsuleClassificationPersistence {
           destroyedAt: capsulesTable.destroyedAt,
         })
       if (!cleanupCapsule) {
-        throw new IncusError('Failed to mark capsule aggregate cleanup-required after destroy uncertainty.', 'CONFLICT', {
-          operationId: operation.id,
-          capsuleId: operation.capsuleId,
-        })
+        throw new IncusError(
+          'Failed to mark capsule aggregate cleanup-required after destroy uncertainty.',
+          'CONFLICT',
+          {
+            operationId: operation.id,
+            capsuleId: operation.capsuleId,
+          },
+        )
       }
       committedCapsule = cleanupCapsule
     }
@@ -362,7 +391,12 @@ export class DestroyCapsuleClassificationPersistence {
         status: capsuleBranchesTable.status,
       })
       .from(capsuleBranchesTable)
-      .where(and(eq(capsuleBranchesTable.capsuleId, operation.capsuleId), eq(capsuleBranchesTable.ownerId, operation.ownerId)))
+      .where(
+        and(
+          eq(capsuleBranchesTable.capsuleId, operation.capsuleId),
+          eq(capsuleBranchesTable.ownerId, operation.ownerId),
+        ),
+      )
       .orderBy(asc(capsuleBranchesTable.id))
     return {
       operation: toCapsuleOperationTransition({

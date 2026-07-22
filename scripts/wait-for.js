@@ -4,10 +4,11 @@ import { access } from 'node:fs/promises'
 import { setTimeout } from 'node:timers/promises'
 
 /**
- * A zero-dependency, native Node.js replacement for `wait-on`.
- * Polls the filesystem for the existence of required build artifacts.
+ * A zero-dependency, native Node.js replacement for `wait-on`. Polls the
+ * filesystem for the existence of required build artifacts.
  *
  * Features:
+ *
  * - 60-second hard timeout to prevent infinite hangs in CI/CD.
  * - 250ms polling interval to prevent CPU/Event Loop starvation.
  * - Cross-platform absolute path resolution.

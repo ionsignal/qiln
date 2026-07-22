@@ -68,12 +68,12 @@ function errorDetailsFromUnknown(error: unknown): Record<string, unknown> {
  * Once an Incus operation ID is returned, it is registered immediately and may
  * complete through either:
  *
- * - a terminal WebSocket event;
- * - an HTTP operation probe;
- * - reconnect reconciliation.
+ * - A terminal WebSocket event;
+ * - An HTTP operation probe;
+ * - Reconnect reconciliation.
  *
- * Every completion mechanism converges through `settlePendingOperation()`, which
- * guarantees exactly one terminal settlement per registered operation.
+ * Every completion mechanism converges through `settlePendingOperation()`,
+ * which guarantees exactly one terminal settlement per registered operation.
  */
 export class IncusTransport implements IIncusTransport {
   private readonly config: WorkerIncusConfig
@@ -213,7 +213,11 @@ export class IncusTransport implements IIncusTransport {
    * Performs a synchronous Incus request and validates the universal response
    * envelope.
    */
-  public async request(path: string, method: string, options?: IncusRequestOptions): Promise<{ data: unknown; etag?: string }> {
+  public async request(
+    path: string,
+    method: string,
+    options?: IncusRequestOptions,
+  ): Promise<{ data: unknown; etag?: string }> {
     this.assertOpen()
 
     const headers = this.buildHeaders(options)
@@ -589,7 +593,11 @@ export class IncusTransport implements IIncusTransport {
    * Registers an operation immediately after its ID is extracted from the
    * asynchronous HTTP response.
    */
-  private registerPendingOperation(operationId: string, project: string | undefined, deadline: ProviderOperationDeadline): Promise<void> {
+  private registerPendingOperation(
+    operationId: string,
+    project: string | undefined,
+    deadline: ProviderOperationDeadline,
+  ): Promise<void> {
     this.assertOperationDeadlineAvailable(deadline)
 
     if (this.pending.has(operationId)) {
@@ -624,9 +632,9 @@ export class IncusTransport implements IIncusTransport {
     })
 
     /**
-     * The initial probe recovers a terminal result whose WebSocket event arrived
-     * before local pending registration. Subsequent probes remain available even
-     * while the event stream is disconnected.
+     * The initial probe recovers a terminal result whose WebSocket event
+     * arrived before local pending registration. Subsequent probes remain
+     * available even while the event stream is disconnected.
      */
     this.scheduleProbe(operationId, 0)
 
@@ -705,7 +713,9 @@ export class IncusTransport implements IIncusTransport {
       return
     }
 
-    console.log(`[IncusClient] Reconciling ${operationIds.length} in-flight operation(s) after event-stream connection.`)
+    console.log(
+      `[IncusClient] Reconciling ${operationIds.length} in-flight operation(s) after event-stream connection.`,
+    )
 
     await Promise.allSettled(operationIds.map(operationId => this.probe(operationId)))
   }
@@ -796,7 +806,12 @@ export class IncusTransport implements IIncusTransport {
     }
   }
 
-  private createSubmissionFailure(path: string, method: string, deadline: ProviderOperationDeadline, error: unknown): IncusError {
+  private createSubmissionFailure(
+    path: string,
+    method: string,
+    deadline: ProviderOperationDeadline,
+    error: unknown,
+  ): IncusError {
     if (this.closed) {
       return this.createShutdownError(deadline.operationId ?? undefined)
     }
@@ -805,13 +820,17 @@ export class IncusTransport implements IIncusTransport {
       return this.createDeadlineError(path, deadline.operationId ?? undefined)
     }
 
-    return new IncusError(`Incus provider mutation submission failed: ${errorMessageFromUnknown(error)}`, 'TRANSPORT_ERROR', {
-      path,
-      method,
-      operationId: deadline.operationId,
-      uncertainProviderOutcome: true,
-      error: errorDetailsFromUnknown(error),
-    })
+    return new IncusError(
+      `Incus provider mutation submission failed: ${errorMessageFromUnknown(error)}`,
+      'TRANSPORT_ERROR',
+      {
+        path,
+        method,
+        operationId: deadline.operationId,
+        uncertainProviderOutcome: true,
+        error: errorDetailsFromUnknown(error),
+      },
+    )
   }
 
   private createDeadlineError(path: string, operationId?: string, lastProbeError?: string): IncusError {
@@ -837,11 +856,15 @@ export class IncusTransport implements IIncusTransport {
   }
 
   private createShutdownError(operationId?: string): IncusError {
-    return new IncusError('Incus client is shutting down; the provider operation outcome may be unknown.', 'TRANSPORT_ERROR', {
-      operationId: operationId ?? null,
-      uncertainProviderOutcome: true,
-      transportShutdown: true,
-    })
+    return new IncusError(
+      'Incus client is shutting down; the provider operation outcome may be unknown.',
+      'TRANSPORT_ERROR',
+      {
+        operationId: operationId ?? null,
+        uncertainProviderOutcome: true,
+        transportShutdown: true,
+      },
+    )
   }
 
   private buildHeaders(options?: IncusRequestOptions | IncusRawRequestOptions): Headers {
@@ -909,7 +932,11 @@ export class ScopedIncusTransport implements IIncusTransport {
     private readonly project: string,
   ) {}
 
-  public async request(path: string, method: string, options?: IncusRequestOptions): Promise<{ data: unknown; etag?: string }> {
+  public async request(
+    path: string,
+    method: string,
+    options?: IncusRequestOptions,
+  ): Promise<{ data: unknown; etag?: string }> {
     return await this.transport.request(path, method, {
       ...options,
       project: this.project,

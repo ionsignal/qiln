@@ -1,7 +1,12 @@
-import { CapsuleOperationStatus, type CapsuleLifecycleStatusValue, type CapsuleOperationStatusValue } from '@qiln/core/server'
+import {
+  CapsuleOperationStatus,
+  type CapsuleLifecycleStatusValue,
+  type CapsuleOperationStatusValue,
+} from '@qiln/core/server'
 import type { DestroyCapsuleBranchLineageInspection } from './lineage'
 
-export type DestroyNonterminalOperationStatus = typeof CapsuleOperationStatus.ACCEPTED | typeof CapsuleOperationStatus.RUNNING
+export type DestroyNonterminalOperationStatus =
+  typeof CapsuleOperationStatus.ACCEPTED | typeof CapsuleOperationStatus.RUNNING
 
 export type DestroyTerminalOperationStatus = Exclude<CapsuleOperationStatusValue, DestroyNonterminalOperationStatus>
 
@@ -68,13 +73,14 @@ export type DestroyNonterminalFailureDecision =
     }
 
 /**
- * Determines whether a destroy operation still requires failure
- * classification.
+ * Determines whether a destroy operation still requires failure classification.
  *
  * This is kept in the destroy failure-policy boundary so persistence code does
  * not independently redefine which operation states are terminal.
  */
-export function inspectDestroyOperationTerminality(operationStatus: CapsuleOperationStatusValue): DestroyOperationTerminality {
+export function inspectDestroyOperationTerminality(
+  operationStatus: CapsuleOperationStatusValue,
+): DestroyOperationTerminality {
   if (isDestroyNonterminalOperationStatus(operationStatus)) {
     return {
       kind: 'nonterminal',
@@ -99,17 +105,19 @@ export function isDestroyNonterminalOperationStatus(
  *
  * Safe restoration requires all of the following:
  *
- * - no operation-wide provider-intent fence;
- * - the capsule remains in its destroying lifecycle fence;
- * - the capsule remains archived;
- * - every branch remains in the expected destroying lineage;
- * - owner, capsule, and root-branch lineage remain valid.
+ * - No operation-wide provider-intent fence;
+ * - The capsule remains in its destroying lifecycle fence;
+ * - The capsule remains archived;
+ * - Every branch remains in the expected destroying lineage;
+ * - Owner, capsule, and root-branch lineage remain valid.
  *
  * Any provider intent or contradictory durable evidence fails closed to
  * cleanup-required. This function performs no persistence, provider calls,
  * event publication, or process-local state inspection.
  */
-export function decideDestroyNonterminalFailure(evidence: DestroyNonterminalFailureEvidence): DestroyNonterminalFailureDecision {
+export function decideDestroyNonterminalFailure(
+  evidence: DestroyNonterminalFailureEvidence,
+): DestroyNonterminalFailureDecision {
   const reasons: DestroyCleanupRequiredReason[] = []
   if (evidence.operation.providerMutationStartedAt !== null) {
     reasons.push({

@@ -14,14 +14,15 @@ export interface CapsuleBranchRuntimeReconcilerDependencies {
 /**
  * Reconciles live provider observations into durable branch runtime state.
  *
- * Reconciliation is strictly observation-only. It never starts, stops,
- * retries, deletes, adopts, or otherwise mutates provider resources.
+ * Reconciliation is strictly observation-only. It never starts, stops, retries,
+ * deletes, adopts, or otherwise mutates provider resources.
  */
 export class CapsuleBranchRuntimeReconciler {
   constructor(private readonly dependencies: CapsuleBranchRuntimeReconcilerDependencies) {}
 
   /**
-   * Reconciles provider state without retrying any prior start or stop mutation.
+   * Reconciles provider state without retrying any prior start or stop
+   * mutation.
    *
    * Candidates are processed serially so startup does not create an unbounded
    * provider-read burst and the resulting diagnostics remain easy to follow.

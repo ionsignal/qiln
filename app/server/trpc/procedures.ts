@@ -17,8 +17,8 @@ const t = initTRPC.context<Context>().create({
 })
 
 /**
- * Middleware to check if a user is authenticated.
- * If not, it throws an UNAUTHORIZED error.
+ * Middleware to check if a user is authenticated. If not, it throws an
+ * UNAUTHORIZED error.
  */
 const isAuthed = t.middleware(({ next, ctx }) => {
   if (!ctx.user) {

@@ -1,4 +1,9 @@
-import { CapsuleLifecycleEventName, TargetType, type CapsuleChannel, type CapsuleLifecycleState } from '@qiln/core/server'
+import {
+  CapsuleLifecycleEventName,
+  TargetType,
+  type CapsuleChannel,
+  type CapsuleLifecycleState,
+} from '@qiln/core/server'
 
 /**
  * Publishes best-effort invalidation hints for committed capsule aggregate

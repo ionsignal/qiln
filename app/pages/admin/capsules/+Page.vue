@@ -32,8 +32,8 @@
       </template>
       <n-flex vertical :size="10">
         <n-text depth="3" style="font-size: 13px">
-          Current working slice: create a capsule with its root branch, observe branch state, and start or stop branches through the capsule
-          channel.
+          Current working slice: create a capsule with its root branch, observe branch state, and start or stop branches
+          through the capsule channel.
         </n-text>
         <n-flex :size="8" wrap>
           <n-tag size="small" :bordered="false" type="info">Snapshot</n-tag>
@@ -49,11 +49,15 @@
       <n-flex justify="space-between" align="center">
         <div>
           <h2 class="section-heading">Capsule Branches</h2>
-          <n-text depth="3">Editable forks of durable capsule versions. Production is promoted, not edited directly.</n-text>
+          <n-text depth="3">
+            Editable forks of durable capsule versions. Production is promoted, not edited directly.
+          </n-text>
         </div>
       </n-flex>
       <div v-if="branchesRef.length === 0">
-        <n-empty description="No capsule branches yet. Create a capsule from a blueprint to begin." class="empty-state" />
+        <n-empty
+          description="No capsule branches yet. Create a capsule from a blueprint to begin."
+          class="empty-state" />
       </div>
       <div v-else class="branch-grid">
         <capsule-branch-card v-for="branch in branchesRef" :key="branch.id" :branch="branch" />
@@ -69,10 +73,17 @@
         <n-empty description="No capsule blueprints are currently loaded." class="empty-state" />
       </div>
       <div v-else class="blueprint-grid">
-        <blueprint-card v-for="blueprint in blueprints" :key="blueprint.name" :blueprint="blueprint" @create-capsule="openCreateDrawer" />
+        <blueprint-card
+          v-for="blueprint in blueprints"
+          :key="blueprint.name"
+          :blueprint="blueprint"
+          @create-capsule="openCreateDrawer" />
       </div>
     </n-flex>
-    <capsule-create-drawer v-model:show="showDrawer" :blueprints="blueprints" :preselected-blueprint="selectedBlueprint" />
+    <capsule-create-drawer
+      v-model:show="showDrawer"
+      :blueprints="blueprints"
+      :preselected-blueprint="selectedBlueprint" />
   </n-flex>
 </template>
 

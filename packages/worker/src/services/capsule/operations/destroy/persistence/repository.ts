@@ -13,8 +13,8 @@ import type {
 } from '../types'
 
 /**
- * Destroy persistence facade consumed by submission, execution, and
- * abandonment capabilities.
+ * Destroy persistence facade consumed by submission, execution, and abandonment
+ * capabilities.
  *
  * This is an intentional operation boundary rather than a compatibility
  * wrapper. Cohesive persistence modules own their transactions and policy

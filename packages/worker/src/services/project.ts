@@ -12,8 +12,9 @@ export class ProjectService {
   }
 
   /**
-   * Ensures the owner project exists before provisioning, enforcing strict feature
-   * flags to prevent storage bloat and preserve capsule branch isolation.
+   * Ensures the owner project exists before provisioning, enforcing strict
+   * feature flags to prevent storage bloat and preserve capsule branch
+   * isolation.
    */
   public async ensureNamespace(ownerId: string): Promise<void> {
     const namespace = this.getNamespace(ownerId)

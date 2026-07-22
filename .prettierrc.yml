@@ -1,4 +1,7 @@
-printWidth: 144
+plugins:
+  - prettier-plugin-jsdoc
+
+printWidth: 120
 tabWidth: 2
 useTabs: false
 semi: false
@@ -10,3 +13,13 @@ arrowParens: avoid
 htmlWhitespaceSensitivity: ignore
 endOfLine: lf
 vueIndentScriptAndStyle: true
+
+jsdocPrintWidth: 80
+jsdocCapitalizeDescription: true
+jsdocDescriptionWithDot: true
+jsdocDescriptionTag: false
+jsdocCommentLineStrategy: multiline
+jsdocSeparateReturnsFromParam: false
+jsdocSeparateTagGroups: false
+jsdocVerticalAlignment: false
+jsdocKeepUnParseAbleExampleIndent: true

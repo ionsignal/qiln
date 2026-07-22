@@ -6,7 +6,11 @@ import {
   type CapsuleOperationAbandonmentClassificationResult,
   type CapsuleOperationAbandonmentHandler,
 } from '../abandonment'
-import type { CapsuleBranchEventPublisher, CapsuleLifecycleEventPublisher, CapsuleOperationEventPublisher } from '../../events'
+import type {
+  CapsuleBranchEventPublisher,
+  CapsuleLifecycleEventPublisher,
+  CapsuleOperationEventPublisher,
+} from '../../events'
 import type { PersistedCapsuleOperation } from '../shared'
 import type { DestroyCapsuleOperationRepository } from './persistence/repository'
 import type { DestroyCapsuleTerminalResult } from './types'
@@ -38,15 +42,17 @@ function assertDestroyAbandonmentRelationships(result: DestroyCapsuleTerminalRes
  *
  * The destroy repository owns the classification transaction and decides
  * whether the durable evidence proves an intact pre-provider destroy fence or
- * requires cleanup after provider intent or contradictory aggregate state.
- * This adapter publishes invalidations only from committed repository output.
+ * requires cleanup after provider intent or contradictory aggregate state. This
+ * adapter publishes invalidations only from committed repository output.
  */
 export class DestroyCapsuleAbandonmentHandler implements CapsuleOperationAbandonmentHandler {
   public readonly operationType = CapsuleOperationType.DESTROY
 
   constructor(private readonly dependencies: DestroyCapsuleAbandonmentHandlerDependencies) {}
 
-  public async classify(operation: PersistedCapsuleOperation): Promise<CapsuleOperationAbandonmentClassificationResult> {
+  public async classify(
+    operation: PersistedCapsuleOperation,
+  ): Promise<CapsuleOperationAbandonmentClassificationResult> {
     assertAbandonedOperationType(operation, this.operationType)
 
     const result = await this.dependencies.repository.classifyAbandoned(operation.id)
@@ -63,7 +69,12 @@ export class DestroyCapsuleAbandonmentHandler implements CapsuleOperationAbandon
     this.dependencies.operationEvents.publishChanged(result.operation)
     this.dependencies.lifecycleEvents.publishChanged(result.operation.ownerId, result.capsule)
     for (const branch of result.branches) {
-      this.dependencies.branchEvents.publishStateChanged(result.operation.ownerId, branch.capsuleId, branch.name, branch.status)
+      this.dependencies.branchEvents.publishStateChanged(
+        result.operation.ownerId,
+        branch.capsuleId,
+        branch.name,
+        branch.status,
+      )
     }
     return {
       classified: true,

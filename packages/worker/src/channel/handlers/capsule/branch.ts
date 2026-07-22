@@ -5,8 +5,8 @@ import type { QilnWorkerRuntime } from '../../../runtime'
 /**
  * Registers privileged runtime handlers for existing editable capsule branches.
  *
- * Direct branch deletion is intentionally unavailable.
- * Capsule archive and destroy govern retirement of the bootstrap lineage root.
+ * Direct branch deletion is intentionally unavailable. Capsule archive and
+ * destroy govern retirement of the bootstrap lineage root.
  */
 export function registerCapsuleBranchHandlers(worker: QilnWorkerRuntime): void {
   const handlerOptions: CapsuleCommandHandlerOptions = {

@@ -6,7 +6,9 @@ export default fp(
   async fastify => {
     fastify.decorate('worker', null)
     if (!fastify.config.worker.embedded) {
-      fastify.log.info('[Worker] Embedded worker disabled. Expecting external qiln-worker runtime for privileged mutations.')
+      fastify.log.info(
+        '[Worker] Embedded worker disabled. Expecting external qiln-worker runtime for privileged mutations.',
+      )
       return
     }
     fastify.log.warn(

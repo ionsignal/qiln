@@ -24,7 +24,10 @@ export const CapsuleBranchCommandName = {
 
 export type CapsuleBranchCommandName = (typeof CapsuleBranchCommandName)[keyof typeof CapsuleBranchCommandName]
 
-export const CapsuleBranchCommandNameValues = [CapsuleBranchCommandName.BRANCH_START, CapsuleBranchCommandName.BRANCH_STOP] as const
+export const CapsuleBranchCommandNameValues = [
+  CapsuleBranchCommandName.BRANCH_START,
+  CapsuleBranchCommandName.BRANCH_STOP,
+] as const
 
 export const CapsuleBranchEventName = {
   BRANCH_STATE_CHANGED: 'capsule.branch.stateChanged',

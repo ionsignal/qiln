@@ -1,6 +1,22 @@
 import { sql } from 'drizzle-orm'
-import { boolean, check, index, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid, type PgColumn } from 'drizzle-orm/pg-core'
-import { CapsuleBranchStatusValues, DEFAULT_CAPSULE_BLUEPRINT_NAME, type CapsuleBranchResourceInventoryDigest } from '../../schemas'
+import {
+  boolean,
+  check,
+  index,
+  jsonb,
+  pgEnum,
+  pgTable,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+  type PgColumn,
+} from 'drizzle-orm/pg-core'
+import {
+  CapsuleBranchStatusValues,
+  DEFAULT_CAPSULE_BLUEPRINT_NAME,
+  type CapsuleBranchResourceInventoryDigest,
+} from '../../schemas'
 import { capsulesTable } from './capsule'
 
 /**

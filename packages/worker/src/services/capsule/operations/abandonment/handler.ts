@@ -27,10 +27,10 @@ export type CapsuleOperationAbandonmentClassificationResult =
  *
  * Implementations own:
  *
- * - operation-type validation;
- * - invocation of the operation-specific repository;
- * - committed result identity validation;
- * - publication of operation-specific invalidations.
+ * - Operation-type validation;
+ * - Invocation of the operation-specific repository;
+ * - Committed result identity validation;
+ * - Publication of operation-specific invalidations.
  *
  * Implementations must not invoke an executor, retry provider work, resume an
  * operation step, or infer classification from process-local state.
@@ -57,7 +57,9 @@ export function assertAbandonedOperationType<TOperationType extends CapsuleOpera
   if (operation.type === expectedOperationType) {
     return
   }
-  throw new Error(`${LOGGER_PREFIX} Handler for '${expectedOperationType}' received operation '${operation.id}' of type '${operation.type}'.`)
+  throw new Error(
+    `${LOGGER_PREFIX} Handler for '${expectedOperationType}' received operation '${operation.id}' of type '${operation.type}'.`,
+  )
 }
 
 /**
@@ -141,7 +143,9 @@ export class CapsuleOperationAbandonmentHandlerRegistry {
   public require(operationType: CapsuleOperationTypeValue): CapsuleOperationAbandonmentHandler {
     const handler = this.handlers.get(operationType)
     if (!handler) {
-      throw new Error(`${LOGGER_PREFIX} No startup abandonment handler is registered for operation type '${operationType}'.`)
+      throw new Error(
+        `${LOGGER_PREFIX} No startup abandonment handler is registered for operation type '${operationType}'.`,
+      )
     }
     return handler
   }
@@ -158,15 +162,21 @@ export class CapsuleOperationAbandonmentHandlerRegistry {
     if (missingOperationTypes.length === 0) {
       return
     }
-    throw new Error(`${LOGGER_PREFIX} Startup abandonment handlers are missing for operation types: ${missingOperationTypes.join(', ')}.`)
+    throw new Error(
+      `${LOGGER_PREFIX} Startup abandonment handlers are missing for operation types: ${missingOperationTypes.join(', ')}.`,
+    )
   }
 
   private register(handler: CapsuleOperationAbandonmentHandler): void {
     if (!CapsuleOperationTypeValues.includes(handler.operationType)) {
-      throw new Error(`${LOGGER_PREFIX} Cannot register a handler for unsupported operation type '${handler.operationType}'.`)
+      throw new Error(
+        `${LOGGER_PREFIX} Cannot register a handler for unsupported operation type '${handler.operationType}'.`,
+      )
     }
     if (this.handlers.has(handler.operationType)) {
-      throw new Error(`${LOGGER_PREFIX} Duplicate startup abandonment handler registered for operation type '${handler.operationType}'.`)
+      throw new Error(
+        `${LOGGER_PREFIX} Duplicate startup abandonment handler registered for operation type '${handler.operationType}'.`,
+      )
     }
     this.handlers.set(handler.operationType, handler)
   }

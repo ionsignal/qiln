@@ -12,14 +12,24 @@ import type {
   ConfirmedBranchRuntimeStateResult,
 } from './types'
 
-const ACTIVE_BRANCH_STATUSES = ['provisioning', 'offline', 'starting', 'online', 'stopping', 'destroying', 'error', 'cleanup_required'] as const
+const ACTIVE_BRANCH_STATUSES = [
+  'provisioning',
+  'offline',
+  'starting',
+  'online',
+  'stopping',
+  'destroying',
+  'error',
+  'cleanup_required',
+] as const
 const RUNTIME_RECONCILIATION_STATUSES = ['offline', 'starting', 'online', 'stopping', 'error'] as const
 
 /**
  * Persistence boundary for capsule branch runtime state.
  *
- * Capsule lifecycle is authoritative over branch runtime mutations. Transitional branch states are durable
- * mutation fences, and every state write revalidates the active, unarchived capsule aggregate.
+ * Capsule lifecycle is authoritative over branch runtime mutations.
+ * Transitional branch states are durable mutation fences, and every state write
+ * revalidates the active, unarchived capsule aggregate.
  */
 export class CapsuleBranchStore {
   constructor(private readonly db: CapsuleHostDbContract) {}
@@ -28,7 +38,9 @@ export class CapsuleBranchStore {
     return await this.db
       .select()
       .from(capsuleBranchesTable)
-      .where(and(eq(capsuleBranchesTable.ownerId, ownerId), inArray(capsuleBranchesTable.status, ACTIVE_BRANCH_STATUSES)))
+      .where(
+        and(eq(capsuleBranchesTable.ownerId, ownerId), inArray(capsuleBranchesTable.status, ACTIVE_BRANCH_STATUSES)),
+      )
       .orderBy(desc(capsuleBranchesTable.createdAt))
   }
 
@@ -95,7 +107,8 @@ export class CapsuleBranchStore {
   /**
    * Lists branch runtimes that are safe to observe during Worker startup.
    *
-   * Cleanup-required, archived, destroying, destroyed, provisioning, and failed creation aggregates are intentionally excluded.
+   * Cleanup-required, archived, destroying, destroyed, provisioning, and failed
+   * creation aggregates are intentionally excluded.
    */
   public async listRuntimeReconciliationCandidates(): Promise<BranchRuntimeReconciliationCandidate[]> {
     return await this.db
@@ -118,21 +131,32 @@ export class CapsuleBranchStore {
       .orderBy(asc(capsuleBranchesTable.ownerId), asc(capsuleBranchesTable.id))
   }
 
-  public async beginBranchStart(ownerId: string, capsuleId: string, branchName: string): Promise<BranchRuntimeTransitionContext> {
+  public async beginBranchStart(
+    ownerId: string,
+    capsuleId: string,
+    branchName: string,
+  ): Promise<BranchRuntimeTransitionContext> {
     return await this.beginBranchRuntimeTransition(ownerId, capsuleId, branchName, 'offline', 'starting')
   }
 
-  public async beginBranchStop(ownerId: string, capsuleId: string, branchName: string): Promise<BranchRuntimeTransitionContext> {
+  public async beginBranchStop(
+    ownerId: string,
+    capsuleId: string,
+    branchName: string,
+  ): Promise<BranchRuntimeTransitionContext> {
     return await this.beginBranchRuntimeTransition(ownerId, capsuleId, branchName, 'online', 'stopping')
   }
 
   /**
    * Persists one provider-confirmed stable branch state.
    *
-   * The operation is idempotent when the confirmed state was committed but the caller did not receive the database result.
-   * A different current state still fails closed as a concurrent lifecycle conflict.
+   * The operation is idempotent when the confirmed state was committed but the
+   * caller did not receive the database result. A different current state still
+   * fails closed as a concurrent lifecycle conflict.
    */
-  public async recordConfirmedRuntimeState(input: ConfirmedBranchRuntimeStateInput): Promise<ConfirmedBranchRuntimeStateResult> {
+  public async recordConfirmedRuntimeState(
+    input: ConfirmedBranchRuntimeStateInput,
+  ): Promise<ConfirmedBranchRuntimeStateResult> {
     return await this.db.transaction(async tx => {
       await this.lockActiveCapsule(tx, input.ownerId, input.capsuleId)
       const [branch] = await tx
@@ -212,7 +236,8 @@ export class CapsuleBranchStore {
   }
 
   /**
-   * Marks a branch runtime as uncertain after Qiln could not prove a stable provider state.
+   * Marks a branch runtime as uncertain after Qiln could not prove a stable
+   * provider state.
    */
   public async recordRuntimeError(input: BranchRuntimeErrorInput): Promise<BranchRuntimeErrorResult> {
     const failureDetails = createFailureDetails(input.error, input.context) ?? {
@@ -326,13 +351,17 @@ export class CapsuleBranchStore {
         })
       }
       if (branch.status !== requiredStatus) {
-        throw new IncusError(`Capsule branch cannot enter '${transitionalStatus}' from '${branch.status}'.`, 'CONFLICT', {
-          capsuleId,
-          branchId: branch.id,
-          branchName,
-          currentStatus: branch.status,
-          requiredStatus,
-        })
+        throw new IncusError(
+          `Capsule branch cannot enter '${transitionalStatus}' from '${branch.status}'.`,
+          'CONFLICT',
+          {
+            capsuleId,
+            branchId: branch.id,
+            branchName,
+            currentStatus: branch.status,
+            requiredStatus,
+          },
+        )
       }
       const [transitioned] = await tx
         .update(capsuleBranchesTable)
@@ -350,13 +379,17 @@ export class CapsuleBranchStore {
           id: capsuleBranchesTable.id,
         })
       if (!transitioned) {
-        throw new IncusError('Capsule branch runtime transition conflicted with another lifecycle change.', 'CONFLICT', {
-          capsuleId,
-          branchId: branch.id,
-          branchName,
-          requiredStatus,
-          transitionalStatus,
-        })
+        throw new IncusError(
+          'Capsule branch runtime transition conflicted with another lifecycle change.',
+          'CONFLICT',
+          {
+            capsuleId,
+            branchId: branch.id,
+            branchName,
+            requiredStatus,
+            transitionalStatus,
+          },
+        )
       }
       return {
         ownerId,

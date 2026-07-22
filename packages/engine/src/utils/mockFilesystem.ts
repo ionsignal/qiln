@@ -251,7 +251,12 @@ const mockVaults: any[] = [
           name: 'datasets',
           modified: new Date(Date.now() - 2000000).toISOString(),
           children: {
-            'raw_data.csv': { type: 'file', name: 'raw_data.csv', modified: new Date(Date.now() - 3000000).toISOString(), size: 150000000 },
+            'raw_data.csv': {
+              type: 'file',
+              name: 'raw_data.csv',
+              modified: new Date(Date.now() - 3000000).toISOString(),
+              size: 150000000,
+            },
             'processed_data.parquet': {
               type: 'file',
               name: 'processed_data.parquet',

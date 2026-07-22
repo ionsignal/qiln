@@ -30,21 +30,25 @@ export class IncusInstancesClient {
   }
 
   /**
-   * Fetches the full definition of an instance.
-   * Required to safely mutate device maps with ETags.
+   * Fetches the full definition of an instance. Required to safely mutate
+   * device maps with ETags.
    */
   public async get(name: string): Promise<{ data: IncusInstanceFull; etag?: string }> {
     const { data, etag } = await this.transport.request(`/instances/${encodeURIComponent(name)}`, 'GET')
     const parsed = IncusInstanceFullSchema.safeParse(data)
     if (!parsed.success) {
-      throw new IncusError('Failed to parse Incus instance full metadata', 'VALIDATION_ERROR', z.treeifyError(parsed.error))
+      throw new IncusError(
+        'Failed to parse Incus instance full metadata',
+        'VALIDATION_ERROR',
+        z.treeifyError(parsed.error),
+      )
     }
     return { data: parsed.data, etag }
   }
 
   /**
-   * Updates the instance definition (e.g., attaching new devices).
-   * Strictly requires an ETag to prevent concurrent state mutation.
+   * Updates the instance definition (e.g., attaching new devices). Strictly
+   * requires an ETag to prevent concurrent state mutation.
    */
   public async update(name: string, state: IncusInstancePut, etag: string): Promise<void> {
     const parsed = IncusInstancePutSchema.safeParse(state)
@@ -76,7 +80,9 @@ export class IncusInstancesClient {
    * Forces a container to power off.
    */
   public async stop(name: string): Promise<void> {
-    await this.transport.operation(`/instances/${encodeURIComponent(name)}/state`, 'PUT', { body: { action: 'stop', force: true } })
+    await this.transport.operation(`/instances/${encodeURIComponent(name)}/state`, 'PUT', {
+      body: { action: 'stop', force: true },
+    })
   }
 
   /**

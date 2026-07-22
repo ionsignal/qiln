@@ -21,8 +21,9 @@ export interface ParsedCapsuleSubject {
 }
 
 /**
- * NATS subjects are dot-tokenized. Capsule targets must remain concrete tokens so
- * ownership/capsule/system checks cannot be bypassed by ambiguous subject parsing.
+ * NATS subjects are dot-tokenized. Capsule targets must remain concrete tokens
+ * so ownership/capsule/system checks cannot be bypassed by ambiguous subject
+ * parsing.
  */
 export function assertCapsuleSubjectTarget(target: unknown, context: string): asserts target is Target {
   assertTarget(target, context)
@@ -33,7 +34,10 @@ export function buildCapsuleCommandSubject(target: Target, commandName: CapsuleC
   return `${CAPSULE_COMMAND_SUBJECT_PREFIX}.${target.type}.${target.id}.${commandName}`
 }
 
-export function buildCapsuleCommandHandlerSubject(targetType: TargetTypeValue, commandName: CapsuleCommandName): string {
+export function buildCapsuleCommandHandlerSubject(
+  targetType: TargetTypeValue,
+  commandName: CapsuleCommandName,
+): string {
   return `${CAPSULE_COMMAND_SUBJECT_PREFIX}.${targetType}.${CAPSULE_WILDCARD_TARGET}.${commandName}`
 }
 

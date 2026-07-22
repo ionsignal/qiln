@@ -11,7 +11,12 @@ import { IncusError } from '../../../../../errors'
 import { toCapsuleLifecycleState, toCapsuleOperationTransition } from '../../shared'
 import { assertDestroyingCapsuleBranchLineage } from '../policy/lineage'
 import { DestroyCapsulePlanner } from '../resource/planner'
-import { lockDestroyBranchResourceInventories, lockDestroyCapsuleBranches, lockDestroyOperation, lockOwnedDestroyCapsule } from './locks'
+import {
+  lockDestroyBranchResourceInventories,
+  lockDestroyCapsuleBranches,
+  lockDestroyOperation,
+  lockOwnedDestroyCapsule,
+} from './locks'
 import type { DestroyCapsuleTerminalResult } from '../types'
 
 const planner = new DestroyCapsulePlanner()
@@ -21,20 +26,23 @@ const planner = new DestroyCapsulePlanner()
  *
  * The transaction independently proves all durable completion evidence:
  *
- * - operation identity and running state;
- * - committed provider intent;
- * - capsule ownership and destroy lifecycle fence;
- * - the complete destroying branch lineage;
- * - each branch's immutable resource inventory digest;
- * - resource ownership, topology, cleanup policy, and provenance;
- * - terminal direct-resource and derived-resource outcomes;
- * - compare-and-set predicates for operation, capsule, and branch completion.
+ * - Operation identity and running state;
+ * - Committed provider intent;
+ * - Capsule ownership and destroy lifecycle fence;
+ * - The complete destroying branch lineage;
+ * - Each branch's immutable resource inventory digest;
+ * - Resource ownership, topology, cleanup policy, and provenance;
+ * - Terminal direct-resource and derived-resource outcomes;
+ * - Compare-and-set predicates for operation, capsule, and branch completion.
  *
  * Process-local plans and earlier executor verification are deliberately not
  * accepted as completion authority. Resource rows are locked and revalidated in
  * the same transaction that commits terminal aggregate state.
  */
-export async function completeDestroyCapsule(db: CapsuleHostDbContract, operationId: string): Promise<DestroyCapsuleTerminalResult> {
+export async function completeDestroyCapsule(
+  db: CapsuleHostDbContract,
+  operationId: string,
+): Promise<DestroyCapsuleTerminalResult> {
   return await db.transaction(async tx => {
     const operation = await lockDestroyOperation(tx, operationId)
     if (operation.status !== CapsuleOperationStatus.RUNNING || operation.providerMutationStartedAt === null) {
@@ -123,7 +131,12 @@ export async function completeDestroyCapsule(db: CapsuleHostDbContract, operatio
         name: capsuleBranchesTable.name,
         status: capsuleBranchesTable.status,
       })
-    if (!completedOperation || !destroyedCapsule || destroyedCapsule.destroyedAt === null || destroyedBranches.length !== branches.length) {
+    if (
+      !completedOperation ||
+      !destroyedCapsule ||
+      destroyedCapsule.destroyedAt === null ||
+      destroyedBranches.length !== branches.length
+    ) {
       throw new IncusError('Failed to atomically complete capsule destroy.', 'CONFLICT', {
         operationId,
         capsuleId: operation.capsuleId,

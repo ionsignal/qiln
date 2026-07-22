@@ -1,4 +1,8 @@
-import { CapsuleLifecycleStateSchema, type CapsuleLifecycleState, type CapsuleLifecycleStatusValue } from '@qiln/core/server'
+import {
+  CapsuleLifecycleStateSchema,
+  type CapsuleLifecycleState,
+  type CapsuleLifecycleStatusValue,
+} from '@qiln/core/server'
 import { toNullableIsoTimestamp } from './timestamps'
 
 export interface CapsuleLifecycleStateSource {

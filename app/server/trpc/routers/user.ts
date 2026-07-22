@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { publicProcedure, router } from '@server/trpc/procedures'
 
 /**
- * Handles user profile operations
+ * Handles user profile operations.
  */
 export const userRouter = router({
   get: publicProcedure.input(z.object({ id: z.uuid() })).query(async ({ ctx, input }) => {

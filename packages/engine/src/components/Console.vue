@@ -1,5 +1,8 @@
 <template>
-  <div class="qiln-console" :class="{ 'is-dragging': consoleState.isDragging.value }" :style="{ height: consoleHeight }">
+  <div
+    class="qiln-console"
+    :class="{ 'is-dragging': consoleState.isDragging.value }"
+    :style="{ height: consoleHeight }">
     <div v-show="consoleState.isExpanded.value" class="console-drag-handle" @mousedown="startDrag"></div>
     <ConsoleTabBar />
     <div v-show="consoleState.isExpanded.value" class="console-body">

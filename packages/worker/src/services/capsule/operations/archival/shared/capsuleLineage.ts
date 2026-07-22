@@ -3,7 +3,10 @@ import { capsuleBranchesTable, capsulesTable, type CapsuleHostDbContract } from 
 import { IncusError } from '../../../../../errors'
 
 export type ArchivalOperationTransaction = Parameters<Parameters<CapsuleHostDbContract['transaction']>[0]>[0]
-export type ArchivalCapsuleRecord = Pick<typeof capsulesTable.$inferSelect, 'id' | 'ownerId' | 'lifecycleStatus' | 'archivedAt' | 'destroyedAt'>
+export type ArchivalCapsuleRecord = Pick<
+  typeof capsulesTable.$inferSelect,
+  'id' | 'ownerId' | 'lifecycleStatus' | 'archivedAt' | 'destroyedAt'
+>
 export type ArchivalBranchRecord = Pick<
   typeof capsuleBranchesTable.$inferSelect,
   'id' | 'capsuleId' | 'ownerId' | 'name' | 'status' | 'isRootBranch'
@@ -86,11 +89,14 @@ export async function lockOwnedArchivalCapsule(
  * Locks every durable branch belonging to one capsule in deterministic ID
  * order.
  *
- * Owner consistency is validated separately by the lineage inspection because
- * a foreign-owner row attached to the capsule is contradictory durable evidence
+ * Owner consistency is validated separately by the lineage inspection because a
+ * foreign-owner row attached to the capsule is contradictory durable evidence
  * that operation-specific policy must classify fail-closed.
  */
-export async function lockArchivalCapsuleBranches(tx: ArchivalOperationTransaction, capsuleId: string): Promise<ArchivalBranchRecord[]> {
+export async function lockArchivalCapsuleBranches(
+  tx: ArchivalOperationTransaction,
+  capsuleId: string,
+): Promise<ArchivalBranchRecord[]> {
   return await tx
     .select({
       id: capsuleBranchesTable.id,
@@ -123,7 +129,9 @@ export function inspectOfflineBranchLineage(
   const valid =
     branches.length > 0 &&
     rootBranchCount === 1 &&
-    branches.every(branch => branch.ownerId === ownerId && branch.capsuleId === capsuleId && branch.status === 'offline')
+    branches.every(
+      branch => branch.ownerId === ownerId && branch.capsuleId === capsuleId && branch.status === 'offline',
+    )
   return {
     valid,
     branchCount: branches.length,
@@ -139,7 +147,11 @@ export function inspectOfflineBranchLineage(
   }
 }
 
-export function isValidOfflineBranchLineage(ownerId: string, capsuleId: string, branches: readonly ArchivalBranchRecord[]): boolean {
+export function isValidOfflineBranchLineage(
+  ownerId: string,
+  capsuleId: string,
+  branches: readonly ArchivalBranchRecord[],
+): boolean {
   return inspectOfflineBranchLineage(ownerId, capsuleId, branches).valid
 }
 
@@ -151,16 +163,24 @@ export function isValidOfflineBranchLineage(ownerId: string, capsuleId: string, 
  * `inspectOfflineBranchLineage()` instead so contradictory evidence can be
  * committed as cleanup-required rather than thrown before terminalization.
  */
-export function assertValidOfflineBranchLineage(ownerId: string, capsuleId: string, branches: readonly ArchivalBranchRecord[]): void {
+export function assertValidOfflineBranchLineage(
+  ownerId: string,
+  capsuleId: string,
+  branches: readonly ArchivalBranchRecord[],
+): void {
   const inspection = inspectOfflineBranchLineage(ownerId, capsuleId, branches)
   if (inspection.valid) {
     return
   }
-  throw new IncusError('Capsule archival mutation requires exactly one root branch and every branch offline.', 'CONFLICT', {
-    ownerId,
-    capsuleId,
-    branchCount: inspection.branchCount,
-    rootBranchCount: inspection.rootBranchCount,
-    branches: inspection.branches,
-  })
+  throw new IncusError(
+    'Capsule archival mutation requires exactly one root branch and every branch offline.',
+    'CONFLICT',
+    {
+      ownerId,
+      capsuleId,
+      branchCount: inspection.branchCount,
+      rootBranchCount: inspection.rootBranchCount,
+      branches: inspection.branches,
+    },
+  )
 }

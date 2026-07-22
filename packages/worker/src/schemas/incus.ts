@@ -1,8 +1,8 @@
 import { z } from 'zod'
 
 /**
- * Incus uses a universal envelope for all API responses.
- * We use a discriminated union to strictly handle errors even when HTTP 200 is returned.
+ * Incus uses a universal envelope for all API responses. We use a discriminated
+ * union to strictly handle errors even when HTTP 200 is returned.
  */
 export const IncusResponseSchema = z.discriminatedUnion('type', [
   z.object({
@@ -44,7 +44,7 @@ export const IncusOperationSchema = z.object({
 })
 
 /**
- * Schema for network addresses
+ * Schema for network addresses.
  */
 export const IncusAddressSchema = z.object({
   family: z.string(),
@@ -54,7 +54,7 @@ export const IncusAddressSchema = z.object({
 })
 
 /**
- * Schema for network interfaces
+ * Schema for network interfaces.
  */
 export const IncusNetworkInterfaceSchema = z.object({
   state: z.string(),
@@ -91,7 +91,7 @@ export const IncusInstanceSchema = z.object({
 })
 
 /**
- * Schema for messages received over the /1.0/events WebSocket
+ * Schema for messages received over the /1.0/events WebSocket.
  */
 export const IncusEventSchema = z.object({
   timestamp: z.string(),
@@ -100,7 +100,7 @@ export const IncusEventSchema = z.object({
 })
 
 /**
- * Schemas for strict Incus Storage API payloads
+ * Schemas for strict Incus Storage API payloads.
  */
 export const IncusVolumeConfigSchema = z.record(z.string(), z.string())
 

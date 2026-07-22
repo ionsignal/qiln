@@ -36,8 +36,8 @@ export interface ComposedCreateCapability {
 /**
  * Composes the create operation vertical slice.
  *
- * This function only constructs objects. It performs no SQL, provider
- * mutation, operation scheduling, event publication, or command registration.
+ * This function only constructs objects. It performs no SQL, provider mutation,
+ * operation scheduling, event publication, or command registration.
  */
 export function composeCreateCapability(options: ComposeCreateCapabilityOptions): ComposedCreateCapability {
   const repository = new CreateCapsuleOperationRepository(options.db, options.operationReader)

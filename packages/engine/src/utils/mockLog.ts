@@ -32,12 +32,21 @@ const templates: Record<LogCategory, LogTemplate[]> = {
     {
       source: '[NATS]',
       sourceColor: colors.blue,
-      messages: ['Connected to nats://10.10.10.1:4222', 'Reconnecting to cluster...', 'Ping latency: 1.2ms', 'Subscribed to gbl.evt.>'],
+      messages: [
+        'Connected to nats://10.10.10.1:4222',
+        'Reconnecting to cluster...',
+        'Ping latency: 1.2ms',
+        'Subscribed to gbl.evt.>',
+      ],
     },
     {
       source: '[Caddy]',
       sourceColor: colors.emerald,
-      messages: ['GET /api/v1/health 200 1.2ms', 'Reloading configuration...', 'Successfully obtained certificate for *.ionsignal.com'],
+      messages: [
+        'GET /api/v1/health 200 1.2ms',
+        'Reloading configuration...',
+        'Successfully obtained certificate for *.ionsignal.com',
+      ],
     },
     {
       source: '[Qiln]',
@@ -136,8 +145,8 @@ function getTimestamp(): string {
 }
 
 /**
- * Generates a randomized LogLine based on the provided category.
- * Used exclusively for the mock UI phase.
+ * Generates a randomized LogLine based on the provided category. Used
+ * exclusively for the mock UI phase.
  */
 export function generateMockLog(category: LogCategory = 'generic'): LogLine {
   const cats = templates[category] || templates.generic

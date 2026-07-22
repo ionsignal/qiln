@@ -40,7 +40,9 @@ export class CapsuleUnarchiveAbandonmentHandler implements CapsuleOperationAband
 
   constructor(private readonly dependencies: CapsuleUnarchiveAbandonmentHandlerDependencies) {}
 
-  public async classify(operation: PersistedCapsuleOperation): Promise<CapsuleOperationAbandonmentClassificationResult> {
+  public async classify(
+    operation: PersistedCapsuleOperation,
+  ): Promise<CapsuleOperationAbandonmentClassificationResult> {
     assertAbandonedOperationType(operation, this.operationType)
 
     const result = await this.dependencies.repository.classifyAbandoned(operation.id)

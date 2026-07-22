@@ -31,8 +31,8 @@ export interface ConsoleState {
 const ConsoleInjectionKey: InjectionKey<ConsoleState> = Symbol('QilnConsole')
 
 /**
- * Provides the global state for the Qiln Console Panel.
- * Must be called exactly once at the Layout level.
+ * Provides the global state for the Qiln Console Panel. Must be called exactly
+ * once at the Layout level.
  */
 export function provideConsole(): ConsoleState {
   const isExpanded = ref(false)
@@ -64,8 +64,8 @@ export function provideConsole(): ConsoleState {
   }
 
   /**
-   * Pushes a line to a specific tab's ring buffer.
-   * Enforces a 5000-line cap to prevent DOM/memory bloat.
+   * Pushes a line to a specific tab's ring buffer. Enforces a 5000-line cap to
+   * prevent DOM/memory bloat.
    */
   function pushLine(tabId: string, line: LogLine) {
     const tab = tabs.value.find(t => t.id === tabId)
@@ -131,8 +131,8 @@ export function provideConsole(): ConsoleState {
   }
 
   /**
-   * Computes the new panel height during a drag event.
-   * Clamps the height between 20% and 60% of the viewport.
+   * Computes the new panel height during a drag event. Clamps the height
+   * between 20% and 60% of the viewport.
    */
   function onResizeMove(clientY: number) {
     if (!isDragging.value) return
@@ -188,6 +188,7 @@ export function provideConsole(): ConsoleState {
 
 /**
  * Injects the global Console state.
+ *
  * @throws Error if called outside of a provideConsole hierarchy.
  */
 export function useConsole(): ConsoleState {

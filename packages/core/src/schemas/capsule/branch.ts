@@ -12,8 +12,9 @@ export const CapsuleBranchNameSchema = z
 /**
  * Runtime status of one capsule branch.
  *
- * Archive is capsule-level and leaves branches offline. Destroying and destroyed
- * are terminal capsule lifecycle states reflected onto branch runtime records.
+ * Archive is capsule-level and leaves branches offline. Destroying and
+ * destroyed are terminal capsule lifecycle states reflected onto branch runtime
+ * records.
  */
 export const CapsuleBranchStatusValues = [
   'provisioning',

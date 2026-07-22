@@ -6,8 +6,9 @@ import { CapsuleBranchNameSchema } from './branch'
  * Durable control-plane mutation types for a capsule aggregate.
  *
  * `create` initializes the capsule aggregate and its root editable branch.
- * Future snapshot capture and branch fork operations will extend this vocabulary
- * only after Qiln can prove their artifact and provider ownership boundaries.
+ * Future snapshot capture and branch fork operations will extend this
+ * vocabulary only after Qiln can prove their artifact and provider ownership
+ * boundaries.
  */
 export const CapsuleOperationType = {
   CREATE: 'create',
@@ -67,7 +68,8 @@ export const CapsuleOperationStepStatus = {
   FAILED: 'failed',
 } as const
 
-export type CapsuleOperationStepStatusValue = (typeof CapsuleOperationStepStatus)[keyof typeof CapsuleOperationStepStatus]
+export type CapsuleOperationStepStatusValue =
+  (typeof CapsuleOperationStepStatus)[keyof typeof CapsuleOperationStepStatus]
 
 export const CapsuleOperationStepStatusValues = [
   CapsuleOperationStepStatus.PENDING,

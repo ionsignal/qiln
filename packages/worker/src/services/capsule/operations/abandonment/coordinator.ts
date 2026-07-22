@@ -1,5 +1,10 @@
 import { assertAbandonedOperationTransitionIdentity, type CapsuleOperationAbandonmentHandlerRegistry } from './handler'
-import type { CapsuleOperationReader, CapsuleOperationStepStore, CapsuleOperationTransitionOutput, PersistedCapsuleOperation } from '../shared'
+import type {
+  CapsuleOperationReader,
+  CapsuleOperationStepStore,
+  CapsuleOperationTransitionOutput,
+  PersistedCapsuleOperation,
+} from '../shared'
 
 const LOGGER_PREFIX = '[CapsuleOperationAbandonmentCoordinator]'
 const ABANDONED_STEP_FAILURE_CODE = 'ABANDONED_CAPSULE_OPERATION'
@@ -21,12 +26,12 @@ export interface CapsuleOperationAbandonmentCoordinatorDependencies {
  *
  * Classification remains fail-closed:
  *
- * - every durable operation type must have a registered handler;
- * - operations are classified sequentially;
- * - a handler failure aborts Worker startup;
- * - executors are never invoked;
- * - provider mutations are never retried;
- * - operation steps are never treated as resumable checkpoints.
+ * - Every durable operation type must have a registered handler;
+ * - Operations are classified sequentially;
+ * - A handler failure aborts Worker startup;
+ * - Executors are never invoked;
+ * - Provider mutations are never retried;
+ * - Operation steps are never treated as resumable checkpoints.
  */
 export class CapsuleOperationAbandonmentCoordinator {
   constructor(private readonly dependencies: CapsuleOperationAbandonmentCoordinatorDependencies) {}

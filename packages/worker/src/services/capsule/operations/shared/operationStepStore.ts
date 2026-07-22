@@ -9,7 +9,10 @@ import {
 import { toJsonObject } from '../../persistence/json'
 import type { AbandonedOperationStepFailureInput, CapsuleOperationStepInput } from './types'
 
-const ABANDONED_STEP_ELIGIBLE_STATUSES = [CapsuleOperationStepStatus.PENDING, CapsuleOperationStepStatus.RUNNING] as const
+const ABANDONED_STEP_ELIGIBLE_STATUSES = [
+  CapsuleOperationStepStatus.PENDING,
+  CapsuleOperationStepStatus.RUNNING,
+] as const
 
 /**
  * Persistence boundary for operation-step accounting.
@@ -32,7 +35,9 @@ export class CapsuleOperationStepStore {
     const [step] = await this.db
       .select()
       .from(capsuleOperationStepsTable)
-      .where(and(eq(capsuleOperationStepsTable.operationId, operationId), eq(capsuleOperationStepsTable.stepKey, stepKey)))
+      .where(
+        and(eq(capsuleOperationStepsTable.operationId, operationId), eq(capsuleOperationStepsTable.stepKey, stepKey)),
+      )
       .limit(1)
 
     return step ?? null
@@ -85,7 +90,8 @@ export class CapsuleOperationStepStore {
         branchName: input.branchName ?? null,
         stepKey: input.stepKey,
         status: input.status ?? CapsuleOperationStepStatus.PENDING,
-        metadata: input.metadata === undefined ? undefined : toJsonObject(input.metadata, 'capsule operation step metadata'),
+        metadata:
+          input.metadata === undefined ? undefined : toJsonObject(input.metadata, 'capsule operation step metadata'),
         updatedAt: new Date(),
       })
       .returning({
@@ -133,7 +139,12 @@ export class CapsuleOperationStepStore {
     const transitioned = await this.db
       .update(capsuleOperationStepsTable)
       .set(updateData)
-      .where(and(eq(capsuleOperationStepsTable.id, stepId), eq(capsuleOperationStepsTable.status, CapsuleOperationStepStatus.PENDING)))
+      .where(
+        and(
+          eq(capsuleOperationStepsTable.id, stepId),
+          eq(capsuleOperationStepsTable.status, CapsuleOperationStepStatus.PENDING),
+        ),
+      )
       .returning({
         id: capsuleOperationStepsTable.id,
       })
@@ -165,7 +176,12 @@ export class CapsuleOperationStepStore {
     const transitioned = await this.db
       .update(capsuleOperationStepsTable)
       .set(updateData)
-      .where(and(eq(capsuleOperationStepsTable.id, stepId), eq(capsuleOperationStepsTable.status, CapsuleOperationStepStatus.RUNNING)))
+      .where(
+        and(
+          eq(capsuleOperationStepsTable.id, stepId),
+          eq(capsuleOperationStepsTable.status, CapsuleOperationStepStatus.RUNNING),
+        ),
+      )
       .returning({
         id: capsuleOperationStepsTable.id,
       })
@@ -189,9 +205,15 @@ export class CapsuleOperationStepStore {
         updatedAt: now,
         failureCode: operationFailureCodeFromUnknown(error),
         failureMessage: operationFailureMessageFromUnknown(error, 'Unknown capsule operation step failure.'),
-        failureDetails: details === undefined ? undefined : toJsonObject(details, 'capsule operation step failure details'),
+        failureDetails:
+          details === undefined ? undefined : toJsonObject(details, 'capsule operation step failure details'),
       })
-      .where(and(eq(capsuleOperationStepsTable.id, stepId), eq(capsuleOperationStepsTable.status, CapsuleOperationStepStatus.RUNNING)))
+      .where(
+        and(
+          eq(capsuleOperationStepsTable.id, stepId),
+          eq(capsuleOperationStepsTable.status, CapsuleOperationStepStatus.RUNNING),
+        ),
+      )
       .returning({
         id: capsuleOperationStepsTable.id,
       })
@@ -210,7 +232,9 @@ export class CapsuleOperationStepStore {
    * Callers must not roll back or alter aggregate classification if this
    * accounting update fails.
    */
-  public async markNonterminalStepsFailedAfterAbandonedClassification(input: AbandonedOperationStepFailureInput): Promise<number> {
+  public async markNonterminalStepsFailedAfterAbandonedClassification(
+    input: AbandonedOperationStepFailureInput,
+  ): Promise<number> {
     const now = new Date()
     const details = toJsonObject(
       {
@@ -257,11 +281,15 @@ export class CapsuleOperationStepStore {
       existing.branchId !== (input.branchId ?? null) ||
       existing.branchName !== (input.branchName ?? null)
     ) {
-      throw new IncusError('Existing capsule operation step identity does not match the requested accounting boundary.', 'CONFLICT', {
-        operationId: input.operationId,
-        capsuleId: input.capsuleId,
-        stepKey: input.stepKey,
-      })
+      throw new IncusError(
+        'Existing capsule operation step identity does not match the requested accounting boundary.',
+        'CONFLICT',
+        {
+          operationId: input.operationId,
+          capsuleId: input.capsuleId,
+          stepKey: input.stepKey,
+        },
+      )
     }
   }
 }

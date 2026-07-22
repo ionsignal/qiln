@@ -39,7 +39,11 @@ export const CapsuleCreateInputSchema = z
         'Capsule branch name must be alphanumeric, can contain hyphens, but cannot start or end with a hyphen.',
       ),
     idempotencyKey: CapsuleOperationIdempotencyKeySchema,
-    blueprintName: z.string().trim().min(1, 'Capsule blueprint name cannot be empty.').default(DEFAULT_CAPSULE_BLUEPRINT_NAME),
+    blueprintName: z
+      .string()
+      .trim()
+      .min(1, 'Capsule blueprint name cannot be empty.')
+      .default(DEFAULT_CAPSULE_BLUEPRINT_NAME),
     blueprintDigest: CapsuleBlueprintDigestSchema,
     cpu: z.string().trim().min(1, 'CPU limit cannot be empty.').default('4'),
     memory: z.string().trim().min(1, 'Memory limit cannot be empty.').default('4GB'),

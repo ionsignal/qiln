@@ -1,64 +1,64 @@
 {
-	"folders": [
-		{
-			"name": "qiln-stealth",
-			"path": "."
-		},
-		{
-			"name": "iondocs",
-			"path": "../iondocs"
-		},
-		{
-			"name": "caddydocs",
-			"path": "../caddydocs"
-		},
-		{
-			"name": "n8n",
-			"path": "../n8n"
-		},
-		{
-			"name": "qiln",
-			"path": "../qiln"
-		},
-		{
-			"name": "trpc",
-			"path": "../trpc"
-		},
-		{
-			"name": "vike",
-			"path": "../vike"
-		},
-		{
-			"name": "zod",
-			"path": "../zod"
-		},
-		{
-			"name": "yaml",
-			"path": "../yaml"
-		},
-		{
-			"name": "incus",
-			"path": "../incus"
-		},
-		{
-			"name": "distrobuilder",
-			"path": "../distrobuilder"
-		},
-		{
-			"path": "../comfyui"
-		},
-		{
-			"path": "../pi-harness"
-		}
-	],
-	"settings": {
-		"[vue]": {
-			"editor.defaultFormatter": "esbenp.prettier-vscode",
-			"editor.formatOnSave": true
-		},
-		"[typescript]": {
-			"editor.defaultFormatter": "esbenp.prettier-vscode",
-			"editor.formatOnSave": true
-		},
-	}
+  "folders": [
+    {
+      "name": "qiln-stealth",
+      "path": ".",
+    },
+    {
+      "name": "iondocs",
+      "path": "../iondocs",
+    },
+    {
+      "name": "caddydocs",
+      "path": "../caddydocs",
+    },
+    {
+      "name": "n8n",
+      "path": "../n8n",
+    },
+    {
+      "name": "qiln",
+      "path": "../qiln",
+    },
+    {
+      "name": "trpc",
+      "path": "../trpc",
+    },
+    {
+      "name": "vike",
+      "path": "../vike",
+    },
+    {
+      "name": "zod",
+      "path": "../zod",
+    },
+    {
+      "name": "yaml",
+      "path": "../yaml",
+    },
+    {
+      "name": "incus",
+      "path": "../incus",
+    },
+    {
+      "name": "distrobuilder",
+      "path": "../distrobuilder",
+    },
+    {
+      "path": "../comfyui",
+    },
+    {
+      "path": "../pi-harness",
+    },
+  ],
+  "settings": {
+    "[vue]": {
+      "editor.defaultFormatter": "esbenp.prettier-vscode",
+      "editor.formatOnSave": true,
+    },
+    "[typescript]": {
+      "editor.defaultFormatter": "esbenp.prettier-vscode",
+      "editor.formatOnSave": true,
+    },
+  },
 }

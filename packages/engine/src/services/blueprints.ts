@@ -4,7 +4,7 @@ import {
   TargetType,
   type CapsuleBlueprintManifest,
   type CapsuleChannel,
-  type SystemTarget,
+  type TargetSystem,
 } from '@qiln/core/server'
 
 /**
@@ -23,7 +23,7 @@ export class CapsuleBlueprintService {
     })
   }
 
-  private systemTarget(): SystemTarget {
+  private systemTarget(): TargetSystem {
     return {
       type: TargetType.SYSTEM,
       id: SYSTEM_TARGET_ID,

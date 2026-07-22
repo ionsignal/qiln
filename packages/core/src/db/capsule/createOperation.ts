@@ -63,4 +63,7 @@ export function createCapsuleCreateOperationsTable(operationIdColumn?: PgColumn,
  * The host-composed schema recreates the same physical table with references to
  * its composed operation and branch tables.
  */
-export const capsuleCreateOperationsTable = createCapsuleCreateOperationsTable(capsuleOperationsTable.id, capsuleBranchesTable.id)
+export const capsuleCreateOperationsTable = createCapsuleCreateOperationsTable(
+  capsuleOperationsTable.id,
+  capsuleBranchesTable.id,
+)

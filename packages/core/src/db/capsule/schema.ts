@@ -1,4 +1,8 @@
-import { type ExtractTablesFromSchema, type ExtractTablesWithRelations, type RelationsBuilderColumnBase } from 'drizzle-orm'
+import {
+  type ExtractTablesFromSchema,
+  type ExtractTablesWithRelations,
+  type RelationsBuilderColumnBase,
+} from 'drizzle-orm'
 import type { PgColumn } from 'drizzle-orm/pg-core'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import { capsuleBranchesTable, createCapsuleBranchesTable } from './branch'
@@ -18,7 +22,11 @@ import {
   capsuleOperationTypeEnum,
   createCapsuleOperationsTable,
 } from './operation'
-import { capsuleOperationStepStatusEnum, capsuleOperationStepsTable, createCapsuleOperationStepsTable } from './operationStep'
+import {
+  capsuleOperationStepStatusEnum,
+  capsuleOperationStepsTable,
+  createCapsuleOperationStepsTable,
+} from './operationStep'
 import { capsuleSnapshotsTable, createCapsuleSnapshotsTable } from './snapshot'
 import type { RelationFragmentManyFn, RelationFragmentOneFn } from '../relations'
 
@@ -39,8 +47,17 @@ export function createCapsuleSchema<TUserIdColumn extends PgColumn>(userIdColumn
   const capsuleSnapshots = createCapsuleSnapshotsTable(capsules.id, capsuleBranches.id)
   const capsuleOperations = createCapsuleOperationsTable(userIdColumn, capsules.id)
   const capsuleCreateOperations = createCapsuleCreateOperationsTable(capsuleOperations.id, capsuleBranches.id)
-  const capsuleBranchResources = createCapsuleBranchResourcesTable(userIdColumn, capsuleBranches.id, capsuleOperations.id)
-  const capsuleOperationSteps = createCapsuleOperationStepsTable(userIdColumn, capsules.id, capsuleOperations.id, capsuleBranches.id)
+  const capsuleBranchResources = createCapsuleBranchResourcesTable(
+    userIdColumn,
+    capsuleBranches.id,
+    capsuleOperations.id,
+  )
+  const capsuleOperationSteps = createCapsuleOperationStepsTable(
+    userIdColumn,
+    capsules.id,
+    capsuleOperations.id,
+    capsuleBranches.id,
+  )
 
   return {
     capsules,

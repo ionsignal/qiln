@@ -22,7 +22,10 @@ export interface CapsuleUnarchiveExecutorDependencies {
  * lineage, and terminal classification.
  */
 export class CapsuleUnarchiveExecutor {
-  private readonly execution: ProviderFreeArchivalOperationExecution<UnarchiveCapsuleExecutionInput, UnarchiveCapsuleTerminalResult>
+  private readonly execution: ProviderFreeArchivalOperationExecution<
+    UnarchiveCapsuleExecutionInput,
+    UnarchiveCapsuleTerminalResult
+  >
 
   constructor(private readonly dependencies: CapsuleUnarchiveExecutorDependencies) {
     this.execution = new ProviderFreeArchivalOperationExecution({

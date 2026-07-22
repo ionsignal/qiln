@@ -45,12 +45,24 @@
       </n-dropdown>
     </n-flex>
     <n-modal v-model:show="showNewFolderModal">
-      <n-card style="width: 400px" title="Create New Folder" :bordered="false" size="small" role="dialog" aria-modal="true">
-        <n-input v-model:value="newFolderName" placeholder="Folder name..." @keydown.enter="handleCreateFolder" autofocus />
+      <n-card
+        style="width: 400px"
+        title="Create New Folder"
+        :bordered="false"
+        size="small"
+        role="dialog"
+        aria-modal="true">
+        <n-input
+          v-model:value="newFolderName"
+          placeholder="Folder name..."
+          @keydown.enter="handleCreateFolder"
+          autofocus />
         <template #action>
           <n-flex justify="flex-end" :size="8">
             <n-button size="small" @click="showNewFolderModal = false">Cancel</n-button>
-            <n-button size="small" type="primary" :disabled="!newFolderName.trim()" @click="handleCreateFolder">Create</n-button>
+            <n-button size="small" type="primary" :disabled="!newFolderName.trim()" @click="handleCreateFolder">
+              Create
+            </n-button>
           </n-flex>
         </template>
       </n-card>
@@ -60,10 +72,30 @@
 
 <script setup lang="ts">
   import { ref, computed, h } from 'vue'
-  import { NFlex, NBreadcrumb, NBreadcrumbItem, NButtonGroup, NButton, NTooltip, NDropdown, NModal, NCard, NInput, useMessage } from 'naive-ui'
+  import {
+    NFlex,
+    NBreadcrumb,
+    NBreadcrumbItem,
+    NButtonGroup,
+    NButton,
+    NTooltip,
+    NDropdown,
+    NModal,
+    NCard,
+    NInput,
+    useMessage,
+  } from 'naive-ui'
   import type { DropdownOption } from 'naive-ui'
   import { Icon } from './Icon'
-  import { mdiUpload, mdiFolderPlus, mdiCameraIris, mdiDotsVertical, mdiHarddisk, mdiCheckAll, mdiDelete } from '@mdi/js'
+  import {
+    mdiUpload,
+    mdiFolderPlus,
+    mdiCameraIris,
+    mdiDotsVertical,
+    mdiHarddisk,
+    mdiCheckAll,
+    mdiDelete,
+  } from '@mdi/js'
   import { useFileBrowser } from '../composables/useFileBrowser'
 
   const props = defineProps<{

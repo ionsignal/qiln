@@ -46,7 +46,10 @@ export const CapsuleArtifactEntryType = {
 
 export type CapsuleArtifactEntryTypeValue = (typeof CapsuleArtifactEntryType)[keyof typeof CapsuleArtifactEntryType]
 
-export const CapsuleArtifactEntryTypeValues = [CapsuleArtifactEntryType.FILE, CapsuleArtifactEntryType.DIRECTORY] as const
+export const CapsuleArtifactEntryTypeValues = [
+  CapsuleArtifactEntryType.FILE,
+  CapsuleArtifactEntryType.DIRECTORY,
+] as const
 
 export const CapsuleArtifactEntryTypeSchema = z.enum(CapsuleArtifactEntryTypeValues)
 
@@ -119,7 +122,10 @@ export const CapsuleArtifactDirectoryEntrySchema = CapsuleArtifactEntryBaseSchem
   type: z.literal(CapsuleArtifactEntryType.DIRECTORY),
 }).strict()
 
-export const CapsuleArtifactEntrySchema = z.discriminatedUnion('type', [CapsuleArtifactFileEntrySchema, CapsuleArtifactDirectoryEntrySchema])
+export const CapsuleArtifactEntrySchema = z.discriminatedUnion('type', [
+  CapsuleArtifactFileEntrySchema,
+  CapsuleArtifactDirectoryEntrySchema,
+])
 
 export type CapsuleArtifactRootId = z.infer<typeof CapsuleArtifactRootIdSchema>
 export type CapsuleArtifactLogicalPath = z.infer<typeof CapsuleArtifactLogicalPathSchema>

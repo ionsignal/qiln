@@ -11,7 +11,12 @@ import {
   type CapsuleBlueprintManifest,
   type CapsuleBlueprintManifestItem,
 } from '../schemas/blueprint/catalog'
-import { CapsuleBlueprintPinSchema, CapsuleBlueprintSchema, type CapsuleBlueprint, type CapsuleBlueprintPin } from '../schemas/blueprint/schema'
+import {
+  CapsuleBlueprintPinSchema,
+  CapsuleBlueprintSchema,
+  type CapsuleBlueprint,
+  type CapsuleBlueprintPin,
+} from '../schemas/blueprint/schema'
 
 const DEFAULT_LOGGER_PREFIX = '[CapsuleBlueprintRegistry]'
 
@@ -137,11 +142,15 @@ export class CapsuleBlueprintRegistry {
         const parsedYaml = this.parseBlueprintYaml(content, file, filePath)
         const result = CapsuleBlueprintSchema.safeParse(parsedYaml)
         if (!result.success) {
-          throw new GlobalError(`Malformed Capsule Blueprint: ${file}. Validation failed.`, GlobalErrorCode.BAD_REQUEST, {
-            file,
-            path: filePath,
-            ...validationDetails(result.error),
-          })
+          throw new GlobalError(
+            `Malformed Capsule Blueprint: ${file}. Validation failed.`,
+            GlobalErrorCode.BAD_REQUEST,
+            {
+              file,
+              path: filePath,
+              ...validationDetails(result.error),
+            },
+          )
         }
         const blueprint = deepFreeze(result.data)
         if (nextCache.has(blueprint.name)) {
@@ -159,10 +168,14 @@ export class CapsuleBlueprintRegistry {
       console.log(`${this.loggerPrefix} Successfully loaded ${this.cache.size} capsule blueprints.`)
     } catch (error: unknown) {
       if (isNodeErrorWithCode(error, 'ENOENT')) {
-        const notFound = new GlobalError(`Capsule blueprint directory not found at '${resolvedDirectory}'.`, GlobalErrorCode.NOT_FOUND, {
-          directory: resolvedDirectory,
-          error: detailsFromUnknown(error),
-        })
+        const notFound = new GlobalError(
+          `Capsule blueprint directory not found at '${resolvedDirectory}'.`,
+          GlobalErrorCode.NOT_FOUND,
+          {
+            directory: resolvedDirectory,
+            error: detailsFromUnknown(error),
+          },
+        )
         console.error(`${this.loggerPrefix} FATAL: ${notFound.message}`)
         throw notFound
       }
@@ -171,15 +184,20 @@ export class CapsuleBlueprintRegistry {
         throw error
       }
       console.error(`${this.loggerPrefix} FATAL: Failed to load capsule blueprints from ${resolvedDirectory}`, error)
-      throw new GlobalError(`Failed to load capsule blueprints from '${resolvedDirectory}'.`, GlobalErrorCode.INTERNAL_ERROR, {
-        directory: resolvedDirectory,
-        error: detailsFromUnknown(error),
-      })
+      throw new GlobalError(
+        `Failed to load capsule blueprints from '${resolvedDirectory}'.`,
+        GlobalErrorCode.INTERNAL_ERROR,
+        {
+          directory: resolvedDirectory,
+          error: detailsFromUnknown(error),
+        },
+      )
     }
   }
 
   /**
-   * Resolves a caller-reviewed blueprint digest to an immutable durable blueprint pin.
+   * Resolves a caller-reviewed blueprint digest to an immutable durable
+   * blueprint pin.
    */
   public pin(name: string, digest: string): CapsuleBlueprintPin {
     const parsedDigest = CapsuleBlueprintDigestSchema.safeParse(digest)
@@ -197,11 +215,15 @@ export class CapsuleBlueprintRegistry {
     }
     const actualDigest = digestCanonicalValue(blueprint)
     if (actualDigest !== parsedDigest.data) {
-      throw new GlobalError(`Capsule blueprint '${name}' digest does not match the reviewed manifest item.`, GlobalErrorCode.CONFLICT, {
-        name,
-        expectedDigest: parsedDigest.data,
-        actualDigest,
-      })
+      throw new GlobalError(
+        `Capsule blueprint '${name}' digest does not match the reviewed manifest item.`,
+        GlobalErrorCode.CONFLICT,
+        {
+          name,
+          expectedDigest: parsedDigest.data,
+          actualDigest,
+        },
+      )
     }
     const pin = {
       name: blueprint.name,

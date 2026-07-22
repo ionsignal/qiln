@@ -54,7 +54,12 @@ export class CreateCapsuleSubmissionService {
      * not depend on the mutable blueprint catalog still containing the original
      * definition.
      */
-    const replay = await this.repository.findIdempotentReplay(input.ownerId, input.actor, input.idempotencyKey, requestHash)
+    const replay = await this.repository.findIdempotentReplay(
+      input.ownerId,
+      input.actor,
+      input.idempotencyKey,
+      requestHash,
+    )
 
     if (replay) {
       return replay.receipt

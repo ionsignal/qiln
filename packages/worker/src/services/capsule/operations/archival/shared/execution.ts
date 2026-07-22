@@ -8,7 +8,8 @@ export const ProviderFreeArchivalExecutionPhase = {
   COMPLETE_OPERATION: 'complete_operation',
 } as const
 
-export type ProviderFreeArchivalExecutionPhase = (typeof ProviderFreeArchivalExecutionPhase)[keyof typeof ProviderFreeArchivalExecutionPhase]
+export type ProviderFreeArchivalExecutionPhase =
+  (typeof ProviderFreeArchivalExecutionPhase)[keyof typeof ProviderFreeArchivalExecutionPhase]
 
 export interface ProviderFreeArchivalExecutionInput {
   ownerId: string
@@ -29,7 +30,11 @@ export interface ProviderFreeArchivalOperationExecutionDefinition<
   loadAcceptedExecution(operationId: string): Promise<TExecutionInput>
   claimAccepted(operationId: string): Promise<CapsuleOperationTransitionOutput>
   complete(operationId: string): Promise<TTerminalResult>
-  classifyExecutionFailure(operationId: string, error: unknown, context: Record<string, unknown>): Promise<TTerminalResult | null>
+  classifyExecutionFailure(
+    operationId: string,
+    error: unknown,
+    context: Record<string, unknown>,
+  ): Promise<TTerminalResult | null>
   publishOperationChanged(operation: CapsuleOperationTransitionOutput): void
   publishTerminalResult(result: TTerminalResult): void
 }
@@ -42,12 +47,17 @@ export class ProviderFreeArchivalOperationExecution<
   TExecutionInput extends ProviderFreeArchivalExecutionInput,
   TTerminalResult extends ProviderFreeArchivalTerminalResult,
 > {
-  constructor(private readonly definition: ProviderFreeArchivalOperationExecutionDefinition<TExecutionInput, TTerminalResult>) {}
+  constructor(
+    private readonly definition: ProviderFreeArchivalOperationExecutionDefinition<TExecutionInput, TTerminalResult>,
+  ) {}
 
   public async execute(operationId: string): Promise<void> {
     let phase: ProviderFreeArchivalExecutionPhase = ProviderFreeArchivalExecutionPhase.LOAD_EXECUTION_INPUT
     let executionInput: TExecutionInput | null = null
-    const runPhase = async <TResult>(executionPhase: ProviderFreeArchivalExecutionPhase, action: () => Promise<TResult>): Promise<TResult> => {
+    const runPhase = async <TResult>(
+      executionPhase: ProviderFreeArchivalExecutionPhase,
+      action: () => Promise<TResult>,
+    ): Promise<TResult> => {
       phase = executionPhase
       return await action()
     }
@@ -55,10 +65,14 @@ export class ProviderFreeArchivalOperationExecution<
       executionInput = await runPhase(ProviderFreeArchivalExecutionPhase.LOAD_EXECUTION_INPUT, () =>
         this.definition.loadAcceptedExecution(operationId),
       )
-      const running = await runPhase(ProviderFreeArchivalExecutionPhase.CLAIM_OPERATION, () => this.definition.claimAccepted(operationId))
+      const running = await runPhase(ProviderFreeArchivalExecutionPhase.CLAIM_OPERATION, () =>
+        this.definition.claimAccepted(operationId),
+      )
       this.assertRunningTransition(operationId, executionInput, running)
       this.publishOperationChangedSafely(running)
-      const completed = await runPhase(ProviderFreeArchivalExecutionPhase.COMPLETE_OPERATION, () => this.definition.complete(operationId))
+      const completed = await runPhase(ProviderFreeArchivalExecutionPhase.COMPLETE_OPERATION, () =>
+        this.definition.complete(operationId),
+      )
       this.assertTerminalResult(operationId, executionInput, completed)
       this.publishTerminalResultSafely(completed)
     } catch (executionError: unknown) {
@@ -107,7 +121,11 @@ export class ProviderFreeArchivalOperationExecution<
     }
   }
 
-  private assertRunningTransition(operationId: string, executionInput: TExecutionInput, operation: CapsuleOperationTransitionOutput): void {
+  private assertRunningTransition(
+    operationId: string,
+    executionInput: TExecutionInput,
+    operation: CapsuleOperationTransitionOutput,
+  ): void {
     this.assertTransitionIdentity(operationId, executionInput, operation)
     if (operation.operationStatus !== CapsuleOperationStatus.RUNNING) {
       throw new Error(
@@ -117,7 +135,11 @@ export class ProviderFreeArchivalOperationExecution<
     }
   }
 
-  private assertTerminalResult(operationId: string, executionInput: TExecutionInput | null, result: TTerminalResult): void {
+  private assertTerminalResult(
+    operationId: string,
+    executionInput: TExecutionInput | null,
+    result: TTerminalResult,
+  ): void {
     this.assertTransitionIdentity(operationId, executionInput, result.operation)
     if (
       result.operation.operationStatus === CapsuleOperationStatus.ACCEPTED ||
