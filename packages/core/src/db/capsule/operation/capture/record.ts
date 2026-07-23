@@ -5,10 +5,10 @@ import type {
   CapsuleBranchResourceInventoryDigest,
   CapsuleSnapshotCapturePolicyDigest,
   CapsuleSnapshotCapturePolicyPin,
-} from '../../../schemas'
-import { capsuleBranchesTable } from '../branch/record'
-import { capsuleSnapshotsTable } from '../snapshot/record'
-import { capsuleOperationsTable } from './record'
+} from '../../../../schemas'
+import { capsuleBranchesTable } from '../../branch/record'
+import { capsuleSnapshotModeEnum, capsuleSnapshotsTable } from '../../snapshot/record'
+import { capsuleOperationsTable } from '../record'
 
 function createOperationIdColumn(operationIdColumn?: PgColumn) {
   return operationIdColumn
@@ -35,15 +35,17 @@ function createNullableSnapshotIdColumn(snapshotIdColumn?: PgColumn) {
 }
 
 /**
- * Creates the dormant Snapshot Capture operation extension.
+ * Creates the Snapshot Capture operation extension.
  *
- * This table defines future immutable operation input and committed-result
- * identity only. Phase 1 adds no operation discriminator, command, writer,
- * executor, event, or abandonment policy capable of inserting these rows.
+ * The extension owns immutable acceptance-time source-branch, capture-policy,
+ * and requested-mode evidence. `snapshotId` remains null until the atomic
+ * capture commit transaction links this operation to committed snapshot
+ * history.
  *
- * PostgreSQL cannot prove that the referenced base operation has the future
- * Snapshot Capture discriminator. The complete operation slice must validate
- * that discriminator whenever this extension authorizes any mutation or read.
+ * PostgreSQL cannot prove that the referenced base operation has the
+ * `snapshot_capture` discriminator. Every repository path that uses this
+ * extension as mutation or read authority must validate the base operation
+ * type.
  */
 export function createCapsuleSnapshotCaptureOperationsTable(
   operationIdColumn?: PgColumn,
@@ -53,6 +55,7 @@ export function createCapsuleSnapshotCaptureOperationsTable(
   const operationId = createOperationIdColumn(operationIdColumn)
   const sourceBranchId = createSourceBranchIdColumn(sourceBranchIdColumn)
   const snapshotId = createNullableSnapshotIdColumn(snapshotIdColumn)
+
   return pgTable(
     'capsule_snapshot_capture_operations',
     {
@@ -65,11 +68,13 @@ export function createCapsuleSnapshotCaptureOperationsTable(
       capturePolicySchemaVersion: integer('capture_policy_schema_version').notNull(),
       capturePolicyDigest: text('capture_policy_digest').$type<CapsuleSnapshotCapturePolicyDigest>().notNull(),
       capturePolicyPin: jsonb('capture_policy_pin').$type<CapsuleSnapshotCapturePolicyPin>().notNull(),
+      requestedMode: capsuleSnapshotModeEnum('requested_mode').notNull().default('experimental'),
       snapshotId,
     },
     table => [
       index('capsule_snapshot_capture_operations_source_branch_idx').on(table.sourceBranchId),
       index('capsule_snapshot_capture_operations_policy_digest_idx').on(table.capturePolicyDigest),
+      index('capsule_snapshot_capture_operations_mode_idx').on(table.requestedMode),
       uniqueIndex('capsule_snapshot_capture_operations_snapshot_unique_idx').on(table.snapshotId),
       check('capsule_snapshot_capture_operations_policy_schema_check', sql`${table.capturePolicySchemaVersion} = 1`),
       check(

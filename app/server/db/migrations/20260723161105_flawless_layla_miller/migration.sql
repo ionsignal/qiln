@@ -3,14 +3,16 @@ CREATE TYPE "capsule_artifact_entry_type" AS ENUM('file', 'directory');--> state
 CREATE TYPE "capsule_branch_resource_cleanup_policy" AS ENUM('delete_with_branch', 'retain', 'external');--> statement-breakpoint
 CREATE TYPE "capsule_branch_resource_status" AS ENUM('planned', 'creating', 'created', 'deleting', 'deleted', 'adopted', 'missing', 'error');--> statement-breakpoint
 CREATE TYPE "capsule_branch_resource_type" AS ENUM('incus_project', 'incus_instance', 'zfs_volume', 'bind_mount', 'provisioning_file');--> statement-breakpoint
-CREATE TYPE "capsule_branch_status" AS ENUM('provisioning', 'offline', 'starting', 'online', 'stopping', 'destroying', 'destroyed', 'error', 'cleanup_required');--> statement-breakpoint
+CREATE TYPE "capsule_branch_status" AS ENUM('provisioning', 'offline', 'capturing', 'starting', 'online', 'stopping', 'destroying', 'destroyed', 'error', 'cleanup_required');--> statement-breakpoint
 CREATE TYPE "capsule_lifecycle_status" AS ENUM('provisioning', 'active', 'archiving', 'unarchiving', 'destroying', 'destroyed', 'creation_failed', 'cleanup_required');--> statement-breakpoint
 CREATE TYPE "capsule_operation_status" AS ENUM('accepted', 'running', 'completed', 'failed', 'cleanup_required');--> statement-breakpoint
 CREATE TYPE "capsule_operation_step_status" AS ENUM('pending', 'running', 'completed', 'failed');--> statement-breakpoint
-CREATE TYPE "capsule_operation_type" AS ENUM('create', 'archive', 'unarchive', 'destroy');--> statement-breakpoint
+CREATE TYPE "capsule_operation_type" AS ENUM('create', 'archive', 'unarchive', 'destroy', 'snapshot_capture');--> statement-breakpoint
+CREATE TYPE "capsule_snapshot_capture_resource_status" AS ENUM('planned', 'creating', 'created', 'deleting', 'deleted', 'missing', 'error');--> statement-breakpoint
 CREATE TYPE "capsule_snapshot_dependency_digest_kind" AS ENUM('content', 'catalog');--> statement-breakpoint
 CREATE TYPE "capsule_snapshot_dependency_kind" AS ENUM('model_vault');--> statement-breakpoint
 CREATE TYPE "capsule_snapshot_git_remote_transport" AS ENUM('https', 'ssh');--> statement-breakpoint
+CREATE TYPE "capsule_snapshot_mode" AS ENUM('experimental');--> statement-breakpoint
 CREATE TYPE "capsule_snapshot_resource_kind" AS ENUM('custom_volume_snapshot');--> statement-breakpoint
 CREATE TYPE "capsule_snapshot_resource_provider" AS ENUM('incus');--> statement-breakpoint
 CREATE TABLE "capsule_artifact_entries" (
@@ -122,8 +124,8 @@ CREATE TABLE "capsule_branches" (
             AND "runtime_error_at" IS NOT NULL
           )
         )),
-	CONSTRAINT "capsule_branches_offline_runtime_ip_check" CHECK ((
-          "status" <> 'offline'
+	CONSTRAINT "capsule_branches_inactive_runtime_ip_check" CHECK ((
+          "status" NOT IN ('offline', 'capturing')
           OR "runtime_ip" IS NULL
         ))
 );
@@ -189,10 +191,130 @@ CREATE TABLE "capsule_snapshot_capture_operations" (
 	"capture_policy_schema_version" integer NOT NULL,
 	"capture_policy_digest" text NOT NULL,
 	"capture_policy_pin" jsonb NOT NULL,
+	"requested_mode" "capsule_snapshot_mode" DEFAULT 'experimental'::"capsule_snapshot_mode" NOT NULL,
 	"snapshot_id" uuid,
 	CONSTRAINT "capsule_snapshot_capture_operations_policy_schema_check" CHECK ("capture_policy_schema_version" = 1),
 	CONSTRAINT "capsule_snapshot_capture_operations_policy_digest_check" CHECK ("capture_policy_digest" ~ '^sha256:[a-f0-9]{64}$'),
 	CONSTRAINT "capsule_snapshot_capture_operations_inventory_digest_check" CHECK ("source_branch_resource_inventory_digest" ~ '^sha256:[a-f0-9]{64}$')
+);
+--> statement-breakpoint
+CREATE TABLE "capsule_snapshot_capture_resources" (
+	"id" uuid PRIMARY KEY DEFAULT uuidv7(),
+	"operation_id" uuid NOT NULL,
+	"source_branch_resource_id" uuid NOT NULL,
+	"artifact_root_id" text NOT NULL,
+	"blueprint_volume_name" text NOT NULL,
+	"provider" "capsule_snapshot_resource_provider" NOT NULL,
+	"kind" "capsule_snapshot_resource_kind" NOT NULL,
+	"project" text NOT NULL,
+	"pool" text NOT NULL,
+	"source_volume" text NOT NULL,
+	"snapshot_name" text NOT NULL,
+	"status" "capsule_snapshot_capture_resource_status" DEFAULT 'planned'::"capsule_snapshot_capture_resource_status" NOT NULL,
+	"snapshot_intent_at" timestamp with time zone,
+	"snapshot_created_at" timestamp with time zone,
+	"cleanup_intent_at" timestamp with time zone,
+	"cleanup_completed_at" timestamp with time zone,
+	"failure_code" text,
+	"failure_message" text,
+	"failure_details" jsonb,
+	"failure_at" timestamp with time zone,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "capsule_snapshot_capture_resources_identity_check" CHECK ((
+          length(btrim("project")) BETWEEN 1 AND 255
+          AND length(btrim("pool")) BETWEEN 1 AND 255
+          AND length(btrim("source_volume")) BETWEEN 1 AND 255
+          AND length(btrim("snapshot_name")) BETWEEN 1 AND 255
+        )),
+	CONSTRAINT "capsule_snapshot_capture_resources_timeline_check" CHECK ((
+          (
+            "status" = 'planned'
+            AND "snapshot_intent_at" IS NULL
+            AND "snapshot_created_at" IS NULL
+            AND "cleanup_intent_at" IS NULL
+            AND "cleanup_completed_at" IS NULL
+          )
+          OR
+          (
+            "status" = 'creating'
+            AND "snapshot_intent_at" IS NOT NULL
+            AND "snapshot_created_at" IS NULL
+            AND "cleanup_intent_at" IS NULL
+            AND "cleanup_completed_at" IS NULL
+          )
+          OR
+          (
+            "status" = 'created'
+            AND "snapshot_intent_at" IS NOT NULL
+            AND "snapshot_created_at" IS NOT NULL
+            AND "cleanup_intent_at" IS NULL
+            AND "cleanup_completed_at" IS NULL
+          )
+          OR
+          (
+            "status" = 'deleting'
+            AND "snapshot_intent_at" IS NOT NULL
+            AND "snapshot_created_at" IS NOT NULL
+            AND "cleanup_intent_at" IS NOT NULL
+            AND "cleanup_completed_at" IS NULL
+          )
+          OR
+          (
+            "status" IN ('deleted', 'missing')
+            AND "snapshot_intent_at" IS NOT NULL
+            AND "snapshot_created_at" IS NOT NULL
+            AND "cleanup_intent_at" IS NOT NULL
+            AND "cleanup_completed_at" IS NOT NULL
+          )
+          OR
+          (
+            "status" = 'error'
+            AND "snapshot_intent_at" IS NOT NULL
+          )
+        )),
+	CONSTRAINT "capsule_snapshot_capture_resources_failure_check" CHECK ((
+          (
+            "status" = 'error'
+            AND "failure_code" IS NOT NULL
+            AND "failure_message" IS NOT NULL
+            AND "failure_details" IS NOT NULL
+            AND "failure_at" IS NOT NULL
+          )
+          OR
+          (
+            "status" <> 'error'
+            AND "failure_code" IS NULL
+            AND "failure_message" IS NULL
+            AND "failure_details" IS NULL
+            AND "failure_at" IS NULL
+          )
+        )),
+	CONSTRAINT "capsule_snapshot_capture_resources_timestamp_order_check" CHECK ((
+          (
+            "snapshot_created_at" IS NULL
+            OR (
+              "snapshot_intent_at" IS NOT NULL
+              AND "snapshot_created_at" >= "snapshot_intent_at"
+            )
+          )
+          AND
+          (
+            "cleanup_intent_at" IS NULL
+            OR (
+              "snapshot_created_at" IS NOT NULL
+              AND "cleanup_intent_at" >= "snapshot_created_at"
+            )
+          )
+          AND
+          (
+            "cleanup_completed_at" IS NULL
+            OR (
+              "cleanup_intent_at" IS NOT NULL
+              AND "cleanup_completed_at" >= "cleanup_intent_at"
+            )
+          )
+        ))
 );
 --> statement-breakpoint
 CREATE TABLE "capsule_snapshot_dependency_references" (
@@ -287,11 +409,20 @@ CREATE TABLE "capsule_snapshots" (
 	"capture_policy_schema_version" integer NOT NULL,
 	"capture_policy_digest" text NOT NULL,
 	"capture_policy_pin" jsonb NOT NULL,
+	"mode" "capsule_snapshot_mode" DEFAULT 'experimental'::"capsule_snapshot_mode" NOT NULL,
+	"limitations" jsonb NOT NULL,
 	"created_at" timestamp(3) with time zone DEFAULT now() NOT NULL,
 	"archived_at" timestamp(3) with time zone,
 	CONSTRAINT "capsule_snapshots_policy_schema_check" CHECK ("capture_policy_schema_version" = 1),
 	CONSTRAINT "capsule_snapshots_policy_digest_check" CHECK ("capture_policy_digest" ~ '^sha256:[a-f0-9]{64}$'),
 	CONSTRAINT "capsule_snapshots_inventory_digest_check" CHECK ("source_branch_resource_inventory_digest" ~ '^sha256:[a-f0-9]{64}$'),
+	CONSTRAINT "capsule_snapshots_experimental_limitations_check" CHECK ((
+          "mode" <> 'experimental'
+          OR (
+            jsonb_typeof("limitations") = 'array'
+            AND jsonb_array_length("limitations") > 0
+          )
+        )),
 	CONSTRAINT "capsule_snapshots_archive_timestamp_check" CHECK ("archived_at" IS NULL OR "archived_at" >= "created_at")
 );
 --> statement-breakpoint
@@ -366,7 +497,15 @@ CREATE UNIQUE INDEX "capsule_operations_owner_idempotency_key_unique_idx" ON "ca
 CREATE UNIQUE INDEX "capsule_operations_capsule_nonterminal_unique_idx" ON "capsule_operations" ("capsule_id") WHERE "status" IN ('accepted', 'running');--> statement-breakpoint
 CREATE INDEX "capsule_snapshot_capture_operations_source_branch_idx" ON "capsule_snapshot_capture_operations" ("source_branch_id");--> statement-breakpoint
 CREATE INDEX "capsule_snapshot_capture_operations_policy_digest_idx" ON "capsule_snapshot_capture_operations" ("capture_policy_digest");--> statement-breakpoint
+CREATE INDEX "capsule_snapshot_capture_operations_mode_idx" ON "capsule_snapshot_capture_operations" ("requested_mode");--> statement-breakpoint
 CREATE UNIQUE INDEX "capsule_snapshot_capture_operations_snapshot_unique_idx" ON "capsule_snapshot_capture_operations" ("snapshot_id");--> statement-breakpoint
+CREATE INDEX "capsule_snapshot_capture_resources_operation_idx" ON "capsule_snapshot_capture_resources" ("operation_id");--> statement-breakpoint
+CREATE INDEX "capsule_snapshot_capture_resources_source_resource_idx" ON "capsule_snapshot_capture_resources" ("source_branch_resource_id");--> statement-breakpoint
+CREATE INDEX "capsule_snapshot_capture_resources_status_idx" ON "capsule_snapshot_capture_resources" ("status");--> statement-breakpoint
+CREATE UNIQUE INDEX "capsule_snapshot_capture_resources_operation_root_unique_idx" ON "capsule_snapshot_capture_resources" ("operation_id","artifact_root_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "capsule_snapshot_capture_resources_operation_volume_unique_idx" ON "capsule_snapshot_capture_resources" ("operation_id","blueprint_volume_name");--> statement-breakpoint
+CREATE UNIQUE INDEX "capsule_snapshot_capture_resources_operation_source_unique_idx" ON "capsule_snapshot_capture_resources" ("operation_id","source_branch_resource_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "capsule_snapshot_capture_resources_provider_identity_unique_idx" ON "capsule_snapshot_capture_resources" ("provider","project","pool","source_volume","snapshot_name");--> statement-breakpoint
 CREATE INDEX "capsule_snap_dependency_ref_snapshot_idx" ON "capsule_snapshot_dependency_references" ("snapshot_id");--> statement-breakpoint
 CREATE INDEX "capsule_snap_dependency_ref_root_idx" ON "capsule_snapshot_dependency_references" ("manifest_root_id");--> statement-breakpoint
 CREATE INDEX "capsule_snap_dependency_ref_source_resource_idx" ON "capsule_snapshot_dependency_references" ("source_branch_resource_id");--> statement-breakpoint
@@ -387,6 +526,7 @@ CREATE UNIQUE INDEX "capsule_snap_resource_ref_provider_identity_unique_idx" ON 
 CREATE INDEX "capsule_snapshots_capsule_created_idx" ON "capsule_snapshots" ("capsule_id","created_at");--> statement-breakpoint
 CREATE INDEX "capsule_snapshots_source_branch_idx" ON "capsule_snapshots" ("source_branch_id");--> statement-breakpoint
 CREATE INDEX "capsule_snapshots_policy_digest_idx" ON "capsule_snapshots" ("capture_policy_digest");--> statement-breakpoint
+CREATE INDEX "capsule_snapshots_mode_idx" ON "capsule_snapshots" ("mode");--> statement-breakpoint
 CREATE INDEX "capsules_owner_idx" ON "capsules" ("owner_id");--> statement-breakpoint
 CREATE INDEX "capsules_owner_lifecycle_status_idx" ON "capsules" ("owner_id","lifecycle_status");--> statement-breakpoint
 ALTER TABLE "capsule_artifact_entries" ADD CONSTRAINT "capsule_artifact_entries_mrkPSpdKYhcL_fkey" FOREIGN KEY ("manifest_root_id") REFERENCES "capsule_artifact_manifest_roots"("id") ON DELETE CASCADE;--> statement-breakpoint
@@ -409,6 +549,8 @@ ALTER TABLE "capsule_operations" ADD CONSTRAINT "capsule_operations_capsule_id_c
 ALTER TABLE "capsule_snapshot_capture_operations" ADD CONSTRAINT "capsule_snapshot_capture_operations_ZhOFScnh8rYr_fkey" FOREIGN KEY ("operation_id") REFERENCES "capsule_operations"("id") ON DELETE RESTRICT;--> statement-breakpoint
 ALTER TABLE "capsule_snapshot_capture_operations" ADD CONSTRAINT "capsule_snapshot_capture_operations_TxTm0hyZaclE_fkey" FOREIGN KEY ("source_branch_id") REFERENCES "capsule_branches"("id") ON DELETE RESTRICT;--> statement-breakpoint
 ALTER TABLE "capsule_snapshot_capture_operations" ADD CONSTRAINT "capsule_snapshot_capture_operations_viOaGFWNjtRH_fkey" FOREIGN KEY ("snapshot_id") REFERENCES "capsule_snapshots"("id") ON DELETE RESTRICT;--> statement-breakpoint
+ALTER TABLE "capsule_snapshot_capture_resources" ADD CONSTRAINT "capsule_snapshot_capture_resources_8G60CcaTLsYo_fkey" FOREIGN KEY ("operation_id") REFERENCES "capsule_snapshot_capture_operations"("operation_id") ON DELETE RESTRICT;--> statement-breakpoint
+ALTER TABLE "capsule_snapshot_capture_resources" ADD CONSTRAINT "capsule_snapshot_capture_resources_Cg5eIMfKn6vE_fkey" FOREIGN KEY ("source_branch_resource_id") REFERENCES "capsule_branch_resources"("id") ON DELETE RESTRICT;--> statement-breakpoint
 ALTER TABLE "capsule_snapshot_dependency_references" ADD CONSTRAINT "capsule_snapshot_dependency_references_JzcghoDeWZIG_fkey" FOREIGN KEY ("snapshot_id") REFERENCES "capsule_snapshots"("id") ON DELETE CASCADE;--> statement-breakpoint
 ALTER TABLE "capsule_snapshot_dependency_references" ADD CONSTRAINT "capsule_snapshot_dependency_references_zgkzWtHStDXh_fkey" FOREIGN KEY ("manifest_root_id") REFERENCES "capsule_artifact_manifest_roots"("id") ON DELETE RESTRICT;--> statement-breakpoint
 ALTER TABLE "capsule_snapshot_dependency_references" ADD CONSTRAINT "capsule_snapshot_dependency_references_aKRwtCdXJbzq_fkey" FOREIGN KEY ("source_branch_resource_id") REFERENCES "capsule_branch_resources"("id") ON DELETE RESTRICT;--> statement-breakpoint

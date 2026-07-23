@@ -4,17 +4,12 @@ import type {
   CapsuleBranchResourceInventoryDigest,
   CapsuleSnapshotCapturePolicyDigest,
   CapsuleSnapshotCapturePolicyPin,
+  CapsuleSnapshotLimitationValue,
+  CapsuleSnapshotModeValue,
 } from '@qiln/core/server'
 
 /**
  * Worker persistence shape for committed capsule snapshot headers.
- *
- * Rows reach this projection only when the snapshot has:
- *
- * - A canonical artifact-manifest header;
- * - A capture-operation extension linked to the snapshot;
- * - Matching immutable source and capture-policy evidence;
- * - A completed base operation.
  *
  * Detailed manifest entries, Git records, dependency references, and provider
  * references remain server-side and are not included in this read projection.
@@ -30,6 +25,12 @@ export interface CapsuleSnapshotRecord {
   capturePolicyPin: CapsuleSnapshotCapturePolicyPin
   artifactManifestSchemaVersion: number
   artifactManifestDigest: CapsuleArtifactManifestDigest
+  mode: CapsuleSnapshotModeValue
+  limitations: CapsuleSnapshotLimitationValue[]
   createdAt: Date
   archivedAt: Date | null
+}
+
+export interface CapsuleSnapshotListOptions {
+  includeExperimental?: boolean
 }

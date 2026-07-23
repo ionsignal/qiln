@@ -38,6 +38,9 @@ export default {
   worker: {
     embedded: process.env.QILN_EMBEDDED_WORKER_ENABLED === 'true',
   },
+  features: {
+    experimentalCapture: process.env.QILN_EXPERIMENTAL_CAPTURE_ENABLED === 'true',
+  },
   cookies: {
     name: process.env.COOKIE_NAME ?? 'runemind_session',
     path: '/',

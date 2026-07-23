@@ -29,9 +29,6 @@ export const IncusResponseSchema = z.discriminatedUnion('type', [
   }),
 ])
 
-/**
- * Schema for the metadata returned by an async Operation wait.
- */
 export const IncusOperationSchema = z.object({
   id: z.string(),
   class: z.string(),
@@ -43,9 +40,6 @@ export const IncusOperationSchema = z.object({
   err: z.string().optional(),
 })
 
-/**
- * Schema for network addresses.
- */
 export const IncusAddressSchema = z.object({
   family: z.string(),
   address: z.string(),
@@ -53,55 +47,35 @@ export const IncusAddressSchema = z.object({
   scope: z.string(),
 })
 
-/**
- * Schema for network interfaces.
- */
 export const IncusNetworkInterfaceSchema = z.object({
   state: z.string(),
   type: z.string(),
   addresses: z.array(IncusAddressSchema).optional(),
 })
 
-/**
- * Incus returns `network: null` for stopped instances. Normalize that provider
- * representation to `undefined` so downstream runtime code has one absence
- * representation and cannot mistake a stopped branch for a schema failure.
- */
 const IncusNetworkSchema = z.preprocess(
   value => (value === null ? undefined : value),
   z.record(z.string(), IncusNetworkInterfaceSchema).optional(),
 )
 
-/**
- * Schema for an Instance's state (Network, CPU, Status).
- */
 export const IncusStateSchema = z.object({
   status: z.string(),
   status_code: z.number(),
   network: IncusNetworkSchema,
 })
 
-/**
- * Schema for an Instance definition (from recursion=1)
- */
 export const IncusInstanceSchema = z.object({
   name: z.string(),
   status: z.string(),
   status_code: z.number(),
 })
 
-/**
- * Schema for messages received over the /1.0/events WebSocket.
- */
 export const IncusEventSchema = z.object({
   timestamp: z.string(),
   type: z.literal('operation'),
   metadata: IncusOperationSchema,
 })
 
-/**
- * Schemas for strict Incus Storage API payloads.
- */
 export const IncusVolumeConfigSchema = z.record(z.string(), z.string())
 
 export const IncusVolumeSourceSchema = z
@@ -132,7 +106,26 @@ export const IncusVolumeClonePayloadSchema = z
   })
   .strict()
 
-// Strict schema enforcing the required 'type' key for all Incus devices
+/**
+ * Narrow payload used by experimental Snapshot Capture.
+ *
+ * Expiry is deliberately omitted. Retention and snapshot deletion will be
+ * operation-specific policy rather than implicit provider expiration.
+ */
+export const IncusCustomVolumeSnapshotCreatePayloadSchema = z
+  .object({
+    name: z.string().trim().min(1).max(255),
+  })
+  .strict()
+
+/**
+ * Raw directory payload returned by the Incus files endpoint.
+ *
+ * Entry names remain untrusted and receive additional canonical-name validation
+ * in the storage files client.
+ */
+export const IncusFileDirectoryListingSchema = z.array(z.string())
+
 export const IncusDeviceSchema = z
   .object({
     type: z.string(),
@@ -190,8 +183,6 @@ export const IncusProjectCreatePayloadSchema = z
   })
   .strict()
 
-// Incus operation status codes:
-// 200 = Success, 400 = Failure, 401 = Cancelled.
 export const INCUS_FINAL: ReadonlySet<number> = new Set([200, 400, 401])
 
 export type IncusResponse = z.infer<typeof IncusResponseSchema>
@@ -203,6 +194,7 @@ export type IncusAddress = z.infer<typeof IncusAddressSchema>
 export type IncusNetworkInterface = z.infer<typeof IncusNetworkInterfaceSchema>
 export type IncusVolumeCreatePayload = z.infer<typeof IncusVolumeCreatePayloadSchema>
 export type IncusVolumeClonePayload = z.infer<typeof IncusVolumeClonePayloadSchema>
+export type IncusCustomVolumeSnapshotCreatePayload = z.infer<typeof IncusCustomVolumeSnapshotCreatePayloadSchema>
 export type IncusDeviceMap = z.infer<typeof IncusDeviceMapSchema>
 export type IncusProject = z.infer<typeof IncusProjectSchema>
 export type IncusProjectCreatePayload = z.infer<typeof IncusProjectCreatePayloadSchema>

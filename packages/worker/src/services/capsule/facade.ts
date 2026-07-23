@@ -2,6 +2,7 @@ import type { CapsuleBranchRuntimeService } from './branch/service'
 import type { CapsuleOperationAbandonmentCoordinator } from './operations/abandonment/coordinator'
 import type { CapsuleArchiveSubmissionService } from './operations/archival/archive/submission'
 import type { CapsuleUnarchiveSubmissionService } from './operations/archival/unarchive/submission'
+import type { CaptureSubmission } from './operations/capture/submission'
 import type { CreateCapsuleSubmissionService } from './operations/create/submission'
 import type { DestroyCapsuleSubmissionService } from './operations/destroy/submission'
 import type { CapsuleSnapshotService } from './snapshot/service'
@@ -18,6 +19,7 @@ export interface CapsuleServiceCapabilities {
   archive: CapsuleArchiveSubmissionService
   unarchive: CapsuleUnarchiveSubmissionService
   destroy: DestroyCapsuleSubmissionService
+  capture: CaptureSubmission
   branch: CapsuleBranchRuntimeService
   snapshot: CapsuleSnapshotService
   abandonmentCoordinator: CapsuleOperationAbandonmentCoordinator
@@ -35,6 +37,7 @@ export class CapsuleService {
   public readonly archive: CapsuleArchiveSubmissionService
   public readonly unarchive: CapsuleUnarchiveSubmissionService
   public readonly destroy: DestroyCapsuleSubmissionService
+  public readonly capture: CaptureSubmission
   public readonly branch: CapsuleBranchRuntimeService
   public readonly snapshot: CapsuleSnapshotService
 
@@ -45,6 +48,7 @@ export class CapsuleService {
     this.archive = capabilities.archive
     this.unarchive = capabilities.unarchive
     this.destroy = capabilities.destroy
+    this.capture = capabilities.capture
     this.branch = capabilities.branch
     this.snapshot = capabilities.snapshot
     this.abandonmentCoordinator = capabilities.abandonmentCoordinator

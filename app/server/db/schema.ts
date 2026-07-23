@@ -11,9 +11,11 @@ import {
   capsuleOperationStatusEnum,
   capsuleOperationStepStatusEnum,
   capsuleOperationTypeEnum,
+  capsuleSnapshotCaptureResourceStatusEnum,
   capsuleSnapshotDependencyDigestKindEnum,
   capsuleSnapshotDependencyKindEnum,
   capsuleSnapshotGitRemoteTransportEnum,
+  capsuleSnapshotModeEnum,
   capsuleSnapshotResourceKindEnum,
   capsuleSnapshotResourceProviderEnum,
   createCapsuleSchema,
@@ -61,9 +63,11 @@ export {
   capsuleOperationStatusEnum,
   capsuleOperationStepStatusEnum,
   capsuleOperationTypeEnum,
+  capsuleSnapshotCaptureResourceStatusEnum,
   capsuleSnapshotDependencyDigestKindEnum,
   capsuleSnapshotDependencyKindEnum,
   capsuleSnapshotGitRemoteTransportEnum,
+  capsuleSnapshotModeEnum,
   capsuleSnapshotResourceKindEnum,
   capsuleSnapshotResourceProviderEnum,
 }
@@ -84,6 +88,7 @@ export const {
   capsuleSnapshotDependencyReferences,
   capsuleSnapshotResourceReferences,
   capsuleSnapshotCaptureOperations,
+  capsuleSnapshotCaptureResources,
 } = capsuleTables
 
 /**
@@ -102,9 +107,11 @@ export const schema = {
   capsuleOperationStatusEnum,
   capsuleOperationStepStatusEnum,
   capsuleOperationTypeEnum,
+  capsuleSnapshotCaptureResourceStatusEnum,
   capsuleSnapshotDependencyDigestKindEnum,
   capsuleSnapshotDependencyKindEnum,
   capsuleSnapshotGitRemoteTransportEnum,
+  capsuleSnapshotModeEnum,
   capsuleSnapshotResourceKindEnum,
   capsuleSnapshotResourceProviderEnum,
   ...capsuleTables,

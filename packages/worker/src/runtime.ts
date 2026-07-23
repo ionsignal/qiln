@@ -118,6 +118,7 @@ export class QilnWorkerRuntime {
       project: this.project,
       blueprints: this.blueprints,
       supervisor: this.supervisor,
+      experimentalCaptureEnabled: this.config.features?.experimentalCapture ?? false,
     })
   }
 
@@ -203,6 +204,11 @@ export class QilnWorkerRuntime {
       console.log(
         `${WORKER_LOG_PREFIX} Runtime started with mutation authority on PostgreSQL backend ${this.authority.recordedBackendPid}.`,
       )
+      if (this.config.features?.experimentalCapture) {
+        console.warn(
+          `${WORKER_LOG_PREFIX} Experimental Snapshot Capture is enabled. Captures are evaluation-only, retain provider snapshots, and are not fork-ready.`,
+        )
+      }
     } catch (error: unknown) {
       await this.disposeAfterStartupFailure(error)
       throw error

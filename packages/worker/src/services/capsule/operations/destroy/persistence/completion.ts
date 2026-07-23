@@ -1,9 +1,10 @@
-import { and, eq, isNotNull } from 'drizzle-orm'
+import { and, eq, isNotNull, isNull } from 'drizzle-orm'
 import {
   CapsuleOperationStatus,
   CapsuleOperationType,
   capsuleBranchesTable,
   capsuleOperationsTable,
+  capsuleSnapshotsTable,
   capsulesTable,
   type CapsuleHostDbContract,
 } from '@qiln/core/server'
@@ -29,6 +30,7 @@ const planner = new DestroyCapsulePlanner()
  * - Operation identity and running state;
  * - Committed provider intent;
  * - Capsule ownership and destroy lifecycle fence;
+ * - Absence of retained committed snapshots;
  * - The complete destroying branch lineage;
  * - Each branch's immutable resource inventory digest;
  * - Resource ownership, topology, cleanup policy, and provenance;
@@ -64,6 +66,36 @@ export async function completeDestroyCapsule(
         lifecycleStatus: capsule.lifecycleStatus,
         archived: capsule.archivedAt !== null,
       })
+    }
+
+    /**
+     * Revalidate retained snapshot absence inside terminal completion.
+     *
+     * Acceptance performs the same check before any provider mutation. This
+     * second check makes terminal storage retirement fail closed if durable
+     * snapshot state is introduced unexpectedly or future concurrency policy
+     * changes weaken the current capsule-wide operation fence.
+     */
+    const [retainedSnapshot] = await tx
+      .select({
+        id: capsuleSnapshotsTable.id,
+        mode: capsuleSnapshotsTable.mode,
+      })
+      .from(capsuleSnapshotsTable)
+      .where(and(eq(capsuleSnapshotsTable.capsuleId, operation.capsuleId), isNull(capsuleSnapshotsTable.archivedAt)))
+      .limit(1)
+    if (retainedSnapshot) {
+      throw new IncusError(
+        'Capsule destroy cannot complete while a committed snapshot retains provider storage.',
+        'CONFLICT',
+        {
+          operationId,
+          capsuleId: operation.capsuleId,
+          snapshotId: retainedSnapshot.id,
+          snapshotMode: retainedSnapshot.mode,
+          policy: 'snapshot_retention_deletion_not_implemented',
+        },
+      )
     }
     const resources = await lockDestroyBranchResourceInventories(
       tx,

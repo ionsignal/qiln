@@ -47,6 +47,10 @@ type WorkerConfig = {
   embedded: boolean
 }
 
+type FeatureConfig = {
+  experimentalCapture: boolean
+}
+
 export interface IncusConfig {
   socketPath?: string
   url?: string
@@ -76,6 +80,7 @@ type Config = {
   ssl: string
   definitions: DefinitionConfig
   worker: WorkerConfig
+  features: FeatureConfig
   cookies: CookiesConfig
   multipart: MultipartConfig
   limit: LimitConfig
@@ -115,4 +120,5 @@ export type {
   NatsConfig,
   DatabaseConfig,
   WorkerConfig,
+  FeatureConfig,
 }

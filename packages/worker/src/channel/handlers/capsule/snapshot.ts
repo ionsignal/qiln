@@ -3,10 +3,13 @@ import { mapWorkerCapsuleCommandError } from '../../errors'
 import type { QilnWorkerRuntime } from '../../../runtime'
 
 /**
- * Registers the owner-scoped, read-only logical snapshot history handler.
+ * Registers committed snapshot history reads and experimental Snapshot Capture
+ * submission.
  *
- * Snapshot capture remains intentionally absent until Qiln can prove complete
- * artifact manifests and physical snapshot references in one durable mutation.
+ * Capture execution remains disabled by default through Worker configuration.
+ * The command may be registered while disabled because the Worker-owned
+ * submission boundary rejects acceptance before any operation, branch fence,
+ * provider intent, or provider mutation is created.
  */
 export function registerCapsuleSnapshotHandlers(worker: QilnWorkerRuntime): void {
   const handlerOptions: CapsuleCommandHandlerOptions = {
@@ -15,7 +18,22 @@ export function registerCapsuleSnapshotHandlers(worker: QilnWorkerRuntime): void
   worker.channel.handle(
     CapsuleSnapshotCommandName.SNAPSHOTS_LIST,
     async input => {
-      return await worker.capsule.snapshot.listForOwner(input.target.id, input.capsuleId)
+      return await worker.capsule.snapshot.listForOwner(input.target.id, input.capsuleId, {
+        includeExperimental: input.includeExperimental,
+      })
+    },
+    handlerOptions,
+  )
+  worker.channel.handle(
+    CapsuleSnapshotCommandName.SNAPSHOT_CAPTURE,
+    async input => {
+      return await worker.capsule.capture.submit({
+        ownerId: input.target.id,
+        actor: input.actor,
+        capsuleId: input.capsuleId,
+        sourceBranchId: input.sourceBranchId,
+        idempotencyKey: input.idempotencyKey,
+      })
     },
     handlerOptions,
   )

@@ -15,6 +15,7 @@ import type {
 const ACTIVE_BRANCH_STATUSES = [
   'provisioning',
   'offline',
+  'capturing',
   'starting',
   'online',
   'stopping',
@@ -22,6 +23,7 @@ const ACTIVE_BRANCH_STATUSES = [
   'error',
   'cleanup_required',
 ] as const
+
 const RUNTIME_RECONCILIATION_STATUSES = ['offline', 'starting', 'online', 'stopping', 'error'] as const
 
 /**
@@ -107,8 +109,8 @@ export class CapsuleBranchStore {
   /**
    * Lists branch runtimes that are safe to observe during Worker startup.
    *
-   * Cleanup-required, archived, destroying, destroyed, provisioning, and failed
-   * creation aggregates are intentionally excluded.
+   * Capture-fenced, cleanup-required, archived, destroying, destroyed,
+   * provisioning, and failed-creation aggregates are intentionally excluded.
    */
   public async listRuntimeReconciliationCandidates(): Promise<BranchRuntimeReconciliationCandidate[]> {
     return await this.db
@@ -147,13 +149,6 @@ export class CapsuleBranchStore {
     return await this.beginBranchRuntimeTransition(ownerId, capsuleId, branchName, 'online', 'stopping')
   }
 
-  /**
-   * Persists one provider-confirmed stable branch state.
-   *
-   * The operation is idempotent when the confirmed state was committed but the
-   * caller did not receive the database result. A different current state still
-   * fails closed as a concurrent lifecycle conflict.
-   */
   public async recordConfirmedRuntimeState(
     input: ConfirmedBranchRuntimeStateInput,
   ): Promise<ConfirmedBranchRuntimeStateResult> {
@@ -235,10 +230,6 @@ export class CapsuleBranchStore {
     })
   }
 
-  /**
-   * Marks a branch runtime as uncertain after Qiln could not prove a stable
-   * provider state.
-   */
   public async recordRuntimeError(input: BranchRuntimeErrorInput): Promise<BranchRuntimeErrorResult> {
     const failureDetails = createFailureDetails(input.error, input.context) ?? {
       context: input.context,

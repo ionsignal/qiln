@@ -32,6 +32,12 @@ provisioning:
       gid: 1000
       mode: '0755'
 
+    - path: /workspace/models
+      type: directory
+      uid: 1000
+      gid: 1000
+      mode: '0755'
+
     - path: /workspace/capsule/n8n
       type: directory
       uid: 1000

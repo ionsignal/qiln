@@ -13,8 +13,14 @@ import {
   capsuleBranchResourcesTable,
   createCapsuleBranchResourcesTable,
 } from './branch/resource'
+import {
+  capsuleSnapshotCaptureOperationsTable,
+  capsuleSnapshotCaptureResourceStatusEnum,
+  capsuleSnapshotCaptureResourcesTable,
+  createCapsuleSnapshotCaptureOperationsTable,
+  createCapsuleSnapshotCaptureResourcesTable,
+} from './operation/capture'
 import { capsuleCreateOperationsTable, createCapsuleCreateOperationsTable } from './operation/create'
-import { capsuleSnapshotCaptureOperationsTable, createCapsuleSnapshotCaptureOperationsTable } from './operation/capture'
 import {
   capsuleActorTypeEnum,
   capsuleOperationStatusEnum,
@@ -69,6 +75,7 @@ export {
   capsuleOperationStatusEnum,
   capsuleOperationStepStatusEnum,
   capsuleOperationTypeEnum,
+  capsuleSnapshotCaptureResourceStatusEnum,
   capsuleSnapshotDependencyDigestKindEnum,
   capsuleSnapshotDependencyKindEnum,
   capsuleSnapshotGitRemoteTransportEnum,
@@ -116,6 +123,10 @@ export function createCapsuleSchema<TUserIdColumn extends PgColumn>(userIdColumn
     capsuleBranches.id,
     capsuleSnapshots.id,
   )
+  const capsuleSnapshotCaptureResources = createCapsuleSnapshotCaptureResourcesTable(
+    capsuleSnapshotCaptureOperations.operationId,
+    capsuleBranchResources.id,
+  )
   return {
     capsules,
     capsuleBranches,
@@ -132,6 +143,7 @@ export function createCapsuleSchema<TUserIdColumn extends PgColumn>(userIdColumn
     capsuleSnapshotDependencyReferences,
     capsuleSnapshotResourceReferences,
     capsuleSnapshotCaptureOperations,
+    capsuleSnapshotCaptureResources,
   }
 }
 
@@ -151,6 +163,7 @@ export const capsuleRuntimeSchema = {
   capsuleSnapshotDependencyReferences: capsuleSnapshotDependencyReferencesTable,
   capsuleSnapshotResourceReferences: capsuleSnapshotResourceReferencesTable,
   capsuleSnapshotCaptureOperations: capsuleSnapshotCaptureOperationsTable,
+  capsuleSnapshotCaptureResources: capsuleSnapshotCaptureResourcesTable,
 } as const
 
 export interface CapsuleRelationHelpers {
@@ -181,6 +194,7 @@ export interface CapsuleRelationHelpers {
     capsuleSnapshotDependencyReferences: RelationFragmentManyFn<'capsuleSnapshotDependencyReferences'>
     capsuleSnapshotResourceReferences: RelationFragmentManyFn<'capsuleSnapshotResourceReferences'>
     capsuleSnapshotCaptureOperations: RelationFragmentManyFn<'capsuleSnapshotCaptureOperations'>
+    capsuleSnapshotCaptureResources: RelationFragmentManyFn<'capsuleSnapshotCaptureResources'>
   }
   users: {
     id: RelationsBuilderColumnBase<'users'>
@@ -255,15 +269,19 @@ export interface CapsuleRelationHelpers {
     sourceBranchId: RelationsBuilderColumnBase<'capsuleSnapshotCaptureOperations'>
     snapshotId: RelationsBuilderColumnBase<'capsuleSnapshotCaptureOperations'>
   }
+  capsuleSnapshotCaptureResources: {
+    operationId: RelationsBuilderColumnBase<'capsuleSnapshotCaptureResources'>
+    sourceBranchResourceId: RelationsBuilderColumnBase<'capsuleSnapshotCaptureResources'>
+  }
 }
 
 /**
  * Defines the complete capsule relation fragment owned by @qiln/core.
  *
  * Relations describe navigable ownership and provenance. Cross-table capture
- * completeness, canonical digest verification, policy satisfaction, and base
- * operation discriminator checks remain responsibilities of the future atomic
- * capture commit transaction.
+ * completeness, canonical digest verification, policy satisfaction, provider
+ * outcome validation, and base operation discriminator checks remain
+ * responsibilities of operation-specific transactions.
  */
 export function defineCapsuleRelations(helpers: CapsuleRelationHelpers) {
   return {
@@ -420,6 +438,10 @@ export function defineCapsuleRelations(helpers: CapsuleRelationHelpers) {
         from: helpers.capsuleBranchResources.id,
         to: helpers.capsuleSnapshotResourceReferences.sourceBranchResourceId,
       }),
+      snapshotCaptureResources: helpers.many.capsuleSnapshotCaptureResources({
+        from: helpers.capsuleBranchResources.id,
+        to: helpers.capsuleSnapshotCaptureResources.sourceBranchResourceId,
+      }),
     },
     capsuleSnapshots: {
       capsule: helpers.one.capsules({
@@ -568,6 +590,22 @@ export function defineCapsuleRelations(helpers: CapsuleRelationHelpers) {
         from: helpers.capsuleSnapshotCaptureOperations.snapshotId,
         to: helpers.capsuleSnapshots.id,
         optional: true,
+      }),
+      resources: helpers.many.capsuleSnapshotCaptureResources({
+        from: helpers.capsuleSnapshotCaptureOperations.operationId,
+        to: helpers.capsuleSnapshotCaptureResources.operationId,
+      }),
+    },
+    capsuleSnapshotCaptureResources: {
+      operation: helpers.one.capsuleSnapshotCaptureOperations({
+        from: helpers.capsuleSnapshotCaptureResources.operationId,
+        to: helpers.capsuleSnapshotCaptureOperations.operationId,
+        optional: false,
+      }),
+      sourceResource: helpers.one.capsuleBranchResources({
+        from: helpers.capsuleSnapshotCaptureResources.sourceBranchResourceId,
+        to: helpers.capsuleBranchResources.id,
+        optional: false,
       }),
     },
   }

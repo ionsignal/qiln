@@ -1,5 +1,7 @@
 import { and, asc, eq, isNotNull } from 'drizzle-orm'
 import {
+  CapsuleOperationType,
+  CapsuleSnapshotMode,
   capsuleArtifactManifestsTable,
   capsuleOperationsTable,
   capsuleSnapshotCaptureOperationsTable,
@@ -8,31 +10,23 @@ import {
   type CapsuleHostDbContract,
 } from '@qiln/core/server'
 import { IncusError } from '../../../errors'
-import type { CapsuleSnapshotRecord } from './types'
+import type { CapsuleSnapshotListOptions, CapsuleSnapshotRecord } from './types'
 
 /**
  * Persistence boundary for committed capsule snapshot history.
  *
- * Snapshot history reads first prove capsule ownership. Missing and foreign
- * capsules are intentionally indistinguishable.
- *
- * A snapshot is visible only when PostgreSQL contains:
- *
- * - Its artifact-manifest header;
- * - A capture-operation extension linked to that snapshot;
- * - Identical immutable source-branch and capture-policy evidence in the
- *   operation extension and committed snapshot;
- * - A completed base operation with a completion timestamp;
- * - Matching capsule and owner identity across the complete linkage.
- *
- * Phase 1 intentionally has no writer, so fresh databases return an empty
- * committed history. Partial, manually inserted, unlinked, or digest-only rows
- * cannot cross this read boundary.
+ * Experimental visibility changes only which committed rows are returned. It
+ * does not weaken ownership, operation completion, manifest linkage, or
+ * immutable capture-evidence checks.
  */
 export class CapsuleSnapshotStore {
   constructor(private readonly db: CapsuleHostDbContract) {}
 
-  public async listForOwner(ownerId: string, capsuleId: string): Promise<CapsuleSnapshotRecord[]> {
+  public async listForOwner(
+    ownerId: string,
+    capsuleId: string,
+    options: CapsuleSnapshotListOptions = {},
+  ): Promise<CapsuleSnapshotRecord[]> {
     const [capsule] = await this.db
       .select({
         id: capsulesTable.id,
@@ -44,6 +38,9 @@ export class CapsuleSnapshotStore {
       throw new IncusError('Capsule not found.', 'NOT_FOUND', {
         capsuleId,
       })
+    }
+    if (!options.includeExperimental) {
+      return []
     }
     return await this.db
       .select({
@@ -57,6 +54,8 @@ export class CapsuleSnapshotStore {
         capturePolicyPin: capsuleSnapshotsTable.capturePolicyPin,
         artifactManifestSchemaVersion: capsuleArtifactManifestsTable.schemaVersion,
         artifactManifestDigest: capsuleArtifactManifestsTable.digest,
+        mode: capsuleSnapshotsTable.mode,
+        limitations: capsuleSnapshotsTable.limitations,
         createdAt: capsuleSnapshotsTable.createdAt,
         archivedAt: capsuleSnapshotsTable.archivedAt,
       })
@@ -78,6 +77,7 @@ export class CapsuleSnapshotStore {
           ),
           eq(capsuleSnapshotCaptureOperationsTable.capturePolicyDigest, capsuleSnapshotsTable.capturePolicyDigest),
           eq(capsuleSnapshotCaptureOperationsTable.capturePolicyPin, capsuleSnapshotsTable.capturePolicyPin),
+          eq(capsuleSnapshotCaptureOperationsTable.requestedMode, capsuleSnapshotsTable.mode),
         ),
       )
       .innerJoin(
@@ -86,11 +86,17 @@ export class CapsuleSnapshotStore {
           eq(capsuleOperationsTable.id, capsuleSnapshotCaptureOperationsTable.operationId),
           eq(capsuleOperationsTable.ownerId, ownerId),
           eq(capsuleOperationsTable.capsuleId, capsuleSnapshotsTable.capsuleId),
+          eq(capsuleOperationsTable.type, CapsuleOperationType.SNAPSHOT_CAPTURE),
           eq(capsuleOperationsTable.status, 'completed'),
           isNotNull(capsuleOperationsTable.completedAt),
         ),
       )
-      .where(eq(capsuleSnapshotsTable.capsuleId, capsule.id))
+      .where(
+        and(
+          eq(capsuleSnapshotsTable.capsuleId, capsule.id),
+          eq(capsuleSnapshotsTable.mode, CapsuleSnapshotMode.EXPERIMENTAL),
+        ),
+      )
       .orderBy(asc(capsuleSnapshotsTable.createdAt), asc(capsuleSnapshotsTable.id))
   }
 }

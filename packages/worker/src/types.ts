@@ -19,6 +19,10 @@ export interface WorkerIncusConfig {
   project?: string
 }
 
+export interface WorkerFeatureConfig {
+  experimentalCapture?: boolean
+}
+
 export interface WorkerRuntimeConfig {
   database?: WorkerDatabaseConfig
   nats?: WorkerNatsConfig
@@ -26,6 +30,7 @@ export interface WorkerRuntimeConfig {
     path: string
   }
   incus?: WorkerIncusConfig
+  features?: WorkerFeatureConfig
 }
 
 export interface WorkerRuntimeOptions {

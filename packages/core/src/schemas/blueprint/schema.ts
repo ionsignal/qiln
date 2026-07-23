@@ -521,18 +521,62 @@ export const CapsuleBlueprintSchema = z
        */
     })
 
-    blueprint.provisioning.files.forEach((file, index) => {
-      const externalMount = resolvedExternalMounts.find(candidate => {
-        const relationship = classifyAbsolutePosixPathRelationship(file.path, candidate.mountPath)
-        return relationship === 'equal' || relationship === 'descendant'
-      })
-      if (!externalMount) {
-        return
+    /**
+     * A nested external bind mount is created only after the managed artifact
+     * root exists. Its target must therefore be declared as one empty
+     * provisioning directory in the underlying managed volume. Provisioning
+     * cannot create descendants because those would be obscured by, or mutate
+     * assumptions about, the external dependency boundary.
+     */
+    resolvedExternalMounts.forEach(externalMount => {
+      const matchingProvisioningFiles = blueprint.provisioning.files
+        .map((file, index) => ({
+          file,
+          index,
+          relationship: classifyAbsolutePosixPathRelationship(file.path, externalMount.mountPath),
+        }))
+        .filter(candidate => candidate.relationship !== 'disjoint' && candidate.relationship !== 'ancestor')
+      const bootstrapDirectories = matchingProvisioningFiles.filter(candidate => candidate.relationship === 'equal')
+      if (bootstrapDirectories.length === 0) {
+        context.addIssue({
+          code: 'custom',
+          path: ['snapshot_capture', 'external_mounts', externalMount.index, 'volume'],
+          message: `External mount '${externalMount.volume}' requires one empty directory provisioning entry at '${externalMount.mountPath}'.`,
+        })
       }
-      context.addIssue({
-        code: 'custom',
-        path: ['provisioning', 'files', index, 'path'],
-        message: `Provisioning path '${file.path}' falls beneath external mount '${externalMount.volume}'.`,
+      if (bootstrapDirectories.length > 1) {
+        bootstrapDirectories.forEach(candidate => {
+          context.addIssue({
+            code: 'custom',
+            path: ['provisioning', 'files', candidate.index, 'path'],
+            message: `External mount '${externalMount.volume}' has duplicate bootstrap directory declarations at '${externalMount.mountPath}'.`,
+          })
+        })
+      }
+      matchingProvisioningFiles.forEach(candidate => {
+        if (candidate.relationship === 'descendant') {
+          context.addIssue({
+            code: 'custom',
+            path: ['provisioning', 'files', candidate.index, 'path'],
+            message: `Provisioning path '${candidate.file.path}' is strictly beneath external mount '${externalMount.volume}'. Only the exact mount-target bootstrap directory is permitted.`,
+          })
+          return
+        }
+
+        if (candidate.file.type !== 'directory') {
+          context.addIssue({
+            code: 'custom',
+            path: ['provisioning', 'files', candidate.index, 'type'],
+            message: `External mount '${externalMount.volume}' bootstrap path '${externalMount.mountPath}' must be a directory.`,
+          })
+        }
+        if (candidate.file.content !== undefined) {
+          context.addIssue({
+            code: 'custom',
+            path: ['provisioning', 'files', candidate.index, 'content'],
+            message: `External mount '${externalMount.volume}' bootstrap directory '${externalMount.mountPath}' cannot contain provisioning content.`,
+          })
+        }
       })
     })
   })

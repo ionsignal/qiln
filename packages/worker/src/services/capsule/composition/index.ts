@@ -10,6 +10,7 @@ import { CapsuleOperationStepStore } from '../operations/shared/operationStepSto
 import { CapsuleBranchResourceStore } from '../resource/store'
 import { composeArchiveCapability } from './archive'
 import { composeBranchCapability } from './branch'
+import { composeCaptureCapability } from './capture'
 import { composeCreateCapability } from './create'
 import { composeDestroyCapability } from './destroy'
 import { composeSnapshotCapability } from './snapshot'
@@ -26,6 +27,7 @@ export interface ComposeCapsuleServiceOptions {
   project: ProjectService
   blueprints: CapsuleBlueprintRegistry
   supervisor: OperationSupervisor
+  experimentalCaptureEnabled: boolean
 }
 
 /**
@@ -93,6 +95,17 @@ export function composeCapsuleService(options: ComposeCapsuleServiceOptions): Ca
     lifecycleEvents,
     branchEvents,
   })
+  const capture = composeCaptureCapability({
+    db: options.db,
+    incus: options.incus,
+    supervisor: options.supervisor,
+    operationReader,
+    operationSteps,
+    operationEvents,
+    lifecycleEvents,
+    branchEvents,
+    enabled: options.experimentalCaptureEnabled,
+  })
   const branch = composeBranchCapability({
     db: options.db,
     incus: options.incus,
@@ -102,15 +115,12 @@ export function composeCapsuleService(options: ComposeCapsuleServiceOptions): Ca
   const snapshot = composeSnapshotCapability({
     db: options.db,
   })
-  /**
-   * Registration order remains create, archive, unarchive, destroy. The
-   * registry still verifies complete coverage before startup classification.
-   */
   const abandonmentHandlers = new CapsuleOperationAbandonmentHandlerRegistry([
     create.abandonment,
     archive.abandonment,
     unarchive.abandonment,
     destroy.abandonment,
+    capture.abandonment,
   ])
   const abandonmentCoordinator = new CapsuleOperationAbandonmentCoordinator({
     reader: operationReader,
@@ -122,6 +132,7 @@ export function composeCapsuleService(options: ComposeCapsuleServiceOptions): Ca
     archive: archive.submission,
     unarchive: unarchive.submission,
     destroy: destroy.submission,
+    capture: capture.submission,
     branch,
     snapshot,
     abandonmentCoordinator,

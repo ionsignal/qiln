@@ -7,6 +7,7 @@ import {
   type IncusVolumeClonePayload,
 } from '../../../schemas/incus'
 import { IncusStorageFilesClient } from './files'
+import { IncusStorageSnapshotsClient } from './snapshots'
 import type { IIncusTransport } from '../types'
 
 /**
@@ -14,15 +15,13 @@ import type { IIncusTransport } from '../types'
  */
 export class IncusStorageClient {
   public readonly files: IncusStorageFilesClient
+  public readonly snapshots: IncusStorageSnapshotsClient
 
   constructor(private readonly transport: IIncusTransport) {
     this.files = new IncusStorageFilesClient(this.transport)
+    this.snapshots = new IncusStorageSnapshotsClient(this.transport)
   }
 
-  /**
-   * Creates an empty custom storage volume (e.g., for 'world' or 'config'
-   * data).
-   */
   public async create(pool: string, name: string, config?: Record<string, string>): Promise<void> {
     const rawPayload: IncusVolumeCreatePayload = {
       name,
@@ -39,10 +38,6 @@ export class IncusStorageClient {
     })
   }
 
-  /**
-   * Performs a near-instant ZFS CoW (Copy-on-Write) clone of an existing
-   * volume.
-   */
   public async clone(
     pool: string,
     volume: string,
@@ -79,9 +74,6 @@ export class IncusStorageClient {
     })
   }
 
-  /**
-   * Deletes a custom storage volume.
-   */
   public async delete(pool: string, name: string): Promise<void> {
     await this.transport.operation(
       `/storage-pools/${encodeURIComponent(pool)}/volumes/custom/${encodeURIComponent(name)}`,

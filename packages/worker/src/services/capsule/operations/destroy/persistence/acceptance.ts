@@ -1,10 +1,11 @@
-import { and, asc, eq, isNotNull } from 'drizzle-orm'
+import { and, asc, eq, isNotNull, isNull } from 'drizzle-orm'
 import {
   CapsuleDestroyReceiptSchema,
   CapsuleOperationStatus,
   CapsuleOperationType,
   capsuleBranchesTable,
   capsuleOperationsTable,
+  capsuleSnapshotsTable,
   capsulesTable,
   type CapsuleDestroyReceipt,
   type CapsuleHostDbContract,
@@ -30,6 +31,7 @@ import type { AcceptDestroyCapsuleOperationInput, DestroyCapsuleRepositoryResult
  *
  * - Capsule and branch locking;
  * - Lifecycle and lineage eligibility;
+ * - Retained committed-snapshot protection;
  * - Operation insertion;
  * - Capsule and branch mutation fences;
  * - Committed receipt and invalidation-source mapping.
@@ -57,6 +59,32 @@ export class DestroyCapsuleAcceptancePersistence {
             capsuleId: input.capsuleId,
             lifecycleStatus: capsule.lifecycleStatus,
             archived: capsule.archivedAt !== null,
+          })
+        }
+
+        /**
+         * Experimental committed snapshots retain provider snapshots attached
+         * to branch storage. Destroy must fail closed until snapshot archival
+         * and provider-retention deletion are implemented.
+         *
+         * The capsule row lock serializes this check with Snapshot Capture's
+         * atomic commit transaction.
+         */
+        const [retainedSnapshot] = await tx
+          .select({
+            id: capsuleSnapshotsTable.id,
+            mode: capsuleSnapshotsTable.mode,
+          })
+          .from(capsuleSnapshotsTable)
+          .where(and(eq(capsuleSnapshotsTable.capsuleId, input.capsuleId), isNull(capsuleSnapshotsTable.archivedAt)))
+          .limit(1)
+        if (retainedSnapshot) {
+          throw new IncusError('Capsule cannot be destroyed while it has retained committed snapshots.', 'CONFLICT', {
+            ownerId: input.ownerId,
+            capsuleId: input.capsuleId,
+            snapshotId: retainedSnapshot.id,
+            snapshotMode: retainedSnapshot.mode,
+            policy: 'snapshot_retention_deletion_not_implemented',
           })
         }
         const branches = await lockDestroyCapsuleBranches(tx, input.capsuleId)

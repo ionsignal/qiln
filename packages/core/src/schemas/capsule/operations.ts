@@ -6,15 +6,15 @@ import { CapsuleBranchNameSchema } from './branch'
  * Durable control-plane mutation types for a capsule aggregate.
  *
  * `create` initializes the capsule aggregate and its root editable branch.
- * Future snapshot capture and branch fork operations will extend this
- * vocabulary only after Qiln can prove their artifact and provider ownership
- * boundaries.
+ * `snapshot_capture` creates immutable committed capsule history from one
+ * durably fenced source branch.
  */
 export const CapsuleOperationType = {
   CREATE: 'create',
   ARCHIVE: 'archive',
   UNARCHIVE: 'unarchive',
   DESTROY: 'destroy',
+  SNAPSHOT_CAPTURE: 'snapshot_capture',
 } as const
 
 export type CapsuleOperationTypeValue = (typeof CapsuleOperationType)[keyof typeof CapsuleOperationType]
@@ -24,6 +24,7 @@ export const CapsuleOperationTypeValues = [
   CapsuleOperationType.ARCHIVE,
   CapsuleOperationType.UNARCHIVE,
   CapsuleOperationType.DESTROY,
+  CapsuleOperationType.SNAPSHOT_CAPTURE,
 ] as const
 
 export const CapsuleOperationTypeSchema = z.enum(CapsuleOperationTypeValues)
@@ -124,6 +125,15 @@ export const CapsuleDestroyReceiptSchema = CapsuleOperationReceiptSchema.extend(
 }).strict()
 
 /**
+ * Receipt for durable Snapshot Capture acceptance or replay.
+ */
+export const CapsuleSnapshotCaptureReceiptSchema = CapsuleOperationReceiptSchema.extend({
+  operationType: z.literal(CapsuleOperationType.SNAPSHOT_CAPTURE),
+  sourceBranchId: z.uuid(),
+  sourceBranchName: CapsuleBranchNameSchema,
+}).strict()
+
+/**
  * Sanitized operation failure visible to authenticated capsule owners.
  *
  * Raw provider diagnostics remain server-only persistence details. This shape
@@ -169,5 +179,6 @@ export type CapsuleCreateReceipt = z.infer<typeof CapsuleCreateReceiptSchema>
 export type CapsuleArchiveReceipt = z.infer<typeof CapsuleArchiveReceiptSchema>
 export type CapsuleUnarchiveReceipt = z.infer<typeof CapsuleUnarchiveReceiptSchema>
 export type CapsuleDestroyReceipt = z.infer<typeof CapsuleDestroyReceiptSchema>
+export type CapsuleSnapshotCaptureReceipt = z.infer<typeof CapsuleSnapshotCaptureReceiptSchema>
 export type CapsuleOperationFailure = z.infer<typeof CapsuleOperationFailureSchema>
 export type CapsuleOperationSummary = z.infer<typeof CapsuleOperationSummarySchema>

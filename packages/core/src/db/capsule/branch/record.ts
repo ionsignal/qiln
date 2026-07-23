@@ -20,11 +20,12 @@ import {
 import { capsulesTable } from '../record'
 
 /**
- * Canonical database enum for capsule branch runtime state.
+ * Canonical database enum for capsule branch runtime and mutation-fence state.
  *
  * Logical capsule archive state is not represented here. A branch remains
- * offline while its capsule is archived. Destroying and destroyed represent
- * terminal capsule-level provider retirement flow.
+ * offline while its capsule is archived. `capturing` fences an offline source
+ * branch during Snapshot Capture. Destroying and destroyed represent terminal
+ * capsule-level provider retirement flow.
  */
 export const capsuleBranchStatusEnum = pgEnum('capsule_branch_status', CapsuleBranchStatusValues)
 
@@ -46,9 +47,6 @@ function createCapsuleIdColumn(capsuleIdColumn?: PgColumn) {
 
 /**
  * Creates the physical `capsule_branches` table.
- *
- * Transitional runtime statuses are durable mutation fences. Runtime error
- * fields preserve why Qiln could not prove a stable provider state.
  */
 export function createCapsuleBranchesTable(ownerIdColumn?: PgColumn, capsuleIdColumn?: PgColumn) {
   const ownerId = createOwnerIdColumn(ownerIdColumn)
@@ -114,9 +112,9 @@ export function createCapsuleBranchesTable(ownerIdColumn?: PgColumn, capsuleIdCo
         )`,
       ),
       check(
-        'capsule_branches_offline_runtime_ip_check',
+        'capsule_branches_inactive_runtime_ip_check',
         sql`(
-          ${table.status} <> 'offline'
+          ${table.status} NOT IN ('offline', 'capturing')
           OR ${table.runtimeIp} IS NULL
         )`,
       ),

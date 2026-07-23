@@ -1,7 +1,7 @@
 {
   "version": "8",
   "dialect": "postgres",
-  "id": "20d5f68e-7bbd-4f44-b601-6d255733977b",
+  "id": "b6d814bb-bb94-4898-9d7f-0470ec84460b",
   "prevIds": [
     "00000000-0000-0000-0000-000000000000"
   ],
@@ -65,6 +65,7 @@
       "values": [
         "provisioning",
         "offline",
+        "capturing",
         "starting",
         "online",
         "stopping",
@@ -120,9 +121,24 @@
         "create",
         "archive",
         "unarchive",
-        "destroy"
+        "destroy",
+        "snapshot_capture"
       ],
       "name": "capsule_operation_type",
+      "entityType": "enums",
+      "schema": "public"
+    },
+    {
+      "values": [
+        "planned",
+        "creating",
+        "created",
+        "deleting",
+        "deleted",
+        "missing",
+        "error"
+      ],
+      "name": "capsule_snapshot_capture_resource_status",
       "entityType": "enums",
       "schema": "public"
     },
@@ -149,6 +165,14 @@
         "ssh"
       ],
       "name": "capsule_snapshot_git_remote_transport",
+      "entityType": "enums",
+      "schema": "public"
+    },
+    {
+      "values": [
+        "experimental"
+      ],
+      "name": "capsule_snapshot_mode",
       "entityType": "enums",
       "schema": "public"
     },
@@ -219,6 +243,12 @@
     {
       "isRlsEnabled": false,
       "name": "capsule_snapshot_capture_operations",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "capsule_snapshot_capture_resources",
       "entityType": "tables",
       "schema": "public"
     },
@@ -1649,6 +1679,19 @@
       "table": "capsule_snapshot_capture_operations"
     },
     {
+      "type": "capsule_snapshot_mode",
+      "typeSchema": "public",
+      "notNull": true,
+      "dimensions": 0,
+      "default": "'experimental'",
+      "generated": null,
+      "identity": null,
+      "name": "requested_mode",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_snapshot_capture_operations"
+    },
+    {
       "type": "uuid",
       "typeSchema": null,
       "notNull": false,
@@ -1660,6 +1703,292 @@
       "entityType": "columns",
       "schema": "public",
       "table": "capsule_snapshot_capture_operations"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "uuidv7()",
+      "generated": null,
+      "identity": null,
+      "name": "id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_snapshot_capture_resources"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "operation_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_snapshot_capture_resources"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "source_branch_resource_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_snapshot_capture_resources"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "artifact_root_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_snapshot_capture_resources"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "blueprint_volume_name",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_snapshot_capture_resources"
+    },
+    {
+      "type": "capsule_snapshot_resource_provider",
+      "typeSchema": "public",
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "provider",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_snapshot_capture_resources"
+    },
+    {
+      "type": "capsule_snapshot_resource_kind",
+      "typeSchema": "public",
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "kind",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_snapshot_capture_resources"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "project",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_snapshot_capture_resources"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "pool",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_snapshot_capture_resources"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "source_volume",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_snapshot_capture_resources"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "snapshot_name",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_snapshot_capture_resources"
+    },
+    {
+      "type": "capsule_snapshot_capture_resource_status",
+      "typeSchema": "public",
+      "notNull": true,
+      "dimensions": 0,
+      "default": "'planned'",
+      "generated": null,
+      "identity": null,
+      "name": "status",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_snapshot_capture_resources"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "snapshot_intent_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_snapshot_capture_resources"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "snapshot_created_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_snapshot_capture_resources"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "cleanup_intent_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_snapshot_capture_resources"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "cleanup_completed_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_snapshot_capture_resources"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "failure_code",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_snapshot_capture_resources"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "failure_message",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_snapshot_capture_resources"
+    },
+    {
+      "type": "jsonb",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "failure_details",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_snapshot_capture_resources"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "failure_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_snapshot_capture_resources"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_snapshot_capture_resources"
+    },
+    {
+      "type": "timestamp with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_snapshot_capture_resources"
     },
     {
       "type": "uuid",
@@ -2281,6 +2610,32 @@
       "generated": null,
       "identity": null,
       "name": "capture_policy_pin",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_snapshots"
+    },
+    {
+      "type": "capsule_snapshot_mode",
+      "typeSchema": "public",
+      "notNull": true,
+      "dimensions": 0,
+      "default": "'experimental'",
+      "generated": null,
+      "identity": null,
+      "name": "mode",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_snapshots"
+    },
+    {
+      "type": "jsonb",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "limitations",
       "entityType": "columns",
       "schema": "public",
       "table": "capsule_snapshots"
@@ -3377,6 +3732,27 @@
       "nameExplicit": true,
       "columns": [
         {
+          "value": "requested_mode",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "capsule_snapshot_capture_operations_mode_idx",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "capsule_snapshot_capture_operations"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
           "value": "snapshot_id",
           "isExpression": false,
           "asc": true,
@@ -3393,6 +3769,202 @@
       "entityType": "indexes",
       "schema": "public",
       "table": "capsule_snapshot_capture_operations"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "operation_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "capsule_snapshot_capture_resources_operation_idx",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "capsule_snapshot_capture_resources"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "source_branch_resource_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "capsule_snapshot_capture_resources_source_resource_idx",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "capsule_snapshot_capture_resources"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "status",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "capsule_snapshot_capture_resources_status_idx",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "capsule_snapshot_capture_resources"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "operation_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        },
+        {
+          "value": "artifact_root_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "capsule_snapshot_capture_resources_operation_root_unique_idx",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "capsule_snapshot_capture_resources"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "operation_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        },
+        {
+          "value": "blueprint_volume_name",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "capsule_snapshot_capture_resources_operation_volume_unique_idx",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "capsule_snapshot_capture_resources"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "operation_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        },
+        {
+          "value": "source_branch_resource_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "capsule_snapshot_capture_resources_operation_source_unique_idx",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "capsule_snapshot_capture_resources"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "provider",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        },
+        {
+          "value": "project",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        },
+        {
+          "value": "pool",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        },
+        {
+          "value": "source_volume",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        },
+        {
+          "value": "snapshot_name",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "capsule_snapshot_capture_resources_provider_identity_unique_idx",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "capsule_snapshot_capture_resources"
     },
     {
       "nameExplicit": true,
@@ -3916,6 +4488,27 @@
       "nameExplicit": true,
       "columns": [
         {
+          "value": "mode",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "capsule_snapshots_mode_idx",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "capsule_snapshots"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
           "value": "owner_id",
           "isExpression": false,
           "asc": true,
@@ -4304,6 +4897,40 @@
     {
       "nameExplicit": false,
       "columns": [
+        "operation_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "capsule_snapshot_capture_operations",
+      "columnsTo": [
+        "operation_id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "RESTRICT",
+      "name": "capsule_snapshot_capture_resources_8G60CcaTLsYo_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "capsule_snapshot_capture_resources"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "source_branch_resource_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "capsule_branch_resources",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "RESTRICT",
+      "name": "capsule_snapshot_capture_resources_Cg5eIMfKn6vE_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "capsule_snapshot_capture_resources"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
         "snapshot_id"
       ],
       "schemaTo": "public",
@@ -4617,6 +5244,16 @@
         "id"
       ],
       "nameExplicit": false,
+      "name": "capsule_snapshot_capture_resources_pkey",
+      "schema": "public",
+      "table": "capsule_snapshot_capture_resources",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
       "name": "capsule_snapshot_dependency_references_pkey",
       "schema": "public",
       "table": "capsule_snapshot_dependency_references",
@@ -4771,8 +5408,8 @@
       "table": "capsule_branches"
     },
     {
-      "value": "(\n          \"status\" <> 'offline'\n          OR \"runtime_ip\" IS NULL\n        )",
-      "name": "capsule_branches_offline_runtime_ip_check",
+      "value": "(\n          \"status\" NOT IN ('offline', 'capturing')\n          OR \"runtime_ip\" IS NULL\n        )",
+      "name": "capsule_branches_inactive_runtime_ip_check",
       "entityType": "checks",
       "schema": "public",
       "table": "capsule_branches"
@@ -4797,6 +5434,34 @@
       "entityType": "checks",
       "schema": "public",
       "table": "capsule_snapshot_capture_operations"
+    },
+    {
+      "value": "(\n          length(btrim(\"project\")) BETWEEN 1 AND 255\n          AND length(btrim(\"pool\")) BETWEEN 1 AND 255\n          AND length(btrim(\"source_volume\")) BETWEEN 1 AND 255\n          AND length(btrim(\"snapshot_name\")) BETWEEN 1 AND 255\n        )",
+      "name": "capsule_snapshot_capture_resources_identity_check",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "capsule_snapshot_capture_resources"
+    },
+    {
+      "value": "(\n          (\n            \"status\" = 'planned'\n            AND \"snapshot_intent_at\" IS NULL\n            AND \"snapshot_created_at\" IS NULL\n            AND \"cleanup_intent_at\" IS NULL\n            AND \"cleanup_completed_at\" IS NULL\n          )\n          OR\n          (\n            \"status\" = 'creating'\n            AND \"snapshot_intent_at\" IS NOT NULL\n            AND \"snapshot_created_at\" IS NULL\n            AND \"cleanup_intent_at\" IS NULL\n            AND \"cleanup_completed_at\" IS NULL\n          )\n          OR\n          (\n            \"status\" = 'created'\n            AND \"snapshot_intent_at\" IS NOT NULL\n            AND \"snapshot_created_at\" IS NOT NULL\n            AND \"cleanup_intent_at\" IS NULL\n            AND \"cleanup_completed_at\" IS NULL\n          )\n          OR\n          (\n            \"status\" = 'deleting'\n            AND \"snapshot_intent_at\" IS NOT NULL\n            AND \"snapshot_created_at\" IS NOT NULL\n            AND \"cleanup_intent_at\" IS NOT NULL\n            AND \"cleanup_completed_at\" IS NULL\n          )\n          OR\n          (\n            \"status\" IN ('deleted', 'missing')\n            AND \"snapshot_intent_at\" IS NOT NULL\n            AND \"snapshot_created_at\" IS NOT NULL\n            AND \"cleanup_intent_at\" IS NOT NULL\n            AND \"cleanup_completed_at\" IS NOT NULL\n          )\n          OR\n          (\n            \"status\" = 'error'\n            AND \"snapshot_intent_at\" IS NOT NULL\n          )\n        )",
+      "name": "capsule_snapshot_capture_resources_timeline_check",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "capsule_snapshot_capture_resources"
+    },
+    {
+      "value": "(\n          (\n            \"status\" = 'error'\n            AND \"failure_code\" IS NOT NULL\n            AND \"failure_message\" IS NOT NULL\n            AND \"failure_details\" IS NOT NULL\n            AND \"failure_at\" IS NOT NULL\n          )\n          OR\n          (\n            \"status\" <> 'error'\n            AND \"failure_code\" IS NULL\n            AND \"failure_message\" IS NULL\n            AND \"failure_details\" IS NULL\n            AND \"failure_at\" IS NULL\n          )\n        )",
+      "name": "capsule_snapshot_capture_resources_failure_check",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "capsule_snapshot_capture_resources"
+    },
+    {
+      "value": "(\n          (\n            \"snapshot_created_at\" IS NULL\n            OR (\n              \"snapshot_intent_at\" IS NOT NULL\n              AND \"snapshot_created_at\" >= \"snapshot_intent_at\"\n            )\n          )\n          AND\n          (\n            \"cleanup_intent_at\" IS NULL\n            OR (\n              \"snapshot_created_at\" IS NOT NULL\n              AND \"cleanup_intent_at\" >= \"snapshot_created_at\"\n            )\n          )\n          AND\n          (\n            \"cleanup_completed_at\" IS NULL\n            OR (\n              \"cleanup_intent_at\" IS NOT NULL\n              AND \"cleanup_completed_at\" >= \"cleanup_intent_at\"\n            )\n          )\n        )",
+      "name": "capsule_snapshot_capture_resources_timestamp_order_check",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "capsule_snapshot_capture_resources"
     },
     {
       "value": "length(btrim(\"revision\")) BETWEEN 1 AND 512",
@@ -4871,6 +5536,13 @@
     {
       "value": "\"source_branch_resource_inventory_digest\" ~ '^sha256:[a-f0-9]{64}$'",
       "name": "capsule_snapshots_inventory_digest_check",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "capsule_snapshots"
+    },
+    {
+      "value": "(\n          \"mode\" <> 'experimental'\n          OR (\n            jsonb_typeof(\"limitations\") = 'array'\n            AND jsonb_array_length(\"limitations\") > 0\n          )\n        )",
+      "name": "capsule_snapshots_experimental_limitations_check",
       "entityType": "checks",
       "schema": "public",
       "table": "capsule_snapshots"
