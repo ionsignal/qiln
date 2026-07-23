@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { containsPosixPathSegment, isCanonicalAbsolutePosixPath } from '../../posix'
 
 const GIT_ADMINISTRATIVE_PATH_SEGMENT = '.git'
+const POSTGRES_SIGNED_INTEGER_MAX = 2_147_483_647
 
 /**
  * Stable identifiers associating artifact entries with one managed root.
@@ -57,6 +58,8 @@ const CapsuleArtifactModeSchema = z.string().regex(/^[0-7]{4}$/, {
   message: 'Capsule artifact modes must contain exactly four octal digits.',
 })
 
+const CapsuleArtifactOwnerIdSchema = z.number().int().min(0).max(POSTGRES_SIGNED_INTEGER_MAX)
+const CapsuleArtifactFileSizeSchema = z.number().int().nonnegative().safe()
 const CAPSULE_ARTIFACT_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
 
 /**
@@ -95,8 +98,8 @@ const CapsuleArtifactEntryBaseSchema = z.object({
   rootId: CapsuleArtifactRootIdSchema,
   logicalPath: CapsuleArtifactLogicalPathSchema,
   mode: CapsuleArtifactModeSchema,
-  uid: z.number().int().nonnegative(),
-  gid: z.number().int().nonnegative(),
+  uid: CapsuleArtifactOwnerIdSchema,
+  gid: CapsuleArtifactOwnerIdSchema,
   modifiedAt: CapsuleArtifactTimestampSchema,
 })
 
@@ -104,11 +107,13 @@ const CapsuleArtifactEntryBaseSchema = z.object({
  * Canonical regular-file identity.
  *
  * File bytes remain in physical snapshot storage or a future content-addressed
- * artifact store.
+ * artifact store. File sizes are limited to JavaScript safe integers so
+ * relational persistence and canonical digest reconstruction cannot silently
+ * lose precision.
  */
 export const CapsuleArtifactFileEntrySchema = CapsuleArtifactEntryBaseSchema.extend({
   type: z.literal(CapsuleArtifactEntryType.FILE),
-  size: z.number().int().nonnegative(),
+  size: CapsuleArtifactFileSizeSchema,
   contentDigest: CapsuleArtifactContentDigestSchema,
 }).strict()
 

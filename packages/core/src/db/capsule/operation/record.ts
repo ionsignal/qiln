@@ -1,7 +1,7 @@
 import { sql } from 'drizzle-orm'
 import { index, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid, type PgColumn } from 'drizzle-orm/pg-core'
-import { CapsuleActorTypeValues, CapsuleOperationStatusValues, CapsuleOperationTypeValues } from '../../schemas'
-import { capsulesTable } from './capsule'
+import { CapsuleActorTypeValues, CapsuleOperationStatusValues, CapsuleOperationTypeValues } from '../../../schemas'
+import { capsulesTable } from '../record'
 
 export const capsuleActorTypeEnum = pgEnum('capsule_actor_type', CapsuleActorTypeValues)
 export const capsuleOperationTypeEnum = pgEnum('capsule_operation_type', CapsuleOperationTypeValues)
@@ -41,7 +41,6 @@ function createCapsuleIdColumn(capsuleIdColumn?: PgColumn) {
 export function createCapsuleOperationsTable(ownerIdColumn?: PgColumn, capsuleIdColumn?: PgColumn) {
   const ownerId = createOwnerIdColumn(ownerIdColumn)
   const capsuleId = createCapsuleIdColumn(capsuleIdColumn)
-
   return pgTable(
     'capsule_operations',
     {

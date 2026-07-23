@@ -104,4 +104,12 @@ export type FileInspectorTarget =
 
 export type CapsuleBranchSummary = EngineRouterOutputs['capsules']['branches']['list'][number]
 export type CapsuleOperationSummary = EngineRouterOutputs['capsules']['operations']['get']
-export type CapsuleSnapshotItem = EngineRouterOutputs['capsules']['snapshots']['list'][number]
+
+/**
+ * Client-safe committed snapshot summary inferred from the Engine router.
+ *
+ * Detailed artifact entries, Git evidence, dependency references, physical
+ * provider references, policy pins, and capture diagnostics remain
+ * server-only.
+ */
+export type CapsuleSnapshotSummary = EngineRouterOutputs['capsules']['snapshots']['list'][number]

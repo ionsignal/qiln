@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { CapsuleSnapshotListOutputSchema } from '../../../schemas/capsule/snapshots'
+import { CapsuleSnapshotListOutputSchema } from '../../../schemas/capsule/snapshot/record'
 import { TargetOwnerSchema, TargetType } from '../targets'
 import { defineCapsuleCommand } from './definitions'
 import type { input, output, ZodType } from 'zod'
@@ -10,7 +10,8 @@ const CAPSULE_SNAPSHOTS_LIST_TIMEOUT_MS = 15_000
 /**
  * Snapshot commands currently expose only committed logical snapshot history.
  * Capture, archive, restore, deletion, diff, and physical snapshot mutation are
- * intentionally absent until Qiln can prove complete artifact manifests.
+ * intentionally absent until Qiln can atomically prove complete capture
+ * evidence through a durable Snapshot Capture operation.
  */
 export const CapsuleSnapshotCommandName = {
   SNAPSHOTS_LIST: 'capsule.snapshots.list',
@@ -24,7 +25,7 @@ export const CapsuleSnapshotCommandNameValues = [CapsuleSnapshotCommandName.SNAP
  * Common owner-scoped snapshot command identity.
  *
  * The owner target is the routing and authorization scope. `capsuleId`
- * identifies the requested capsule but n ever replaces independent durable
+ * identifies the requested capsule but never replaces independent durable
  * ownership verification.
  */
 export const CapsuleSnapshotOwnerScopedInputSchema = z

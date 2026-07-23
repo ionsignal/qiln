@@ -1,8 +1,8 @@
+export * from './record'
 export * from './branch'
-export * from './branchResource'
-export * from './capsule'
-export * from './createOperation'
 export * from './operation'
-export * from './operationStep'
-export * from './schema'
 export * from './snapshot'
+
+export { capsuleRuntimeSchema, createCapsuleSchema, defineCapsuleRelations } from './schema'
+
+export type { CapsuleHostDbContract, CapsuleRelationHelpers } from './schema'

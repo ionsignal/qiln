@@ -97,19 +97,15 @@ export async function createManagedVolumes(
   for (const volume of volumes) {
     const resourceId = await dependencies.resources.ensureBranchResource(createBranchResourceInput(context, volume))
     let providerMutationAttempted = false
-
     try {
       await dependencies.resources.recordBranchResourceCreateIntent(resourceId, context.operationId)
       providerMutationAttempted = true
-
       await dependencies.driver.createVolume(context.namespace, volume)
       await dependencies.resources.recordBranchResourceCreateOutcome(resourceId, context.operationId)
-
       state.compensation.recordCreatedVolume(resourceId, volume)
     } catch (error: unknown) {
       if (providerMutationAttempted) {
         state.markProviderOwnershipUncertain()
-
         await recordDirectResourceCreateFailureBestEffort(
           dependencies.resources,
           context,
@@ -121,7 +117,6 @@ export async function createManagedVolumes(
           state,
         )
       }
-
       throw error
     }
   }
@@ -141,14 +136,11 @@ export async function createRootBranchInstance(
 ): Promise<void> {
   const resourceId = await dependencies.resources.ensureBranchResource(createBranchResourceInput(context, instance))
   let providerMutationAttempted = false
-
   try {
     await dependencies.resources.recordBranchResourceCreateIntent(resourceId, context.operationId)
     providerMutationAttempted = true
-
     await dependencies.driver.createInstance(context.namespace, instance)
     await dependencies.resources.recordBranchResourceCreateOutcome(resourceId, context.operationId)
-
     state.compensation.recordCreatedInstance(resourceId, instance.resourceKey, instance.instanceName)
   } catch (error: unknown) {
     if (providerMutationAttempted) {
@@ -165,7 +157,6 @@ export async function createRootBranchInstance(
         state,
       )
     }
-
     throw error
   }
 }
@@ -185,7 +176,6 @@ export async function writeProvisioningFiles(
   state: CreateCapsuleExecutionState,
 ): Promise<void> {
   const instanceResourceId = state.compensation.getCreatedInstanceResourceId()
-
   if (!instanceResourceId) {
     throw new IncusError(
       'Capsule root instance ownership was not durably recorded before provisioning files.',
@@ -197,23 +187,18 @@ export async function writeProvisioningFiles(
       },
     )
   }
-
   for (const file of files) {
     const resourceId = await dependencies.resources.ensureBranchResource(createBranchResourceInput(context, file))
     const backingResourceId = resolveProvisioningFileBackingResourceId(file, instanceResourceId, state)
-
     state.compensation.recordDerivedProvisioningFile({
       resourceId,
       resourceKey: file.resourceKey,
       backingResourceId,
     })
-
     let providerMutationAttempted = false
-
     try {
       await dependencies.resources.recordBranchResourceCreateIntent(resourceId, context.operationId)
       providerMutationAttempted = true
-
       await dependencies.driver.writeProvisioningFile(context.namespace, context.rootBranchName, file)
       await dependencies.resources.recordBranchResourceCreateOutcome(resourceId, context.operationId)
     } catch (error: unknown) {
@@ -227,7 +212,6 @@ export async function writeProvisioningFiles(
           state,
         )
       }
-
       throw error
     }
   }
@@ -236,8 +220,9 @@ export async function writeProvisioningFiles(
 function createBranchResourceInput(
   context: CreateCapsuleOperationContext,
   resource: {
-    resourceType: BranchResourceInput['resourceType']
     resourceKey: string
+    resourceType: BranchResourceInput['resourceType']
+    blueprintVolumeName: BranchResourceInput['blueprintVolumeName']
     cleanupPolicy: BranchResourceInput['cleanupPolicy']
     metadata: Record<string, unknown>
   },
@@ -249,6 +234,7 @@ function createBranchResourceInput(
     branchName: context.rootBranchName,
     resourceType: resource.resourceType,
     resourceKey: resource.resourceKey,
+    blueprintVolumeName: resource.blueprintVolumeName,
     cleanupPolicy: resource.cleanupPolicy,
     metadata: resource.metadata,
   }

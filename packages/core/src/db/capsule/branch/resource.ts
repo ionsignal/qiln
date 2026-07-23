@@ -1,12 +1,24 @@
 import { sql } from 'drizzle-orm'
-import { index, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid, type PgColumn } from 'drizzle-orm/pg-core'
+import {
+  check,
+  index,
+  jsonb,
+  pgEnum,
+  pgTable,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+  type PgColumn,
+} from 'drizzle-orm/pg-core'
 import {
   CapsuleBranchResourceCleanupPolicyValues,
   CapsuleBranchResourceStatusValues,
   CapsuleBranchResourceTypeValues,
-} from '../../schemas'
-import { capsuleBranchesTable } from './branch'
-import { capsuleOperationsTable } from './operation'
+  type CapsuleBlueprintIdentifier,
+} from '../../../schemas'
+import { capsuleOperationsTable } from '../operation/record'
+import { capsuleBranchesTable } from './record'
 
 export const capsuleBranchResourceTypeEnum = pgEnum('capsule_branch_resource_type', CapsuleBranchResourceTypeValues)
 export const capsuleBranchResourceStatusEnum = pgEnum(
@@ -50,6 +62,11 @@ function createNullableOperationIdColumn(columnName: string, operationIdColumn?:
  * Operation provenance records which operation created and last touched a
  * resource. Destroy can delete only resources whose durable inventory, cleanup
  * policy, and provider state satisfy fail-closed ownership checks.
+ *
+ * Managed volumes and bind mounts retain their originating blueprint volume
+ * identity. Snapshot Capture must resolve capture-policy roots and external
+ * boundaries through this explicit identity rather than provider names, mount
+ * paths, or live provider discovery.
  */
 export function createCapsuleBranchResourcesTable(
   ownerIdColumn?: PgColumn,
@@ -75,6 +92,7 @@ export function createCapsuleBranchResourcesTable(
       resourceType: capsuleBranchResourceTypeEnum('resource_type').notNull(),
       provider: text('provider').notNull().default('incus'),
       resourceKey: text('resource_key').notNull(),
+      blueprintVolumeName: text('blueprint_volume_name').$type<CapsuleBlueprintIdentifier>(),
       status: capsuleBranchResourceStatusEnum('status').notNull().default('planned'),
       cleanupPolicy: capsuleBranchResourceCleanupPolicyEnum('cleanup_policy').notNull(),
       metadata: jsonb('metadata').$type<Record<string, unknown>>(),
@@ -100,11 +118,29 @@ export function createCapsuleBranchResourcesTable(
       index('capsule_branch_resources_created_by_operation_idx').on(table.createdByOperationId),
       index('capsule_branch_resources_last_operation_idx').on(table.lastOperationId),
       index('capsule_branch_resources_resource_key_idx').on(table.resourceKey),
+      index('capsule_branch_resources_blueprint_volume_idx').on(table.blueprintVolumeName),
       uniqueIndex('capsule_branch_resources_operation_key_unique_idx').on(
         table.createdByOperationId,
         table.resourceKey,
       ),
       uniqueIndex('capsule_branch_resources_branch_key_unique_idx').on(table.branchId, table.resourceKey),
+      uniqueIndex('capsule_branch_resources_branch_blueprint_volume_unique_idx')
+        .on(table.branchId, table.blueprintVolumeName)
+        .where(sql`${table.blueprintVolumeName} IS NOT NULL`),
+      check(
+        'capsule_branch_resources_blueprint_volume_check',
+        sql`(
+          (
+            ${table.resourceType} IN ('zfs_volume', 'bind_mount')
+            AND ${table.blueprintVolumeName} IS NOT NULL
+          )
+          OR
+          (
+            ${table.resourceType} NOT IN ('zfs_volume', 'bind_mount')
+            AND ${table.blueprintVolumeName} IS NULL
+          )
+        )`,
+      ),
     ],
   )
 }

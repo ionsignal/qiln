@@ -123,6 +123,7 @@ export async function lockDestroyBranchResourceInventories(
       provider: capsuleBranchResourcesTable.provider,
       resourceType: capsuleBranchResourcesTable.resourceType,
       resourceKey: capsuleBranchResourcesTable.resourceKey,
+      blueprintVolumeName: capsuleBranchResourcesTable.blueprintVolumeName,
       status: capsuleBranchResourcesTable.status,
       cleanupPolicy: capsuleBranchResourcesTable.cleanupPolicy,
       metadata: capsuleBranchResourcesTable.metadata,

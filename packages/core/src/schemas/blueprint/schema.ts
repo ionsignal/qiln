@@ -194,7 +194,7 @@ export const CapsuleBlueprintSchema = z
         }
       }
 
-      root.required_paths.forEach((requiredPath, _) => {
+      root.required_paths.forEach(requiredPath => {
         const absoluteRequiredPath = joinAbsoluteAndRelativePosixPath(volume.mount_path, requiredPath.path)
         root.exclusions.forEach((exclusion, exclusionIndex) => {
           const absoluteExclusionPath = joinAbsoluteAndRelativePosixPath(volume.mount_path, exclusion.path)
@@ -297,13 +297,13 @@ export const CapsuleBlueprintSchema = z
     })
 
     const externalMountIndexesByVolume = new Map<string, number>()
+    const externalDependencyIndexes = new Map<string, number>()
     const resolvedExternalMounts: Array<{
       index: number
       volume: string
       mountPath: string
       artifactRootId: string
     }> = []
-
     blueprint.snapshot_capture.external_mounts.forEach((externalMount, index) => {
       const existingExternalMountIndex = externalMountIndexesByVolume.get(externalMount.volume)
       if (existingExternalMountIndex !== undefined) {
@@ -314,6 +314,17 @@ export const CapsuleBlueprintSchema = z
         })
       } else {
         externalMountIndexesByVolume.set(externalMount.volume, index)
+      }
+      const dependencyIdentity = `${externalMount.dependency.kind}\u0000${externalMount.dependency.logical_id}`
+      const existingDependencyIndex = externalDependencyIndexes.get(dependencyIdentity)
+      if (existingDependencyIndex !== undefined) {
+        context.addIssue({
+          code: 'custom',
+          path: ['snapshot_capture', 'external_mounts', index, 'dependency', 'logical_id'],
+          message: `External dependency '${externalMount.dependency.kind}:${externalMount.dependency.logical_id}' is already assigned to external mount at index ${existingDependencyIndex}.`,
+        })
+      } else {
+        externalDependencyIndexes.set(dependencyIdentity, index)
       }
       const volume = volumesByName.get(externalMount.volume)
       if (!volume) {

@@ -39,10 +39,16 @@ function normalizedMetadata(
   return metadata === null || metadata === undefined ? null : toJsonObject(metadata, context)
 }
 
-function resourceIdentityDigest(provider: string, metadata: Record<string, unknown> | null, context: string): string {
+function resourceIdentityDigest(
+  provider: string,
+  blueprintVolumeName: BranchResourceInput['blueprintVolumeName'],
+  metadata: Record<string, unknown> | null,
+  context: string,
+): string {
   return digestCanonicalJsonValue(
     {
       provider,
+      blueprintVolumeName,
       metadata,
     },
     {
@@ -130,6 +136,7 @@ export class CapsuleBranchResourceStore {
         resourceType: input.resourceType,
         provider,
         resourceKey: input.resourceKey,
+        blueprintVolumeName: input.blueprintVolumeName,
         cleanupPolicy: input.cleanupPolicy,
         status: CapsuleBranchResourceStatus.PLANNED,
         metadata,
@@ -525,6 +532,7 @@ export class CapsuleBranchResourceStore {
         provider: capsuleBranchResourcesTable.provider,
         resourceType: capsuleBranchResourcesTable.resourceType,
         resourceKey: capsuleBranchResourcesTable.resourceKey,
+        blueprintVolumeName: capsuleBranchResourcesTable.blueprintVolumeName,
         status: capsuleBranchResourcesTable.status,
         cleanupPolicy: capsuleBranchResourcesTable.cleanupPolicy,
         metadata: capsuleBranchResourcesTable.metadata,
@@ -551,6 +559,7 @@ export class CapsuleBranchResourceStore {
         provider: capsuleBranchResourcesTable.provider,
         resourceType: capsuleBranchResourcesTable.resourceType,
         resourceKey: capsuleBranchResourcesTable.resourceKey,
+        blueprintVolumeName: capsuleBranchResourcesTable.blueprintVolumeName,
         status: capsuleBranchResourcesTable.status,
         cleanupPolicy: capsuleBranchResourcesTable.cleanupPolicy,
         metadata: capsuleBranchResourcesTable.metadata,
@@ -575,6 +584,7 @@ export class CapsuleBranchResourceStore {
       resourceType: BranchResourceInput['resourceType']
       cleanupPolicy: BranchResourceInput['cleanupPolicy']
       resourceKey: string
+      blueprintVolumeName: BranchResourceInput['blueprintVolumeName']
       metadata: Record<string, unknown> | null
     },
     input: BranchResourceInput,
@@ -583,11 +593,13 @@ export class CapsuleBranchResourceStore {
     const expectedMetadata = normalizedMetadata(input.metadata, 'requested capsule branch resource metadata')
     const existingIdentityDigest = resourceIdentityDigest(
       existing.provider,
+      existing.blueprintVolumeName,
       existing.metadata,
       'existing capsule branch resource identity',
     )
     const expectedIdentityDigest = resourceIdentityDigest(
       expectedProvider,
+      input.blueprintVolumeName,
       expectedMetadata,
       'requested capsule branch resource identity',
     )
@@ -599,6 +611,7 @@ export class CapsuleBranchResourceStore {
       existing.resourceType !== input.resourceType ||
       existing.cleanupPolicy !== input.cleanupPolicy ||
       existing.resourceKey !== input.resourceKey ||
+      existing.blueprintVolumeName !== input.blueprintVolumeName ||
       existingIdentityDigest !== expectedIdentityDigest
     ) {
       throw new IncusError(

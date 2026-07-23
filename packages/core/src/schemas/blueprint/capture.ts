@@ -14,7 +14,7 @@ const CapsuleBlueprintArtifactRelativePathSchema = z
     message: "Artifact paths cannot identify or traverse a '.git' administrative path.",
   })
 
-const CapsuleBlueprintRepositoryRelativePathSchema = z
+export const CapsuleBlueprintRepositoryRelativePathSchema = z
   .string()
   .refine(value => isCanonicalRelativePosixPath(value, true), {
     message: "Git repository paths must be canonical relative POSIX paths; use '.' for the artifact root itself.",
@@ -107,6 +107,10 @@ export const CapsuleBlueprintExternalMountDependencySchema = CapsuleBlueprintMod
  *
  * External mounts are capture boundaries rather than ordinary exclusions. A
  * collector must not traverse their contents as canonical artifact entries.
+ *
+ * Every external mount has exactly one logical dependency declaration. One
+ * logical dependency identity may belong to only one external mount boundary
+ * within a capture policy.
  *
  * A required external mount requires an immutable dependency reference before
  * capture may commit. Read-only mount configuration alone is not proof that the

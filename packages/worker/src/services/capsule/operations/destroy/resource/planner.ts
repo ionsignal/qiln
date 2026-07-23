@@ -171,6 +171,9 @@ export class DestroyCapsulePlanner {
           validationPhase: validation.phase,
         })
       }
+
+      this.assertBlueprintVolumeIdentity(row, validation)
+
       const rows = rowsByBranch.get(row.branchId) ?? []
       rows.push(row)
       rowsByBranch.set(row.branchId, rows)
@@ -249,6 +252,7 @@ export class DestroyCapsulePlanner {
         provider: row.provider,
         resourceType: row.resourceType,
         resourceKey: row.resourceKey,
+        blueprintVolumeName: row.blueprintVolumeName,
         cleanupPolicy: row.cleanupPolicy,
         metadata: row.metadata,
       })),
@@ -498,6 +502,36 @@ export class DestroyCapsulePlanner {
       provisioningFiles: provisioningFiles.sort((left, right) =>
         compareStableString(left.resourceKey, right.resourceKey),
       ),
+    }
+  }
+
+  private assertBlueprintVolumeIdentity(
+    row: CapsuleBranchResourceInventoryRow,
+    validation: DestroyInventoryValidation,
+  ): void {
+    const requiresBlueprintVolumeName =
+      row.resourceType === CapsuleBranchResourceType.ZFS_VOLUME ||
+      row.resourceType === CapsuleBranchResourceType.BIND_MOUNT
+    if (requiresBlueprintVolumeName && row.blueprintVolumeName === null) {
+      throw new IncusError(
+        'Managed volume or bind-mount resource has no durable blueprint volume identity.',
+        'CONFLICT',
+        {
+          resourceId: row.id,
+          resourceType: row.resourceType,
+          resourceKey: row.resourceKey,
+          validationPhase: validation.phase,
+        },
+      )
+    }
+    if (!requiresBlueprintVolumeName && row.blueprintVolumeName !== null) {
+      throw new IncusError('Capsule branch resource retains an invalid blueprint volume identity.', 'CONFLICT', {
+        resourceId: row.id,
+        resourceType: row.resourceType,
+        resourceKey: row.resourceKey,
+        blueprintVolumeName: row.blueprintVolumeName,
+        validationPhase: validation.phase,
+      })
     }
   }
 

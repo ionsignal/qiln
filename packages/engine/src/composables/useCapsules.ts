@@ -17,7 +17,7 @@ import {
 import type { InjectionKey, Ref } from 'vue'
 import type { TRPCClient } from '@trpc/client'
 import type { EngineRouter } from '../trpc'
-import type { CapsuleBranchSummary, CapsuleOperationSummary } from '../types'
+import type { CapsuleBranchSummary, CapsuleOperationSummary, CapsuleSnapshotSummary } from '../types'
 
 export type CapsuleClient = TRPCClient<EngineRouter>['capsules']
 
@@ -70,6 +70,8 @@ export interface CapsuleContext {
 
   getOperation: (operationId: string) => Promise<CapsuleOperationSummary>
   listOperations: (capsuleId: string) => Promise<CapsuleOperationSummary[]>
+
+  listSnapshots: (capsuleId: string) => Promise<CapsuleSnapshotSummary[]>
 }
 
 const CapsuleContextKey: InjectionKey<CapsuleContext> = Symbol('CapsuleContext')
@@ -300,6 +302,22 @@ export function provideCapsules(options: ProvideCapsulesOptions): CapsuleContext
   }
 
   // ---------------------------------------------------------------------------
+  // Committed snapshot history
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Fetches client-safe committed snapshot summaries.
+   *
+   * This method exposes no capture mutation and no detailed manifest, Git,
+   * dependency, provider-reference, or capture-operation evidence.
+   */
+  async function listSnapshots(capsuleId: string): Promise<CapsuleSnapshotSummary[]> {
+    return await options.client.snapshots.list.query({
+      capsuleId,
+    })
+  }
+
+  // ---------------------------------------------------------------------------
   // Event subscription lifecycle
   // ---------------------------------------------------------------------------
 
@@ -325,6 +343,7 @@ export function provideCapsules(options: ProvideCapsulesOptions): CapsuleContext
     refreshBranches,
 
     createCapsule,
+
     archive,
     unarchive,
     destroy,
@@ -333,9 +352,13 @@ export function provideCapsules(options: ProvideCapsulesOptions): CapsuleContext
     stopBranch,
 
     getOperation,
+
     listOperations,
+    listSnapshots,
   }
+
   provide(CapsuleContextKey, context)
+
   return context
 }
 

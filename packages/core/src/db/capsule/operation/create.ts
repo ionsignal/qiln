@@ -1,7 +1,7 @@
 import { jsonb, pgTable, text, uniqueIndex, uuid, type PgColumn } from 'drizzle-orm/pg-core'
-import type { CapsuleBlueprint, CapsuleBlueprintDigest, CapsuleBranchName } from '../../schemas'
-import { capsuleBranchesTable } from './branch'
-import { capsuleOperationsTable } from './operation'
+import type { CapsuleBlueprint, CapsuleBlueprintDigest, CapsuleBranchName } from '../../../schemas'
+import { capsuleBranchesTable } from '../branch/record'
+import { capsuleOperationsTable } from './record'
 
 function createOperationIdColumn(operationIdColumn?: PgColumn) {
   return operationIdColumn
@@ -40,7 +40,6 @@ function createRootBranchIdColumn(rootBranchIdColumn?: PgColumn) {
 export function createCapsuleCreateOperationsTable(operationIdColumn?: PgColumn, rootBranchIdColumn?: PgColumn) {
   const operationId = createOperationIdColumn(operationIdColumn)
   const rootBranchId = createRootBranchIdColumn(rootBranchIdColumn)
-
   return pgTable(
     'capsule_create_operations',
     {

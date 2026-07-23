@@ -16,8 +16,8 @@ import {
   CapsuleBranchStatusValues,
   DEFAULT_CAPSULE_BLUEPRINT_NAME,
   type CapsuleBranchResourceInventoryDigest,
-} from '../../schemas'
-import { capsulesTable } from './capsule'
+} from '../../../schemas'
+import { capsulesTable } from '../record'
 
 /**
  * Canonical database enum for capsule branch runtime state.

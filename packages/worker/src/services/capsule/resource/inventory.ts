@@ -1,6 +1,9 @@
 import {
+  CapsuleBlueprintIdentifierSchema,
   CapsuleBranchResourceInventoryDigestSchema,
+  CapsuleBranchResourceType,
   digestCanonicalJsonValue,
+  type CapsuleBlueprintIdentifier,
   type CapsuleBranchResourceCleanupPolicyValue,
   type CapsuleBranchResourceInventoryDigest,
   type CapsuleBranchResourceTypeValue,
@@ -13,6 +16,7 @@ export interface CapsuleBranchResourceInventoryEntry {
   provider: string
   resourceType: CapsuleBranchResourceTypeValue
   resourceKey: string
+  blueprintVolumeName: CapsuleBlueprintIdentifier | null
   cleanupPolicy: CapsuleBranchResourceCleanupPolicyValue
   metadata: unknown
 }
@@ -21,6 +25,7 @@ interface CanonicalCapsuleBranchResourceInventoryEntry {
   provider: string
   resourceType: CapsuleBranchResourceTypeValue
   resourceKey: string
+  blueprintVolumeName: CapsuleBlueprintIdentifier | null
   cleanupPolicy: CapsuleBranchResourceCleanupPolicyValue
   metadata: Record<string, unknown>
 }
@@ -59,6 +64,42 @@ function createInventoryValidationError(
   })
 }
 
+function normalizeBlueprintVolumeName(
+  entry: CapsuleBranchResourceInventoryEntry,
+  context: string,
+): CapsuleBlueprintIdentifier | null {
+  const requiresBlueprintVolumeName =
+    entry.resourceType === CapsuleBranchResourceType.ZFS_VOLUME ||
+    entry.resourceType === CapsuleBranchResourceType.BIND_MOUNT
+  if (!requiresBlueprintVolumeName) {
+    if (entry.blueprintVolumeName !== null) {
+      throw createInventoryValidationError(
+        'Capsule branch resource type cannot retain a blueprint volume identity.',
+        context,
+        {
+          resourceType: entry.resourceType,
+          resourceKey: entry.resourceKey,
+          blueprintVolumeName: entry.blueprintVolumeName,
+        },
+      )
+    }
+    return null
+  }
+  const parsed = CapsuleBlueprintIdentifierSchema.safeParse(entry.blueprintVolumeName)
+  if (!parsed.success) {
+    throw createInventoryValidationError(
+      'Managed volume and bind-mount resources require a valid blueprint volume identity.',
+      context,
+      {
+        resourceType: entry.resourceType,
+        resourceKey: entry.resourceKey,
+        blueprintVolumeName: entry.blueprintVolumeName,
+      },
+    )
+  }
+  return parsed.data
+}
+
 function normalizeInventoryEntries(
   entries: readonly CapsuleBranchResourceInventoryEntry[],
   context: string,
@@ -90,6 +131,7 @@ function normalizeInventoryEntries(
         },
       )
     }
+    const blueprintVolumeName = normalizeBlueprintVolumeName(entry, entryContext)
     const identity = `${entry.provider}\u0000${entry.resourceKey}`
     if (identities.has(identity)) {
       throw createInventoryValidationError(
@@ -108,6 +150,7 @@ function normalizeInventoryEntries(
         provider: entry.provider,
         resourceType: entry.resourceType,
         resourceKey: entry.resourceKey,
+        blueprintVolumeName,
         cleanupPolicy: entry.cleanupPolicy,
         metadata: entry.metadata,
       },
@@ -121,6 +164,10 @@ function normalizeInventoryEntries(
  * Produces the immutable identity digest for all resources planned for one
  * capsule branch. Mutable runtime state is deliberately excluded so normal
  * resource status transitions do not invalidate the creation-time proof.
+ *
+ * Blueprint volume identity is included because it is capture-policy evidence,
+ * not mutable provider progress. Changing or removing it invalidates the
+ * creation-time ownership proof.
  */
 export function createCapsuleBranchResourceInventoryDigest(
   entries: readonly CapsuleBranchResourceInventoryEntry[],

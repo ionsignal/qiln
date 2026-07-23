@@ -1,6 +1,7 @@
 import { and, eq } from 'drizzle-orm'
 import {
   CapsuleSnapshotCommandName,
+  CapsuleSnapshotListOutputSchema,
   GlobalError,
   GlobalErrorCode,
   TargetType,
@@ -15,11 +16,11 @@ import {
  *
  * Snapshot commands are owner-targeted at the protocol layer. The Engine
  * derives that target from authenticated context and proves local visibility
- * before dispatch. The Worker independently verifies durable ownership before
- * reading snapshot history.
+ * before dispatch. The Worker independently verifies durable ownership and
+ * complete committed evidence before returning snapshot history.
  *
- * Snapshot capture and physical snapshot mutation remain intentionally outside
- * this read-only service.
+ * Snapshot Capture and all snapshot-evidence writes remain intentionally
+ * outside this read-only service.
  */
 export class CapsuleSnapshotsService {
   constructor(
@@ -29,20 +30,22 @@ export class CapsuleSnapshotsService {
 
   public async list(ownerId: string, capsuleId: string): Promise<CapsuleSnapshotListOutput> {
     await this.assertOwnedCapsule(ownerId, capsuleId)
-    return await this.channel.command(CapsuleSnapshotCommandName.SNAPSHOTS_LIST, {
+    const snapshots = await this.channel.command(CapsuleSnapshotCommandName.SNAPSHOTS_LIST, {
       target: {
         type: TargetType.OWNER,
         id: ownerId,
       },
       capsuleId,
     })
+    return CapsuleSnapshotListOutputSchema.parse(snapshots)
   }
 
   /**
    * Provides defense in depth at the authenticated Engine boundary.
    *
-   * The Worker remains authoritative and repeats this ownership proof before
-   * reading durable snapshot state.
+   * Missing and foreign capsules are intentionally indistinguishable. The
+   * Worker remains authoritative and repeats this ownership proof before
+   * validating and reading committed snapshot state.
    */
   private async assertOwnedCapsule(ownerId: string, capsuleId: string): Promise<void> {
     const [capsule] = await this.db

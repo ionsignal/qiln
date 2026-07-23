@@ -1,4 +1,5 @@
 import type {
+  CapsuleBlueprintIdentifier,
   CapsuleBranchResourceCleanupPolicyValue,
   CapsuleBranchResourceStatusValue,
   CapsuleBranchResourceTypeValue,
@@ -22,6 +23,11 @@ export type {
  * Operation-specific repositories continue to own operation acceptance and
  * aggregate transitions. This contract contains only branch resource identity,
  * cleanup policy, metadata, and creation provenance.
+ *
+ * Managed volumes and bind mounts retain their originating blueprint volume
+ * identity. Snapshot Capture must resolve policy roots and external boundaries
+ * through this identity rather than provider names, mount paths, or live
+ * provider discovery.
  */
 export interface BranchResourceInput {
   operationId: string
@@ -30,6 +36,7 @@ export interface BranchResourceInput {
   branchName: string
   resourceType: CapsuleBranchResourceTypeValue
   resourceKey: string
+  blueprintVolumeName: CapsuleBlueprintIdentifier | null
   cleanupPolicy: CapsuleBranchResourceCleanupPolicyValue
   provider?: string
   metadata?: Record<string, unknown>
@@ -47,6 +54,7 @@ export interface CapsuleBranchResourceInventoryRow {
   provider: string
   resourceType: CapsuleBranchResourceTypeValue
   resourceKey: string
+  blueprintVolumeName: CapsuleBlueprintIdentifier | null
   status: CapsuleBranchResourceStatusValue
   cleanupPolicy: CapsuleBranchResourceCleanupPolicyValue
   metadata: Record<string, unknown> | null

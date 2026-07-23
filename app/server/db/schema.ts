@@ -2,6 +2,7 @@ import { sql, defineRelations } from 'drizzle-orm'
 import { pgTable, uuid, text, timestamp } from 'drizzle-orm/pg-core'
 import {
   capsuleActorTypeEnum,
+  capsuleArtifactEntryTypeEnum,
   capsuleBranchResourceCleanupPolicyEnum,
   capsuleBranchResourceStatusEnum,
   capsuleBranchResourceTypeEnum,
@@ -10,6 +11,11 @@ import {
   capsuleOperationStatusEnum,
   capsuleOperationStepStatusEnum,
   capsuleOperationTypeEnum,
+  capsuleSnapshotDependencyDigestKindEnum,
+  capsuleSnapshotDependencyKindEnum,
+  capsuleSnapshotGitRemoteTransportEnum,
+  capsuleSnapshotResourceKindEnum,
+  capsuleSnapshotResourceProviderEnum,
   createCapsuleSchema,
   defineCapsuleRelations,
   mergeRelationFragments,
@@ -46,14 +52,20 @@ const capsuleTables = createCapsuleSchema(users.id)
 
 export {
   capsuleActorTypeEnum,
-  capsuleLifecycleStatusEnum,
-  capsuleOperationTypeEnum,
-  capsuleOperationStatusEnum,
-  capsuleOperationStepStatusEnum,
+  capsuleArtifactEntryTypeEnum,
   capsuleBranchResourceCleanupPolicyEnum,
   capsuleBranchResourceStatusEnum,
   capsuleBranchResourceTypeEnum,
   capsuleBranchStatusEnum,
+  capsuleLifecycleStatusEnum,
+  capsuleOperationStatusEnum,
+  capsuleOperationStepStatusEnum,
+  capsuleOperationTypeEnum,
+  capsuleSnapshotDependencyDigestKindEnum,
+  capsuleSnapshotDependencyKindEnum,
+  capsuleSnapshotGitRemoteTransportEnum,
+  capsuleSnapshotResourceKindEnum,
+  capsuleSnapshotResourceProviderEnum,
 }
 
 export const {
@@ -64,6 +76,14 @@ export const {
   capsuleOperationSteps,
   capsuleBranchResources,
   capsuleSnapshots,
+  capsuleArtifactManifests,
+  capsuleArtifactManifestRoots,
+  capsuleArtifactEntries,
+  capsuleSnapshotGitRepositories,
+  capsuleSnapshotGitRemotes,
+  capsuleSnapshotDependencyReferences,
+  capsuleSnapshotResourceReferences,
+  capsuleSnapshotCaptureOperations,
 } = capsuleTables
 
 /**
@@ -73,14 +93,20 @@ export const schema = {
   users,
   sessions,
   capsuleActorTypeEnum,
-  capsuleLifecycleStatusEnum,
+  capsuleArtifactEntryTypeEnum,
   capsuleBranchStatusEnum,
-  capsuleOperationTypeEnum,
+  capsuleBranchResourceCleanupPolicyEnum,
+  capsuleBranchResourceStatusEnum,
+  capsuleBranchResourceTypeEnum,
+  capsuleLifecycleStatusEnum,
   capsuleOperationStatusEnum,
   capsuleOperationStepStatusEnum,
-  capsuleBranchResourceTypeEnum,
-  capsuleBranchResourceStatusEnum,
-  capsuleBranchResourceCleanupPolicyEnum,
+  capsuleOperationTypeEnum,
+  capsuleSnapshotDependencyDigestKindEnum,
+  capsuleSnapshotDependencyKindEnum,
+  capsuleSnapshotGitRemoteTransportEnum,
+  capsuleSnapshotResourceKindEnum,
+  capsuleSnapshotResourceProviderEnum,
   ...capsuleTables,
 } as const
 

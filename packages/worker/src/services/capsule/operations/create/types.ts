@@ -2,6 +2,7 @@ import type {
   CapsuleActorReference,
   CapsuleBlueprint,
   CapsuleBlueprintDigest,
+  CapsuleBlueprintIdentifier,
   CapsuleBranchResourceCleanupPolicyValue,
   CapsuleBranchResourceTypeValue,
   CapsuleBranchStatus,
@@ -76,6 +77,7 @@ export interface CreateCapsuleOperationContext {
 export interface CreateCapsulePlannedResource {
   resourceKey: string
   resourceType: CapsuleBranchResourceTypeValue
+  blueprintVolumeName: CapsuleBlueprintIdentifier | null
   cleanupPolicy: CapsuleBranchResourceCleanupPolicyValue
   metadata: Record<string, unknown>
 }

@@ -5,46 +5,80 @@ import {
 } from 'drizzle-orm'
 import type { PgColumn } from 'drizzle-orm/pg-core'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
-import { capsuleBranchesTable, createCapsuleBranchesTable } from './branch'
+import { capsuleBranchesTable, createCapsuleBranchesTable } from './branch/record'
 import {
   capsuleBranchResourceCleanupPolicyEnum,
   capsuleBranchResourceStatusEnum,
   capsuleBranchResourceTypeEnum,
   capsuleBranchResourcesTable,
   createCapsuleBranchResourcesTable,
-} from './branchResource'
-import { capsuleLifecycleStatusEnum, capsulesTable, createCapsulesTable } from './capsule'
-import { capsuleCreateOperationsTable, createCapsuleCreateOperationsTable } from './createOperation'
+} from './branch/resource'
+import { capsuleCreateOperationsTable, createCapsuleCreateOperationsTable } from './operation/create'
+import { capsuleSnapshotCaptureOperationsTable, createCapsuleSnapshotCaptureOperationsTable } from './operation/capture'
 import {
   capsuleActorTypeEnum,
   capsuleOperationStatusEnum,
   capsuleOperationsTable,
   capsuleOperationTypeEnum,
   createCapsuleOperationsTable,
-} from './operation'
+} from './operation/record'
 import {
   capsuleOperationStepStatusEnum,
   capsuleOperationStepsTable,
   createCapsuleOperationStepsTable,
-} from './operationStep'
-import { capsuleSnapshotsTable, createCapsuleSnapshotsTable } from './snapshot'
+} from './operation/step'
+import { capsuleLifecycleStatusEnum, capsulesTable, createCapsulesTable } from './record'
+import {
+  capsuleSnapshotDependencyDigestKindEnum,
+  capsuleSnapshotDependencyKindEnum,
+  capsuleSnapshotDependencyReferencesTable,
+  createCapsuleSnapshotDependencyReferencesTable,
+} from './snapshot/dependency'
+import {
+  capsuleSnapshotGitRemoteTransportEnum,
+  capsuleSnapshotGitRemotesTable,
+  capsuleSnapshotGitRepositoriesTable,
+  createCapsuleSnapshotGitRemotesTable,
+  createCapsuleSnapshotGitRepositoriesTable,
+} from './snapshot/git'
+import {
+  capsuleArtifactEntriesTable,
+  capsuleArtifactEntryTypeEnum,
+  capsuleArtifactManifestRootsTable,
+  capsuleArtifactManifestsTable,
+  createCapsuleArtifactEntriesTable,
+  createCapsuleArtifactManifestRootsTable,
+  createCapsuleArtifactManifestsTable,
+} from './snapshot/manifest'
+import { capsuleSnapshotsTable, createCapsuleSnapshotsTable } from './snapshot/record'
+import {
+  capsuleSnapshotResourceKindEnum,
+  capsuleSnapshotResourceProviderEnum,
+  capsuleSnapshotResourceReferencesTable,
+  createCapsuleSnapshotResourceReferencesTable,
+} from './snapshot/resource'
 import type { RelationFragmentManyFn, RelationFragmentOneFn } from '../relations'
 
 export {
   capsuleActorTypeEnum,
+  capsuleArtifactEntryTypeEnum,
+  capsuleBranchResourceCleanupPolicyEnum,
+  capsuleBranchResourceStatusEnum,
+  capsuleBranchResourceTypeEnum,
   capsuleLifecycleStatusEnum,
   capsuleOperationStatusEnum,
   capsuleOperationStepStatusEnum,
   capsuleOperationTypeEnum,
-  capsuleBranchResourceCleanupPolicyEnum,
-  capsuleBranchResourceStatusEnum,
-  capsuleBranchResourceTypeEnum,
+  capsuleSnapshotDependencyDigestKindEnum,
+  capsuleSnapshotDependencyKindEnum,
+  capsuleSnapshotGitRemoteTransportEnum,
+  capsuleSnapshotResourceKindEnum,
+  capsuleSnapshotResourceProviderEnum,
 }
 
 export function createCapsuleSchema<TUserIdColumn extends PgColumn>(userIdColumn: TUserIdColumn) {
   const capsules = createCapsulesTable(userIdColumn)
   const capsuleBranches = createCapsuleBranchesTable(userIdColumn, capsules.id)
-  const capsuleSnapshots = createCapsuleSnapshotsTable(capsules.id, capsuleBranches.id)
   const capsuleOperations = createCapsuleOperationsTable(userIdColumn, capsules.id)
   const capsuleCreateOperations = createCapsuleCreateOperationsTable(capsuleOperations.id, capsuleBranches.id)
   const capsuleBranchResources = createCapsuleBranchResourcesTable(
@@ -58,7 +92,30 @@ export function createCapsuleSchema<TUserIdColumn extends PgColumn>(userIdColumn
     capsuleOperations.id,
     capsuleBranches.id,
   )
-
+  const capsuleSnapshots = createCapsuleSnapshotsTable(capsules.id, capsuleBranches.id)
+  const capsuleArtifactManifests = createCapsuleArtifactManifestsTable(capsuleSnapshots.id)
+  const capsuleArtifactManifestRoots = createCapsuleArtifactManifestRootsTable(capsuleArtifactManifests.id)
+  const capsuleArtifactEntries = createCapsuleArtifactEntriesTable(capsuleArtifactManifestRoots.id)
+  const capsuleSnapshotGitRepositories = createCapsuleSnapshotGitRepositoriesTable(
+    capsuleSnapshots.id,
+    capsuleArtifactManifestRoots.id,
+  )
+  const capsuleSnapshotGitRemotes = createCapsuleSnapshotGitRemotesTable(capsuleSnapshotGitRepositories.id)
+  const capsuleSnapshotDependencyReferences = createCapsuleSnapshotDependencyReferencesTable(
+    capsuleSnapshots.id,
+    capsuleArtifactManifestRoots.id,
+    capsuleBranchResources.id,
+  )
+  const capsuleSnapshotResourceReferences = createCapsuleSnapshotResourceReferencesTable(
+    capsuleSnapshots.id,
+    capsuleArtifactManifestRoots.id,
+    capsuleBranchResources.id,
+  )
+  const capsuleSnapshotCaptureOperations = createCapsuleSnapshotCaptureOperationsTable(
+    capsuleOperations.id,
+    capsuleBranches.id,
+    capsuleSnapshots.id,
+  )
   return {
     capsules,
     capsuleBranches,
@@ -67,6 +124,14 @@ export function createCapsuleSchema<TUserIdColumn extends PgColumn>(userIdColumn
     capsuleOperationSteps,
     capsuleBranchResources,
     capsuleSnapshots,
+    capsuleArtifactManifests,
+    capsuleArtifactManifestRoots,
+    capsuleArtifactEntries,
+    capsuleSnapshotGitRepositories,
+    capsuleSnapshotGitRemotes,
+    capsuleSnapshotDependencyReferences,
+    capsuleSnapshotResourceReferences,
+    capsuleSnapshotCaptureOperations,
   }
 }
 
@@ -78,6 +143,14 @@ export const capsuleRuntimeSchema = {
   capsuleOperationSteps: capsuleOperationStepsTable,
   capsuleBranchResources: capsuleBranchResourcesTable,
   capsuleSnapshots: capsuleSnapshotsTable,
+  capsuleArtifactManifests: capsuleArtifactManifestsTable,
+  capsuleArtifactManifestRoots: capsuleArtifactManifestRootsTable,
+  capsuleArtifactEntries: capsuleArtifactEntriesTable,
+  capsuleSnapshotGitRepositories: capsuleSnapshotGitRepositoriesTable,
+  capsuleSnapshotGitRemotes: capsuleSnapshotGitRemotesTable,
+  capsuleSnapshotDependencyReferences: capsuleSnapshotDependencyReferencesTable,
+  capsuleSnapshotResourceReferences: capsuleSnapshotResourceReferencesTable,
+  capsuleSnapshotCaptureOperations: capsuleSnapshotCaptureOperationsTable,
 } as const
 
 export interface CapsuleRelationHelpers {
@@ -87,6 +160,12 @@ export interface CapsuleRelationHelpers {
     capsuleBranches: RelationFragmentOneFn<'capsuleBranches'>
     capsuleOperations: RelationFragmentOneFn<'capsuleOperations'>
     capsuleCreateOperations: RelationFragmentOneFn<'capsuleCreateOperations'>
+    capsuleBranchResources: RelationFragmentOneFn<'capsuleBranchResources'>
+    capsuleSnapshots: RelationFragmentOneFn<'capsuleSnapshots'>
+    capsuleArtifactManifests: RelationFragmentOneFn<'capsuleArtifactManifests'>
+    capsuleArtifactManifestRoots: RelationFragmentOneFn<'capsuleArtifactManifestRoots'>
+    capsuleSnapshotGitRepositories: RelationFragmentOneFn<'capsuleSnapshotGitRepositories'>
+    capsuleSnapshotCaptureOperations: RelationFragmentOneFn<'capsuleSnapshotCaptureOperations'>
   }
   many: {
     capsules: RelationFragmentManyFn<'capsules'>
@@ -95,6 +174,13 @@ export interface CapsuleRelationHelpers {
     capsuleOperationSteps: RelationFragmentManyFn<'capsuleOperationSteps'>
     capsuleBranchResources: RelationFragmentManyFn<'capsuleBranchResources'>
     capsuleSnapshots: RelationFragmentManyFn<'capsuleSnapshots'>
+    capsuleArtifactManifestRoots: RelationFragmentManyFn<'capsuleArtifactManifestRoots'>
+    capsuleArtifactEntries: RelationFragmentManyFn<'capsuleArtifactEntries'>
+    capsuleSnapshotGitRepositories: RelationFragmentManyFn<'capsuleSnapshotGitRepositories'>
+    capsuleSnapshotGitRemotes: RelationFragmentManyFn<'capsuleSnapshotGitRemotes'>
+    capsuleSnapshotDependencyReferences: RelationFragmentManyFn<'capsuleSnapshotDependencyReferences'>
+    capsuleSnapshotResourceReferences: RelationFragmentManyFn<'capsuleSnapshotResourceReferences'>
+    capsuleSnapshotCaptureOperations: RelationFragmentManyFn<'capsuleSnapshotCaptureOperations'>
   }
   users: {
     id: RelationsBuilderColumnBase<'users'>
@@ -124,22 +210,60 @@ export interface CapsuleRelationHelpers {
     branchId: RelationsBuilderColumnBase<'capsuleOperationSteps'>
   }
   capsuleBranchResources: {
+    id: RelationsBuilderColumnBase<'capsuleBranchResources'>
     ownerId: RelationsBuilderColumnBase<'capsuleBranchResources'>
     branchId: RelationsBuilderColumnBase<'capsuleBranchResources'>
     createdByOperationId: RelationsBuilderColumnBase<'capsuleBranchResources'>
     lastOperationId: RelationsBuilderColumnBase<'capsuleBranchResources'>
   }
   capsuleSnapshots: {
+    id: RelationsBuilderColumnBase<'capsuleSnapshots'>
     capsuleId: RelationsBuilderColumnBase<'capsuleSnapshots'>
     sourceBranchId: RelationsBuilderColumnBase<'capsuleSnapshots'>
+  }
+  capsuleArtifactManifests: {
+    id: RelationsBuilderColumnBase<'capsuleArtifactManifests'>
+    snapshotId: RelationsBuilderColumnBase<'capsuleArtifactManifests'>
+  }
+  capsuleArtifactManifestRoots: {
+    id: RelationsBuilderColumnBase<'capsuleArtifactManifestRoots'>
+    manifestId: RelationsBuilderColumnBase<'capsuleArtifactManifestRoots'>
+  }
+  capsuleArtifactEntries: {
+    manifestRootId: RelationsBuilderColumnBase<'capsuleArtifactEntries'>
+  }
+  capsuleSnapshotGitRepositories: {
+    id: RelationsBuilderColumnBase<'capsuleSnapshotGitRepositories'>
+    snapshotId: RelationsBuilderColumnBase<'capsuleSnapshotGitRepositories'>
+    manifestRootId: RelationsBuilderColumnBase<'capsuleSnapshotGitRepositories'>
+  }
+  capsuleSnapshotGitRemotes: {
+    repositoryId: RelationsBuilderColumnBase<'capsuleSnapshotGitRemotes'>
+  }
+  capsuleSnapshotDependencyReferences: {
+    snapshotId: RelationsBuilderColumnBase<'capsuleSnapshotDependencyReferences'>
+    manifestRootId: RelationsBuilderColumnBase<'capsuleSnapshotDependencyReferences'>
+    sourceBranchResourceId: RelationsBuilderColumnBase<'capsuleSnapshotDependencyReferences'>
+  }
+  capsuleSnapshotResourceReferences: {
+    snapshotId: RelationsBuilderColumnBase<'capsuleSnapshotResourceReferences'>
+    manifestRootId: RelationsBuilderColumnBase<'capsuleSnapshotResourceReferences'>
+    sourceBranchResourceId: RelationsBuilderColumnBase<'capsuleSnapshotResourceReferences'>
+  }
+  capsuleSnapshotCaptureOperations: {
+    operationId: RelationsBuilderColumnBase<'capsuleSnapshotCaptureOperations'>
+    sourceBranchId: RelationsBuilderColumnBase<'capsuleSnapshotCaptureOperations'>
+    snapshotId: RelationsBuilderColumnBase<'capsuleSnapshotCaptureOperations'>
   }
 }
 
 /**
- * Defines the full capsule relation fragment owned by @qiln/core.
+ * Defines the complete capsule relation fragment owned by @qiln/core.
  *
- * Host-owned reverse relations from users remain composed by the host because
- * the host owns the physical users table.
+ * Relations describe navigable ownership and provenance. Cross-table capture
+ * completeness, canonical digest verification, policy satisfaction, and base
+ * operation discriminator checks remain responsibilities of the future atomic
+ * capture commit transaction.
  */
 export function defineCapsuleRelations(helpers: CapsuleRelationHelpers) {
   return {
@@ -194,6 +318,10 @@ export function defineCapsuleRelations(helpers: CapsuleRelationHelpers) {
         from: helpers.capsuleBranches.id,
         to: helpers.capsuleSnapshots.sourceBranchId,
       }),
+      snapshotCaptures: helpers.many.capsuleSnapshotCaptureOperations({
+        from: helpers.capsuleBranches.id,
+        to: helpers.capsuleSnapshotCaptureOperations.sourceBranchId,
+      }),
     },
     capsuleOperations: {
       owner: helpers.one.users({
@@ -209,6 +337,11 @@ export function defineCapsuleRelations(helpers: CapsuleRelationHelpers) {
       createOperation: helpers.one.capsuleCreateOperations({
         from: helpers.capsuleOperations.id,
         to: helpers.capsuleCreateOperations.operationId,
+        optional: true,
+      }),
+      snapshotCaptureOperation: helpers.one.capsuleSnapshotCaptureOperations({
+        from: helpers.capsuleOperations.id,
+        to: helpers.capsuleSnapshotCaptureOperations.operationId,
         optional: true,
       }),
       steps: helpers.many.capsuleOperationSteps({
@@ -279,6 +412,14 @@ export function defineCapsuleRelations(helpers: CapsuleRelationHelpers) {
         to: helpers.capsuleOperations.id,
         optional: true,
       }),
+      snapshotDependencies: helpers.many.capsuleSnapshotDependencyReferences({
+        from: helpers.capsuleBranchResources.id,
+        to: helpers.capsuleSnapshotDependencyReferences.sourceBranchResourceId,
+      }),
+      snapshotResources: helpers.many.capsuleSnapshotResourceReferences({
+        from: helpers.capsuleBranchResources.id,
+        to: helpers.capsuleSnapshotResourceReferences.sourceBranchResourceId,
+      }),
     },
     capsuleSnapshots: {
       capsule: helpers.one.capsules({
@@ -290,6 +431,143 @@ export function defineCapsuleRelations(helpers: CapsuleRelationHelpers) {
         from: helpers.capsuleSnapshots.sourceBranchId,
         to: helpers.capsuleBranches.id,
         optional: false,
+      }),
+      manifest: helpers.one.capsuleArtifactManifests({
+        from: helpers.capsuleSnapshots.id,
+        to: helpers.capsuleArtifactManifests.snapshotId,
+        optional: false,
+      }),
+      captureOperation: helpers.one.capsuleSnapshotCaptureOperations({
+        from: helpers.capsuleSnapshots.id,
+        to: helpers.capsuleSnapshotCaptureOperations.snapshotId,
+        optional: true,
+      }),
+      gitRepositories: helpers.many.capsuleSnapshotGitRepositories({
+        from: helpers.capsuleSnapshots.id,
+        to: helpers.capsuleSnapshotGitRepositories.snapshotId,
+      }),
+      dependencies: helpers.many.capsuleSnapshotDependencyReferences({
+        from: helpers.capsuleSnapshots.id,
+        to: helpers.capsuleSnapshotDependencyReferences.snapshotId,
+      }),
+      resourceReferences: helpers.many.capsuleSnapshotResourceReferences({
+        from: helpers.capsuleSnapshots.id,
+        to: helpers.capsuleSnapshotResourceReferences.snapshotId,
+      }),
+    },
+    capsuleArtifactManifests: {
+      snapshot: helpers.one.capsuleSnapshots({
+        from: helpers.capsuleArtifactManifests.snapshotId,
+        to: helpers.capsuleSnapshots.id,
+        optional: false,
+      }),
+      roots: helpers.many.capsuleArtifactManifestRoots({
+        from: helpers.capsuleArtifactManifests.id,
+        to: helpers.capsuleArtifactManifestRoots.manifestId,
+      }),
+    },
+    capsuleArtifactManifestRoots: {
+      manifest: helpers.one.capsuleArtifactManifests({
+        from: helpers.capsuleArtifactManifestRoots.manifestId,
+        to: helpers.capsuleArtifactManifests.id,
+        optional: false,
+      }),
+      entries: helpers.many.capsuleArtifactEntries({
+        from: helpers.capsuleArtifactManifestRoots.id,
+        to: helpers.capsuleArtifactEntries.manifestRootId,
+      }),
+      gitRepositories: helpers.many.capsuleSnapshotGitRepositories({
+        from: helpers.capsuleArtifactManifestRoots.id,
+        to: helpers.capsuleSnapshotGitRepositories.manifestRootId,
+      }),
+      dependencies: helpers.many.capsuleSnapshotDependencyReferences({
+        from: helpers.capsuleArtifactManifestRoots.id,
+        to: helpers.capsuleSnapshotDependencyReferences.manifestRootId,
+      }),
+      resourceReferences: helpers.many.capsuleSnapshotResourceReferences({
+        from: helpers.capsuleArtifactManifestRoots.id,
+        to: helpers.capsuleSnapshotResourceReferences.manifestRootId,
+      }),
+    },
+    capsuleArtifactEntries: {
+      root: helpers.one.capsuleArtifactManifestRoots({
+        from: helpers.capsuleArtifactEntries.manifestRootId,
+        to: helpers.capsuleArtifactManifestRoots.id,
+        optional: false,
+      }),
+    },
+    capsuleSnapshotGitRepositories: {
+      snapshot: helpers.one.capsuleSnapshots({
+        from: helpers.capsuleSnapshotGitRepositories.snapshotId,
+        to: helpers.capsuleSnapshots.id,
+        optional: false,
+      }),
+      root: helpers.one.capsuleArtifactManifestRoots({
+        from: helpers.capsuleSnapshotGitRepositories.manifestRootId,
+        to: helpers.capsuleArtifactManifestRoots.id,
+        optional: false,
+      }),
+      remotes: helpers.many.capsuleSnapshotGitRemotes({
+        from: helpers.capsuleSnapshotGitRepositories.id,
+        to: helpers.capsuleSnapshotGitRemotes.repositoryId,
+      }),
+    },
+    capsuleSnapshotGitRemotes: {
+      repository: helpers.one.capsuleSnapshotGitRepositories({
+        from: helpers.capsuleSnapshotGitRemotes.repositoryId,
+        to: helpers.capsuleSnapshotGitRepositories.id,
+        optional: false,
+      }),
+    },
+    capsuleSnapshotDependencyReferences: {
+      snapshot: helpers.one.capsuleSnapshots({
+        from: helpers.capsuleSnapshotDependencyReferences.snapshotId,
+        to: helpers.capsuleSnapshots.id,
+        optional: false,
+      }),
+      root: helpers.one.capsuleArtifactManifestRoots({
+        from: helpers.capsuleSnapshotDependencyReferences.manifestRootId,
+        to: helpers.capsuleArtifactManifestRoots.id,
+        optional: false,
+      }),
+      sourceResource: helpers.one.capsuleBranchResources({
+        from: helpers.capsuleSnapshotDependencyReferences.sourceBranchResourceId,
+        to: helpers.capsuleBranchResources.id,
+        optional: false,
+      }),
+    },
+    capsuleSnapshotResourceReferences: {
+      snapshot: helpers.one.capsuleSnapshots({
+        from: helpers.capsuleSnapshotResourceReferences.snapshotId,
+        to: helpers.capsuleSnapshots.id,
+        optional: false,
+      }),
+      root: helpers.one.capsuleArtifactManifestRoots({
+        from: helpers.capsuleSnapshotResourceReferences.manifestRootId,
+        to: helpers.capsuleArtifactManifestRoots.id,
+        optional: false,
+      }),
+      sourceResource: helpers.one.capsuleBranchResources({
+        from: helpers.capsuleSnapshotResourceReferences.sourceBranchResourceId,
+        to: helpers.capsuleBranchResources.id,
+        optional: false,
+      }),
+    },
+    capsuleSnapshotCaptureOperations: {
+      operation: helpers.one.capsuleOperations({
+        from: helpers.capsuleSnapshotCaptureOperations.operationId,
+        to: helpers.capsuleOperations.id,
+        optional: false,
+      }),
+      sourceBranch: helpers.one.capsuleBranches({
+        from: helpers.capsuleSnapshotCaptureOperations.sourceBranchId,
+        to: helpers.capsuleBranches.id,
+        optional: false,
+      }),
+      snapshot: helpers.one.capsuleSnapshots({
+        from: helpers.capsuleSnapshotCaptureOperations.snapshotId,
+        to: helpers.capsuleSnapshots.id,
+        optional: true,
       }),
     },
   }

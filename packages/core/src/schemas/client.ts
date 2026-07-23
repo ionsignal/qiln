@@ -2,7 +2,7 @@ export * from './capsule/actor'
 export * from './capsule/branch'
 export * from './capsule/lifecycle'
 export * from './capsule/operations'
-export * from './capsule/snapshots'
+export * from './capsule/snapshot/record'
 
 export {
   CapsuleArtifactManifestDigestSchema,
@@ -10,6 +10,18 @@ export {
 } from './capsule/artifact/reference'
 
 export type { CapsuleArtifactManifestDigest, CapsuleArtifactManifestReference } from './capsule/artifact/reference'
+
+export {
+  CapsuleSnapshotCapturePolicyDigestSchema,
+  CapsuleSnapshotCapturePolicyPinSchemaVersionSchema,
+  CapsuleSnapshotCapturePolicyReferenceSchema,
+} from './capsule/snapshot/policy'
+
+export type {
+  CapsuleSnapshotCapturePolicyDigest,
+  CapsuleSnapshotCapturePolicyReference,
+} from './capsule/snapshot/policy'
+
 export type {
   CapsuleBlueprintDigest,
   CapsuleBlueprintManifest,
