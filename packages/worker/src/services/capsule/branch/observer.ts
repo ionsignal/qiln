@@ -19,7 +19,7 @@ export class CapsuleBranchRuntimeObserver {
 
   public async observe(ownerId: string, branchName: string): Promise<CapsuleBranchRuntimeObservation> {
     const namespace = this.project.getNamespace(ownerId)
-    const project = this.incus.UseProject(namespace)
+    const project = this.incus.project(namespace)
     try {
       const { data } = await project.instances.state(branchName)
       if (data.status === 'Running') {

@@ -11,7 +11,7 @@ import type {
   CapsuleOperationRequestHash,
 } from '@qiln/core/server'
 import type { IncusFilePushOptions } from '../../../../incus/client/types'
-import type { IncusDeviceMap } from '../../../../schemas/incus'
+import type { IncusDeviceMap } from '../../../../incus/client'
 import type { ManagedVolume, ProvisioningFileTarget } from '../../resource/bootstrap/targets'
 import type { CapsuleOperationTransitionOutput } from '../shared'
 

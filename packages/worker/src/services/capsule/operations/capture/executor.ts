@@ -2,6 +2,7 @@ import {
   CapsuleOperationType,
   CapsuleSnapshotLimitation,
   CapsuleSnapshotMode,
+  ExperimentalCapsuleSnapshotLimitations,
   type CapsuleSnapshotLimitationValue,
 } from '@qiln/core/server'
 import { IncusError } from '../../../../errors'
@@ -101,7 +102,7 @@ export class CaptureExecutor {
         CaptureStepKey.COLLECT,
         {
           rootCount: capture.plan.roots.length,
-          collectionSource: 'source_volume',
+          collectionSource: 'provider_snapshot_rest',
         },
         async () => {
           const projects = new Set(capture.plan.roots.map(root => root.project))
@@ -121,7 +122,7 @@ export class CaptureExecutor {
               operationId,
             })
           }
-          const project = this.dependencies.incus.UseProject(projectName)
+          const project = this.dependencies.incus.project(projectName)
           return await this.dependencies.collector.collect({
             operationId,
             policy: capture.capturePolicy,
@@ -189,16 +190,28 @@ export class CaptureExecutor {
     collection: readonly CapsuleSnapshotLimitationValue[],
     git: readonly CapsuleSnapshotLimitationValue[],
   ): CapsuleSnapshotLimitationValue[] {
-    const limitations = new Set<CapsuleSnapshotLimitationValue>([
+    const reported = new Set<CapsuleSnapshotLimitationValue>([
       ...collection,
       ...git,
       CapsuleSnapshotLimitation.DEPENDENCY_EVIDENCE_OMITTED,
-      CapsuleSnapshotLimitation.SOURCE_VOLUME_COLLECTION,
-      CapsuleSnapshotLimitation.SECRET_POLICY_UNVERIFIED,
     ])
-    return [...limitations]
+    const expected = ExperimentalCapsuleSnapshotLimitations
+    const unexpected = [...reported].filter(limitation => !expected.includes(limitation))
+    const missing = expected.filter(limitation => !reported.has(limitation))
+    if (unexpected.length > 0 || missing.length > 0) {
+      throw new IncusError(
+        'Experimental Snapshot Capture collectors produced an unexpected limitation set.',
+        'CONFLICT',
+        {
+          expectedLimitations: expected,
+          reportedLimitations: [...reported],
+          unexpectedLimitations: unexpected,
+          missingLimitations: missing,
+        },
+      )
+    }
+    return [...expected]
   }
-
   private async fail(
     operationId: string,
     execution: CaptureExecutionInput | null,
@@ -253,7 +266,6 @@ export class CaptureExecutor {
         return
       }
     }
-
     const terminal = await this.dependencies.repository.classify(operationId, error, {
       ...context,
       compensationAttempted: true,
@@ -261,7 +273,6 @@ export class CaptureExecutor {
       compensationFailures: compensation.failures,
       captureResources: resources.map(resource => this.describeResource(resource)),
     })
-
     if (terminal) {
       this.publish(terminal)
     }

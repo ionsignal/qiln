@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+
 import {
   CapsuleArtifactEntryType,
   CapsuleArtifactManifestSchema,
@@ -13,8 +14,13 @@ import {
   type CapsuleSnapshotLimitationValue,
 } from '@qiln/core/server'
 import { IncusError } from '../../../../errors'
-import type { IncusStorageFilesClient, IncusStorageFileEntry } from '../../../../incus/client/storage/files'
+import type {
+  IncusStorageFilesClient,
+  IncusStorageReadEntry,
+  IncusStorageSnapshotFilesClient,
+} from '../../../../incus/client/storage/files'
 import type { CaptureRootPlan } from './types'
+import type { ReadableStreamReadResult } from 'node:stream/web'
 
 const DEFAULT_MAX_ENTRIES = 25_000
 const DEFAULT_MAX_FILE_SIZE_BYTES = 256 * 1024 * 1024
@@ -48,6 +54,7 @@ export interface CaptureCollectionResult {
 
 interface CollectionState {
   startedAt: number
+  deadlineAt: number
   entryCount: number
   totalBytes: number
   entries: CapsuleArtifactEntry[]
@@ -57,12 +64,11 @@ interface CollectionState {
 
 interface RootCollectionContext {
   operationId: string
-  policy: CapsuleSnapshotCapturePolicyPin
   root: CapsuleSnapshotCapturePolicyPin['artifactRoots'][number]
-  plan: CaptureRootPlan
-  files: IncusStorageFilesClient
+  snapshot: IncusStorageSnapshotFilesClient
   limits: CaptureCollectionLimits
   state: CollectionState
+  signal: AbortSignal
   externalBoundaries: Set<string>
 }
 
@@ -108,12 +114,20 @@ function relativePath(logicalPath: string, rootPath: string): string {
   return logicalPath.slice(rootPath === '/' ? 1 : rootPath.length + 1)
 }
 
-function assertWithinDeadline(context: RootCollectionContext): void {
-  if (Date.now() - context.state.startedAt > context.limits.timeoutMs) {
-    throw new IncusError('Experimental Snapshot Capture artifact collection timed out.', 'TRANSPORT_ERROR', {
-      operationId: context.operationId,
-      timeoutMs: context.limits.timeoutMs,
-    })
+function collectionTimeoutError(operationId: string, timeoutMs: number): IncusError {
+  return new IncusError('Experimental Snapshot Capture artifact collection timed out.', 'TRANSPORT_ERROR', {
+    operationId,
+    timeoutMs,
+  })
+}
+
+function throwIfCollectionExpired(context: RootCollectionContext): void {
+  if (context.signal.aborted || Date.now() >= context.state.deadlineAt) {
+    const reason = context.signal.reason
+    if (reason instanceof IncusError) {
+      throw reason
+    }
+    throw collectionTimeoutError(context.operationId, context.limits.timeoutMs)
   }
 }
 
@@ -152,7 +166,7 @@ function requiredPathIdentity(rootId: string, path: string): string {
   return `${rootId}\u0000${path}`
 }
 
-function recordRequiredPath(context: RootCollectionContext, logicalPath: string, entry: IncusStorageFileEntry): void {
+function recordRequiredPath(context: RootCollectionContext, logicalPath: string, entry: IncusStorageReadEntry): void {
   const relative = relativePath(logicalPath, context.root.logicalPath)
   if (relative === '.') {
     return
@@ -176,7 +190,7 @@ function recordRequiredPath(context: RootCollectionContext, logicalPath: string,
 function recordRequiredExclusion(
   context: RootCollectionContext,
   logicalPath: string,
-  entry: IncusStorageFileEntry,
+  entry: IncusStorageReadEntry,
 ): void {
   const relative = relativePath(logicalPath, context.root.logicalPath)
   const exclusion = context.root.exclusions.find(candidate => candidate.path === relative)
@@ -198,7 +212,7 @@ function recordRequiredExclusion(
 function createDirectoryEntry(
   context: RootCollectionContext,
   logicalPath: string,
-  entry: Extract<IncusStorageFileEntry, { type: 'directory' }>,
+  entry: Extract<IncusStorageReadEntry, { type: 'directory' }>,
 ): CapsuleArtifactEntry {
   return {
     rootId: context.root.id,
@@ -211,32 +225,68 @@ function createDirectoryEntry(
   }
 }
 
-function createFileEntry(
+async function createFileEntry(
   context: RootCollectionContext,
   logicalPath: string,
-  entry: Extract<IncusStorageFileEntry, { type: 'file' }>,
-): CapsuleArtifactEntry {
-  if (entry.data.byteLength > context.limits.maxFileSizeBytes) {
-    throw new IncusError('Experimental Snapshot Capture file exceeds the configured file-size limit.', 'CONFLICT', {
-      operationId: context.operationId,
-      artifactRootId: context.root.id,
-      logicalPath,
-      size: entry.data.byteLength,
-      maxFileSizeBytes: context.limits.maxFileSizeBytes,
-    })
+  entry: Extract<IncusStorageReadEntry, { type: 'file' }>,
+): Promise<CapsuleArtifactEntry> {
+  const hash = createHash('sha256')
+  const reader = entry.stream.getReader()
+  let size = 0
+  let reachedEof = false
+  try {
+    while (true) {
+      throwIfCollectionExpired(context)
+      let result: ReadableStreamReadResult<Uint8Array>
+      try {
+        result = await reader.read()
+      } catch (error: unknown) {
+        if (context.signal.aborted || Date.now() >= context.state.deadlineAt) {
+          throw collectionTimeoutError(context.operationId, context.limits.timeoutMs)
+        }
+        throw error
+      }
+      if (result.done) {
+        reachedEof = true
+        break
+      }
+      const chunk = result.value
+      const nextSize = size + chunk.byteLength
+      if (!Number.isSafeInteger(nextSize) || nextSize > context.limits.maxFileSizeBytes) {
+        throw new IncusError('Experimental Snapshot Capture file exceeds the configured file-size limit.', 'CONFLICT', {
+          operationId: context.operationId,
+          artifactRootId: context.root.id,
+          logicalPath,
+          size: nextSize,
+          maxFileSizeBytes: context.limits.maxFileSizeBytes,
+        })
+      }
+      const nextTotalBytes = context.state.totalBytes + chunk.byteLength
+      if (!Number.isSafeInteger(nextTotalBytes) || nextTotalBytes > context.limits.maxTotalBytes) {
+        throw new IncusError('Experimental Snapshot Capture exceeded its total hashed-byte limit.', 'CONFLICT', {
+          operationId: context.operationId,
+          artifactRootId: context.root.id,
+          logicalPath,
+          totalBytes: nextTotalBytes,
+          maxTotalBytes: context.limits.maxTotalBytes,
+        })
+      }
+      size = nextSize
+      context.state.totalBytes = nextTotalBytes
+      hash.update(chunk)
+    }
+  } finally {
+    if (!reachedEof) {
+      try {
+        await reader.cancel()
+      } catch {
+        // The response stream may already be aborted by the collection deadline.
+      }
+    }
+    reader.releaseLock()
   }
-  const nextTotalBytes = context.state.totalBytes + entry.data.byteLength
-  if (!Number.isSafeInteger(nextTotalBytes) || nextTotalBytes > context.limits.maxTotalBytes) {
-    throw new IncusError('Experimental Snapshot Capture exceeded its total hashed-byte limit.', 'CONFLICT', {
-      operationId: context.operationId,
-      artifactRootId: context.root.id,
-      logicalPath,
-      totalBytes: nextTotalBytes,
-      maxTotalBytes: context.limits.maxTotalBytes,
-    })
-  }
-  context.state.totalBytes = nextTotalBytes
   return {
+    size,
     rootId: context.root.id,
     logicalPath,
     type: CapsuleArtifactEntryType.FILE,
@@ -244,21 +294,20 @@ function createFileEntry(
     uid: entry.metadata.uid,
     gid: entry.metadata.gid,
     modifiedAt: toCanonicalCapsuleArtifactTimestamp(entry.metadata.modifiedAt),
-    size: entry.data.byteLength,
-    contentDigest: `sha256:${createHash('sha256').update(entry.data).digest('hex')}`,
+    contentDigest: `sha256:${hash.digest('hex')}`,
   }
 }
 
 /**
- * Collects basic regular-file and directory evidence from the source custom
- * volume after a retained provider snapshot has been created.
+ * Collects canonical regular-file and directory evidence from exact retained
+ * custom-volume snapshots.
  *
- * TODO(snapshot-capture): Collect from the retained provider snapshot or from a
- * temporary clone of that snapshot. Source-volume collection is allowed only
- * for experimental, non-fork-ready captures.
+ * Every snapshot handle is created from the deterministic provider identity
+ * accepted into the operation-scoped capture resource ledger. Collection does
+ * not list, discover, infer, or adopt provider snapshots.
  *
- * TODO(snapshot-capture): Replace in-memory file reads with bounded streaming
- * hashing before increasing experimental collection limits.
+ * File content is hashed incrementally. A single collection-wide abort signal
+ * bounds pending REST requests and active response-stream consumption.
  */
 export class CaptureCollector {
   public async collect(input: CaptureCollectionInput): Promise<CaptureCollectionResult> {
@@ -270,72 +319,83 @@ export class CaptureCollector {
         policyRootCount: input.policy.artifactRoots.length,
       })
     }
+    const startedAt = Date.now()
+    const controller = new AbortController()
+    const timeoutError = collectionTimeoutError(input.operationId, limits.timeoutMs)
+    const timeout = setTimeout(() => {
+      if (!controller.signal.aborted) {
+        controller.abort(timeoutError)
+      }
+    }, limits.timeoutMs)
     const state: CollectionState = {
-      startedAt: Date.now(),
+      startedAt,
+      deadlineAt: startedAt + limits.timeoutMs,
       entryCount: 0,
       totalBytes: 0,
       entries: [],
       visitedRequiredPaths: new Set<string>(),
       visitedRequiredExclusions: new Set<string>(),
     }
-    const roots = [...input.policy.artifactRoots].sort((left, right) => compareStableString(left.id, right.id))
-    for (const root of roots) {
-      const plan = input.roots.find(candidate => candidate.artifactRootId === root.id)
-      if (!plan || plan.blueprintVolumeName !== root.blueprintVolumeName) {
-        throw new IncusError(`Snapshot Capture collection plan is missing artifact root '${root.id}'.`, 'CONFLICT', {
-          operationId: input.operationId,
-          artifactRootId: root.id,
-          blueprintVolumeName: root.blueprintVolumeName,
-        })
+    try {
+      const roots = [...input.policy.artifactRoots].sort((left, right) => compareStableString(left.id, right.id))
+      for (const root of roots) {
+        const plan = input.roots.find(candidate => candidate.artifactRootId === root.id)
+        if (!plan || plan.blueprintVolumeName !== root.blueprintVolumeName) {
+          throw new IncusError(`Snapshot Capture collection plan is missing artifact root '${root.id}'.`, 'CONFLICT', {
+            operationId: input.operationId,
+            artifactRootId: root.id,
+            blueprintVolumeName: root.blueprintVolumeName,
+          })
+        }
+        const snapshot = input.files.snapshot(plan.pool, plan.sourceVolume, plan.snapshotName)
+        const externalBoundaries = new Set(
+          input.policy.externalMounts.filter(mount => mount.artifactRootId === root.id).map(mount => mount.logicalPath),
+        )
+        await this.walk(
+          {
+            operationId: input.operationId,
+            root,
+            snapshot,
+            limits,
+            state,
+            signal: controller.signal,
+            externalBoundaries,
+          },
+          '/',
+          root.logicalPath,
+          0,
+        )
       }
-      const externalBoundaries = new Set(
-        input.policy.externalMounts.filter(mount => mount.artifactRootId === root.id).map(mount => mount.logicalPath),
-      )
-      await this.walk(
-        {
-          operationId: input.operationId,
-          policy: input.policy,
-          root,
-          plan,
-          files: input.files,
-          limits,
-          state,
-          externalBoundaries,
-        },
-        '/',
-        root.logicalPath,
-        0,
-      )
-    }
-
-    this.assertRequiredEvidence(input.operationId, input.policy, state)
-
-    const rawManifest = {
-      schemaVersion: 1,
-      roots: roots.map(root => ({
-        id: root.id,
-        logicalPath: root.logicalPath,
-      })),
-      entries: state.entries,
-    }
-    const parsedManifest = CapsuleArtifactManifestSchema.safeParse(rawManifest)
-    if (!parsedManifest.success) {
-      throw new IncusError(
-        'Experimental Snapshot Capture produced an invalid artifact manifest.',
-        'VALIDATION_ERROR',
-        parsedManifest.error,
-      )
-    }
-    const manifest = normalizeCapsuleArtifactManifest(parsedManifest.data)
-    return {
-      manifest,
-      digest: digestCapsuleArtifactManifest(manifest),
-      limitations: [
-        CapsuleSnapshotLimitation.SOURCE_VOLUME_COLLECTION,
-        CapsuleSnapshotLimitation.SECRET_POLICY_UNVERIFIED,
-      ],
-      entryCount: state.entryCount,
-      totalBytes: state.totalBytes,
+      this.assertRequiredEvidence(input.operationId, input.policy, state)
+      const rawManifest = {
+        schemaVersion: 1,
+        roots: roots.map(root => ({
+          id: root.id,
+          logicalPath: root.logicalPath,
+        })),
+        entries: state.entries,
+      }
+      const parsedManifest = CapsuleArtifactManifestSchema.safeParse(rawManifest)
+      if (!parsedManifest.success) {
+        throw new IncusError(
+          'Experimental Snapshot Capture produced an invalid artifact manifest.',
+          'VALIDATION_ERROR',
+          parsedManifest.error,
+        )
+      }
+      const manifest = normalizeCapsuleArtifactManifest(parsedManifest.data)
+      return {
+        manifest,
+        digest: digestCapsuleArtifactManifest(manifest),
+        limitations: [CapsuleSnapshotLimitation.SECRET_POLICY_UNVERIFIED],
+        entryCount: state.entryCount,
+        totalBytes: state.totalBytes,
+      }
+    } finally {
+      clearTimeout(timeout)
+      if (!controller.signal.aborted) {
+        controller.abort()
+      }
     }
   }
 
@@ -345,8 +405,7 @@ export class CaptureCollector {
     logicalPath: string,
     depth: number,
   ): Promise<void> {
-    assertWithinDeadline(context)
-
+    throwIfCollectionExpired(context)
     if (depth > context.limits.maxDepth) {
       throw new IncusError('Experimental Snapshot Capture exceeded its directory recursion limit.', 'CONFLICT', {
         operationId: context.operationId,
@@ -361,11 +420,28 @@ export class CaptureCollector {
     if (containsGitAdministrativeSegment(logicalPath)) {
       return
     }
-    const entry = await context.files.entry(context.plan.pool, context.plan.sourceVolume, internalPath)
+    let entry: IncusStorageReadEntry
+    try {
+      entry = await context.snapshot.get(internalPath, {
+        signal: context.signal,
+      })
+    } catch (error: unknown) {
+      if (context.signal.aborted || Date.now() >= context.state.deadlineAt) {
+        throw collectionTimeoutError(context.operationId, context.limits.timeoutMs)
+      }
+      throw error
+    }
     recordRequiredPath(context, logicalPath, entry)
     const exclusion = exclusionForPath(context, logicalPath)
     if (exclusion) {
       recordRequiredExclusion(context, logicalPath, entry)
+      if (entry.type === 'file') {
+        try {
+          await entry.stream.cancel()
+        } catch {
+          // The excluded file body is intentionally not consumed.
+        }
+      }
       return
     }
     if (entry.type === 'unsupported') {
@@ -376,12 +452,10 @@ export class CaptureCollector {
         providerType: entry.providerType,
       })
     }
-
     assertEntryCapacity(context)
-
     context.state.entryCount++
     if (entry.type === 'file') {
-      context.state.entries.push(createFileEntry(context, logicalPath, entry))
+      context.state.entries.push(await createFileEntry(context, logicalPath, entry))
       return
     }
     context.state.entries.push(createDirectoryEntry(context, logicalPath, entry))

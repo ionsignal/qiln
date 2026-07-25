@@ -3,7 +3,7 @@ import { IncusError } from '../../../errors'
 import {
   IncusCustomVolumeSnapshotCreatePayloadSchema,
   type IncusCustomVolumeSnapshotCreatePayload,
-} from '../../../schemas/incus'
+} from '../schemas/storage'
 import type { IIncusTransport } from '../types'
 
 /**
@@ -12,6 +12,9 @@ import type { IIncusTransport } from '../types'
  * Every operation requires a complete caller-supplied provider identity. This
  * client deliberately exposes no listing, discovery, adoption, or inferred
  * ownership behavior.
+ *
+ * A retained snapshot is later read through the Files API as the qualified
+ * volume identity `<source-volume>/<snapshot-name>`.
  */
 export class IncusStorageSnapshotsClient {
   constructor(private readonly transport: IIncusTransport) {}

@@ -6,6 +6,7 @@ import {
   CapsuleOperationType,
   CapsuleSnapshotLimitationsSchema,
   CapsuleSnapshotMode,
+  ExperimentalCapsuleSnapshotLimitations,
   capsuleArtifactEntriesTable,
   capsuleArtifactManifestRootsTable,
   capsuleArtifactManifestsTable,
@@ -520,20 +521,13 @@ export class CaptureCommitPersistence {
     operationId: string,
     limitations: readonly CapsuleSnapshotLimitationValue[],
   ): void {
-    const required = [
-      'git_evidence_omitted',
-      'dependency_evidence_omitted',
-      'source_volume_collection',
-      'secret_policy_unverified',
-    ] as const satisfies readonly CapsuleSnapshotLimitationValue[]
-
-    if (!sameLimitations(limitations, required)) {
+    if (!sameLimitations(limitations, ExperimentalCapsuleSnapshotLimitations)) {
       throw new IncusError(
         'Experimental Snapshot Capture must commit the complete Worker-owned limitation set.',
         'CONFLICT',
         {
           operationId,
-          expectedLimitations: required,
+          expectedLimitations: ExperimentalCapsuleSnapshotLimitations,
           actualLimitations: limitations,
         },
       )

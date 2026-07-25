@@ -1,9 +1,16 @@
-import { IncusTransport, ScopedIncusTransport } from './transport'
+import { IncusTransport } from './transport/client'
+import { ProjectTransport } from './transport/project'
 import { IncusInstancesClient } from './instances'
 import { IncusFilesClient } from './files'
 import { IncusStorageClient } from './storage/index'
 import { IncusProjectsClient } from './projects'
 import type { WorkerIncusConfig } from '../../types'
+
+export * from './schemas/response'
+export * from './schemas/state'
+export * from './schemas/instance'
+export * from './schemas/storage'
+export * from './schemas/project'
 
 export class IncusClient {
   private readonly transport: IncusTransport
@@ -16,7 +23,7 @@ export class IncusClient {
   constructor(config: WorkerIncusConfig = {}) {
     this.transport = new IncusTransport(config)
     const defaultProject = config.project ?? 'default'
-    const scoped = new ScopedIncusTransport(this.transport, defaultProject)
+    const scoped = new ProjectTransport(this.transport, defaultProject)
     this.projects = new IncusProjectsClient(this.transport)
     this.instances = new IncusInstancesClient(scoped)
     this.files = new IncusFilesClient(scoped)
@@ -27,7 +34,7 @@ export class IncusClient {
    * Pre-flight check to ensure transport connectivity.
    */
   public async init(): Promise<void> {
-    return this.transport.init()
+    await this.transport.init()
   }
 
   /**
@@ -35,20 +42,23 @@ export class IncusClient {
    * operations.
    */
   public destroy(): void {
-    return this.transport.destroy()
+    this.transport.destroy()
   }
 
   /**
    * Returns a set of sub-clients that are strictly scoped to a specific Incus
    * project, reusing the underlying WebSocket connection to prevent resource
    * exhaustion.
+   *
+   * The existing method name is retained because capsule services outside this
+   * refactor scope call it directly.
    */
-  public UseProject(project: string) {
-    const scopedTransport = new ScopedIncusTransport(this.transport, project)
+  public project(project: string) {
+    const transport = new ProjectTransport(this.transport, project)
     return {
-      instances: new IncusInstancesClient(scopedTransport),
-      files: new IncusFilesClient(scopedTransport),
-      storage: new IncusStorageClient(scopedTransport),
+      instances: new IncusInstancesClient(transport),
+      files: new IncusFilesClient(transport),
+      storage: new IncusStorageClient(transport),
     }
   }
 }

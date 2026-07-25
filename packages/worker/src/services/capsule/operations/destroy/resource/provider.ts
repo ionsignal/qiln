@@ -66,7 +66,7 @@ export class DestroyCapsuleProvider {
     target: DestroyCapsuleInstanceTarget,
   ): Promise<void> {
     await this.dependencies.resources.recordBranchResourceDeleteIntent(target.id, context.operationId)
-    const project = this.dependencies.incus.UseProject(target.namespace)
+    const project = this.dependencies.incus.project(target.namespace)
     try {
       let providerState: string
       try {
@@ -149,7 +149,7 @@ export class DestroyCapsuleProvider {
     target: DestroyCapsuleVolumeTarget,
   ): Promise<void> {
     await this.dependencies.resources.recordBranchResourceDeleteIntent(target.id, context.operationId)
-    const project = this.dependencies.incus.UseProject(target.namespace)
+    const project = this.dependencies.incus.project(target.namespace)
     try {
       try {
         await project.storage.delete(target.pool, target.volumeName)

@@ -1,17 +1,16 @@
 import { z } from 'zod'
 import { IncusError } from '../../errors'
 import {
-  IncusStateSchema,
   IncusInstanceSchema,
   IncusInstanceCreatePayloadSchema,
   IncusInstancePutSchema,
   IncusInstanceFullSchema,
-  type IncusState,
   type IncusInstance,
   type IncusInstanceCreatePayload,
   type IncusInstancePut,
   type IncusInstanceFull,
-} from '../../schemas/incus'
+} from './schemas/instance'
+import { IncusStateSchema, type IncusState } from './schemas/state'
 import type { IIncusTransport, IncusListOptions } from './types'
 
 export class IncusInstancesClient {

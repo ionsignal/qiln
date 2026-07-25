@@ -148,7 +148,7 @@ export class CapsuleBranchRuntimeService {
     mutation: BranchRuntimeMutation,
   ): Promise<void> {
     const namespace = this.dependencies.project.getNamespace(transition.ownerId)
-    const project = this.dependencies.incus.UseProject(namespace)
+    const project = this.dependencies.incus.project(namespace)
     if (mutation === 'start') {
       await project.instances.start(transition.branchName)
       return

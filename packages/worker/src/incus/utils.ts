@@ -1,4 +1,4 @@
-import type { IncusNetworkInterface } from '../schemas/incus'
+import type { IncusNetworkInterface } from '../incus/client'
 import type { IncusFilePushOptions } from './client/types'
 
 /**

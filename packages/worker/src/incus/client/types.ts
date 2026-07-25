@@ -1,25 +1,4 @@
-import type { IncusError } from '../../errors'
 import type { Response } from 'undici'
-
-/**
- * A pending asynchronous Incus operation.
- *
- * WebSocket events, HTTP probes, reconnect reconciliation, timeout expiry, and
- * transport shutdown all converge through the transport's guarded settlement
- * path. Callers must not invoke these callbacks directly.
- */
-export interface PendingOp {
-  resolve: () => void
-  reject: (error: IncusError) => void
-  deadlineAt: number
-  deadlineTimer: ReturnType<typeof setTimeout>
-  probeTimer: ReturnType<typeof setTimeout> | null
-  probeInFlight: boolean
-  settled: boolean
-  abortController: AbortController
-  project?: string
-  lastProbeError?: string
-}
 
 /**
  * Incus file push options shared between instance and storage file clients.

@@ -5,13 +5,17 @@ import {
   IncusVolumeClonePayloadSchema,
   type IncusVolumeCreatePayload,
   type IncusVolumeClonePayload,
-} from '../../../schemas/incus'
+} from '../schemas/storage'
 import { IncusStorageFilesClient } from './files'
 import { IncusStorageSnapshotsClient } from './snapshots'
 import type { IIncusTransport } from '../types'
 
 /**
  * Interfaces with the Incus Storage API to handle ZFS volume orchestration.
+ *
+ * Snapshot Capture must read the exact persisted snapshot identity through
+ * `files`, using `<source-volume>/<snapshot-name>` rather than provider
+ * discovery.
  */
 export class IncusStorageClient {
   public readonly files: IncusStorageFilesClient

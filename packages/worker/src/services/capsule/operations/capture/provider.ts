@@ -92,7 +92,7 @@ export class CaptureProvider {
 
   private async createRoot(operationId: string, root: CaptureRootPlan): Promise<CaptureResourceRecord> {
     const creating = await this.dependencies.resources.creating(operationId, root)
-    const project = this.dependencies.incus.UseProject(root.project)
+    const project = this.dependencies.incus.project(root.project)
 
     try {
       await project.storage.snapshots.create(root.pool, root.sourceVolume, root.snapshotName)
@@ -134,7 +134,7 @@ export class CaptureProvider {
 
   private async delete(operationId: string, resource: CaptureResourceRecord): Promise<CaptureResourceRecord> {
     const deleting = await this.dependencies.resources.deleting(operationId, resource.id)
-    const project = this.dependencies.incus.UseProject(deleting.project)
+    const project = this.dependencies.incus.project(deleting.project)
 
     try {
       await project.storage.snapshots.delete(deleting.pool, deleting.sourceVolume, deleting.snapshotName)

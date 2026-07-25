@@ -19,7 +19,7 @@ import type {
   CreateCapsuleResourcePlanInput,
   CreateCapsuleVolumeResource,
 } from './types'
-import type { IncusDeviceMap } from '../../../../schemas/incus'
+import type { IncusDeviceMap } from '../../../../incus/client'
 
 const SOURCE_PROJECT = 'default'
 

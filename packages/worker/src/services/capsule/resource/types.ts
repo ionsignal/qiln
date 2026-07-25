@@ -5,7 +5,7 @@ import type {
   CapsuleBranchResourceTypeValue,
 } from '@qiln/core/server'
 import type { IncusFilePushOptions } from '../../../incus/client/types'
-import type { IncusDeviceMap } from '../../../schemas/incus'
+import type { IncusDeviceMap } from '../../../incus/client'
 import type { ProvisioningFileTarget } from './bootstrap/targets'
 
 export type {

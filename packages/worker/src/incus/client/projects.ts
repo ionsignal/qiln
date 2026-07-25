@@ -5,7 +5,7 @@ import {
   IncusProjectCreatePayloadSchema,
   type IncusProject,
   type IncusProjectCreatePayload,
-} from '../../schemas/incus'
+} from './schemas/project'
 import type { IIncusTransport } from './types'
 
 /**

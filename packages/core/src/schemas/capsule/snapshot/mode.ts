@@ -19,7 +19,6 @@ export const CapsuleSnapshotModeSchema = z.enum(CapsuleSnapshotModeValues)
 export const CapsuleSnapshotLimitation = {
   GIT_EVIDENCE_OMITTED: 'git_evidence_omitted',
   DEPENDENCY_EVIDENCE_OMITTED: 'dependency_evidence_omitted',
-  SOURCE_VOLUME_COLLECTION: 'source_volume_collection',
   SECRET_POLICY_UNVERIFIED: 'secret_policy_unverified',
 } as const
 
@@ -28,7 +27,6 @@ export type CapsuleSnapshotLimitationValue = (typeof CapsuleSnapshotLimitation)[
 export const CapsuleSnapshotLimitationValues = [
   CapsuleSnapshotLimitation.GIT_EVIDENCE_OMITTED,
   CapsuleSnapshotLimitation.DEPENDENCY_EVIDENCE_OMITTED,
-  CapsuleSnapshotLimitation.SOURCE_VOLUME_COLLECTION,
   CapsuleSnapshotLimitation.SECRET_POLICY_UNVERIFIED,
 ] as const
 
@@ -55,14 +53,14 @@ export const CapsuleSnapshotLimitationsSchema = z
   })
 
 /**
- * The complete limitation set committed by the first experimental collector.
+ * The complete limitation set committed by the snapshot-backed experimental
+ * collector.
  *
  * This value is Worker-owned. It must never be accepted from browser input.
  */
 export const ExperimentalCapsuleSnapshotLimitations = [
   CapsuleSnapshotLimitation.GIT_EVIDENCE_OMITTED,
   CapsuleSnapshotLimitation.DEPENDENCY_EVIDENCE_OMITTED,
-  CapsuleSnapshotLimitation.SOURCE_VOLUME_COLLECTION,
   CapsuleSnapshotLimitation.SECRET_POLICY_UNVERIFIED,
 ] as const satisfies readonly CapsuleSnapshotLimitationValue[]
 

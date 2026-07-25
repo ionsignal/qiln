@@ -1,10 +1,12 @@
 import fs from 'node:fs'
 import { WebSocket, type ClientOptions, type RawData } from 'ws'
 import { Agent, fetch, type Response } from 'undici'
-import { IncusError } from '../../errors'
-import { INCUS_FINAL, IncusEventSchema, IncusOperationSchema, IncusResponseSchema } from '../../schemas/incus'
-import type { WorkerIncusConfig } from '../../types'
-import type { IIncusTransport, IncusRawRequestOptions, IncusRequestOptions, PendingOp } from './types'
+import { IncusError } from '../../../errors'
+import { INCUS_FINAL, IncusEventSchema, IncusOperationSchema, IncusResponseSchema } from '../schemas/response'
+import { detailsFromUnknown, messageFromUnknown } from './error'
+import type { WorkerIncusConfig } from '../../../types'
+import type { IIncusTransport, IncusRawRequestOptions, IncusRequestOptions } from '../types'
+import type { OperationDeadline, OperationSettlement, PendingOperation } from './types'
 
 /**
  * One overall deadline covers mutation submission, response parsing, pending
@@ -14,52 +16,6 @@ import type { IIncusTransport, IncusRawRequestOptions, IncusRequestOptions, Pend
 const OPERATION_TIMEOUT_MS = 120_000
 const OPERATION_PROBE_INTERVAL_MS = 2_000
 const MAX_RECONNECT_DELAY_MS = 30_000
-
-interface ProviderOperationDeadline {
-  path: string
-  deadlineAt: number
-  controller: AbortController
-  timer: ReturnType<typeof setTimeout> | null
-  operationId: string | null
-}
-
-type PendingOperationSettlement =
-  | {
-      ok: true
-    }
-  | {
-      ok: false
-      error: IncusError
-    }
-
-function errorMessageFromUnknown(error: unknown): string {
-  if (error instanceof Error && error.message) {
-    return error.message
-  }
-
-  if (typeof error === 'string' && error.trim() !== '') {
-    return error
-  }
-
-  return 'Unknown Incus transport failure'
-}
-
-function errorDetailsFromUnknown(error: unknown): Record<string, unknown> {
-  if (error instanceof Error) {
-    return {
-      name: error.name,
-      message: error.message,
-    }
-  }
-
-  if (typeof error === 'object' && error !== null && !Array.isArray(error)) {
-    return error as Record<string, unknown>
-  }
-
-  return {
-    value: error,
-  }
-}
 
 /**
  * Shared Incus transport.
@@ -72,8 +28,8 @@ function errorDetailsFromUnknown(error: unknown): Record<string, unknown> {
  * - An HTTP operation probe;
  * - Reconnect reconciliation.
  *
- * Every completion mechanism converges through `settlePendingOperation()`,
- * which guarantees exactly one terminal settlement per registered operation.
+ * Every completion mechanism converges through `settle()`, which guarantees
+ * exactly one terminal settlement per registered operation.
  */
 export class IncusTransport implements IIncusTransport {
   private readonly config: WorkerIncusConfig
@@ -86,12 +42,11 @@ export class IncusTransport implements IIncusTransport {
   private closed = false
   private retries = 0
 
-  private readonly pending = new Map<string, PendingOp>()
+  private readonly pending = new Map<string, PendingOperation>()
   private readonly operationControllers = new Set<AbortController>()
 
   constructor(config: WorkerIncusConfig = {}) {
     this.config = config
-
     const eventQuery = '&all-projects=true'
 
     if (this.config.socketPath) {
@@ -104,7 +59,6 @@ export class IncusTransport implements IIncusTransport {
         connections: 100,
         pipelining: 10,
       })
-
       return
     }
 
@@ -124,7 +78,6 @@ export class IncusTransport implements IIncusTransport {
         connections: 100,
         pipelining: 10,
       })
-
       return
     }
 
@@ -177,7 +130,7 @@ export class IncusTransport implements IIncusTransport {
     const shutdownError = this.createShutdownError()
 
     for (const operationId of [...this.pending.keys()]) {
-      this.settlePendingOperation(operationId, {
+      this.settle(operationId, {
         ok: false,
         error: shutdownError,
       })
@@ -221,8 +174,12 @@ export class IncusTransport implements IIncusTransport {
     this.assertOpen()
 
     const headers = this.buildHeaders(options)
-    const finalPath = this.applyQueryAttributes(path, options)
 
+    if (options?.body !== undefined && !headers.has('Content-Type')) {
+      headers.set('Content-Type', 'application/json')
+    }
+
+    const finalPath = this.applyQuery(path, options)
     let response: Response
 
     try {
@@ -234,11 +191,11 @@ export class IncusTransport implements IIncusTransport {
         signal: options?.signal,
       })
     } catch (error: unknown) {
-      throw new IncusError(`Incus transport request failed: ${errorMessageFromUnknown(error)}`, 'TRANSPORT_ERROR', {
+      throw new IncusError(`Incus transport request failed: ${messageFromUnknown(error)}`, 'TRANSPORT_ERROR', {
         path: finalPath,
         method,
         aborted: options?.signal?.aborted ?? false,
-        error: errorDetailsFromUnknown(error),
+        error: detailsFromUnknown(error),
       })
     }
 
@@ -251,7 +208,7 @@ export class IncusTransport implements IIncusTransport {
         path: finalPath,
         method,
         status: response.status,
-        error: errorDetailsFromUnknown(error),
+        error: detailsFromUnknown(error),
       })
     }
 
@@ -297,6 +254,10 @@ export class IncusTransport implements IIncusTransport {
 
   /**
    * Performs a raw Incus request for file operations.
+   *
+   * Raw byte requests must not inherit JSON content type. File uploads default
+   * to `application/octet-stream` unless the caller provides a more specific
+   * content type.
    */
   public async raw(path: string, method: string, options?: IncusRawRequestOptions): Promise<Response> {
     this.assertOpen()
@@ -307,8 +268,7 @@ export class IncusTransport implements IIncusTransport {
       headers.set('Content-Type', 'application/octet-stream')
     }
 
-    const finalPath = this.applyQueryAttributes(path, options)
-
+    const finalPath = this.applyQuery(path, options)
     let response: Response
 
     try {
@@ -320,11 +280,11 @@ export class IncusTransport implements IIncusTransport {
         signal: options?.signal,
       })
     } catch (error: unknown) {
-      throw new IncusError(`Incus transport request failed: ${errorMessageFromUnknown(error)}`, 'TRANSPORT_ERROR', {
+      throw new IncusError(`Incus transport request failed: ${messageFromUnknown(error)}`, 'TRANSPORT_ERROR', {
         path: finalPath,
         method,
         aborted: options?.signal?.aborted ?? false,
-        error: errorDetailsFromUnknown(error),
+        error: detailsFromUnknown(error),
       })
     }
 
@@ -377,13 +337,17 @@ export class IncusTransport implements IIncusTransport {
   public async operation(path: string, method: string, options?: IncusRequestOptions): Promise<void> {
     this.assertOpen()
 
-    const deadline = this.createOperationDeadline(path)
+    const deadline = this.createDeadline(path)
     this.operationControllers.add(deadline.controller)
 
     try {
       const headers = this.buildHeaders(options)
-      const finalPath = this.applyQueryAttributes(path, options)
 
+      if (options?.body !== undefined && !headers.has('Content-Type')) {
+        headers.set('Content-Type', 'application/json')
+      }
+
+      const finalPath = this.applyQuery(path, options)
       let response: Response
 
       try {
@@ -444,19 +408,19 @@ export class IncusTransport implements IIncusTransport {
         })
       }
 
-      this.assertOperationDeadlineAvailable(deadline)
+      this.assertDeadline(deadline)
 
       if (envelope.data.type === 'sync') {
         return
       }
 
       const operationId = envelope.data.metadata.id
-      const completion = this.registerPendingOperation(operationId, options?.project, deadline)
+      const completion = this.register(operationId, options?.project, deadline)
 
       await completion
     } finally {
       this.operationControllers.delete(deadline.controller)
-      this.disposeOperationDeadline(deadline)
+      this.disposeDeadline(deadline)
     }
   }
 
@@ -493,7 +457,6 @@ export class IncusTransport implements IIncusTransport {
         } catch {
           // A stale socket has no transport authority.
         }
-
         return
       }
 
@@ -514,7 +477,7 @@ export class IncusTransport implements IIncusTransport {
           return
         }
 
-        this.observeProviderOperation(event.data.metadata)
+        this.observe(event.data.metadata)
       } catch {
         console.warn('[IncusClient] Malformed event frame ignored; the stream remains active.')
       }
@@ -557,7 +520,7 @@ export class IncusTransport implements IIncusTransport {
    * Nonterminal observations leave the operation pending. Terminal WebSocket
    * events and terminal HTTP probe responses use this same path.
    */
-  private observeProviderOperation(metadata: unknown): void {
+  private observe(metadata: unknown): void {
     const parsed = IncusOperationSchema.safeParse(metadata)
 
     if (!parsed.success) {
@@ -571,14 +534,13 @@ export class IncusTransport implements IIncusTransport {
     }
 
     if (operation.status_code === 200) {
-      this.settlePendingOperation(operation.id, {
+      this.settle(operation.id, {
         ok: true,
       })
-
       return
     }
 
-    this.settlePendingOperation(operation.id, {
+    this.settle(operation.id, {
       ok: false,
       error: new IncusError(`Incus operation failed: ${operation.err ?? operation.status}`, 'API_ERROR', {
         operationId: operation.id,
@@ -593,12 +555,8 @@ export class IncusTransport implements IIncusTransport {
    * Registers an operation immediately after its ID is extracted from the
    * asynchronous HTTP response.
    */
-  private registerPendingOperation(
-    operationId: string,
-    project: string | undefined,
-    deadline: ProviderOperationDeadline,
-  ): Promise<void> {
-    this.assertOperationDeadlineAvailable(deadline)
+  private register(operationId: string, project: string | undefined, deadline: OperationDeadline): Promise<void> {
+    this.assertDeadline(deadline)
 
     if (this.pending.has(operationId)) {
       throw new IncusError(`Incus operation '${operationId}' is already pending in this transport.`, 'CONFLICT', {
@@ -616,7 +574,7 @@ export class IncusTransport implements IIncusTransport {
     deadline.operationId = operationId
 
     const completion = new Promise<void>((resolve, reject) => {
-      const pending: PendingOp = {
+      const pending: PendingOperation = {
         resolve,
         reject,
         deadlineAt: deadline.deadlineAt,
@@ -682,12 +640,12 @@ export class IncusTransport implements IIncusTransport {
         signal: pending.abortController.signal,
       })
 
-      this.observeProviderOperation(data)
+      this.observe(data)
     } catch (error: unknown) {
       const current = this.pending.get(operationId)
 
       if (current === pending && !current.settled) {
-        current.lastProbeError = errorMessageFromUnknown(error)
+        current.lastProbeError = messageFromUnknown(error)
       }
     } finally {
       const current = this.pending.get(operationId)
@@ -723,7 +681,7 @@ export class IncusTransport implements IIncusTransport {
   /**
    * Provides the only terminal settlement path for registered operations.
    */
-  private settlePendingOperation(operationId: string, settlement: PendingOperationSettlement): boolean {
+  private settle(operationId: string, settlement: OperationSettlement): boolean {
     const pending = this.pending.get(operationId)
 
     if (!pending || pending.settled) {
@@ -732,7 +690,6 @@ export class IncusTransport implements IIncusTransport {
 
     pending.settled = true
     this.pending.delete(operationId)
-
     clearTimeout(pending.deadlineTimer)
 
     if (pending.probeTimer) {
@@ -757,9 +714,9 @@ export class IncusTransport implements IIncusTransport {
    * Creates the one deadline that governs the complete provider-operation
    * lifecycle.
    */
-  private createOperationDeadline(path: string): ProviderOperationDeadline {
+  private createDeadline(path: string): OperationDeadline {
     const controller = new AbortController()
-    const deadline: ProviderOperationDeadline = {
+    const deadline: OperationDeadline = {
       path,
       deadlineAt: Date.now() + OPERATION_TIMEOUT_MS,
       controller,
@@ -780,7 +737,7 @@ export class IncusTransport implements IIncusTransport {
 
       const pending = this.pending.get(operationId)
 
-      this.settlePendingOperation(operationId, {
+      this.settle(operationId, {
         ok: false,
         error: this.createDeadlineError(path, operationId, pending?.lastProbeError),
       })
@@ -789,14 +746,14 @@ export class IncusTransport implements IIncusTransport {
     return deadline
   }
 
-  private disposeOperationDeadline(deadline: ProviderOperationDeadline): void {
+  private disposeDeadline(deadline: OperationDeadline): void {
     if (deadline.timer) {
       clearTimeout(deadline.timer)
       deadline.timer = null
     }
   }
 
-  private assertOperationDeadlineAvailable(deadline: ProviderOperationDeadline): void {
+  private assertDeadline(deadline: OperationDeadline): void {
     if (this.closed) {
       throw this.createShutdownError(deadline.operationId ?? undefined)
     }
@@ -809,7 +766,7 @@ export class IncusTransport implements IIncusTransport {
   private createSubmissionFailure(
     path: string,
     method: string,
-    deadline: ProviderOperationDeadline,
+    deadline: OperationDeadline,
     error: unknown,
   ): IncusError {
     if (this.closed) {
@@ -821,14 +778,14 @@ export class IncusTransport implements IIncusTransport {
     }
 
     return new IncusError(
-      `Incus provider mutation submission failed: ${errorMessageFromUnknown(error)}`,
+      `Incus provider mutation submission failed: ${messageFromUnknown(error)}`,
       'TRANSPORT_ERROR',
       {
         path,
         method,
         operationId: deadline.operationId,
         uncertainProviderOutcome: true,
-        error: errorDetailsFromUnknown(error),
+        error: detailsFromUnknown(error),
       },
     )
   }
@@ -867,12 +824,14 @@ export class IncusTransport implements IIncusTransport {
     )
   }
 
+  /**
+   * Builds common authentication, ETag, and caller-supplied headers.
+   *
+   * Content type is deliberately assigned by the JSON or raw request method so
+   * file uploads cannot accidentally inherit `application/json`.
+   */
   private buildHeaders(options?: IncusRequestOptions | IncusRawRequestOptions): Headers {
     const headers = new Headers()
-
-    if (options?.body !== undefined) {
-      headers.set('Content-Type', 'application/json')
-    }
 
     if (this.config.authToken) {
       headers.set('Authorization', `Basic ${Buffer.from(this.config.authToken).toString('base64')}`)
@@ -895,7 +854,7 @@ export class IncusTransport implements IIncusTransport {
    * Injects project scope without allowing it to overwrite an explicit project
    * or all-projects query.
    */
-  private applyQueryAttributes(path: string, options?: { project?: string }): string {
+  private applyQuery(path: string, options?: { project?: string }): string {
     const project = options?.project
 
     if (!project) {
@@ -917,43 +876,5 @@ export class IncusTransport implements IIncusTransport {
         transportShutdown: true,
       })
     }
-  }
-}
-
-/**
- * Project-scoped proxy over one shared Incus transport.
- *
- * Scoping reuses the same HTTP agent, WebSocket connection, pending-operation
- * registry, and overall operation deadlines.
- */
-export class ScopedIncusTransport implements IIncusTransport {
-  constructor(
-    private readonly transport: IIncusTransport,
-    private readonly project: string,
-  ) {}
-
-  public async request(
-    path: string,
-    method: string,
-    options?: IncusRequestOptions,
-  ): Promise<{ data: unknown; etag?: string }> {
-    return await this.transport.request(path, method, {
-      ...options,
-      project: this.project,
-    })
-  }
-
-  public async raw(path: string, method: string, options?: IncusRawRequestOptions): Promise<Response> {
-    return await this.transport.raw(path, method, {
-      ...options,
-      project: this.project,
-    })
-  }
-
-  public async operation(path: string, method: string, options?: IncusRequestOptions): Promise<void> {
-    return await this.transport.operation(path, method, {
-      ...options,
-      project: this.project,
-    })
   }
 }
