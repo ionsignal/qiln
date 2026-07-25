@@ -7,6 +7,7 @@ import {
   type IncusVolumeClonePayload,
 } from '../schemas/storage'
 import { IncusStorageFilesClient } from './files'
+import { volumeIdentity } from './identity'
 import { IncusStorageSnapshotsClient } from './snapshots'
 import type { IIncusTransport } from '../types'
 
@@ -27,8 +28,9 @@ export class IncusStorageClient {
   }
 
   public async create(pool: string, name: string, config?: Record<string, string>): Promise<void> {
+    const identity = volumeIdentity(pool, name)
     const rawPayload: IncusVolumeCreatePayload = {
-      name,
+      name: identity.volume,
       type: 'custom',
       content_type: 'filesystem',
       config,
@@ -37,7 +39,7 @@ export class IncusStorageClient {
     if (!parsed.success) {
       throw new IncusError('Invalid Incus Volume Create Payload', 'VALIDATION_ERROR', z.treeifyError(parsed.error))
     }
-    await this.transport.operation(`/storage-pools/${encodeURIComponent(pool)}/volumes/custom`, 'POST', {
+    await this.transport.operation(`/storage-pools/${encodeURIComponent(identity.pool)}/volumes/custom`, 'POST', {
       body: parsed.data,
     })
   }
@@ -51,20 +53,22 @@ export class IncusStorageClient {
     sourcePool?: string,
     volumeOnly?: boolean,
   ): Promise<void> {
-    if (sourcePool && sourcePool !== pool) {
+    const target = volumeIdentity(pool, name)
+    const source = volumeIdentity(sourcePool ?? target.pool, volume)
+    if (source.pool !== target.pool) {
       console.warn(
-        `[IncusStorageClient] WARNING: Cross-pool cloning detected from '${sourcePool}' to '${pool}'. ` +
+        `[IncusStorageClient] WARNING: Cross-pool cloning detected from '${source.pool}' to '${target.pool}'. ` +
           `This bypasses ZFS Copy-on-Write (CoW) and will trigger a heavy raw block copy (zfs send/recv) across physical drives.`,
       )
     }
     const rawPayload: IncusVolumeClonePayload = {
-      name,
+      name: target.volume,
       type: 'custom',
       source: {
-        name: volume,
+        name: source.volume,
         type: 'copy',
         project: sourceProject,
-        pool: sourcePool || pool,
+        pool: source.pool,
         volume_only: volumeOnly,
       },
       config,
@@ -73,14 +77,15 @@ export class IncusStorageClient {
     if (!parsed.success) {
       throw new IncusError('Invalid Incus Volume Clone Payload', 'VALIDATION_ERROR', z.treeifyError(parsed.error))
     }
-    await this.transport.operation(`/storage-pools/${encodeURIComponent(pool)}/volumes/custom`, 'POST', {
+    await this.transport.operation(`/storage-pools/${encodeURIComponent(target.pool)}/volumes/custom`, 'POST', {
       body: parsed.data,
     })
   }
 
   public async delete(pool: string, name: string): Promise<void> {
+    const identity = volumeIdentity(pool, name)
     await this.transport.operation(
-      `/storage-pools/${encodeURIComponent(pool)}/volumes/custom/${encodeURIComponent(name)}`,
+      `/storage-pools/${encodeURIComponent(identity.pool)}/volumes/custom/${encodeURIComponent(identity.volume)}`,
       'DELETE',
     )
   }

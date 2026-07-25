@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { IncusError } from '../../../errors'
 import { IncusFileDirectoryResponseSchema } from '../schemas/storage'
 import { buildIncusFileHeaders } from '../../utils'
+import { assertFilePath, snapshotIdentity, volumeIdentity, type IncusStorageSnapshotIdentity } from './identity'
 import type { IIncusTransport, IncusFilePushOptions } from '../types'
 import type { Response } from 'undici'
 
@@ -38,11 +39,9 @@ export interface IncusStorageReadOptions {
   signal?: AbortSignal
 }
 
-interface IncusStorageSnapshotIdentity {
+interface IncusStorageFileTarget {
   pool: string
-  sourceVolume: string
-  snapshotName: string
-  qualifiedVolume: string
+  volume: string
 }
 
 function readProviderHeader(response: Response, name: string): string | null {
@@ -123,62 +122,6 @@ function assertCanonicalEntryName(name: string, context: string): void {
   }
 }
 
-function assertStoragePath(value: string): void {
-  if (value === '/') {
-    return
-  }
-  if (!value.startsWith('/') || value.endsWith('/') || value.includes('\0')) {
-    throw new IncusError('Incus storage file path must be a canonical absolute POSIX path.', 'VALIDATION_ERROR', {
-      path: value,
-    })
-  }
-  const segments = value.slice(1).split('/')
-  if (segments.some(segment => segment === '' || segment === '.' || segment === '..')) {
-    throw new IncusError('Incus storage file path must be a canonical absolute POSIX path.', 'VALIDATION_ERROR', {
-      path: value,
-    })
-  }
-}
-
-function assertProviderIdentity(value: string, field: string): void {
-  if (
-    value.length === 0 ||
-    value.trim() !== value ||
-    value.length > 255 ||
-    value.includes('/') ||
-    /[\u0000-\u001f\u007f]/.test(value)
-  ) {
-    throw new IncusError(`Incus snapshot ${field} is invalid.`, 'VALIDATION_ERROR', {
-      field,
-      value,
-    })
-  }
-}
-
-function createSnapshotIdentity(
-  pool: string,
-  sourceVolume: string,
-  snapshotName: string,
-): IncusStorageSnapshotIdentity {
-  assertProviderIdentity(pool, 'pool')
-  assertProviderIdentity(sourceVolume, 'source volume')
-  assertProviderIdentity(snapshotName, 'name')
-  const qualifiedVolume = `${sourceVolume}/${snapshotName}`
-  if (qualifiedVolume.length > 511) {
-    throw new IncusError('Qualified Incus snapshot volume identity is too long.', 'VALIDATION_ERROR', {
-      sourceVolume,
-      snapshotName,
-      length: qualifiedVolume.length,
-    })
-  }
-  return {
-    pool,
-    sourceVolume,
-    snapshotName,
-    qualifiedVolume,
-  }
-}
-
 async function cancelResponseBody(response: Response): Promise<void> {
   const body = response.body
   if (!body || body.locked) {
@@ -217,29 +160,31 @@ async function parseDirectory(response: Response, path: string): Promise<string[
 
 async function requestEntry(
   transport: IIncusTransport,
-  pool: string,
-  volume: string,
+  target: IncusStorageFileTarget,
   path: string,
   options: IncusStorageReadOptions = {},
 ): Promise<Response> {
-  assertStoragePath(path)
+  assertFilePath(path)
+
   const queryPath = encodeURIComponent(path)
-  const requestOptions = options.signal === undefined ? undefined : { signal: options.signal }
-  return await transport.raw(
-    `/storage-pools/${encodeURIComponent(pool)}/volumes/custom/${encodeURIComponent(volume)}/files?path=${queryPath}`,
+  return await transport.readRaw(
+    `/storage-pools/${encodeURIComponent(target.pool)}/volumes/custom/${encodeURIComponent(target.volume)}/files?path=${queryPath}`,
     'GET',
-    requestOptions,
+    options.signal === undefined
+      ? undefined
+      : {
+          signal: options.signal,
+        },
   )
 }
 
 async function openEntry(
   transport: IIncusTransport,
-  pool: string,
-  volume: string,
+  target: IncusStorageFileTarget,
   path: string,
   options: IncusStorageReadOptions = {},
 ): Promise<IncusStorageReadEntry> {
-  const response = await requestEntry(transport, pool, volume, path, options)
+  const response = await requestEntry(transport, target, path, options)
   let providerType: string
   let metadata: IncusStorageFileMetadata
   try {
@@ -253,8 +198,8 @@ async function openEntry(
   if (providerType === 'file') {
     if (!response.body) {
       throw new IncusError('Incus regular-file response has no readable body.', 'VALIDATION_ERROR', {
-        pool,
-        volume,
+        pool: target.pool,
+        volume: target.volume,
         path,
       })
     }
@@ -298,7 +243,7 @@ export class IncusStorageSnapshotFilesClient {
     sourceVolume: string,
     snapshotName: string,
   ) {
-    this.identityValue = createSnapshotIdentity(pool, sourceVolume, snapshotName)
+    this.identityValue = snapshotIdentity(pool, sourceVolume, snapshotName)
   }
 
   public get identity(): Readonly<IncusStorageSnapshotIdentity> {
@@ -312,7 +257,15 @@ export class IncusStorageSnapshotFilesClient {
    * must cancel the stream if it exits before reaching EOF.
    */
   public async get(path: string, options: IncusStorageReadOptions = {}): Promise<IncusStorageReadEntry> {
-    return await openEntry(this.transport, this.identityValue.pool, this.identityValue.qualifiedVolume, path, options)
+    return await openEntry(
+      this.transport,
+      {
+        pool: this.identityValue.pool,
+        volume: this.identityValue.qualifiedVolume,
+      },
+      path,
+      options,
+    )
   }
 }
 
@@ -334,11 +287,14 @@ export class IncusStorageFilesClient {
     content: Uint8Array | string,
     options: IncusFilePushOptions = {},
   ): Promise<void> {
-    assertStoragePath(path)
+    const identity = volumeIdentity(pool, volume)
+
+    assertFilePath(path)
+
     const queryPath = encodeURIComponent(path)
     const headers = buildIncusFileHeaders(options)
-    await this.transport.raw(
-      `/storage-pools/${encodeURIComponent(pool)}/volumes/custom/${encodeURIComponent(volume)}/files?path=${queryPath}`,
+    await this.transport.mutateRaw(
+      `/storage-pools/${encodeURIComponent(identity.pool)}/volumes/custom/${encodeURIComponent(identity.volume)}/files?path=${queryPath}`,
       'POST',
       {
         body: content,
@@ -348,10 +304,13 @@ export class IncusStorageFilesClient {
   }
 
   public async delete(pool: string, volume: string, path: string): Promise<void> {
-    assertStoragePath(path)
+    const identity = volumeIdentity(pool, volume)
+
+    assertFilePath(path)
+
     const queryPath = encodeURIComponent(path)
-    await this.transport.request(
-      `/storage-pools/${encodeURIComponent(pool)}/volumes/custom/${encodeURIComponent(volume)}/files?path=${queryPath}`,
+    await this.transport.mutate(
+      `/storage-pools/${encodeURIComponent(identity.pool)}/volumes/custom/${encodeURIComponent(identity.volume)}/files?path=${queryPath}`,
       'DELETE',
     )
   }

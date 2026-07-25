@@ -1,873 +1,317 @@
-import fs from 'node:fs'
-import { WebSocket, type ClientOptions, type RawData } from 'ws'
-import { Agent, fetch, type Response } from 'undici'
 import { IncusError } from '../../../errors'
-import { INCUS_FINAL, IncusEventSchema, IncusOperationSchema, IncusResponseSchema } from '../schemas/response'
-import { detailsFromUnknown, messageFromUnknown } from './error'
+import { IncusEvents } from './events'
+import { IncusHttp, resolveIncusEndpoints } from './http'
+import { IncusOperations } from './operations'
+import {
+  data as responseData,
+  isObservedTerminalProviderFailure,
+  operation as responseOperation,
+  parseIncusResponse,
+  readError,
+} from './response'
+import { detailsFromUnknown } from './error'
 import type { WorkerIncusConfig } from '../../../types'
-import type { IIncusTransport, IncusRawRequestOptions, IncusRequestOptions } from '../types'
-import type { OperationDeadline, OperationSettlement, PendingOperation } from './types'
+import type {
+  IIncusTransport,
+  IncusMutationOptions,
+  IncusOperationOptions,
+  IncusRawMutationOptions,
+  IncusRawReadOptions,
+  IncusRequestOptions,
+} from '../types'
+import type { OperationAttempt } from './types'
+import type { Response } from 'undici'
 
 /**
- * One overall deadline covers mutation submission, response parsing, pending
- * registration, WebSocket observation, HTTP probing, and reconnect
- * reconciliation.
- */
-const OPERATION_TIMEOUT_MS = 120_000
-const OPERATION_PROBE_INTERVAL_MS = 2_000
-const MAX_RECONNECT_DELAY_MS = 30_000
-
-/**
- * Shared Incus transport.
+ * Shared Incus transport façade.
  *
- * Async provider operations do not depend on WebSocket readiness for progress.
- * Once an Incus operation ID is returned, it is registered immediately and may
- * complete through either:
+ * Focused internal components own:
  *
- * - A terminal WebSocket event;
- * - An HTTP operation probe;
- * - Reconnect reconciliation.
+ * - HTTP endpoint, agent, headers, and dispatch;
+ * - Incus response parsing and provider-outcome classification;
+ * - Async operation deadlines, probes, and one-time settlement;
+ * - WebSocket connection and reconnect lifecycle.
  *
- * Every completion mechanism converges through `settle()`, which guarantees
- * exactly one terminal settlement per registered operation.
+ * Reads and mutations use distinct public methods. Synchronous mutations
+ * resolve only after a successful Incus response envelope has been consumed and
+ * validated. Raw reads remain stream-backed and transfer response ownership to
+ * the caller.
+ *
+ * WebSocket readiness is never required for provider-operation progress. Once
+ * an async operation ID is returned, HTTP probing and WebSocket observation
+ * independently converge through the operation tracker's settlement boundary.
  */
 export class IncusTransport implements IIncusTransport {
-  private readonly config: WorkerIncusConfig
-  private readonly baseUrl: string
-  private readonly wsUrl: string
-  private readonly agent: Agent
+  private readonly http: IncusHttp
+  private readonly operations: IncusOperations
+  private readonly events: IncusEvents
 
-  private ws: WebSocket | null = null
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private closed = false
-  private retries = 0
-
-  private readonly pending = new Map<string, PendingOperation>()
-  private readonly operationControllers = new Set<AbortController>()
 
   constructor(config: WorkerIncusConfig = {}) {
-    this.config = config
-    const eventQuery = '&all-projects=true'
-
-    if (this.config.socketPath) {
-      this.baseUrl = 'http://localhost/1.0'
-      this.wsUrl = `ws+unix://${this.config.socketPath}:/1.0/events?type=operation${eventQuery}`
-      this.agent = new Agent({
-        connect: {
-          socketPath: this.config.socketPath,
-        },
-        connections: 100,
-        pipelining: 10,
-      })
-      return
-    }
-
-    if (this.config.url) {
-      this.baseUrl = `${this.config.url}/1.0`
-      this.wsUrl = `${this.config.url.replace(/^http/, 'ws')}/1.0/events?type=operation${eventQuery}`
-      this.agent = new Agent({
-        connect: {
-          rejectUnauthorized: this.config.rejectUnauthorized ?? false,
-          ...(this.config.cert && this.config.key
+    const endpoints = resolveIncusEndpoints(config)
+    this.http = new IncusHttp(config, endpoints)
+    this.operations = new IncusOperations({
+      probe: async (operationId, project, signal) => {
+        const { data } = await this.readInternal(
+          `/operations/${encodeURIComponent(operationId)}`,
+          'GET',
+          project === undefined
             ? {
-                cert: this.config.cert,
-                key: this.config.key,
+                signal,
               }
-            : {}),
-        },
-        connections: 100,
-        pipelining: 10,
-      })
-      return
-    }
+            : {
+                project,
+                signal,
+              },
+        )
 
-    throw new IncusError('Invalid Incus config: Must provide socketPath OR url', 'TRANSPORT_ERROR')
+        return data
+      },
+    })
+    this.events = new IncusEvents({
+      config,
+      endpoints,
+      observe: operation => {
+        this.operations.observe(operation)
+      },
+      reconcile: async () => {
+        await this.operations.reconcile()
+      },
+    })
   }
 
   /**
-   * Performs the local Unix-socket preflight and starts the event stream.
-   *
-   * Provider operations do not wait indefinitely for this stream. HTTP probing
-   * remains an independent completion path while the stream is unavailable.
+   * Performs local HTTP preflight and starts the operation event stream.
    */
   public async init(): Promise<void> {
     this.assertOpen()
-
-    if (this.config.socketPath) {
-      try {
-        fs.accessSync(this.config.socketPath, fs.constants.R_OK | fs.constants.W_OK)
-      } catch {
-        throw new IncusError(
-          `Cannot access Incus socket at ${this.config.socketPath}. Ensure the Node.js process has correct permissions.`,
-          'TRANSPORT_ERROR',
-        )
-      }
-    }
-
-    this.connect()
+    this.http.init()
+    this.events.start()
   }
 
   /**
-   * Closes provider connectivity and rejects all registered asynchronous
-   * operations through the same guarded settlement path used by normal
-   * completion.
-   *
-   * HTTP mutation submissions that have not yet returned an operation ID are
-   * also aborted. Their provider outcome must be treated as unknown.
+   * Closes provider connectivity and rejects every submitting or registered
+   * async operation as an uncertain provider outcome.
    */
   public destroy(): void {
     if (this.closed) {
       return
     }
-
     this.closed = true
-
-    if (this.reconnectTimer) {
-      clearTimeout(this.reconnectTimer)
-      this.reconnectTimer = null
-    }
-
-    const shutdownError = this.createShutdownError()
-
-    for (const operationId of [...this.pending.keys()]) {
-      this.settle(operationId, {
-        ok: false,
-        error: shutdownError,
-      })
-    }
-
-    for (const controller of this.operationControllers) {
-      if (!controller.signal.aborted) {
-        controller.abort()
-      }
-    }
-
-    const ws = this.ws
-    this.ws = null
-
-    if (ws) {
-      try {
-        ws.close(1000, 'shutting down')
-      } catch {
-        // The socket may already be closing as part of a transport failure.
-      }
-    }
-
-    try {
-      void this.agent.destroy().catch((error: unknown) => {
-        console.warn('[IncusClient] Failed to destroy the Incus HTTP agent during shutdown.', error)
-      })
-    } catch (error: unknown) {
-      console.warn('[IncusClient] Failed to begin Incus HTTP agent shutdown.', error)
-    }
+    this.events.stop()
+    this.operations.close()
+    this.http.close()
   }
 
   /**
-   * Performs a synchronous Incus request and validates the universal response
+   * Performs a synchronous Incus read and validates the universal response
    * envelope.
    */
-  public async request(
+  public async read(
     path: string,
     method: string,
     options?: IncusRequestOptions,
   ): Promise<{ data: unknown; etag?: string }> {
     this.assertOpen()
-
-    const headers = this.buildHeaders(options)
-
-    if (options?.body !== undefined && !headers.has('Content-Type')) {
-      headers.set('Content-Type', 'application/json')
-    }
-
-    const finalPath = this.applyQuery(path, options)
-    let response: Response
-
-    try {
-      response = await fetch(`${this.baseUrl}${finalPath}`, {
-        method,
-        dispatcher: this.agent,
-        body: options?.body === undefined ? undefined : JSON.stringify(options.body),
-        headers,
-        signal: options?.signal,
-      })
-    } catch (error: unknown) {
-      throw new IncusError(`Incus transport request failed: ${messageFromUnknown(error)}`, 'TRANSPORT_ERROR', {
-        path: finalPath,
-        method,
-        aborted: options?.signal?.aborted ?? false,
-        error: detailsFromUnknown(error),
-      })
-    }
-
-    let raw: unknown
-
-    try {
-      raw = await response.json()
-    } catch (error: unknown) {
-      throw new IncusError('Failed to parse Incus response JSON.', 'VALIDATION_ERROR', {
-        path: finalPath,
-        method,
-        status: response.status,
-        error: detailsFromUnknown(error),
-      })
-    }
-
-    const envelope = IncusResponseSchema.safeParse(raw)
-
-    if (!envelope.success) {
-      throw new IncusError('Malformed Incus Response Envelope', 'VALIDATION_ERROR', envelope.error.format())
-    }
-
-    if (envelope.data.type === 'error') {
-      if (envelope.data.error_code === 404) {
-        throw new IncusError(envelope.data.error, 'NOT_FOUND')
-      }
-
-      if (envelope.data.error_code === 401 || envelope.data.error_code === 403) {
-        throw new IncusError(envelope.data.error, 'FORBIDDEN', {
-          code: envelope.data.error_code,
-        })
-      }
-
-      if (envelope.data.error_code === 409) {
-        throw new IncusError(envelope.data.error, 'CONFLICT', {
-          code: envelope.data.error_code,
-        })
-      }
-
-      throw new IncusError(envelope.data.error, 'API_ERROR', {
-        code: envelope.data.error_code,
-      })
-    }
-
-    if (envelope.data.type === 'async') {
-      throw new IncusError('Expected sync response, got async operation', 'API_ERROR')
-    }
-
-    const etag = response.headers.get('etag') ?? undefined
-
-    return {
-      data: envelope.data.metadata,
-      etag,
-    }
+    return await this.readInternal(path, method, options)
   }
 
   /**
-   * Performs a raw Incus request for file operations.
+   * Performs a synchronous JSON mutation.
    *
-   * Raw byte requests must not inherit JSON content type. File uploads default
-   * to `application/octet-stream` unless the caller provides a more specific
-   * content type.
+   * A successful mutation must return a valid synchronous Incus envelope.
+   * Malformed, asynchronous, non-successful, or transport-ambiguous responses
+   * become uncertain provider outcomes unless Incus positively supplied a
+   * terminal error envelope.
    */
-  public async raw(path: string, method: string, options?: IncusRawRequestOptions): Promise<Response> {
+  public async mutate(path: string, method: string, options?: IncusMutationOptions): Promise<void> {
     this.assertOpen()
+    await this.mutateInternal(path, method, async () => {
+      return await this.http.json(path, method, options)
+    })
+  }
 
-    const headers = this.buildHeaders(options)
-
-    if (options?.body !== undefined && !headers.has('Content-Type')) {
-      headers.set('Content-Type', 'application/octet-stream')
-    }
-
-    const finalPath = this.applyQuery(path, options)
-    let response: Response
-
-    try {
-      response = await fetch(`${this.baseUrl}${finalPath}`, {
-        method,
-        dispatcher: this.agent,
-        body: options?.body,
-        headers,
-        signal: options?.signal,
-      })
-    } catch (error: unknown) {
-      throw new IncusError(`Incus transport request failed: ${messageFromUnknown(error)}`, 'TRANSPORT_ERROR', {
-        path: finalPath,
-        method,
-        aborted: options?.signal?.aborted ?? false,
-        error: detailsFromUnknown(error),
-      })
-    }
-
+  /**
+   * Performs a raw Incus read for Files API operations.
+   *
+   * Successful responses remain stream-backed and are owned by the caller.
+   */
+  public async readRaw(path: string, method: string, options?: IncusRawReadOptions): Promise<Response> {
+    this.assertOpen()
+    const response = await this.http.raw(path, method, options)
     if (response.ok) {
       return response
     }
+    throw await readError(response, path, method)
+  }
 
-    let errorMessage = `HTTP Error ${response.status}`
-    const textBody = await response.text().catch(() => '')
-
-    if (textBody) {
-      try {
-        const raw: unknown = JSON.parse(textBody)
-        const envelope = IncusResponseSchema.safeParse(raw)
-
-        if (envelope.success && envelope.data.type === 'error') {
-          errorMessage = envelope.data.error
-        } else {
-          errorMessage = textBody
-        }
-      } catch {
-        errorMessage = textBody
-      }
-    }
-
-    if (response.status === 404) {
-      throw new IncusError(errorMessage, 'NOT_FOUND')
-    }
-
-    if (response.status === 401 || response.status === 403) {
-      throw new IncusError(errorMessage, 'FORBIDDEN')
-    }
-
-    if (response.status === 409) {
-      throw new IncusError(errorMessage, 'CONFLICT')
-    }
-
-    throw new IncusError(errorMessage, 'API_ERROR', {
-      code: response.status,
+  /**
+   * Performs a raw Incus mutation for Files API operations.
+   *
+   * The response is consumed and validated before this method resolves. A
+   * caller cannot receive an already-consumed Response.
+   */
+  public async mutateRaw(path: string, method: string, options?: IncusRawMutationOptions): Promise<void> {
+    this.assertOpen()
+    await this.mutateInternal(path, method, async () => {
+      return await this.http.raw(path, method, options)
     })
   }
 
   /**
    * Performs one bounded asynchronous Incus mutation.
    *
-   * The deadline starts before HTTP submission. Once an asynchronous response
-   * exposes an operation ID, the operation is registered synchronously before
-   * waiting for either the event stream or a probe.
+   * The overall deadline begins before HTTP submission. No provider mutation is
+   * retried, and only the exact operation ID returned by Incus may be tracked
+   * or probed.
+   *
+   * Positively observed terminal provider failures take precedence over an
+   * attempt deadline reached while receiving or parsing that response. A
+   * deadline cannot erase stronger terminal evidence already supplied by
+   * Incus.
    */
-  public async operation(path: string, method: string, options?: IncusRequestOptions): Promise<void> {
+  public async operation(path: string, method: string, options?: IncusOperationOptions): Promise<void> {
     this.assertOpen()
-
-    const deadline = this.createDeadline(path)
-    this.operationControllers.add(deadline.controller)
-
+    const attempt = this.operations.begin(path)
     try {
-      const headers = this.buildHeaders(options)
-
-      if (options?.body !== undefined && !headers.has('Content-Type')) {
-        headers.set('Content-Type', 'application/json')
-      }
-
-      const finalPath = this.applyQuery(path, options)
       let response: Response
-
       try {
-        response = await fetch(`${this.baseUrl}${finalPath}`, {
-          method,
-          dispatcher: this.agent,
-          body: options?.body === undefined ? undefined : JSON.stringify(options.body),
-          headers,
-          signal: deadline.controller.signal,
+        response = await this.http.json(path, method, {
+          ...options,
+          signal: attempt.controller.signal,
         })
       } catch (error: unknown) {
-        throw this.createSubmissionFailure(path, method, deadline, error)
+        throw this.mutationError(path, method, error, attempt)
       }
-
-      if (response.status === 401 || response.status === 403) {
-        throw new IncusError(`Incus Transport Error: ${response.status} Unauthorized/Forbidden`, 'FORBIDDEN')
-      }
-
-      let raw: unknown
-
+      let parsed: Awaited<ReturnType<typeof parseIncusResponse>>
       try {
-        raw = await response.json()
-      } catch (error: unknown) {
-        throw this.createSubmissionFailure(path, method, deadline, error)
-      }
-
-      const envelope = IncusResponseSchema.safeParse(raw)
-
-      if (!envelope.success) {
-        throw new IncusError('Malformed Incus Response Envelope', 'VALIDATION_ERROR', {
-          validation: envelope.error.format(),
+        parsed = await parseIncusResponse(response, {
           path,
           method,
-          uncertainProviderOutcome: true,
+          mutation: true,
         })
+      } catch (error: unknown) {
+        throw this.mutationError(path, method, error, attempt)
       }
-
-      if (envelope.data.type === 'error') {
-        if (envelope.data.error_code === 404) {
-          throw new IncusError(envelope.data.error, 'NOT_FOUND')
-        }
-
-        if (envelope.data.error_code === 401 || envelope.data.error_code === 403) {
-          throw new IncusError(envelope.data.error, 'FORBIDDEN', {
-            code: envelope.data.error_code,
-          })
-        }
-
-        if (envelope.data.error_code === 409) {
-          throw new IncusError(envelope.data.error, 'CONFLICT', {
-            code: envelope.data.error_code,
-          })
-        }
-
-        throw new IncusError(envelope.data.error, 'API_ERROR', {
-          code: envelope.data.error_code,
-          terminalProviderStateObserved: true,
-        })
-      }
-
-      this.assertDeadline(deadline)
-
-      if (envelope.data.type === 'sync') {
-        return
-      }
-
-      const operationId = envelope.data.metadata.id
-      const completion = this.register(operationId, options?.project, deadline)
-
-      await completion
-    } finally {
-      this.operationControllers.delete(deadline.controller)
-      this.disposeDeadline(deadline)
-    }
-  }
-
-  /**
-   * Starts the Incus event stream without making provider-operation progress
-   * depend on its readiness.
-   */
-  private connect(): void {
-    if (this.ws !== null || this.closed) {
-      return
-    }
-
-    const options: ClientOptions = {
-      headers: {},
-    }
-
-    if (!this.config.socketPath) {
-      options.rejectUnauthorized = this.config.rejectUnauthorized ?? false
-      options.cert = this.config.cert
-      options.key = this.config.key
-
-      if (this.config.authToken) {
-        options.headers!['Authorization'] = `Basic ${Buffer.from(this.config.authToken).toString('base64')}`
-      }
-    }
-
-    const socket = new WebSocket(this.wsUrl, options)
-    this.ws = socket
-
-    socket.on('open', () => {
-      if (this.closed || this.ws !== socket) {
-        try {
-          socket.close(1000, 'stale connection')
-        } catch {
-          // A stale socket has no transport authority.
-        }
-        return
-      }
-
-      this.retries = 0
-      void this.reconcile()
-    })
-
-    socket.on('message', (data: RawData) => {
-      if (this.closed || this.ws !== socket) {
-        return
-      }
-
+      let result: ReturnType<typeof responseOperation>
       try {
-        const raw: unknown = JSON.parse(data.toString())
-        const event = IncusEventSchema.safeParse(raw)
-
-        if (!event.success || event.data.type !== 'operation') {
-          return
-        }
-
-        this.observe(event.data.metadata)
-      } catch {
-        console.warn('[IncusClient] Malformed event frame ignored; the stream remains active.')
+        /**
+         * Interpret a valid Incus error envelope before applying deadline
+         * uncertainty. Positively observed terminal failure is stronger
+         * evidence than local timer state.
+         */
+        result = responseOperation(parsed, {
+          path,
+          method,
+        })
+      } catch (error: unknown) {
+        throw this.mutationError(path, method, error, attempt)
       }
-    })
-
-    socket.on('error', error => {
-      console.error('[IncusClient] Event stream error:', error.message)
-    })
-
-    socket.on('close', () => {
-      if (this.ws === socket) {
-        this.ws = null
-      }
-
-      if (!this.closed) {
-        this.reconnect()
-      }
-    })
-  }
-
-  private reconnect(): void {
-    if (this.closed || this.reconnectTimer) {
-      return
-    }
-
-    const delay = Math.min(1_000 * Math.pow(2, this.retries), MAX_RECONNECT_DELAY_MS)
-    this.retries++
-
-    console.warn(`[IncusClient] Event stream disconnected. Reconnecting in ${delay}ms (attempt ${this.retries})...`)
-
-    this.reconnectTimer = setTimeout(() => {
-      this.reconnectTimer = null
-      this.connect()
-    }, delay)
-  }
-
-  /**
-   * Applies a positively observed Incus operation state.
-   *
-   * Nonterminal observations leave the operation pending. Terminal WebSocket
-   * events and terminal HTTP probe responses use this same path.
-   */
-  private observe(metadata: unknown): void {
-    const parsed = IncusOperationSchema.safeParse(metadata)
-
-    if (!parsed.success) {
-      return
-    }
-
-    const operation = parsed.data
-
-    if (!INCUS_FINAL.has(operation.status_code)) {
-      return
-    }
-
-    if (operation.status_code === 200) {
-      this.settle(operation.id, {
-        ok: true,
-      })
-      return
-    }
-
-    this.settle(operation.id, {
-      ok: false,
-      error: new IncusError(`Incus operation failed: ${operation.err ?? operation.status}`, 'API_ERROR', {
-        operationId: operation.id,
-        status: operation.status,
-        code: operation.status_code,
-        terminalProviderStateObserved: true,
-      }),
-    })
-  }
-
-  /**
-   * Registers an operation immediately after its ID is extracted from the
-   * asynchronous HTTP response.
-   */
-  private register(operationId: string, project: string | undefined, deadline: OperationDeadline): Promise<void> {
-    this.assertDeadline(deadline)
-
-    if (this.pending.has(operationId)) {
-      throw new IncusError(`Incus operation '${operationId}' is already pending in this transport.`, 'CONFLICT', {
-        operationId,
-        path: deadline.path,
-      })
-    }
-
-    const deadlineTimer = deadline.timer
-
-    if (!deadlineTimer) {
-      throw this.createDeadlineError(deadline.path, operationId)
-    }
-
-    deadline.operationId = operationId
-
-    const completion = new Promise<void>((resolve, reject) => {
-      const pending: PendingOperation = {
-        resolve,
-        reject,
-        deadlineAt: deadline.deadlineAt,
-        deadlineTimer,
-        probeTimer: null,
-        probeInFlight: false,
-        settled: false,
-        abortController: deadline.controller,
-        ...(project === undefined ? {} : { project }),
-      }
-
-      this.pending.set(operationId, pending)
-    })
-
-    /**
-     * The initial probe recovers a terminal result whose WebSocket event
-     * arrived before local pending registration. Subsequent probes remain
-     * available even while the event stream is disconnected.
-     */
-    this.scheduleProbe(operationId, 0)
-
-    return completion
-  }
-
-  private scheduleProbe(operationId: string, delayMs = OPERATION_PROBE_INTERVAL_MS): void {
-    const pending = this.pending.get(operationId)
-
-    if (!pending || pending.settled || pending.probeTimer) {
-      return
-    }
-
-    pending.probeTimer = setTimeout(() => {
-      const current = this.pending.get(operationId)
-
-      if (!current || current !== pending || current.settled) {
+      this.operations.assert(attempt)
+      if (result.kind === 'sync') {
         return
       }
-
-      current.probeTimer = null
-      void this.probe(operationId)
-    }, delayMs)
-  }
-
-  /**
-   * Probes a registered operation over HTTP.
-   *
-   * Probe failures are retained as deadline diagnostics but do not settle the
-   * provider operation. A transient probe failure is not proof of either
-   * provider success or failure.
-   */
-  private async probe(operationId: string): Promise<void> {
-    const pending = this.pending.get(operationId)
-
-    if (!pending || pending.settled || pending.probeInFlight) {
-      return
-    }
-
-    pending.probeInFlight = true
-
-    try {
-      const { data } = await this.request(`/operations/${encodeURIComponent(operationId)}`, 'GET', {
-        project: pending.project,
-        signal: pending.abortController.signal,
-      })
-
-      this.observe(data)
-    } catch (error: unknown) {
-      const current = this.pending.get(operationId)
-
-      if (current === pending && !current.settled) {
-        current.lastProbeError = messageFromUnknown(error)
-      }
+      await this.operations.add(attempt, result.operationId, options?.project)
     } finally {
-      const current = this.pending.get(operationId)
-
-      if (current === pending && !current.settled) {
-        current.probeInFlight = false
-        this.scheduleProbe(operationId)
-      }
+      this.operations.end(attempt)
     }
   }
 
-  /**
-   * Reconciles every currently registered operation when the event stream
-   * reconnects.
-   *
-   * Reconciliation observes only operation IDs already returned by prior
-   * mutations. It never discovers or adopts provider ownership.
-   */
-  private async reconcile(): Promise<void> {
-    const operationIds = [...this.pending.keys()]
-
-    if (operationIds.length === 0) {
-      return
-    }
-
-    console.log(
-      `[IncusClient] Reconciling ${operationIds.length} in-flight operation(s) after event-stream connection.`,
-    )
-
-    await Promise.allSettled(operationIds.map(operationId => this.probe(operationId)))
-  }
-
-  /**
-   * Provides the only terminal settlement path for registered operations.
-   */
-  private settle(operationId: string, settlement: OperationSettlement): boolean {
-    const pending = this.pending.get(operationId)
-
-    if (!pending || pending.settled) {
-      return false
-    }
-
-    pending.settled = true
-    this.pending.delete(operationId)
-    clearTimeout(pending.deadlineTimer)
-
-    if (pending.probeTimer) {
-      clearTimeout(pending.probeTimer)
-      pending.probeTimer = null
-    }
-
-    if (!pending.abortController.signal.aborted) {
-      pending.abortController.abort()
-    }
-
-    if (settlement.ok) {
-      pending.resolve()
-    } else {
-      pending.reject(settlement.error)
-    }
-
-    return true
-  }
-
-  /**
-   * Creates the one deadline that governs the complete provider-operation
-   * lifecycle.
-   */
-  private createDeadline(path: string): OperationDeadline {
-    const controller = new AbortController()
-    const deadline: OperationDeadline = {
-      path,
-      deadlineAt: Date.now() + OPERATION_TIMEOUT_MS,
-      controller,
-      timer: null,
-      operationId: null,
-    }
-
-    deadline.timer = setTimeout(() => {
-      if (!controller.signal.aborted) {
-        controller.abort()
-      }
-
-      const operationId = deadline.operationId
-
-      if (!operationId) {
-        return
-      }
-
-      const pending = this.pending.get(operationId)
-
-      this.settle(operationId, {
-        ok: false,
-        error: this.createDeadlineError(path, operationId, pending?.lastProbeError),
-      })
-    }, OPERATION_TIMEOUT_MS)
-
-    return deadline
-  }
-
-  private disposeDeadline(deadline: OperationDeadline): void {
-    if (deadline.timer) {
-      clearTimeout(deadline.timer)
-      deadline.timer = null
-    }
-  }
-
-  private assertDeadline(deadline: OperationDeadline): void {
-    if (this.closed) {
-      throw this.createShutdownError(deadline.operationId ?? undefined)
-    }
-
-    if (deadline.controller.signal.aborted || Date.now() >= deadline.deadlineAt) {
-      throw this.createDeadlineError(deadline.path, deadline.operationId ?? undefined)
-    }
-  }
-
-  private createSubmissionFailure(
+  private async readInternal(
     path: string,
     method: string,
-    deadline: OperationDeadline,
-    error: unknown,
-  ): IncusError {
-    if (this.closed) {
-      return this.createShutdownError(deadline.operationId ?? undefined)
-    }
-
-    if (deadline.controller.signal.aborted || Date.now() >= deadline.deadlineAt) {
-      return this.createDeadlineError(path, deadline.operationId ?? undefined)
-    }
-
-    return new IncusError(
-      `Incus provider mutation submission failed: ${messageFromUnknown(error)}`,
-      'TRANSPORT_ERROR',
-      {
-        path,
-        method,
-        operationId: deadline.operationId,
-        uncertainProviderOutcome: true,
-        error: detailsFromUnknown(error),
-      },
-    )
+    options?: IncusRequestOptions,
+  ): Promise<{ data: unknown; etag?: string }> {
+    const response = await this.http.json(path, method, options)
+    const parsed = await parseIncusResponse(response, {
+      path,
+      method,
+    })
+    return responseData(parsed, {
+      path,
+      method,
+    })
   }
 
-  private createDeadlineError(path: string, operationId?: string, lastProbeError?: string): IncusError {
+  /**
+   * Central synchronous mutation boundary shared by JSON and raw byte
+   * mutations.
+   *
+   * The submitted response is always interpreted with mutation context. This
+   * prevents malformed or non-Incus responses from being mistaken for definite
+   * provider rejection and prevents async envelopes from escaping a synchronous
+   * mutation API.
+   */
+  private async mutateInternal(path: string, method: string, submit: () => Promise<Response>): Promise<void> {
+    try {
+      const response = await submit()
+      const parsed = await parseIncusResponse(response, {
+        path,
+        method,
+        mutation: true,
+      })
+      responseData(parsed, {
+        path,
+        method,
+        mutation: true,
+      })
+    } catch (error: unknown) {
+      throw this.mutationError(path, method, error)
+    }
+  }
+
+  /**
+   * Preserves only positively observed terminal provider failures.
+   *
+   * Every other mutation error is normalized to transport uncertainty,
+   * including malformed envelopes, unreadable responses, unexpected HTTP
+   * statuses, unsupported asynchronous synchronous-mutation responses, request
+   * transport failures, and expired async attempts.
+   *
+   * Terminal provider evidence is checked before attempt expiry so a deadline
+   * cannot erase a valid terminal Incus error response.
+   */
+  private mutationError(path: string, method: string, error: unknown, attempt?: OperationAttempt): IncusError {
+    if (isObservedTerminalProviderFailure(error)) {
+      return error
+    }
+    if (attempt && (attempt.controller.signal.aborted || Date.now() >= attempt.deadlineAt)) {
+      this.operations.assert(attempt)
+    }
     const details: Record<string, unknown> = {
       path,
-      operationId: operationId ?? null,
-      timeoutMs: OPERATION_TIMEOUT_MS,
+      method,
+      operationId: attempt?.operationId ?? null,
       uncertainProviderOutcome: true,
       terminalProviderStateObserved: false,
+      error: this.errorDetails(error),
     }
-
-    if (lastProbeError !== undefined) {
-      details.lastProbeError = lastProbeError
+    if (error instanceof IncusError && error.details !== undefined) {
+      details.responseDetails = error.details
     }
-
     return new IncusError(
-      operationId
-        ? `Incus operation '${operationId}' exceeded its overall deadline; the provider outcome is unknown.`
-        : 'Incus provider mutation exceeded its overall deadline; the provider outcome is unknown.',
+      error instanceof Error && error.message
+        ? `Incus provider mutation outcome is uncertain: ${error.message}`
+        : 'Incus provider mutation outcome is uncertain.',
       'TRANSPORT_ERROR',
       details,
     )
   }
 
-  private createShutdownError(operationId?: string): IncusError {
-    return new IncusError(
-      'Incus client is shutting down; the provider operation outcome may be unknown.',
-      'TRANSPORT_ERROR',
-      {
-        operationId: operationId ?? null,
-        uncertainProviderOutcome: true,
-        transportShutdown: true,
-      },
-    )
-  }
-
-  /**
-   * Builds common authentication, ETag, and caller-supplied headers.
-   *
-   * Content type is deliberately assigned by the JSON or raw request method so
-   * file uploads cannot accidentally inherit `application/json`.
-   */
-  private buildHeaders(options?: IncusRequestOptions | IncusRawRequestOptions): Headers {
-    const headers = new Headers()
-
-    if (this.config.authToken) {
-      headers.set('Authorization', `Basic ${Buffer.from(this.config.authToken).toString('base64')}`)
-    }
-
-    if (options?.etag) {
-      headers.set('If-Match', options.etag)
-    }
-
-    if (options?.headers) {
-      for (const [key, value] of Object.entries(options.headers)) {
-        headers.set(key, value)
+  private errorDetails(error: unknown): Record<string, unknown> {
+    if (error instanceof IncusError) {
+      const details: Record<string, unknown> = {
+        name: error.name,
+        message: error.message,
+        code: error.code,
       }
+      if (error.details !== undefined) {
+        details.details = error.details
+      }
+      return details
     }
-
-    return headers
-  }
-
-  /**
-   * Injects project scope without allowing it to overwrite an explicit project
-   * or all-projects query.
-   */
-  private applyQuery(path: string, options?: { project?: string }): string {
-    const project = options?.project
-
-    if (!project) {
-      return path
-    }
-
-    const url = new URL(path, 'http://localhost')
-
-    if (!url.searchParams.has('project') && !url.searchParams.has('all-projects')) {
-      url.searchParams.set('project', project)
-    }
-
-    return `${url.pathname}${url.search}`
+    return detailsFromUnknown(error)
   }
 
   private assertOpen(): void {

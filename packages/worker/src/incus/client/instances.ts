@@ -20,12 +20,15 @@ export class IncusInstancesClient {
    * Fetches the current state of a specific instance.
    */
   public async state(name: string): Promise<{ data: IncusState; etag?: string }> {
-    const { data, etag } = await this.transport.request(`/instances/${encodeURIComponent(name)}/state`, 'GET')
+    const { data, etag } = await this.transport.read(`/instances/${encodeURIComponent(name)}/state`, 'GET')
     const parsed = IncusStateSchema.safeParse(data)
     if (!parsed.success) {
       throw new IncusError('Failed to parse Incus state metadata', 'VALIDATION_ERROR', z.treeifyError(parsed.error))
     }
-    return { data: parsed.data, etag }
+    return {
+      data: parsed.data,
+      etag,
+    }
   }
 
   /**
@@ -33,7 +36,7 @@ export class IncusInstancesClient {
    * device maps with ETags.
    */
   public async get(name: string): Promise<{ data: IncusInstanceFull; etag?: string }> {
-    const { data, etag } = await this.transport.request(`/instances/${encodeURIComponent(name)}`, 'GET')
+    const { data, etag } = await this.transport.read(`/instances/${encodeURIComponent(name)}`, 'GET')
     const parsed = IncusInstanceFullSchema.safeParse(data)
     if (!parsed.success) {
       throw new IncusError(
@@ -42,7 +45,10 @@ export class IncusInstancesClient {
         z.treeifyError(parsed.error),
       )
     }
-    return { data: parsed.data, etag }
+    return {
+      data: parsed.data,
+      etag,
+    }
   }
 
   /**
@@ -54,25 +60,34 @@ export class IncusInstancesClient {
     if (!parsed.success) {
       throw new IncusError('Invalid Incus Instance Put Payload', 'VALIDATION_ERROR', z.treeifyError(parsed.error))
     }
-    await this.transport.operation(`/instances/${encodeURIComponent(name)}`, 'PUT', { body: parsed.data, etag })
+    await this.transport.operation(`/instances/${encodeURIComponent(name)}`, 'PUT', {
+      body: parsed.data,
+      etag,
+    })
   }
 
   /**
-   * Provision a new container by cloning a source image.
+   * Provisions a new container by cloning a source image.
    */
   public async create(payload: IncusInstanceCreatePayload): Promise<void> {
     const parsed = IncusInstanceCreatePayloadSchema.safeParse(payload)
     if (!parsed.success) {
       throw new IncusError('Invalid Incus Instance Create Payload', 'VALIDATION_ERROR', z.treeifyError(parsed.error))
     }
-    await this.transport.operation('/instances', 'POST', { body: parsed.data })
+    await this.transport.operation('/instances', 'POST', {
+      body: parsed.data,
+    })
   }
 
   /**
    * Powers on an existing container.
    */
   public async start(name: string): Promise<void> {
-    await this.transport.operation(`/instances/${encodeURIComponent(name)}/state`, 'PUT', { body: { action: 'start' } })
+    await this.transport.operation(`/instances/${encodeURIComponent(name)}/state`, 'PUT', {
+      body: {
+        action: 'start',
+      },
+    })
   }
 
   /**
@@ -80,7 +95,10 @@ export class IncusInstancesClient {
    */
   public async stop(name: string): Promise<void> {
     await this.transport.operation(`/instances/${encodeURIComponent(name)}/state`, 'PUT', {
-      body: { action: 'stop', force: true },
+      body: {
+        action: 'stop',
+        force: true,
+      },
     })
   }
 
@@ -92,7 +110,7 @@ export class IncusInstancesClient {
   }
 
   /**
-   * Fetches all instances (used for boot-time reconciliation).
+   * Fetches all instances used for boot-time reconciliation.
    */
   public async list(options?: IncusListOptions): Promise<{ data: IncusInstance[]; etag?: string }> {
     const params = new URLSearchParams()
@@ -100,11 +118,14 @@ export class IncusInstancesClient {
     if (options?.filter) {
       params.append('filter', options.filter)
     }
-    const { data, etag } = await this.transport.request(`/instances?${params.toString()}`, 'GET')
+    const { data, etag } = await this.transport.read(`/instances?${params.toString()}`, 'GET')
     const parsed = z.array(IncusInstanceSchema).safeParse(data)
     if (!parsed.success) {
       throw new IncusError('Failed to parse Incus instance list', 'VALIDATION_ERROR', z.treeifyError(parsed.error))
     }
-    return { data: parsed.data, etag }
+    return {
+      data: parsed.data,
+      etag,
+    }
   }
 }

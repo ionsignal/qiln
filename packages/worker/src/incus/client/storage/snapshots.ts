@@ -4,6 +4,7 @@ import {
   IncusCustomVolumeSnapshotCreatePayloadSchema,
   type IncusCustomVolumeSnapshotCreatePayload,
 } from '../schemas/storage'
+import { snapshotIdentity } from './identity'
 import type { IIncusTransport } from '../types'
 
 /**
@@ -20,8 +21,9 @@ export class IncusStorageSnapshotsClient {
   constructor(private readonly transport: IIncusTransport) {}
 
   public async create(pool: string, volume: string, snapshot: string): Promise<void> {
+    const identity = snapshotIdentity(pool, volume, snapshot)
     const rawPayload: IncusCustomVolumeSnapshotCreatePayload = {
-      name: snapshot,
+      name: identity.snapshotName,
     }
     const parsed = IncusCustomVolumeSnapshotCreatePayloadSchema.safeParse(rawPayload)
     if (!parsed.success) {
@@ -32,7 +34,7 @@ export class IncusStorageSnapshotsClient {
       )
     }
     await this.transport.operation(
-      `/storage-pools/${encodeURIComponent(pool)}/volumes/custom/${encodeURIComponent(volume)}/snapshots`,
+      `/storage-pools/${encodeURIComponent(identity.pool)}/volumes/custom/${encodeURIComponent(identity.sourceVolume)}/snapshots`,
       'POST',
       {
         body: parsed.data,
@@ -41,8 +43,9 @@ export class IncusStorageSnapshotsClient {
   }
 
   public async delete(pool: string, volume: string, snapshot: string): Promise<void> {
+    const identity = snapshotIdentity(pool, volume, snapshot)
     await this.transport.operation(
-      `/storage-pools/${encodeURIComponent(pool)}/volumes/custom/${encodeURIComponent(volume)}/snapshots/${encodeURIComponent(snapshot)}`,
+      `/storage-pools/${encodeURIComponent(identity.pool)}/volumes/custom/${encodeURIComponent(identity.sourceVolume)}/snapshots/${encodeURIComponent(identity.snapshotName)}`,
       'DELETE',
     )
   }

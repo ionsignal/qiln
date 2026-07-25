@@ -1,11 +1,29 @@
 import type { IncusError } from '../../../errors'
+import type { IncusOperation } from '../schemas/response'
 
-export interface OperationDeadline {
+export interface IncusEndpoints {
+  baseUrl: string
+  eventUrl: string
+  socketPath?: string
+}
+
+export interface OperationAttempt {
   path: string
   deadlineAt: number
   controller: AbortController
   timer: ReturnType<typeof setTimeout> | null
   operationId: string | null
+}
+
+export interface PendingOperation {
+  attempt: OperationAttempt
+  resolve: () => void
+  reject: (error: IncusError) => void
+  probeTimer: ReturnType<typeof setTimeout> | null
+  probeInFlight: boolean
+  settled: boolean
+  project?: string
+  lastProbeError?: string
 }
 
 export type OperationSettlement =
@@ -17,23 +35,5 @@ export type OperationSettlement =
       error: IncusError
     }
 
-/**
- * Process-local state for one registered asynchronous Incus operation.
- *
- * WebSocket events, HTTP probes, reconnect reconciliation, timeout expiry, and
- * transport shutdown all converge through the transport's guarded settlement
- * path. This state is private transport machinery and must not be used as
- * durable operation authority.
- */
-export interface PendingOperation {
-  resolve: () => void
-  reject: (error: IncusError) => void
-  deadlineAt: number
-  deadlineTimer: ReturnType<typeof setTimeout>
-  probeTimer: ReturnType<typeof setTimeout> | null
-  probeInFlight: boolean
-  settled: boolean
-  abortController: AbortController
-  project?: string
-  lastProbeError?: string
-}
+export type OperationProbe = (operationId: string, project: string | undefined, signal: AbortSignal) => Promise<unknown>
+export type OperationObserver = (operation: IncusOperation) => void

@@ -9,15 +9,24 @@ export class IncusFilesClient {
    */
   public async read(instance: string, path: string): Promise<{ data: Uint8Array; etag?: string }> {
     const queryPath = encodeURIComponent(path)
-    const res = await this.transport.raw(`/instances/${encodeURIComponent(instance)}/files?path=${queryPath}`, 'GET')
-    const arrayBuffer = await res.arrayBuffer()
-    const etag = res.headers.get('etag') ?? undefined
-    return { data: new Uint8Array(arrayBuffer), etag }
+    const response = await this.transport.readRaw(
+      `/instances/${encodeURIComponent(instance)}/files?path=${queryPath}`,
+      'GET',
+    )
+    const arrayBuffer = await response.arrayBuffer()
+    const etag = response.headers.get('etag') ?? undefined
+    return {
+      data: new Uint8Array(arrayBuffer),
+      etag,
+    }
   }
 
   /**
-   * Pushes a file to the container disk, injecting X-INCUS headers for
+   * Pushes a file to the container disk, injecting X-Incus headers for
    * ownership.
+   *
+   * A malformed or ambiguous response is an uncertain provider mutation outcome
+   * rather than a definite validation failure.
    */
   public async write(
     instance: string,
@@ -27,7 +36,7 @@ export class IncusFilesClient {
   ): Promise<void> {
     const queryPath = encodeURIComponent(path)
     const headers = buildIncusFileHeaders(options)
-    await this.transport.raw(`/instances/${encodeURIComponent(instance)}/files?path=${queryPath}`, 'POST', {
+    await this.transport.mutateRaw(`/instances/${encodeURIComponent(instance)}/files?path=${queryPath}`, 'POST', {
       body: content,
       headers,
     })
@@ -35,10 +44,13 @@ export class IncusFilesClient {
 
   /**
    * Deletes a file from the container.
+   *
+   * The transport validates a synchronous Incus mutation response. An
+   * unreadable or malformed response is treated as an uncertain provider
+   * outcome rather than a definite deletion failure.
    */
   public async delete(instance: string, path: string): Promise<void> {
     const queryPath = encodeURIComponent(path)
-    // DELETE returns a standard sync JSON response, so we can use the standard request wrapper
-    await this.transport.request(`/instances/${encodeURIComponent(instance)}/files?path=${queryPath}`, 'DELETE')
+    await this.transport.mutate(`/instances/${encodeURIComponent(instance)}/files?path=${queryPath}`, 'DELETE')
   }
 }
