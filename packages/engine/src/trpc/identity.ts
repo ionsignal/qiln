@@ -1,6 +1,6 @@
 import { CapsuleActorReferenceSchema, CapsuleActorType } from '@qiln/core/server'
 import type { EngineContext } from '../types'
-import type { CapsuleMutationIdentity } from '../services/capsule/operations'
+import type { CapsuleMutationIdentity } from '../services/capsule/types'
 
 type AuthenticatedEngineUser = NonNullable<EngineContext['user']>
 

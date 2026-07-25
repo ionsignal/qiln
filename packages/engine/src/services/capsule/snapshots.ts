@@ -1,5 +1,6 @@
 import { and, eq } from 'drizzle-orm'
 import {
+  CapsuleSnapshotCaptureOutputSchema,
   CapsuleSnapshotCommandName,
   CapsuleSnapshotListOutputSchema,
   GlobalError,
@@ -8,19 +9,35 @@ import {
   capsulesTable,
   type CapsuleChannel,
   type CapsuleHostDbContract,
+  type CapsuleOperationIdempotencyKey,
+  type CapsuleSnapshotCaptureOutput,
   type CapsuleSnapshotListOutput,
 } from '@qiln/core/server'
+import type { CapsuleMutationIdentity } from './types'
+
+export interface CapsuleSnapshotListOptions {
+  includeExperimental?: boolean
+}
+
+export interface CapsuleSnapshotCaptureRequest {
+  capsuleId: string
+  sourceBranchId: string
+  idempotencyKey: CapsuleOperationIdempotencyKey
+}
 
 /**
- * Public Engine boundary for committed capsule snapshot history.
+ * Public Engine boundary for committed capsule snapshot history and Snapshot
+ * Capture submission.
  *
  * Snapshot commands are owner-targeted at the protocol layer. The Engine
- * derives that target from authenticated context and proves local visibility
- * before dispatch. The Worker independently verifies durable ownership and
- * complete committed evidence before returning snapshot history.
+ * derives owner and actor authority from authenticated context and proves local
+ * capsule visibility before dispatch. The Worker independently verifies durable
+ * ownership, aggregate state, source-branch eligibility, capture-policy
+ * evidence, and the capsule-wide nonterminal-operation fence.
  *
- * Snapshot Capture and all snapshot-evidence writes remain intentionally
- * outside this read-only service.
+ * Capture returns only a durable acceptance or replay receipt. It does not wait
+ * for provider snapshot creation, artifact collection, atomic snapshot commit,
+ * or branch restoration.
  */
 export class CapsuleSnapshotsService {
   constructor(
@@ -28,7 +45,11 @@ export class CapsuleSnapshotsService {
     private readonly channel: CapsuleChannel,
   ) {}
 
-  public async list(ownerId: string, capsuleId: string): Promise<CapsuleSnapshotListOutput> {
+  public async list(
+    ownerId: string,
+    capsuleId: string,
+    options: CapsuleSnapshotListOptions = {},
+  ): Promise<CapsuleSnapshotListOutput> {
     await this.assertOwnedCapsule(ownerId, capsuleId)
     const snapshots = await this.channel.command(CapsuleSnapshotCommandName.SNAPSHOTS_LIST, {
       target: {
@@ -36,8 +57,35 @@ export class CapsuleSnapshotsService {
         id: ownerId,
       },
       capsuleId,
+      includeExperimental: options.includeExperimental ?? false,
     })
     return CapsuleSnapshotListOutputSchema.parse(snapshots)
+  }
+
+  /**
+   * Submits an experimental Snapshot Capture operation using authenticated
+   * owner and actor authority.
+   *
+   * Browser input supplies only domain identity and idempotency. Capture mode,
+   * owner target, actor provenance, policy evidence, provider identities, and
+   * all mutation fences remain trusted server-side concerns.
+   */
+  public async capture(
+    identity: CapsuleMutationIdentity,
+    input: CapsuleSnapshotCaptureRequest,
+  ): Promise<CapsuleSnapshotCaptureOutput> {
+    await this.assertOwnedCapsule(identity.ownerId, input.capsuleId)
+    const receipt = await this.channel.command(CapsuleSnapshotCommandName.SNAPSHOT_CAPTURE, {
+      target: {
+        type: TargetType.OWNER,
+        id: identity.ownerId,
+      },
+      actor: identity.actor,
+      capsuleId: input.capsuleId,
+      sourceBranchId: input.sourceBranchId,
+      idempotencyKey: input.idempotencyKey,
+    })
+    return CapsuleSnapshotCaptureOutputSchema.parse(receipt)
   }
 
   /**
@@ -45,7 +93,7 @@ export class CapsuleSnapshotsService {
    *
    * Missing and foreign capsules are intentionally indistinguishable. The
    * Worker remains authoritative and repeats this ownership proof before
-   * validating and reading committed snapshot state.
+   * validating snapshot reads or accepting Snapshot Capture.
    */
   private async assertOwnedCapsule(ownerId: string, capsuleId: string): Promise<void> {
     const [capsule] = await this.db

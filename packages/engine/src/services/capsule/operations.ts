@@ -15,7 +15,6 @@ import {
   GlobalErrorCode,
   TargetType,
   capsuleOperationsTable,
-  type CapsuleActorReference,
   type CapsuleArchiveOperationOutput,
   type CapsuleBlueprintDigest,
   type CapsuleBranchName,
@@ -29,6 +28,7 @@ import {
   type CapsuleOperationSummary,
   type CapsuleUnarchiveOperationOutput,
 } from '@qiln/core/server'
+import type { CapsuleMutationIdentity } from './types'
 
 const CLIENT_SAFE_FAILURE_CODE_PATTERN = /^[A-Z][A-Z0-9_:-]{0,127}$/
 const DEFAULT_CLIENT_FAILURE_CODE = 'CAPSULE_OPERATION_FAILED'
@@ -50,11 +50,6 @@ type CapsuleOperationSummaryRow = Pick<
   | 'failureCode'
   | 'failureMessage'
 >
-
-export interface CapsuleMutationIdentity {
-  readonly ownerId: string
-  readonly actor: CapsuleActorReference
-}
 
 export interface CapsuleCreateRequest {
   rootBranchName: CapsuleBranchName
