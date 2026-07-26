@@ -1,66 +1,46 @@
-import {
-  type ExtractTablesFromSchema,
-  type ExtractTablesWithRelations,
-  type RelationsBuilderColumnBase,
-} from 'drizzle-orm'
+import type { RelationsBuilderColumnBase } from 'drizzle-orm'
 import type { PgColumn } from 'drizzle-orm/pg-core'
-import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
-import { capsuleBranchesTable, createCapsuleBranchesTable } from './branch/record'
+import { createCapsuleBranchesTable } from './branch/record'
 import {
   capsuleBranchResourceCleanupPolicyEnum,
   capsuleBranchResourceStatusEnum,
   capsuleBranchResourceTypeEnum,
-  capsuleBranchResourcesTable,
   createCapsuleBranchResourcesTable,
 } from './branch/resource'
 import {
-  capsuleSnapshotCaptureOperationsTable,
   capsuleSnapshotCaptureResourceStatusEnum,
-  capsuleSnapshotCaptureResourcesTable,
   createCapsuleSnapshotCaptureOperationsTable,
   createCapsuleSnapshotCaptureResourcesTable,
 } from './operation/capture'
-import { capsuleCreateOperationsTable, createCapsuleCreateOperationsTable } from './operation/create'
+import { createCapsuleCreateOperationsTable } from './operation/create'
 import {
   capsuleActorTypeEnum,
   capsuleOperationStatusEnum,
-  capsuleOperationsTable,
   capsuleOperationTypeEnum,
   createCapsuleOperationsTable,
 } from './operation/record'
-import {
-  capsuleOperationStepStatusEnum,
-  capsuleOperationStepsTable,
-  createCapsuleOperationStepsTable,
-} from './operation/step'
-import { capsuleLifecycleStatusEnum, capsulesTable, createCapsulesTable } from './record'
+import { capsuleOperationStepStatusEnum, createCapsuleOperationStepsTable } from './operation/step'
+import { capsuleLifecycleStatusEnum, createCapsulesTable } from './record'
 import {
   capsuleSnapshotDependencyDigestKindEnum,
   capsuleSnapshotDependencyKindEnum,
-  capsuleSnapshotDependencyReferencesTable,
   createCapsuleSnapshotDependencyReferencesTable,
 } from './snapshot/dependency'
 import {
   capsuleSnapshotGitRemoteTransportEnum,
-  capsuleSnapshotGitRemotesTable,
-  capsuleSnapshotGitRepositoriesTable,
   createCapsuleSnapshotGitRemotesTable,
   createCapsuleSnapshotGitRepositoriesTable,
 } from './snapshot/git'
 import {
-  capsuleArtifactEntriesTable,
   capsuleArtifactEntryTypeEnum,
-  capsuleArtifactManifestRootsTable,
-  capsuleArtifactManifestsTable,
   createCapsuleArtifactEntriesTable,
   createCapsuleArtifactManifestRootsTable,
   createCapsuleArtifactManifestsTable,
 } from './snapshot/manifest'
-import { capsuleSnapshotsTable, createCapsuleSnapshotsTable } from './snapshot/record'
+import { createCapsuleSnapshotsTable } from './snapshot/record'
 import {
   capsuleSnapshotResourceKindEnum,
   capsuleSnapshotResourceProviderEnum,
-  capsuleSnapshotResourceReferencesTable,
   createCapsuleSnapshotResourceReferencesTable,
 } from './snapshot/resource'
 import type { RelationFragmentManyFn, RelationFragmentOneFn } from '../relations'
@@ -147,24 +127,16 @@ export function createCapsuleSchema<TUserIdColumn extends PgColumn>(userIdColumn
   }
 }
 
-export const capsuleRuntimeSchema = {
-  capsules: capsulesTable,
-  capsuleBranches: capsuleBranchesTable,
-  capsuleOperations: capsuleOperationsTable,
-  capsuleCreateOperations: capsuleCreateOperationsTable,
-  capsuleOperationSteps: capsuleOperationStepsTable,
-  capsuleBranchResources: capsuleBranchResourcesTable,
-  capsuleSnapshots: capsuleSnapshotsTable,
-  capsuleArtifactManifests: capsuleArtifactManifestsTable,
-  capsuleArtifactManifestRoots: capsuleArtifactManifestRootsTable,
-  capsuleArtifactEntries: capsuleArtifactEntriesTable,
-  capsuleSnapshotGitRepositories: capsuleSnapshotGitRepositoriesTable,
-  capsuleSnapshotGitRemotes: capsuleSnapshotGitRemotesTable,
-  capsuleSnapshotDependencyReferences: capsuleSnapshotDependencyReferencesTable,
-  capsuleSnapshotResourceReferences: capsuleSnapshotResourceReferencesTable,
-  capsuleSnapshotCaptureOperations: capsuleSnapshotCaptureOperationsTable,
-  capsuleSnapshotCaptureResources: capsuleSnapshotCaptureResourcesTable,
-} as const
+/**
+ * Minimum host-composed capsule table collection required by package
+ * persistence.
+ *
+ * The host retains the precise user-column types in its concrete `typeof
+ * capsuleTables` collection. This package-level type defines the common
+ * structural boundary without constructing another set of physical table
+ * handles.
+ */
+export type CapsuleTables = ReturnType<typeof createCapsuleSchema>
 
 export interface CapsuleRelationHelpers {
   one: {
@@ -610,7 +582,3 @@ export function defineCapsuleRelations(helpers: CapsuleRelationHelpers) {
     },
   }
 }
-
-type CapsuleRuntimeRelations = ExtractTablesWithRelations<{}, ExtractTablesFromSchema<typeof capsuleRuntimeSchema>>
-
-export type CapsuleHostDbContract = PostgresJsDatabase<CapsuleRuntimeRelations>

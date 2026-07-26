@@ -4,7 +4,7 @@ import { CapsuleBlueprintService } from './services/blueprints'
 import { CapsuleBranchesService } from './services/capsule/branches'
 import { CapsuleOperationsService } from './services/capsule/operations'
 import { CapsuleSnapshotsService } from './services/capsule/snapshots'
-import type { CapsuleHostDbContract } from '@qiln/core/server'
+import type { EnginePersistence } from './persistence'
 import type { EngineConfig } from './types'
 
 const LOGGER_PREFIX = '[QilnEngine]'
@@ -22,7 +22,7 @@ export class QilnEngineController {
   private starting: Promise<void> | null = null
   private stopping: Promise<void> | null = null
 
-  constructor(db: CapsuleHostDbContract, config: EngineConfig = {}) {
+  constructor(persistence: EnginePersistence, config: EngineConfig = {}) {
     const nats = config.nats
     if (!nats) {
       throw new Error(`${LOGGER_PREFIX} Missing required configuration: config.nats is required.`)
@@ -32,9 +32,9 @@ export class QilnEngineController {
     })
     this.events = new CapsuleEventHub(this.channel)
     this.blueprints = new CapsuleBlueprintService(this.channel)
-    this.capsuleOperations = new CapsuleOperationsService(db, this.channel)
-    this.capsuleBranches = new CapsuleBranchesService(db, this.channel)
-    this.capsuleSnapshots = new CapsuleSnapshotsService(db, this.channel)
+    this.capsuleOperations = new CapsuleOperationsService(persistence, this.channel)
+    this.capsuleBranches = new CapsuleBranchesService(persistence, this.channel)
+    this.capsuleSnapshots = new CapsuleSnapshotsService(persistence, this.channel)
   }
 
   public async start(): Promise<void> {

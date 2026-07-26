@@ -1,13 +1,6 @@
 import { and, eq, isNotNull, isNull } from 'drizzle-orm'
-import {
-  CapsuleOperationStatus,
-  CapsuleOperationType,
-  capsuleBranchesTable,
-  capsuleOperationsTable,
-  capsuleSnapshotsTable,
-  capsulesTable,
-  type CapsuleHostDbContract,
-} from '@qiln/core/server'
+import { CapsuleOperationStatus, CapsuleOperationType, type QilnPersistence, type QilnTables } from '@qiln/core/server'
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import { IncusError } from '../../../../../errors'
 import { toCapsuleLifecycleState, toCapsuleOperationTransition } from '../../shared'
 import { assertDestroyingCapsuleBranchLineage } from '../policy/lineage'
@@ -41,12 +34,14 @@ const planner = new DestroyCapsulePlanner()
  * accepted as completion authority. Resource rows are locked and revalidated in
  * the same transaction that commits terminal aggregate state.
  */
-export async function completeDestroyCapsule(
-  db: CapsuleHostDbContract,
+export async function completeDestroyCapsule<TDatabase extends PostgresJsDatabase, TTables extends QilnTables>(
+  persistence: QilnPersistence<TDatabase, TTables>,
   operationId: string,
 ): Promise<DestroyCapsuleTerminalResult> {
+  const db = persistence.db
+  const { capsules, capsuleBranches, capsuleOperations, capsuleSnapshots } = persistence.tables
   return await db.transaction(async tx => {
-    const operation = await lockDestroyOperation(tx, operationId)
+    const operation = await lockDestroyOperation<TDatabase, TTables>(tx, persistence.tables, operationId)
     if (operation.status !== CapsuleOperationStatus.RUNNING || operation.providerMutationStartedAt === null) {
       throw new IncusError('Capsule destroy operation is not eligible for successful completion.', 'CONFLICT', {
         operationId,
@@ -54,8 +49,13 @@ export async function completeDestroyCapsule(
         hasProviderIntent: operation.providerMutationStartedAt !== null,
       })
     }
-    const capsule = await lockOwnedDestroyCapsule(tx, operation.ownerId, operation.capsuleId)
-    const branches = await lockDestroyCapsuleBranches(tx, operation.capsuleId)
+    const capsule = await lockOwnedDestroyCapsule<TDatabase, TTables>(
+      tx,
+      persistence.tables,
+      operation.ownerId,
+      operation.capsuleId,
+    )
+    const branches = await lockDestroyCapsuleBranches<TDatabase, TTables>(tx, persistence.tables, operation.capsuleId)
 
     assertDestroyingCapsuleBranchLineage(operation.ownerId, operation.capsuleId, branches)
 
@@ -78,11 +78,11 @@ export async function completeDestroyCapsule(
      */
     const [retainedSnapshot] = await tx
       .select({
-        id: capsuleSnapshotsTable.id,
-        mode: capsuleSnapshotsTable.mode,
+        id: capsuleSnapshots.id,
+        mode: capsuleSnapshots.mode,
       })
-      .from(capsuleSnapshotsTable)
-      .where(and(eq(capsuleSnapshotsTable.capsuleId, operation.capsuleId), isNull(capsuleSnapshotsTable.archivedAt)))
+      .from(capsuleSnapshots)
+      .where(and(eq(capsuleSnapshots.capsuleId, operation.capsuleId), isNull(capsuleSnapshots.archivedAt)))
       .limit(1)
     if (retainedSnapshot) {
       throw new IncusError(
@@ -97,8 +97,9 @@ export async function completeDestroyCapsule(
         },
       )
     }
-    const resources = await lockDestroyBranchResourceInventories(
+    const resources = await lockDestroyBranchResourceInventories<TDatabase, TTables>(
       tx,
+      persistence.tables,
       branches.map(branch => branch.id),
     )
 
@@ -106,7 +107,7 @@ export async function completeDestroyCapsule(
 
     const now = new Date()
     const [completedOperation] = await tx
-      .update(capsuleOperationsTable)
+      .update(capsuleOperations)
       .set({
         status: CapsuleOperationStatus.COMPLETED,
         completedAt: now,
@@ -114,17 +115,17 @@ export async function completeDestroyCapsule(
       })
       .where(
         and(
-          eq(capsuleOperationsTable.id, operationId),
-          eq(capsuleOperationsTable.type, CapsuleOperationType.DESTROY),
-          eq(capsuleOperationsTable.status, CapsuleOperationStatus.RUNNING),
-          isNotNull(capsuleOperationsTable.providerMutationStartedAt),
+          eq(capsuleOperations.id, operationId),
+          eq(capsuleOperations.type, CapsuleOperationType.DESTROY),
+          eq(capsuleOperations.status, CapsuleOperationStatus.RUNNING),
+          isNotNull(capsuleOperations.providerMutationStartedAt),
         ),
       )
       .returning({
-        id: capsuleOperationsTable.id,
+        id: capsuleOperations.id,
       })
     const [destroyedCapsule] = await tx
-      .update(capsulesTable)
+      .update(capsules)
       .set({
         lifecycleStatus: 'destroyed',
         destroyedAt: now,
@@ -132,19 +133,19 @@ export async function completeDestroyCapsule(
       })
       .where(
         and(
-          eq(capsulesTable.id, operation.capsuleId),
-          eq(capsulesTable.ownerId, operation.ownerId),
-          eq(capsulesTable.lifecycleStatus, 'destroying'),
-          isNotNull(capsulesTable.archivedAt),
+          eq(capsules.id, operation.capsuleId),
+          eq(capsules.ownerId, operation.ownerId),
+          eq(capsules.lifecycleStatus, 'destroying'),
+          isNotNull(capsules.archivedAt),
         ),
       )
       .returning({
-        lifecycleStatus: capsulesTable.lifecycleStatus,
-        archivedAt: capsulesTable.archivedAt,
-        destroyedAt: capsulesTable.destroyedAt,
+        lifecycleStatus: capsules.lifecycleStatus,
+        archivedAt: capsules.archivedAt,
+        destroyedAt: capsules.destroyedAt,
       })
     const destroyedBranches = await tx
-      .update(capsuleBranchesTable)
+      .update(capsuleBranches)
       .set({
         status: 'destroyed',
         runtimeIp: null,
@@ -152,16 +153,16 @@ export async function completeDestroyCapsule(
       })
       .where(
         and(
-          eq(capsuleBranchesTable.capsuleId, operation.capsuleId),
-          eq(capsuleBranchesTable.ownerId, operation.ownerId),
-          eq(capsuleBranchesTable.status, 'destroying'),
+          eq(capsuleBranches.capsuleId, operation.capsuleId),
+          eq(capsuleBranches.ownerId, operation.ownerId),
+          eq(capsuleBranches.status, 'destroying'),
         ),
       )
       .returning({
-        id: capsuleBranchesTable.id,
-        capsuleId: capsuleBranchesTable.capsuleId,
-        name: capsuleBranchesTable.name,
-        status: capsuleBranchesTable.status,
+        id: capsuleBranches.id,
+        capsuleId: capsuleBranches.capsuleId,
+        name: capsuleBranches.name,
+        status: capsuleBranches.status,
       })
     if (
       !completedOperation ||

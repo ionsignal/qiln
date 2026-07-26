@@ -2,54 +2,54 @@
   "folders": [
     {
       "name": "qiln-stealth",
-      "path": ".",
-    },
-    {
-      "name": "iondocs",
-      "path": "../iondocs",
-    },
-    {
-      "name": "caddydocs",
-      "path": "../caddydocs",
-    },
-    {
-      "name": "n8n",
-      "path": "../n8n",
+      "path": "."
     },
     {
       "name": "qiln",
-      "path": "../qiln",
+      "path": "../qiln"
+    },
+    {
+      "name": "iondocs",
+      "path": "../iondocs"
+    },
+    {
+      "path": "../pi-harness"
+    },
+    {
+      "name": "caddydocs",
+      "path": "../caddydocs"
+    },
+    {
+      "name": "n8n",
+      "path": "../n8n"
+    },
+    {
+      "path": "../comfyui"
     },
     {
       "name": "trpc",
-      "path": "../trpc",
+      "path": "../trpc"
     },
     {
       "name": "vike",
-      "path": "../vike",
+      "path": "../vike"
     },
     {
       "name": "zod",
-      "path": "../zod",
+      "path": "../zod"
     },
     {
       "name": "yaml",
-      "path": "../yaml",
+      "path": "../yaml"
     },
     {
       "name": "incus",
-      "path": "../incus",
+      "path": "../incus"
     },
     {
       "name": "distrobuilder",
-      "path": "../distrobuilder",
-    },
-    {
-      "path": "../comfyui",
-    },
-    {
-      "path": "../pi-harness",
-    },
+      "path": "../distrobuilder"
+    }
   ],
   "settings": {
     "[vue]": {

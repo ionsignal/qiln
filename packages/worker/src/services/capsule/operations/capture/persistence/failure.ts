@@ -2,14 +2,9 @@ import { and, asc, eq, inArray, isNull, ne } from 'drizzle-orm'
 import {
   CapsuleOperationStatus,
   CapsuleOperationType,
-  capsuleBranchesTable,
-  capsuleBranchResourcesTable,
-  capsuleOperationsTable,
-  capsuleSnapshotCaptureOperationsTable,
-  capsuleSnapshotCaptureResourcesTable,
-  capsulesTable,
   verifyCapsuleSnapshotCapturePolicyPin,
-  type CapsuleHostDbContract,
+  type QilnPersistence,
+  type QilnTables,
   type CapsuleOperationStatusValue,
 } from '@qiln/core/server'
 import { IncusError } from '../../../../../errors'
@@ -25,13 +20,13 @@ import type {
   CaptureSourceBranch,
   CaptureTerminalResult,
 } from '../types'
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
 const NONTERMINAL_CAPTURE_STATUSES = [CapsuleOperationStatus.ACCEPTED, CapsuleOperationStatus.RUNNING] as const
 
-type CaptureTransaction = Parameters<Parameters<CapsuleHostDbContract['transaction']>[0]>[0]
-type PersistedCaptureOperation = typeof capsuleOperationsTable.$inferSelect
-type PersistedCaptureCapsule = typeof capsulesTable.$inferSelect
-type PersistedCaptureExtension = typeof capsuleSnapshotCaptureOperationsTable.$inferSelect
+type PersistedCaptureOperation = QilnTables['capsuleOperations']['$inferSelect']
+type PersistedCaptureCapsule = QilnTables['capsules']['$inferSelect']
+type PersistedCaptureExtension = QilnTables['capsuleSnapshotCaptureOperations']['$inferSelect']
 
 function isNonterminal(status: CapsuleOperationStatusValue): status is (typeof NONTERMINAL_CAPTURE_STATUSES)[number] {
   return status === CapsuleOperationStatus.ACCEPTED || status === CapsuleOperationStatus.RUNNING
@@ -45,10 +40,13 @@ function isNonterminal(status: CapsuleOperationStatusValue): status is (typeof N
  * never committed and all accepted capture evidence remains intact. Any
  * contradiction fails closed to cleanup-required.
  */
-export class CaptureFailurePersistence {
+export class CaptureFailurePersistence<
+  TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
+  TTables extends QilnTables = QilnTables,
+> {
   constructor(
-    private readonly db: CapsuleHostDbContract,
-    private readonly reader: CapsuleOperationReader,
+    private readonly persistence: QilnPersistence<TDatabase, TTables>,
+    private readonly reader: CapsuleOperationReader<TDatabase, TTables>,
     private readonly planner: CapturePlanner,
   ) {}
 
@@ -57,21 +55,17 @@ export class CaptureFailurePersistence {
     error: unknown,
     context: Record<string, unknown>,
   ): Promise<CaptureTerminalResult | null> {
-    return await this.db.transaction(async tx => {
+    return await this.persistence.db.transaction(async tx => {
       const operation = await this.lockOperation(tx, operationId)
       if (!isNonterminal(operation.status)) {
         return null
       }
-
       const capsule = await this.lockCapsule(tx, operation.ownerId, operation.capsuleId)
       const extension = await this.lockExtension(tx, operationId)
       const branches = await this.lockBranches(tx, operation.capsuleId)
-
       const sourceBranch =
         extension === null ? null : (branches.find(branch => branch.id === extension.sourceBranchId) ?? null)
-
       const reasons: string[] = []
-
       if (operation.providerMutationStartedAt !== null) {
         reasons.push('provider_intent_present')
       }
@@ -108,7 +102,6 @@ export class CaptureFailurePersistence {
           reasons.push('source_branch_inventory_digest_mismatch')
         }
       }
-
       let evidenceError: unknown
       if (extension && sourceBranch) {
         try {
@@ -136,7 +129,6 @@ export class CaptureFailurePersistence {
           reasons.push('capture_evidence_invalid')
         }
       }
-
       if (reasons.length === 0 && sourceBranch && extension) {
         return await this.failInTransaction(tx, operation, capsule, sourceBranch, error, {
           ...context,
@@ -146,7 +138,6 @@ export class CaptureFailurePersistence {
           capturePolicyDigest: extension.capturePolicyDigest,
         })
       }
-
       return await this.cleanupInTransaction(tx, operation, capsule, extension, branches, error, {
         ...context,
         classification: 'snapshot_capture_cleanup_required',
@@ -170,7 +161,6 @@ export class CaptureFailurePersistence {
     if (!operation || operation.type !== CapsuleOperationType.SNAPSHOT_CAPTURE || !isNonterminal(operation.status)) {
       return null
     }
-
     const error = new IncusError(
       'Snapshot Capture operation was abandoned by a previous Worker process.',
       'API_ERROR',
@@ -181,7 +171,6 @@ export class CaptureFailurePersistence {
         policy: 'no_provider_mutation_after_worker_restart',
       },
     )
-
     return await this.classify(operationId, error, {
       operationId,
       capsuleId: operation.capsuleId,
@@ -192,18 +181,19 @@ export class CaptureFailurePersistence {
   }
 
   private async failInTransaction(
-    tx: CaptureTransaction,
+    tx: Parameters<Parameters<TDatabase['transaction']>[0]>[0],
     operation: PersistedCaptureOperation,
     capsule: PersistedCaptureCapsule,
     branch: CaptureSourceBranch,
     error: unknown,
     context: Record<string, unknown>,
   ): Promise<CaptureTerminalResult> {
+    const operations = this.persistence.tables.capsuleOperations
+    const branches = this.persistence.tables.capsuleBranches
     const details = createFailureDetails(error, context)
     const now = new Date()
-
     const [failedOperation] = await tx
-      .update(capsuleOperationsTable)
+      .update(operations)
       .set({
         status: CapsuleOperationStatus.FAILED,
         failedAt: now,
@@ -215,18 +205,17 @@ export class CaptureFailurePersistence {
       })
       .where(
         and(
-          eq(capsuleOperationsTable.id, operation.id),
-          eq(capsuleOperationsTable.type, CapsuleOperationType.SNAPSHOT_CAPTURE),
-          inArray(capsuleOperationsTable.status, NONTERMINAL_CAPTURE_STATUSES),
-          isNull(capsuleOperationsTable.providerMutationStartedAt),
+          eq(operations.id, operation.id),
+          eq(operations.type, CapsuleOperationType.SNAPSHOT_CAPTURE),
+          inArray(operations.status, NONTERMINAL_CAPTURE_STATUSES),
+          isNull(operations.providerMutationStartedAt),
         ),
       )
       .returning({
-        id: capsuleOperationsTable.id,
+        id: operations.id,
       })
-
     const [offlineBranch] = await tx
-      .update(capsuleBranchesTable)
+      .update(branches)
       .set({
         status: 'offline',
         runtimeIp: null,
@@ -238,19 +227,18 @@ export class CaptureFailurePersistence {
       })
       .where(
         and(
-          eq(capsuleBranchesTable.id, branch.id),
-          eq(capsuleBranchesTable.ownerId, operation.ownerId),
-          eq(capsuleBranchesTable.capsuleId, operation.capsuleId),
-          eq(capsuleBranchesTable.status, 'capturing'),
+          eq(branches.id, branch.id),
+          eq(branches.ownerId, operation.ownerId),
+          eq(branches.capsuleId, operation.capsuleId),
+          eq(branches.status, 'capturing'),
         ),
       )
       .returning({
-        id: capsuleBranchesTable.id,
-        capsuleId: capsuleBranchesTable.capsuleId,
-        name: capsuleBranchesTable.name,
-        status: capsuleBranchesTable.status,
+        id: branches.id,
+        capsuleId: branches.capsuleId,
+        name: branches.name,
+        status: branches.status,
       })
-
     if (!failedOperation || !offlineBranch) {
       throw new IncusError(
         'Failed to atomically restore the source branch after pre-provider Snapshot Capture failure.',
@@ -262,7 +250,6 @@ export class CaptureFailurePersistence {
         },
       )
     }
-
     return {
       operation: toCapsuleOperationTransition({
         ownerId: operation.ownerId,
@@ -282,7 +269,7 @@ export class CaptureFailurePersistence {
   }
 
   private async cleanupInTransaction(
-    tx: CaptureTransaction,
+    tx: Parameters<Parameters<TDatabase['transaction']>[0]>[0],
     operation: PersistedCaptureOperation,
     capsule: PersistedCaptureCapsule,
     extension: PersistedCaptureExtension | null,
@@ -290,11 +277,13 @@ export class CaptureFailurePersistence {
     error: unknown,
     context: Record<string, unknown>,
   ): Promise<CaptureTerminalResult> {
+    const operations = this.persistence.tables.capsuleOperations
+    const capsules = this.persistence.tables.capsules
+    const branchTable = this.persistence.tables.capsuleBranches
     const details = createFailureDetails(error, context)
     const now = new Date()
-
     const [cleanupOperation] = await tx
-      .update(capsuleOperationsTable)
+      .update(operations)
       .set({
         status: CapsuleOperationStatus.CLEANUP_REQUIRED,
         failedAt: now,
@@ -306,48 +295,44 @@ export class CaptureFailurePersistence {
       })
       .where(
         and(
-          eq(capsuleOperationsTable.id, operation.id),
-          eq(capsuleOperationsTable.type, CapsuleOperationType.SNAPSHOT_CAPTURE),
-          inArray(capsuleOperationsTable.status, NONTERMINAL_CAPTURE_STATUSES),
+          eq(operations.id, operation.id),
+          eq(operations.type, CapsuleOperationType.SNAPSHOT_CAPTURE),
+          inArray(operations.status, NONTERMINAL_CAPTURE_STATUSES),
         ),
       )
       .returning({
-        id: capsuleOperationsTable.id,
+        id: operations.id,
       })
-
     if (!cleanupOperation) {
       throw new IncusError('Failed to classify Snapshot Capture cleanup-required.', 'CONFLICT', {
         operationId: operation.id,
         capsuleId: operation.capsuleId,
       })
     }
-
     let committedCapsule = {
       lifecycleStatus: capsule.lifecycleStatus,
       archivedAt: capsule.archivedAt,
       destroyedAt: capsule.destroyedAt,
     }
-
     if (capsule.lifecycleStatus !== 'destroyed') {
       const [cleanupCapsule] = await tx
-        .update(capsulesTable)
+        .update(capsules)
         .set({
           lifecycleStatus: 'cleanup_required',
           updatedAt: now,
         })
         .where(
           and(
-            eq(capsulesTable.id, operation.capsuleId),
-            eq(capsulesTable.ownerId, operation.ownerId),
-            ne(capsulesTable.lifecycleStatus, 'destroyed'),
+            eq(capsules.id, operation.capsuleId),
+            eq(capsules.ownerId, operation.ownerId),
+            ne(capsules.lifecycleStatus, 'destroyed'),
           ),
         )
         .returning({
-          lifecycleStatus: capsulesTable.lifecycleStatus,
-          archivedAt: capsulesTable.archivedAt,
-          destroyedAt: capsulesTable.destroyedAt,
+          lifecycleStatus: capsules.lifecycleStatus,
+          archivedAt: capsules.archivedAt,
+          destroyedAt: capsules.destroyedAt,
         })
-
       if (!cleanupCapsule) {
         throw new IncusError(
           'Failed to mark the capsule cleanup-required after Snapshot Capture uncertainty.',
@@ -358,20 +343,16 @@ export class CaptureFailurePersistence {
           },
         )
       }
-
       committedCapsule = cleanupCapsule
     }
-
     const knownSourceBranchIds =
       extension === null
         ? branches.filter(branch => branch.status === 'capturing').map(branch => branch.id)
         : branches.filter(branch => branch.id === extension.sourceBranchId).map(branch => branch.id)
-
     let committedBranches: CaptureCommittedBranch[] = []
-
     if (knownSourceBranchIds.length > 0) {
       committedBranches = await tx
-        .update(capsuleBranchesTable)
+        .update(branchTable)
         .set({
           status: 'cleanup_required',
           runtimeIp: null,
@@ -379,20 +360,19 @@ export class CaptureFailurePersistence {
         })
         .where(
           and(
-            inArray(capsuleBranchesTable.id, knownSourceBranchIds),
-            eq(capsuleBranchesTable.ownerId, operation.ownerId),
-            eq(capsuleBranchesTable.capsuleId, operation.capsuleId),
-            ne(capsuleBranchesTable.status, 'destroyed'),
+            inArray(branchTable.id, knownSourceBranchIds),
+            eq(branchTable.ownerId, operation.ownerId),
+            eq(branchTable.capsuleId, operation.capsuleId),
+            ne(branchTable.status, 'destroyed'),
           ),
         )
         .returning({
-          id: capsuleBranchesTable.id,
-          capsuleId: capsuleBranchesTable.capsuleId,
-          name: capsuleBranchesTable.name,
-          status: capsuleBranchesTable.status,
+          id: branchTable.id,
+          capsuleId: branchTable.capsuleId,
+          name: branchTable.name,
+          status: branchTable.status,
         })
     }
-
     return {
       operation: toCapsuleOperationTransition({
         ownerId: operation.ownerId,
@@ -411,132 +391,143 @@ export class CaptureFailurePersistence {
     }
   }
 
-  private async lockOperation(tx: CaptureTransaction, operationId: string): Promise<PersistedCaptureOperation> {
+  private async lockOperation(
+    tx: Parameters<Parameters<TDatabase['transaction']>[0]>[0],
+    operationId: string,
+  ): Promise<PersistedCaptureOperation> {
+    const operations = this.persistence.tables.capsuleOperations
     const [operation] = await tx
       .select()
-      .from(capsuleOperationsTable)
-      .where(
-        and(
-          eq(capsuleOperationsTable.id, operationId),
-          eq(capsuleOperationsTable.type, CapsuleOperationType.SNAPSHOT_CAPTURE),
-        ),
-      )
+      .from(operations)
+      .where(and(eq(operations.id, operationId), eq(operations.type, CapsuleOperationType.SNAPSHOT_CAPTURE)))
       .for('update')
       .limit(1)
-
     if (!operation) {
       throw new IncusError('Snapshot Capture operation was not found.', 'NOT_FOUND', {
         operationId,
       })
     }
-
     return operation
   }
 
   private async lockCapsule(
-    tx: CaptureTransaction,
+    tx: Parameters<Parameters<TDatabase['transaction']>[0]>[0],
     ownerId: string,
     capsuleId: string,
   ): Promise<PersistedCaptureCapsule> {
+    const capsules = this.persistence.tables.capsules
     const [capsule] = await tx
       .select()
-      .from(capsulesTable)
-      .where(and(eq(capsulesTable.id, capsuleId), eq(capsulesTable.ownerId, ownerId)))
+      .from(capsules)
+      .where(and(eq(capsules.id, capsuleId), eq(capsules.ownerId, ownerId)))
       .for('update')
       .limit(1)
-
     if (!capsule) {
       throw new IncusError('Snapshot Capture capsule was not found.', 'NOT_FOUND', {
         ownerId,
         capsuleId,
       })
     }
-
     return capsule
   }
 
-  private async lockExtension(tx: CaptureTransaction, operationId: string): Promise<PersistedCaptureExtension | null> {
+  private async lockExtension(
+    tx: Parameters<Parameters<TDatabase['transaction']>[0]>[0],
+    operationId: string,
+  ): Promise<PersistedCaptureExtension | null> {
+    const captureOperations = this.persistence.tables.capsuleSnapshotCaptureOperations
     const [extension] = await tx
       .select()
-      .from(capsuleSnapshotCaptureOperationsTable)
-      .where(eq(capsuleSnapshotCaptureOperationsTable.operationId, operationId))
+      .from(captureOperations)
+      .where(eq(captureOperations.operationId, operationId))
       .for('update')
       .limit(1)
-
     return extension ?? null
   }
 
-  private async lockBranches(tx: CaptureTransaction, capsuleId: string): Promise<CaptureSourceBranch[]> {
+  private async lockBranches(
+    tx: Parameters<Parameters<TDatabase['transaction']>[0]>[0],
+    capsuleId: string,
+  ): Promise<CaptureSourceBranch[]> {
+    const branches = this.persistence.tables.capsuleBranches
     return await tx
       .select({
-        id: capsuleBranchesTable.id,
-        ownerId: capsuleBranchesTable.ownerId,
-        capsuleId: capsuleBranchesTable.capsuleId,
-        name: capsuleBranchesTable.name,
-        status: capsuleBranchesTable.status,
-        isRootBranch: capsuleBranchesTable.isRootBranch,
-        blueprintName: capsuleBranchesTable.blueprintName,
-        blueprintDigest: capsuleBranchesTable.blueprintDigest,
-        cpu: capsuleBranchesTable.cpu,
-        memory: capsuleBranchesTable.memory,
-        resourceInventoryDigest: capsuleBranchesTable.resourceInventoryDigest,
+        id: branches.id,
+        ownerId: branches.ownerId,
+        capsuleId: branches.capsuleId,
+        name: branches.name,
+        status: branches.status,
+        isRootBranch: branches.isRootBranch,
+        blueprintName: branches.blueprintName,
+        blueprintDigest: branches.blueprintDigest,
+        cpu: branches.cpu,
+        memory: branches.memory,
+        resourceInventoryDigest: branches.resourceInventoryDigest,
       })
-      .from(capsuleBranchesTable)
-      .where(eq(capsuleBranchesTable.capsuleId, capsuleId))
-      .orderBy(asc(capsuleBranchesTable.id))
+      .from(branches)
+      .where(eq(branches.capsuleId, capsuleId))
+      .orderBy(asc(branches.id))
       .for('update')
   }
 
-  private async lockInventory(tx: CaptureTransaction, branchId: string): Promise<CapsuleBranchResourceInventoryRow[]> {
+  private async lockInventory(
+    tx: Parameters<Parameters<TDatabase['transaction']>[0]>[0],
+    branchId: string,
+  ): Promise<CapsuleBranchResourceInventoryRow[]> {
+    const resources = this.persistence.tables.capsuleBranchResources
     return await tx
       .select({
-        id: capsuleBranchResourcesTable.id,
-        ownerId: capsuleBranchResourcesTable.ownerId,
-        branchId: capsuleBranchResourcesTable.branchId,
-        branchName: capsuleBranchResourcesTable.branchName,
-        provider: capsuleBranchResourcesTable.provider,
-        resourceType: capsuleBranchResourcesTable.resourceType,
-        resourceKey: capsuleBranchResourcesTable.resourceKey,
-        blueprintVolumeName: capsuleBranchResourcesTable.blueprintVolumeName,
-        status: capsuleBranchResourcesTable.status,
-        cleanupPolicy: capsuleBranchResourcesTable.cleanupPolicy,
-        metadata: capsuleBranchResourcesTable.metadata,
-        createdByOperationId: capsuleBranchResourcesTable.createdByOperationId,
-        lastOperationId: capsuleBranchResourcesTable.lastOperationId,
+        id: resources.id,
+        ownerId: resources.ownerId,
+        branchId: resources.branchId,
+        branchName: resources.branchName,
+        provider: resources.provider,
+        resourceType: resources.resourceType,
+        resourceKey: resources.resourceKey,
+        blueprintVolumeName: resources.blueprintVolumeName,
+        status: resources.status,
+        cleanupPolicy: resources.cleanupPolicy,
+        metadata: resources.metadata,
+        createdByOperationId: resources.createdByOperationId,
+        lastOperationId: resources.lastOperationId,
       })
-      .from(capsuleBranchResourcesTable)
-      .where(eq(capsuleBranchResourcesTable.branchId, branchId))
-      .orderBy(asc(capsuleBranchResourcesTable.createdAt), asc(capsuleBranchResourcesTable.id))
+      .from(resources)
+      .where(eq(resources.branchId, branchId))
+      .orderBy(asc(resources.createdAt), asc(resources.id))
       .for('update')
   }
 
-  private async lockResources(tx: CaptureTransaction, operationId: string): Promise<CaptureResourceRecord[]> {
+  private async lockResources(
+    tx: Parameters<Parameters<TDatabase['transaction']>[0]>[0],
+    operationId: string,
+  ): Promise<CaptureResourceRecord[]> {
+    const resources = this.persistence.tables.capsuleSnapshotCaptureResources
     return await tx
       .select({
-        id: capsuleSnapshotCaptureResourcesTable.id,
-        operationId: capsuleSnapshotCaptureResourcesTable.operationId,
-        sourceBranchResourceId: capsuleSnapshotCaptureResourcesTable.sourceBranchResourceId,
-        artifactRootId: capsuleSnapshotCaptureResourcesTable.artifactRootId,
-        blueprintVolumeName: capsuleSnapshotCaptureResourcesTable.blueprintVolumeName,
-        provider: capsuleSnapshotCaptureResourcesTable.provider,
-        kind: capsuleSnapshotCaptureResourcesTable.kind,
-        project: capsuleSnapshotCaptureResourcesTable.project,
-        pool: capsuleSnapshotCaptureResourcesTable.pool,
-        sourceVolume: capsuleSnapshotCaptureResourcesTable.sourceVolume,
-        snapshotName: capsuleSnapshotCaptureResourcesTable.snapshotName,
-        status: capsuleSnapshotCaptureResourcesTable.status,
-        snapshotIntentAt: capsuleSnapshotCaptureResourcesTable.snapshotIntentAt,
-        snapshotCreatedAt: capsuleSnapshotCaptureResourcesTable.snapshotCreatedAt,
-        cleanupIntentAt: capsuleSnapshotCaptureResourcesTable.cleanupIntentAt,
-        cleanupCompletedAt: capsuleSnapshotCaptureResourcesTable.cleanupCompletedAt,
-        failureCode: capsuleSnapshotCaptureResourcesTable.failureCode,
-        failureMessage: capsuleSnapshotCaptureResourcesTable.failureMessage,
-        failureDetails: capsuleSnapshotCaptureResourcesTable.failureDetails,
-        failureAt: capsuleSnapshotCaptureResourcesTable.failureAt,
+        id: resources.id,
+        operationId: resources.operationId,
+        sourceBranchResourceId: resources.sourceBranchResourceId,
+        artifactRootId: resources.artifactRootId,
+        blueprintVolumeName: resources.blueprintVolumeName,
+        provider: resources.provider,
+        kind: resources.kind,
+        project: resources.project,
+        pool: resources.pool,
+        sourceVolume: resources.sourceVolume,
+        snapshotName: resources.snapshotName,
+        status: resources.status,
+        snapshotIntentAt: resources.snapshotIntentAt,
+        snapshotCreatedAt: resources.snapshotCreatedAt,
+        cleanupIntentAt: resources.cleanupIntentAt,
+        cleanupCompletedAt: resources.cleanupCompletedAt,
+        failureCode: resources.failureCode,
+        failureMessage: resources.failureMessage,
+        failureDetails: resources.failureDetails,
+        failureAt: resources.failureAt,
       })
-      .from(capsuleSnapshotCaptureResourcesTable)
-      .where(eq(capsuleSnapshotCaptureResourcesTable.operationId, operationId))
-      .orderBy(asc(capsuleSnapshotCaptureResourcesTable.artifactRootId), asc(capsuleSnapshotCaptureResourcesTable.id))
+      .from(resources)
+      .where(eq(resources.operationId, operationId))
+      .orderBy(asc(resources.artifactRootId), asc(resources.id))
       .for('update')
   }
 }

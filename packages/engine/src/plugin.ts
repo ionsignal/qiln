@@ -5,7 +5,7 @@ import type { EnginePluginOptions } from './types'
 export const enginePlugin = fp(
   async (fastify, options: EnginePluginOptions) => {
     fastify.log.debug('[QilnEngine] Initializing capsule engine module...')
-    const controller = new QilnEngineController(options.db, options.config)
+    const controller = new QilnEngineController(options.persistence, options.config)
     fastify.decorate('engine', controller)
     try {
       await controller.start()

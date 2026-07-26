@@ -3,12 +3,11 @@ import {
   CapsuleArchiveReceiptSchema,
   CapsuleOperationStatus,
   CapsuleOperationType,
-  capsuleOperationsTable,
-  capsulesTable,
   type CapsuleArchiveReceipt,
-  type CapsuleHostDbContract,
   type CapsuleOperationRequestHash,
   type CapsuleOperationStatusValue,
+  type QilnPersistence,
+  type QilnTables,
 } from '@qiln/core/server'
 import { IncusError, isUniqueConstraintViolation } from '../../../../../errors'
 import {
@@ -23,7 +22,6 @@ import {
   lockOwnedArchivalCapsule,
   readOwnedArchivalCapsule,
   type ArchivalCapsuleRecord,
-  type ArchivalOperationTransaction,
   type ProviderFreeArchivalOperationLedger,
 } from '../shared'
 import {
@@ -40,10 +38,11 @@ import type {
   ArchiveCapsuleExecutionInput,
   ArchiveCapsuleTerminalResult,
 } from './types'
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
 const NONTERMINAL_ARCHIVE_STATUSES = [CapsuleOperationStatus.ACCEPTED, CapsuleOperationStatus.RUNNING] as const
 
-type PersistedArchiveOperation = typeof capsuleOperationsTable.$inferSelect
+type PersistedArchiveOperation = QilnTables['capsuleOperations']['$inferSelect']
 
 function isNonterminalArchiveStatus(
   status: CapsuleOperationStatusValue,
@@ -59,10 +58,13 @@ function isNonterminalArchiveStatus(
  * shared with unarchive. Archive eligibility, timestamp policy, and terminal
  * classification remain explicit in this repository.
  */
-export class CapsuleArchiveRepository {
+export class CapsuleArchiveRepository<
+  TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
+  TTables extends QilnTables = QilnTables,
+> {
   constructor(
-    private readonly db: CapsuleHostDbContract,
-    private readonly operationLedger: ProviderFreeArchivalOperationLedger,
+    private readonly persistence: QilnPersistence<TDatabase, TTables>,
+    private readonly operationLedger: ProviderFreeArchivalOperationLedger<TDatabase, TTables>,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -83,9 +85,14 @@ export class CapsuleArchiveRepository {
       return replay
     }
 
+    const db = this.persistence.db
+    const tables = this.persistence.tables
+    const operations = tables.capsuleOperations
+    const capsules = tables.capsules
+
     try {
-      return await this.db.transaction(async tx => {
-        const capsule = await lockOwnedArchivalCapsule(tx, input.ownerId, input.capsuleId)
+      return await db.transaction(async tx => {
+        const capsule = await lockOwnedArchivalCapsule<TDatabase, TTables>(tx, tables, input.ownerId, input.capsuleId)
 
         if (capsule.lifecycleStatus !== 'active' || capsule.archivedAt !== null) {
           throw new IncusError('Only an active, unarchived capsule can be archived.', 'CONFLICT', {
@@ -96,14 +103,14 @@ export class CapsuleArchiveRepository {
           })
         }
 
-        const branches = await lockArchivalCapsuleBranches(tx, input.capsuleId)
+        const branches = await lockArchivalCapsuleBranches<TDatabase, TTables>(tx, tables, input.capsuleId)
 
         assertValidOfflineBranchLineage(input.ownerId, input.capsuleId, branches)
 
         const now = new Date()
 
         const [operation] = await tx
-          .insert(capsuleOperationsTable)
+          .insert(operations)
           .values({
             ownerId: input.ownerId,
             actorType: input.actor.type,
@@ -118,10 +125,10 @@ export class CapsuleArchiveRepository {
             updatedAt: now,
           })
           .returning({
-            id: capsuleOperationsTable.id,
-            ownerId: capsuleOperationsTable.ownerId,
-            capsuleId: capsuleOperationsTable.capsuleId,
-            status: capsuleOperationsTable.status,
+            id: operations.id,
+            ownerId: operations.ownerId,
+            capsuleId: operations.capsuleId,
+            status: operations.status,
           })
 
         if (!operation) {
@@ -129,23 +136,23 @@ export class CapsuleArchiveRepository {
         }
 
         const [archivingCapsule] = await tx
-          .update(capsulesTable)
+          .update(capsules)
           .set({
             lifecycleStatus: 'archiving',
             updatedAt: now,
           })
           .where(
             and(
-              eq(capsulesTable.id, input.capsuleId),
-              eq(capsulesTable.ownerId, input.ownerId),
-              eq(capsulesTable.lifecycleStatus, 'active'),
-              isNull(capsulesTable.archivedAt),
+              eq(capsules.id, input.capsuleId),
+              eq(capsules.ownerId, input.ownerId),
+              eq(capsules.lifecycleStatus, 'active'),
+              isNull(capsules.archivedAt),
             ),
           )
           .returning({
-            lifecycleStatus: capsulesTable.lifecycleStatus,
-            archivedAt: capsulesTable.archivedAt,
-            destroyedAt: capsulesTable.destroyedAt,
+            lifecycleStatus: capsules.lifecycleStatus,
+            archivedAt: capsules.archivedAt,
+            destroyedAt: capsules.destroyedAt,
           })
 
         if (!archivingCapsule) {
@@ -214,9 +221,11 @@ export class CapsuleArchiveRepository {
       operationType: CapsuleOperationType.ARCHIVE,
       requestDescription: 'capsule archive',
     })
+
     if (!operation) {
       return null
     }
+
     return await this.loadAcceptanceResult(operation, false, true)
   }
 
@@ -264,7 +273,12 @@ export class CapsuleArchiveRepository {
    * Atomically completes archive and records the logical archive timestamp.
    */
   public async complete(operationId: string): Promise<ArchiveCapsuleTerminalResult> {
-    return await this.db.transaction(async tx => {
+    const db = this.persistence.db
+    const tables = this.persistence.tables
+    const operations = tables.capsuleOperations
+    const capsules = tables.capsules
+
+    return await db.transaction(async tx => {
       const operation = await this.lockArchiveOperation(tx, operationId)
 
       if (operation.status !== CapsuleOperationStatus.RUNNING || operation.providerMutationStartedAt !== null) {
@@ -275,8 +289,13 @@ export class CapsuleArchiveRepository {
         })
       }
 
-      const capsule = await lockOwnedArchivalCapsule(tx, operation.ownerId, operation.capsuleId)
-      const branches = await lockArchivalCapsuleBranches(tx, operation.capsuleId)
+      const capsule = await lockOwnedArchivalCapsule<TDatabase, TTables>(
+        tx,
+        tables,
+        operation.ownerId,
+        operation.capsuleId,
+      )
+      const branches = await lockArchivalCapsuleBranches<TDatabase, TTables>(tx, tables, operation.capsuleId)
 
       assertValidOfflineBranchLineage(operation.ownerId, operation.capsuleId, branches)
 
@@ -292,7 +311,7 @@ export class CapsuleArchiveRepository {
       const now = new Date()
 
       const [completedOperation] = await tx
-        .update(capsuleOperationsTable)
+        .update(operations)
         .set({
           status: CapsuleOperationStatus.COMPLETED,
           completedAt: now,
@@ -300,18 +319,18 @@ export class CapsuleArchiveRepository {
         })
         .where(
           and(
-            eq(capsuleOperationsTable.id, operationId),
-            eq(capsuleOperationsTable.type, CapsuleOperationType.ARCHIVE),
-            eq(capsuleOperationsTable.status, CapsuleOperationStatus.RUNNING),
-            isNull(capsuleOperationsTable.providerMutationStartedAt),
+            eq(operations.id, operationId),
+            eq(operations.type, CapsuleOperationType.ARCHIVE),
+            eq(operations.status, CapsuleOperationStatus.RUNNING),
+            isNull(operations.providerMutationStartedAt),
           ),
         )
         .returning({
-          id: capsuleOperationsTable.id,
+          id: operations.id,
         })
 
       const [archivedCapsule] = await tx
-        .update(capsulesTable)
+        .update(capsules)
         .set({
           lifecycleStatus: 'active',
           archivedAt: now,
@@ -319,16 +338,16 @@ export class CapsuleArchiveRepository {
         })
         .where(
           and(
-            eq(capsulesTable.id, operation.capsuleId),
-            eq(capsulesTable.ownerId, operation.ownerId),
-            eq(capsulesTable.lifecycleStatus, 'archiving'),
-            isNull(capsulesTable.archivedAt),
+            eq(capsules.id, operation.capsuleId),
+            eq(capsules.ownerId, operation.ownerId),
+            eq(capsules.lifecycleStatus, 'archiving'),
+            isNull(capsules.archivedAt),
           ),
         )
         .returning({
-          lifecycleStatus: capsulesTable.lifecycleStatus,
-          archivedAt: capsulesTable.archivedAt,
-          destroyedAt: capsulesTable.destroyedAt,
+          lifecycleStatus: capsules.lifecycleStatus,
+          archivedAt: capsules.archivedAt,
+          destroyedAt: capsules.destroyedAt,
         })
 
       if (!completedOperation || !archivedCapsule || archivedCapsule.archivedAt === null) {
@@ -380,15 +399,23 @@ export class CapsuleArchiveRepository {
     error: unknown,
     context: Record<string, unknown>,
   ): Promise<ArchiveCapsuleTerminalResult | null> {
-    return await this.db.transaction(async tx => {
+    const db = this.persistence.db
+    const tables = this.persistence.tables
+
+    return await db.transaction(async tx => {
       const operation = await this.lockArchiveOperation(tx, operationId)
 
       if (!isNonterminalArchiveStatus(operation.status)) {
         return null
       }
 
-      const capsule = await lockOwnedArchivalCapsule(tx, operation.ownerId, operation.capsuleId)
-      const branches = await lockArchivalCapsuleBranches(tx, operation.capsuleId)
+      const capsule = await lockOwnedArchivalCapsule<TDatabase, TTables>(
+        tx,
+        tables,
+        operation.ownerId,
+        operation.capsuleId,
+      )
+      const branches = await lockArchivalCapsuleBranches<TDatabase, TTables>(tx, tables, operation.capsuleId)
       const lineage = inspectOfflineBranchLineage(operation.ownerId, operation.capsuleId, branches)
 
       const safeProviderFreeFailure =
@@ -438,7 +465,10 @@ export class CapsuleArchiveRepository {
    * contradictory durable evidence is classified cleanup-required.
    */
   public async classifyAbandoned(operationId: string): Promise<ArchiveCapsuleAbandonedClassificationResult> {
-    return await this.db.transaction(async tx => {
+    const db = this.persistence.db
+    const tables = this.persistence.tables
+
+    return await db.transaction(async tx => {
       const operation = await this.lockArchiveOperationIfPresent(tx, operationId)
 
       if (!operation) {
@@ -456,8 +486,13 @@ export class CapsuleArchiveRepository {
         return null
       }
 
-      const capsule = await lockOwnedArchivalCapsule(tx, operation.ownerId, operation.capsuleId)
-      const branches = await lockArchivalCapsuleBranches(tx, operation.capsuleId)
+      const capsule = await lockOwnedArchivalCapsule<TDatabase, TTables>(
+        tx,
+        tables,
+        operation.ownerId,
+        operation.capsuleId,
+      )
+      const branches = await lockArchivalCapsuleBranches<TDatabase, TTables>(tx, tables, operation.capsuleId)
       const lineage = inspectOfflineBranchLineage(operation.ownerId, operation.capsuleId, branches)
 
       const safeProviderFreeClassification =
@@ -514,7 +549,7 @@ export class CapsuleArchiveRepository {
   // ---------------------------------------------------------------------------
 
   private async markSafeFailureInTransaction(
-    tx: ArchivalOperationTransaction,
+    tx: Parameters<Parameters<TDatabase['transaction']>[0]>[0],
     operation: PersistedArchiveOperation,
     error: unknown,
     context: Record<string, unknown>,
@@ -538,11 +573,13 @@ export class CapsuleArchiveRepository {
       )
     }
 
+    const operations = this.persistence.tables.capsuleOperations
+    const capsules = this.persistence.tables.capsules
     const failureDetails = createOperationFailureDetails(error, context)
     const now = new Date()
 
     const [failedOperation] = await tx
-      .update(capsuleOperationsTable)
+      .update(operations)
       .set({
         status: CapsuleOperationStatus.FAILED,
         failedAt: now,
@@ -554,18 +591,18 @@ export class CapsuleArchiveRepository {
       })
       .where(
         and(
-          eq(capsuleOperationsTable.id, operation.id),
-          eq(capsuleOperationsTable.type, CapsuleOperationType.ARCHIVE),
-          inArray(capsuleOperationsTable.status, NONTERMINAL_ARCHIVE_STATUSES),
-          isNull(capsuleOperationsTable.providerMutationStartedAt),
+          eq(operations.id, operation.id),
+          eq(operations.type, CapsuleOperationType.ARCHIVE),
+          inArray(operations.status, NONTERMINAL_ARCHIVE_STATUSES),
+          isNull(operations.providerMutationStartedAt),
         ),
       )
       .returning({
-        id: capsuleOperationsTable.id,
+        id: operations.id,
       })
 
     const [restoredCapsule] = await tx
-      .update(capsulesTable)
+      .update(capsules)
       .set({
         lifecycleStatus: 'active',
         archivedAt: null,
@@ -573,16 +610,16 @@ export class CapsuleArchiveRepository {
       })
       .where(
         and(
-          eq(capsulesTable.id, operation.capsuleId),
-          eq(capsulesTable.ownerId, operation.ownerId),
-          eq(capsulesTable.lifecycleStatus, 'archiving'),
-          isNull(capsulesTable.archivedAt),
+          eq(capsules.id, operation.capsuleId),
+          eq(capsules.ownerId, operation.ownerId),
+          eq(capsules.lifecycleStatus, 'archiving'),
+          isNull(capsules.archivedAt),
         ),
       )
       .returning({
-        lifecycleStatus: capsulesTable.lifecycleStatus,
-        archivedAt: capsulesTable.archivedAt,
-        destroyedAt: capsulesTable.destroyedAt,
+        lifecycleStatus: capsules.lifecycleStatus,
+        archivedAt: capsules.archivedAt,
+        destroyedAt: capsules.destroyedAt,
       })
 
     if (!failedOperation || !restoredCapsule) {
@@ -609,7 +646,7 @@ export class CapsuleArchiveRepository {
   }
 
   private async markCleanupRequiredInTransaction(
-    tx: ArchivalOperationTransaction,
+    tx: Parameters<Parameters<TDatabase['transaction']>[0]>[0],
     operation: PersistedArchiveOperation,
     capsule: ArchivalCapsuleRecord,
     error: unknown,
@@ -622,11 +659,13 @@ export class CapsuleArchiveRepository {
       })
     }
 
+    const operations = this.persistence.tables.capsuleOperations
+    const capsules = this.persistence.tables.capsules
     const failureDetails = createOperationFailureDetails(error, context)
     const now = new Date()
 
     const [cleanupOperation] = await tx
-      .update(capsuleOperationsTable)
+      .update(operations)
       .set({
         status: CapsuleOperationStatus.CLEANUP_REQUIRED,
         failedAt: now,
@@ -643,13 +682,13 @@ export class CapsuleArchiveRepository {
       })
       .where(
         and(
-          eq(capsuleOperationsTable.id, operation.id),
-          eq(capsuleOperationsTable.type, CapsuleOperationType.ARCHIVE),
-          inArray(capsuleOperationsTable.status, NONTERMINAL_ARCHIVE_STATUSES),
+          eq(operations.id, operation.id),
+          eq(operations.type, CapsuleOperationType.ARCHIVE),
+          inArray(operations.status, NONTERMINAL_ARCHIVE_STATUSES),
         ),
       )
       .returning({
-        id: capsuleOperationsTable.id,
+        id: operations.id,
       })
 
     if (!cleanupOperation) {
@@ -669,18 +708,17 @@ export class CapsuleArchiveRepository {
     // durable destroyed-timestamp invariant.
     if (capsule.lifecycleStatus !== 'destroyed') {
       const [cleanupCapsule] = await tx
-        .update(capsulesTable)
+        .update(capsules)
         .set({
           lifecycleStatus: 'cleanup_required',
           updatedAt: now,
         })
-        .where(and(eq(capsulesTable.id, operation.capsuleId), eq(capsulesTable.ownerId, operation.ownerId)))
+        .where(and(eq(capsules.id, operation.capsuleId), eq(capsules.ownerId, operation.ownerId)))
         .returning({
-          lifecycleStatus: capsulesTable.lifecycleStatus,
-          archivedAt: capsulesTable.archivedAt,
-          destroyedAt: capsulesTable.destroyedAt,
+          lifecycleStatus: capsules.lifecycleStatus,
+          archivedAt: capsules.archivedAt,
+          destroyedAt: capsules.destroyedAt,
         })
-
       if (!cleanupCapsule) {
         throw new IncusError(
           'Failed to mark the capsule cleanup-required after an archive invariant violation.',
@@ -720,7 +758,7 @@ export class CapsuleArchiveRepository {
     newlyAccepted: boolean,
     replayed: boolean,
   ): Promise<ArchiveCapsuleAcceptanceResult> {
-    const capsule = await readOwnedArchivalCapsule(this.db, operation.ownerId, operation.capsuleId)
+    const capsule = await readOwnedArchivalCapsule(this.persistence, operation.ownerId, operation.capsuleId)
     if (!capsule) {
       throw new IncusError('Capsule archive operation references a missing capsule aggregate.', 'API_ERROR', {
         operationId: operation.id,
@@ -785,38 +823,30 @@ export class CapsuleArchiveRepository {
   // ---------------------------------------------------------------------------
 
   private async lockArchiveOperation(
-    tx: ArchivalOperationTransaction,
+    tx: Parameters<Parameters<TDatabase['transaction']>[0]>[0],
     operationId: string,
   ): Promise<PersistedArchiveOperation> {
     const operation = await this.lockArchiveOperationIfPresent(tx, operationId)
-
     if (!operation) {
       throw new IncusError('Capsule archive operation was not found.', 'NOT_FOUND', {
         operationId,
       })
     }
-
     if (operation.type !== CapsuleOperationType.ARCHIVE) {
       throw new IncusError('Operation is not a capsule archive operation.', 'CONFLICT', {
         operationId,
         operationType: operation.type,
       })
     }
-
     return operation
   }
 
   private async lockArchiveOperationIfPresent(
-    tx: ArchivalOperationTransaction,
+    tx: Parameters<Parameters<TDatabase['transaction']>[0]>[0],
     operationId: string,
   ): Promise<PersistedArchiveOperation | null> {
-    const [operation] = await tx
-      .select()
-      .from(capsuleOperationsTable)
-      .where(eq(capsuleOperationsTable.id, operationId))
-      .for('update')
-      .limit(1)
-
+    const operations = this.persistence.tables.capsuleOperations
+    const [operation] = await tx.select().from(operations).where(eq(operations.id, operationId)).for('update').limit(1)
     return operation ?? null
   }
 }

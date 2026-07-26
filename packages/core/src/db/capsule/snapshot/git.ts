@@ -18,8 +18,6 @@ import {
   type CapsuleSnapshotGitObjectId,
   type CapsuleSnapshotGitReference,
 } from '../../../schemas'
-import { capsuleArtifactManifestRootsTable } from './manifest'
-import { capsuleSnapshotsTable } from './record'
 
 export const capsuleSnapshotGitRemoteTransportEnum = pgEnum(
   'capsule_snapshot_git_remote_transport',
@@ -161,12 +159,3 @@ export function createCapsuleSnapshotGitRemotesTable(repositoryIdColumn?: PgColu
     ],
   )
 }
-
-export const capsuleSnapshotGitRepositoriesTable = createCapsuleSnapshotGitRepositoriesTable(
-  capsuleSnapshotsTable.id,
-  capsuleArtifactManifestRootsTable.id,
-)
-
-export const capsuleSnapshotGitRemotesTable = createCapsuleSnapshotGitRemotesTable(
-  capsuleSnapshotGitRepositoriesTable.id,
-)

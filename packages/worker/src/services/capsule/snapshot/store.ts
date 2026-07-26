@@ -1,16 +1,8 @@
 import { and, asc, eq, isNotNull } from 'drizzle-orm'
-import {
-  CapsuleOperationType,
-  CapsuleSnapshotMode,
-  capsuleArtifactManifestsTable,
-  capsuleOperationsTable,
-  capsuleSnapshotCaptureOperationsTable,
-  capsuleSnapshotsTable,
-  capsulesTable,
-  type CapsuleHostDbContract,
-} from '@qiln/core/server'
+import { CapsuleOperationType, CapsuleSnapshotMode, type QilnPersistence, type QilnTables } from '@qiln/core/server'
 import { IncusError } from '../../../errors'
 import type { CapsuleSnapshotListOptions, CapsuleSnapshotRecord } from './types'
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
 /**
  * Persistence boundary for committed capsule snapshot history.
@@ -19,20 +11,31 @@ import type { CapsuleSnapshotListOptions, CapsuleSnapshotRecord } from './types'
  * does not weaken ownership, operation completion, manifest linkage, or
  * immutable capture-evidence checks.
  */
-export class CapsuleSnapshotStore {
-  constructor(private readonly db: CapsuleHostDbContract) {}
+export class CapsuleSnapshotStore<
+  TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
+  TTables extends QilnTables = QilnTables,
+> {
+  constructor(private readonly persistence: QilnPersistence<TDatabase, TTables>) {}
 
   public async listForOwner(
     ownerId: string,
     capsuleId: string,
     options: CapsuleSnapshotListOptions = {},
   ): Promise<CapsuleSnapshotRecord[]> {
-    const [capsule] = await this.db
+    const db = this.persistence.db
+    const {
+      capsules,
+      capsuleOperations,
+      capsuleSnapshots,
+      capsuleArtifactManifests,
+      capsuleSnapshotCaptureOperations,
+    } = this.persistence.tables
+    const [capsule] = await db
       .select({
-        id: capsulesTable.id,
+        id: capsules.id,
       })
-      .from(capsulesTable)
-      .where(and(eq(capsulesTable.id, capsuleId), eq(capsulesTable.ownerId, ownerId)))
+      .from(capsules)
+      .where(and(eq(capsules.id, capsuleId), eq(capsules.ownerId, ownerId)))
       .limit(1)
     if (!capsule) {
       throw new IncusError('Capsule not found.', 'NOT_FOUND', {
@@ -42,61 +45,55 @@ export class CapsuleSnapshotStore {
     if (!options.includeExperimental) {
       return []
     }
-    return await this.db
+    return await db
       .select({
-        id: capsuleSnapshotsTable.id,
-        capsuleId: capsuleSnapshotsTable.capsuleId,
-        sourceBranchId: capsuleSnapshotsTable.sourceBranchId,
-        sourceBranchName: capsuleSnapshotsTable.sourceBranchName,
-        sourceBranchResourceInventoryDigest: capsuleSnapshotsTable.sourceBranchResourceInventoryDigest,
-        capturePolicySchemaVersion: capsuleSnapshotsTable.capturePolicySchemaVersion,
-        capturePolicyDigest: capsuleSnapshotsTable.capturePolicyDigest,
-        capturePolicyPin: capsuleSnapshotsTable.capturePolicyPin,
-        artifactManifestSchemaVersion: capsuleArtifactManifestsTable.schemaVersion,
-        artifactManifestDigest: capsuleArtifactManifestsTable.digest,
-        mode: capsuleSnapshotsTable.mode,
-        limitations: capsuleSnapshotsTable.limitations,
-        createdAt: capsuleSnapshotsTable.createdAt,
-        archivedAt: capsuleSnapshotsTable.archivedAt,
+        id: capsuleSnapshots.id,
+        capsuleId: capsuleSnapshots.capsuleId,
+        sourceBranchId: capsuleSnapshots.sourceBranchId,
+        sourceBranchName: capsuleSnapshots.sourceBranchName,
+        sourceBranchResourceInventoryDigest: capsuleSnapshots.sourceBranchResourceInventoryDigest,
+        capturePolicySchemaVersion: capsuleSnapshots.capturePolicySchemaVersion,
+        capturePolicyDigest: capsuleSnapshots.capturePolicyDigest,
+        capturePolicyPin: capsuleSnapshots.capturePolicyPin,
+        artifactManifestSchemaVersion: capsuleArtifactManifests.schemaVersion,
+        artifactManifestDigest: capsuleArtifactManifests.digest,
+        mode: capsuleSnapshots.mode,
+        limitations: capsuleSnapshots.limitations,
+        createdAt: capsuleSnapshots.createdAt,
+        archivedAt: capsuleSnapshots.archivedAt,
       })
-      .from(capsuleSnapshotsTable)
-      .innerJoin(capsuleArtifactManifestsTable, eq(capsuleArtifactManifestsTable.snapshotId, capsuleSnapshotsTable.id))
+      .from(capsuleSnapshots)
+      .innerJoin(capsuleArtifactManifests, eq(capsuleArtifactManifests.snapshotId, capsuleSnapshots.id))
       .innerJoin(
-        capsuleSnapshotCaptureOperationsTable,
+        capsuleSnapshotCaptureOperations,
         and(
-          eq(capsuleSnapshotCaptureOperationsTable.snapshotId, capsuleSnapshotsTable.id),
-          eq(capsuleSnapshotCaptureOperationsTable.sourceBranchId, capsuleSnapshotsTable.sourceBranchId),
-          eq(capsuleSnapshotCaptureOperationsTable.sourceBranchName, capsuleSnapshotsTable.sourceBranchName),
+          eq(capsuleSnapshotCaptureOperations.snapshotId, capsuleSnapshots.id),
+          eq(capsuleSnapshotCaptureOperations.sourceBranchId, capsuleSnapshots.sourceBranchId),
+          eq(capsuleSnapshotCaptureOperations.sourceBranchName, capsuleSnapshots.sourceBranchName),
           eq(
-            capsuleSnapshotCaptureOperationsTable.sourceBranchResourceInventoryDigest,
-            capsuleSnapshotsTable.sourceBranchResourceInventoryDigest,
+            capsuleSnapshotCaptureOperations.sourceBranchResourceInventoryDigest,
+            capsuleSnapshots.sourceBranchResourceInventoryDigest,
           ),
-          eq(
-            capsuleSnapshotCaptureOperationsTable.capturePolicySchemaVersion,
-            capsuleSnapshotsTable.capturePolicySchemaVersion,
-          ),
-          eq(capsuleSnapshotCaptureOperationsTable.capturePolicyDigest, capsuleSnapshotsTable.capturePolicyDigest),
-          eq(capsuleSnapshotCaptureOperationsTable.capturePolicyPin, capsuleSnapshotsTable.capturePolicyPin),
-          eq(capsuleSnapshotCaptureOperationsTable.requestedMode, capsuleSnapshotsTable.mode),
+          eq(capsuleSnapshotCaptureOperations.capturePolicySchemaVersion, capsuleSnapshots.capturePolicySchemaVersion),
+          eq(capsuleSnapshotCaptureOperations.capturePolicyDigest, capsuleSnapshots.capturePolicyDigest),
+          eq(capsuleSnapshotCaptureOperations.capturePolicyPin, capsuleSnapshots.capturePolicyPin),
+          eq(capsuleSnapshotCaptureOperations.requestedMode, capsuleSnapshots.mode),
         ),
       )
       .innerJoin(
-        capsuleOperationsTable,
+        capsuleOperations,
         and(
-          eq(capsuleOperationsTable.id, capsuleSnapshotCaptureOperationsTable.operationId),
-          eq(capsuleOperationsTable.ownerId, ownerId),
-          eq(capsuleOperationsTable.capsuleId, capsuleSnapshotsTable.capsuleId),
-          eq(capsuleOperationsTable.type, CapsuleOperationType.SNAPSHOT_CAPTURE),
-          eq(capsuleOperationsTable.status, 'completed'),
-          isNotNull(capsuleOperationsTable.completedAt),
+          eq(capsuleOperations.id, capsuleSnapshotCaptureOperations.operationId),
+          eq(capsuleOperations.ownerId, ownerId),
+          eq(capsuleOperations.capsuleId, capsuleSnapshots.capsuleId),
+          eq(capsuleOperations.type, CapsuleOperationType.SNAPSHOT_CAPTURE),
+          eq(capsuleOperations.status, 'completed'),
+          isNotNull(capsuleOperations.completedAt),
         ),
       )
       .where(
-        and(
-          eq(capsuleSnapshotsTable.capsuleId, capsule.id),
-          eq(capsuleSnapshotsTable.mode, CapsuleSnapshotMode.EXPERIMENTAL),
-        ),
+        and(eq(capsuleSnapshots.capsuleId, capsule.id), eq(capsuleSnapshots.mode, CapsuleSnapshotMode.EXPERIMENTAL)),
       )
-      .orderBy(asc(capsuleSnapshotsTable.createdAt), asc(capsuleSnapshotsTable.id))
+      .orderBy(asc(capsuleSnapshots.createdAt), asc(capsuleSnapshots.id))
   }
 }

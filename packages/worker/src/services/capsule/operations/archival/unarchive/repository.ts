@@ -3,12 +3,11 @@ import {
   CapsuleOperationStatus,
   CapsuleOperationType,
   CapsuleUnarchiveReceiptSchema,
-  capsuleOperationsTable,
-  capsulesTable,
-  type CapsuleHostDbContract,
   type CapsuleOperationRequestHash,
   type CapsuleOperationStatusValue,
   type CapsuleUnarchiveReceipt,
+  type QilnPersistence,
+  type QilnTables,
 } from '@qiln/core/server'
 import { IncusError, isUniqueConstraintViolation } from '../../../../../errors'
 import {
@@ -23,7 +22,6 @@ import {
   lockOwnedArchivalCapsule,
   readOwnedArchivalCapsule,
   type ArchivalCapsuleRecord,
-  type ArchivalOperationTransaction,
   type ProviderFreeArchivalOperationLedger,
 } from '../shared'
 import {
@@ -40,10 +38,11 @@ import type {
   UnarchiveCapsuleExecutionInput,
   UnarchiveCapsuleTerminalResult,
 } from './types'
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
 const NONTERMINAL_UNARCHIVE_STATUSES = [CapsuleOperationStatus.ACCEPTED, CapsuleOperationStatus.RUNNING] as const
 
-type PersistedUnarchiveOperation = typeof capsuleOperationsTable.$inferSelect
+type PersistedUnarchiveOperation = QilnTables['capsuleOperations']['$inferSelect']
 
 function isNonterminalUnarchiveStatus(
   status: CapsuleOperationStatusValue,
@@ -64,10 +63,13 @@ function isSameTimestamp(left: Date, right: Date): boolean {
  * shared with archive. Unarchive eligibility, archive-timestamp policy, and
  * terminal classification remain explicit in this repository.
  */
-export class CapsuleUnarchiveRepository {
+export class CapsuleUnarchiveRepository<
+  TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
+  TTables extends QilnTables = QilnTables,
+> {
   constructor(
-    private readonly db: CapsuleHostDbContract,
-    private readonly operationLedger: ProviderFreeArchivalOperationLedger,
+    private readonly persistence: QilnPersistence<TDatabase, TTables>,
+    private readonly operationLedger: ProviderFreeArchivalOperationLedger<TDatabase, TTables>,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -82,12 +84,20 @@ export class CapsuleUnarchiveRepository {
    */
   public async acceptOrReplay(input: AcceptUnarchiveCapsuleOperationInput): Promise<UnarchiveCapsuleAcceptanceResult> {
     const replay = await this.findSubmissionReplay(input.ownerId, input.actor, input.idempotencyKey, input.requestHash)
+
     if (replay) {
       return replay
     }
+
     try {
-      return await this.db.transaction(async tx => {
-        const capsule = await lockOwnedArchivalCapsule(tx, input.ownerId, input.capsuleId)
+      return await this.persistence.db.transaction(async tx => {
+        const capsule = await lockOwnedArchivalCapsule<TDatabase, TTables>(
+          tx,
+          this.persistence.tables,
+          input.ownerId,
+          input.capsuleId,
+        )
+
         if (capsule.lifecycleStatus !== 'active' || capsule.archivedAt === null) {
           throw new IncusError('Only an active, archived capsule can be unarchived.', 'CONFLICT', {
             ownerId: input.ownerId,
@@ -96,14 +106,20 @@ export class CapsuleUnarchiveRepository {
             archived: capsule.archivedAt !== null,
           })
         }
-        const branches = await lockArchivalCapsuleBranches(tx, input.capsuleId)
+
+        const branches = await lockArchivalCapsuleBranches<TDatabase, TTables>(
+          tx,
+          this.persistence.tables,
+          input.capsuleId,
+        )
 
         assertValidOfflineBranchLineage(input.ownerId, input.capsuleId, branches)
 
         const originalArchivedAt = capsule.archivedAt
         const now = new Date()
+
         const [operation] = await tx
-          .insert(capsuleOperationsTable)
+          .insert(this.persistence.tables.capsuleOperations)
           .values({
             ownerId: input.ownerId,
             actorType: input.actor.type,
@@ -118,32 +134,34 @@ export class CapsuleUnarchiveRepository {
             updatedAt: now,
           })
           .returning({
-            id: capsuleOperationsTable.id,
-            ownerId: capsuleOperationsTable.ownerId,
-            capsuleId: capsuleOperationsTable.capsuleId,
-            status: capsuleOperationsTable.status,
+            id: this.persistence.tables.capsuleOperations.id,
+            ownerId: this.persistence.tables.capsuleOperations.ownerId,
+            capsuleId: this.persistence.tables.capsuleOperations.capsuleId,
+            status: this.persistence.tables.capsuleOperations.status,
           })
+
         if (!operation) {
           throw new IncusError('Failed to durably accept the capsule unarchive operation.', 'API_ERROR')
         }
+
         const [unarchivingCapsule] = await tx
-          .update(capsulesTable)
+          .update(this.persistence.tables.capsules)
           .set({
             lifecycleStatus: 'unarchiving',
             updatedAt: now,
           })
           .where(
             and(
-              eq(capsulesTable.id, input.capsuleId),
-              eq(capsulesTable.ownerId, input.ownerId),
-              eq(capsulesTable.lifecycleStatus, 'active'),
-              isNotNull(capsulesTable.archivedAt),
+              eq(this.persistence.tables.capsules.id, input.capsuleId),
+              eq(this.persistence.tables.capsules.ownerId, input.ownerId),
+              eq(this.persistence.tables.capsules.lifecycleStatus, 'active'),
+              isNotNull(this.persistence.tables.capsules.archivedAt),
             ),
           )
           .returning({
-            lifecycleStatus: capsulesTable.lifecycleStatus,
-            archivedAt: capsulesTable.archivedAt,
-            destroyedAt: capsulesTable.destroyedAt,
+            lifecycleStatus: this.persistence.tables.capsules.lifecycleStatus,
+            archivedAt: this.persistence.tables.capsules.archivedAt,
+            destroyedAt: this.persistence.tables.capsules.destroyedAt,
           })
 
         if (
@@ -222,9 +240,11 @@ export class CapsuleUnarchiveRepository {
       operationType: CapsuleOperationType.UNARCHIVE,
       requestDescription: 'capsule unarchive',
     })
+
     if (!operation) {
       return null
     }
+
     return await this.loadAcceptanceResult(operation, false, true)
   }
 
@@ -275,7 +295,7 @@ export class CapsuleUnarchiveRepository {
    * `archivedAt`.
    */
   public async complete(operationId: string): Promise<UnarchiveCapsuleTerminalResult> {
-    return await this.db.transaction(async tx => {
+    return await this.persistence.db.transaction(async tx => {
       const operation = await this.lockUnarchiveOperation(tx, operationId)
 
       if (operation.status !== CapsuleOperationStatus.RUNNING || operation.providerMutationStartedAt !== null) {
@@ -286,8 +306,17 @@ export class CapsuleUnarchiveRepository {
         })
       }
 
-      const capsule = await lockOwnedArchivalCapsule(tx, operation.ownerId, operation.capsuleId)
-      const branches = await lockArchivalCapsuleBranches(tx, operation.capsuleId)
+      const capsule = await lockOwnedArchivalCapsule<TDatabase, TTables>(
+        tx,
+        this.persistence.tables,
+        operation.ownerId,
+        operation.capsuleId,
+      )
+      const branches = await lockArchivalCapsuleBranches<TDatabase, TTables>(
+        tx,
+        this.persistence.tables,
+        operation.capsuleId,
+      )
 
       assertValidOfflineBranchLineage(operation.ownerId, operation.capsuleId, branches)
 
@@ -303,7 +332,7 @@ export class CapsuleUnarchiveRepository {
       const now = new Date()
 
       const [completedOperation] = await tx
-        .update(capsuleOperationsTable)
+        .update(this.persistence.tables.capsuleOperations)
         .set({
           status: CapsuleOperationStatus.COMPLETED,
           completedAt: now,
@@ -311,18 +340,18 @@ export class CapsuleUnarchiveRepository {
         })
         .where(
           and(
-            eq(capsuleOperationsTable.id, operationId),
-            eq(capsuleOperationsTable.type, CapsuleOperationType.UNARCHIVE),
-            eq(capsuleOperationsTable.status, CapsuleOperationStatus.RUNNING),
-            isNull(capsuleOperationsTable.providerMutationStartedAt),
+            eq(this.persistence.tables.capsuleOperations.id, operationId),
+            eq(this.persistence.tables.capsuleOperations.type, CapsuleOperationType.UNARCHIVE),
+            eq(this.persistence.tables.capsuleOperations.status, CapsuleOperationStatus.RUNNING),
+            isNull(this.persistence.tables.capsuleOperations.providerMutationStartedAt),
           ),
         )
         .returning({
-          id: capsuleOperationsTable.id,
+          id: this.persistence.tables.capsuleOperations.id,
         })
 
       const [unarchivedCapsule] = await tx
-        .update(capsulesTable)
+        .update(this.persistence.tables.capsules)
         .set({
           lifecycleStatus: 'active',
           archivedAt: null,
@@ -330,16 +359,16 @@ export class CapsuleUnarchiveRepository {
         })
         .where(
           and(
-            eq(capsulesTable.id, operation.capsuleId),
-            eq(capsulesTable.ownerId, operation.ownerId),
-            eq(capsulesTable.lifecycleStatus, 'unarchiving'),
-            isNotNull(capsulesTable.archivedAt),
+            eq(this.persistence.tables.capsules.id, operation.capsuleId),
+            eq(this.persistence.tables.capsules.ownerId, operation.ownerId),
+            eq(this.persistence.tables.capsules.lifecycleStatus, 'unarchiving'),
+            isNotNull(this.persistence.tables.capsules.archivedAt),
           ),
         )
         .returning({
-          lifecycleStatus: capsulesTable.lifecycleStatus,
-          archivedAt: capsulesTable.archivedAt,
-          destroyedAt: capsulesTable.destroyedAt,
+          lifecycleStatus: this.persistence.tables.capsules.lifecycleStatus,
+          archivedAt: this.persistence.tables.capsules.archivedAt,
+          destroyedAt: this.persistence.tables.capsules.destroyedAt,
         })
 
       if (!completedOperation || !unarchivedCapsule || unarchivedCapsule.archivedAt !== null) {
@@ -392,15 +421,24 @@ export class CapsuleUnarchiveRepository {
     error: unknown,
     context: Record<string, unknown>,
   ): Promise<UnarchiveCapsuleTerminalResult | null> {
-    return await this.db.transaction(async tx => {
+    return await this.persistence.db.transaction(async tx => {
       const operation = await this.lockUnarchiveOperation(tx, operationId)
 
       if (!isNonterminalUnarchiveStatus(operation.status)) {
         return null
       }
 
-      const capsule = await lockOwnedArchivalCapsule(tx, operation.ownerId, operation.capsuleId)
-      const branches = await lockArchivalCapsuleBranches(tx, operation.capsuleId)
+      const capsule = await lockOwnedArchivalCapsule<TDatabase, TTables>(
+        tx,
+        this.persistence.tables,
+        operation.ownerId,
+        operation.capsuleId,
+      )
+      const branches = await lockArchivalCapsuleBranches<TDatabase, TTables>(
+        tx,
+        this.persistence.tables,
+        operation.capsuleId,
+      )
       const lineage = inspectOfflineBranchLineage(operation.ownerId, operation.capsuleId, branches)
       const originalArchivedAt = capsule.archivedAt
 
@@ -453,7 +491,7 @@ export class CapsuleUnarchiveRepository {
    * cleanup-required.
    */
   public async classifyAbandoned(operationId: string): Promise<UnarchiveCapsuleAbandonedClassificationResult> {
-    return await this.db.transaction(async tx => {
+    return await this.persistence.db.transaction(async tx => {
       const operation = await this.lockUnarchiveOperationIfPresent(tx, operationId)
 
       if (!operation) {
@@ -471,8 +509,17 @@ export class CapsuleUnarchiveRepository {
         return null
       }
 
-      const capsule = await lockOwnedArchivalCapsule(tx, operation.ownerId, operation.capsuleId)
-      const branches = await lockArchivalCapsuleBranches(tx, operation.capsuleId)
+      const capsule = await lockOwnedArchivalCapsule<TDatabase, TTables>(
+        tx,
+        this.persistence.tables,
+        operation.ownerId,
+        operation.capsuleId,
+      )
+      const branches = await lockArchivalCapsuleBranches<TDatabase, TTables>(
+        tx,
+        this.persistence.tables,
+        operation.capsuleId,
+      )
       const lineage = inspectOfflineBranchLineage(operation.ownerId, operation.capsuleId, branches)
       const originalArchivedAt = capsule.archivedAt
 
@@ -530,7 +577,7 @@ export class CapsuleUnarchiveRepository {
   // ---------------------------------------------------------------------------
 
   private async markSafeFailureInTransaction(
-    tx: ArchivalOperationTransaction,
+    tx: Parameters<Parameters<TDatabase['transaction']>[0]>[0],
     operation: PersistedUnarchiveOperation,
     originalArchivedAt: Date,
     error: unknown,
@@ -557,8 +604,9 @@ export class CapsuleUnarchiveRepository {
 
     const failureDetails = createOperationFailureDetails(error, context)
     const now = new Date()
+
     const [failedOperation] = await tx
-      .update(capsuleOperationsTable)
+      .update(this.persistence.tables.capsuleOperations)
       .set({
         status: CapsuleOperationStatus.FAILED,
         failedAt: now,
@@ -570,34 +618,34 @@ export class CapsuleUnarchiveRepository {
       })
       .where(
         and(
-          eq(capsuleOperationsTable.id, operation.id),
-          eq(capsuleOperationsTable.type, CapsuleOperationType.UNARCHIVE),
-          inArray(capsuleOperationsTable.status, NONTERMINAL_UNARCHIVE_STATUSES),
-          isNull(capsuleOperationsTable.providerMutationStartedAt),
+          eq(this.persistence.tables.capsuleOperations.id, operation.id),
+          eq(this.persistence.tables.capsuleOperations.type, CapsuleOperationType.UNARCHIVE),
+          inArray(this.persistence.tables.capsuleOperations.status, NONTERMINAL_UNARCHIVE_STATUSES),
+          isNull(this.persistence.tables.capsuleOperations.providerMutationStartedAt),
         ),
       )
       .returning({
-        id: capsuleOperationsTable.id,
+        id: this.persistence.tables.capsuleOperations.id,
       })
 
     const [restoredCapsule] = await tx
-      .update(capsulesTable)
+      .update(this.persistence.tables.capsules)
       .set({
         lifecycleStatus: 'active',
         updatedAt: now,
       })
       .where(
         and(
-          eq(capsulesTable.id, operation.capsuleId),
-          eq(capsulesTable.ownerId, operation.ownerId),
-          eq(capsulesTable.lifecycleStatus, 'unarchiving'),
-          isNotNull(capsulesTable.archivedAt),
+          eq(this.persistence.tables.capsules.id, operation.capsuleId),
+          eq(this.persistence.tables.capsules.ownerId, operation.ownerId),
+          eq(this.persistence.tables.capsules.lifecycleStatus, 'unarchiving'),
+          isNotNull(this.persistence.tables.capsules.archivedAt),
         ),
       )
       .returning({
-        lifecycleStatus: capsulesTable.lifecycleStatus,
-        archivedAt: capsulesTable.archivedAt,
-        destroyedAt: capsulesTable.destroyedAt,
+        lifecycleStatus: this.persistence.tables.capsules.lifecycleStatus,
+        archivedAt: this.persistence.tables.capsules.archivedAt,
+        destroyedAt: this.persistence.tables.capsules.destroyedAt,
       })
 
     if (
@@ -631,7 +679,7 @@ export class CapsuleUnarchiveRepository {
   }
 
   private async markCleanupRequiredInTransaction(
-    tx: ArchivalOperationTransaction,
+    tx: Parameters<Parameters<TDatabase['transaction']>[0]>[0],
     operation: PersistedUnarchiveOperation,
     capsule: ArchivalCapsuleRecord,
     error: unknown,
@@ -648,7 +696,7 @@ export class CapsuleUnarchiveRepository {
     const now = new Date()
 
     const [cleanupOperation] = await tx
-      .update(capsuleOperationsTable)
+      .update(this.persistence.tables.capsuleOperations)
       .set({
         status: CapsuleOperationStatus.CLEANUP_REQUIRED,
         failedAt: now,
@@ -665,13 +713,13 @@ export class CapsuleUnarchiveRepository {
       })
       .where(
         and(
-          eq(capsuleOperationsTable.id, operation.id),
-          eq(capsuleOperationsTable.type, CapsuleOperationType.UNARCHIVE),
-          inArray(capsuleOperationsTable.status, NONTERMINAL_UNARCHIVE_STATUSES),
+          eq(this.persistence.tables.capsuleOperations.id, operation.id),
+          eq(this.persistence.tables.capsuleOperations.type, CapsuleOperationType.UNARCHIVE),
+          inArray(this.persistence.tables.capsuleOperations.status, NONTERMINAL_UNARCHIVE_STATUSES),
         ),
       )
       .returning({
-        id: capsuleOperationsTable.id,
+        id: this.persistence.tables.capsuleOperations.id,
       })
 
     if (!cleanupOperation) {
@@ -691,16 +739,21 @@ export class CapsuleUnarchiveRepository {
     // durable destroyed-timestamp invariant.
     if (capsule.lifecycleStatus !== 'destroyed') {
       const [cleanupCapsule] = await tx
-        .update(capsulesTable)
+        .update(this.persistence.tables.capsules)
         .set({
           lifecycleStatus: 'cleanup_required',
           updatedAt: now,
         })
-        .where(and(eq(capsulesTable.id, operation.capsuleId), eq(capsulesTable.ownerId, operation.ownerId)))
+        .where(
+          and(
+            eq(this.persistence.tables.capsules.id, operation.capsuleId),
+            eq(this.persistence.tables.capsules.ownerId, operation.ownerId),
+          ),
+        )
         .returning({
-          lifecycleStatus: capsulesTable.lifecycleStatus,
-          archivedAt: capsulesTable.archivedAt,
-          destroyedAt: capsulesTable.destroyedAt,
+          lifecycleStatus: this.persistence.tables.capsules.lifecycleStatus,
+          archivedAt: this.persistence.tables.capsules.archivedAt,
+          destroyedAt: this.persistence.tables.capsules.destroyedAt,
         })
 
       if (!cleanupCapsule) {
@@ -742,13 +795,15 @@ export class CapsuleUnarchiveRepository {
     newlyAccepted: boolean,
     replayed: boolean,
   ): Promise<UnarchiveCapsuleAcceptanceResult> {
-    const capsule = await readOwnedArchivalCapsule(this.db, operation.ownerId, operation.capsuleId)
+    const capsule = await readOwnedArchivalCapsule(this.persistence, operation.ownerId, operation.capsuleId)
+
     if (!capsule) {
       throw new IncusError('Capsule unarchive operation references a missing capsule aggregate.', 'API_ERROR', {
         operationId: operation.id,
         capsuleId: operation.capsuleId,
       })
     }
+
     return {
       newlyAccepted,
       receipt: this.createReceipt({
@@ -807,7 +862,7 @@ export class CapsuleUnarchiveRepository {
   // ---------------------------------------------------------------------------
 
   private async lockUnarchiveOperation(
-    tx: ArchivalOperationTransaction,
+    tx: Parameters<Parameters<TDatabase['transaction']>[0]>[0],
     operationId: string,
   ): Promise<PersistedUnarchiveOperation> {
     const operation = await this.lockUnarchiveOperationIfPresent(tx, operationId)
@@ -829,13 +884,13 @@ export class CapsuleUnarchiveRepository {
   }
 
   private async lockUnarchiveOperationIfPresent(
-    tx: ArchivalOperationTransaction,
+    tx: Parameters<Parameters<TDatabase['transaction']>[0]>[0],
     operationId: string,
   ): Promise<PersistedUnarchiveOperation | null> {
     const [operation] = await tx
       .select()
-      .from(capsuleOperationsTable)
-      .where(eq(capsuleOperationsTable.id, operationId))
+      .from(this.persistence.tables.capsuleOperations)
+      .where(eq(this.persistence.tables.capsuleOperations.id, operationId))
       .for('update')
       .limit(1)
 

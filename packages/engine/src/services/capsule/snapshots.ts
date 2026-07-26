@@ -6,13 +6,12 @@ import {
   GlobalError,
   GlobalErrorCode,
   TargetType,
-  capsulesTable,
   type CapsuleChannel,
-  type CapsuleHostDbContract,
   type CapsuleOperationIdempotencyKey,
   type CapsuleSnapshotCaptureOutput,
   type CapsuleSnapshotListOutput,
 } from '@qiln/core/server'
+import type { EnginePersistence } from '../../persistence'
 import type { CapsuleMutationIdentity } from './types'
 
 export interface CapsuleSnapshotListOptions {
@@ -41,7 +40,7 @@ export interface CapsuleSnapshotCaptureRequest {
  */
 export class CapsuleSnapshotsService {
   constructor(
-    private readonly db: CapsuleHostDbContract,
+    private readonly persistence: EnginePersistence,
     private readonly channel: CapsuleChannel,
   ) {}
 
@@ -96,12 +95,14 @@ export class CapsuleSnapshotsService {
    * validating snapshot reads or accepting Snapshot Capture.
    */
   private async assertOwnedCapsule(ownerId: string, capsuleId: string): Promise<void> {
-    const [capsule] = await this.db
+    const { db, tables } = this.persistence
+    const capsules = tables.capsules
+    const [capsule] = await db
       .select({
-        id: capsulesTable.id,
+        id: capsules.id,
       })
-      .from(capsulesTable)
-      .where(and(eq(capsulesTable.id, capsuleId), eq(capsulesTable.ownerId, ownerId)))
+      .from(capsules)
+      .where(and(eq(capsules.id, capsuleId), eq(capsules.ownerId, ownerId)))
       .limit(1)
     if (!capsule) {
       throw new GlobalError('Capsule not found or access denied.', GlobalErrorCode.NOT_FOUND, {

@@ -3,7 +3,7 @@ import type { FastifyInstance } from 'fastify'
 import type { QilnEngineController } from '@qiln/engine/server'
 import type { QilnWorkerRuntime } from '@qiln/worker/server'
 import type { Session } from '@server/plugins/session'
-import type { Database } from '@server/db'
+import type { Database, Persistence } from '@server/db'
 
 type MultipartConfig = {
   directory: string
@@ -104,6 +104,7 @@ declare module 'fastify' {
   }
   interface FastifyInstance {
     db: Database
+    persistence: Persistence
     engine: QilnEngineController
     worker: QilnWorkerRuntime | null
     config: EnvironmentConfig

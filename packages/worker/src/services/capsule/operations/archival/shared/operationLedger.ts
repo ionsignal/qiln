@@ -2,9 +2,9 @@ import { and, eq, isNull } from 'drizzle-orm'
 import {
   CapsuleOperationStatus,
   CapsuleOperationType,
-  capsuleOperationsTable,
+  type QilnPersistence,
+  type QilnTables,
   type CapsuleActorReference,
-  type CapsuleHostDbContract,
   type CapsuleOperationRequestHash,
 } from '@qiln/core/server'
 import { IncusError } from '../../../../../errors'
@@ -12,6 +12,7 @@ import { assertOperationReplayIdentity } from '../../shared/replayIdentity'
 import { toCapsuleOperationTransition } from '../../shared/operationTransition'
 import type { CapsuleOperationReader } from '../../shared/operationReader'
 import type { CapsuleOperationTransitionOutput, PersistedCapsuleOperation } from '../../shared/types'
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
 export type ProviderFreeArchivalOperationType =
   typeof CapsuleOperationType.ARCHIVE | typeof CapsuleOperationType.UNARCHIVE
@@ -46,10 +47,13 @@ export interface ClaimProviderFreeArchivalOperationInput {
  * eligibility, archive timestamp policy, terminal failure classification, or
  * abandoned-operation policy.
  */
-export class ProviderFreeArchivalOperationLedger {
+export class ProviderFreeArchivalOperationLedger<
+  TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
+  TTables extends QilnTables = QilnTables,
+> {
   constructor(
-    private readonly db: CapsuleHostDbContract,
-    private readonly reader: CapsuleOperationReader,
+    private readonly persistence: QilnPersistence<TDatabase, TTables>,
+    private readonly reader: CapsuleOperationReader<TDatabase, TTables>,
   ) {}
 
   /**
@@ -129,8 +133,10 @@ export class ProviderFreeArchivalOperationLedger {
     input: ClaimProviderFreeArchivalOperationInput,
   ): Promise<CapsuleOperationTransitionOutput> {
     const now = new Date()
-    const [claimed] = await this.db
-      .update(capsuleOperationsTable)
+    const db = this.persistence.db
+    const operations = this.persistence.tables.capsuleOperations
+    const [claimed] = await db
+      .update(operations)
       .set({
         status: CapsuleOperationStatus.RUNNING,
         executionStartedAt: now,
@@ -138,16 +144,16 @@ export class ProviderFreeArchivalOperationLedger {
       })
       .where(
         and(
-          eq(capsuleOperationsTable.id, input.operationId),
-          eq(capsuleOperationsTable.type, input.operationType),
-          eq(capsuleOperationsTable.status, CapsuleOperationStatus.ACCEPTED),
-          isNull(capsuleOperationsTable.providerMutationStartedAt),
+          eq(operations.id, input.operationId),
+          eq(operations.type, input.operationType),
+          eq(operations.status, CapsuleOperationStatus.ACCEPTED),
+          isNull(operations.providerMutationStartedAt),
         ),
       )
       .returning({
-        ownerId: capsuleOperationsTable.ownerId,
-        capsuleId: capsuleOperationsTable.capsuleId,
-        operationStatus: capsuleOperationsTable.status,
+        ownerId: operations.ownerId,
+        capsuleId: operations.capsuleId,
+        operationStatus: operations.status,
       })
     if (!claimed) {
       throw new IncusError(

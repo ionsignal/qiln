@@ -1,4 +1,5 @@
-import type { CapsuleHostDbContract, CapsuleOperationRequestHash } from '@qiln/core/server'
+import type { CapsuleOperationRequestHash, QilnPersistence, QilnTables } from '@qiln/core/server'
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import type { CapsuleOperationReader, CapsuleOperationTransitionOutput } from '../../shared'
 import { DestroyCapsuleAcceptancePersistence } from './acceptance'
 import { DestroyCapsuleClassificationPersistence } from './classification'
@@ -20,18 +21,21 @@ import type {
  * wrapper. Cohesive persistence modules own their transactions and policy
  * orchestration; the facade itself opens no transactions.
  */
-export class DestroyCapsuleOperationRepository {
-  private readonly acceptance: DestroyCapsuleAcceptancePersistence
-  private readonly execution: DestroyCapsuleExecutionPersistence
-  private readonly classification: DestroyCapsuleClassificationPersistence
+export class DestroyCapsuleOperationRepository<
+  TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
+  TTables extends QilnTables = QilnTables,
+> {
+  private readonly acceptance: DestroyCapsuleAcceptancePersistence<TDatabase, TTables>
+  private readonly execution: DestroyCapsuleExecutionPersistence<TDatabase, TTables>
+  private readonly classification: DestroyCapsuleClassificationPersistence<TDatabase, TTables>
 
   constructor(
-    private readonly db: CapsuleHostDbContract,
-    reader: CapsuleOperationReader,
+    private readonly persistence: QilnPersistence<TDatabase, TTables>,
+    reader: CapsuleOperationReader<TDatabase, TTables>,
   ) {
-    this.acceptance = new DestroyCapsuleAcceptancePersistence(db, reader)
-    this.execution = new DestroyCapsuleExecutionPersistence(db, reader)
-    this.classification = new DestroyCapsuleClassificationPersistence(db, reader)
+    this.acceptance = new DestroyCapsuleAcceptancePersistence(persistence, reader)
+    this.execution = new DestroyCapsuleExecutionPersistence(persistence, reader)
+    this.classification = new DestroyCapsuleClassificationPersistence(persistence, reader)
   }
 
   public async acceptOrReplay(
@@ -55,7 +59,7 @@ export class DestroyCapsuleOperationRepository {
   }
 
   public async complete(operationId: string): Promise<DestroyCapsuleTerminalResult> {
-    return await completeDestroyCapsule(this.db, operationId)
+    return await completeDestroyCapsule(this.persistence, operationId)
   }
 
   public async classifyExecutionFailure(

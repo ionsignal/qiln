@@ -5,9 +5,6 @@ import {
   CapsuleSnapshotResourceProviderValues,
   type CapsuleBlueprintIdentifier,
 } from '../../../schemas'
-import { capsuleBranchResourcesTable } from '../branch/resource'
-import { capsuleArtifactManifestRootsTable } from './manifest'
-import { capsuleSnapshotsTable } from './record'
 
 export const capsuleSnapshotResourceProviderEnum = pgEnum(
   'capsule_snapshot_resource_provider',
@@ -104,9 +101,3 @@ export function createCapsuleSnapshotResourceReferencesTable(
     ],
   )
 }
-
-export const capsuleSnapshotResourceReferencesTable = createCapsuleSnapshotResourceReferencesTable(
-  capsuleSnapshotsTable.id,
-  capsuleArtifactManifestRootsTable.id,
-  capsuleBranchResourcesTable.id,
-)

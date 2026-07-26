@@ -19,7 +19,6 @@ import {
   type CapsuleArtifactManifestDigest,
   type CapsuleArtifactRootId,
 } from '../../../schemas'
-import { capsuleSnapshotsTable } from './record'
 
 export const capsuleArtifactEntryTypeEnum = pgEnum('capsule_artifact_entry_type', CapsuleArtifactEntryTypeValues)
 
@@ -172,11 +171,3 @@ export function createCapsuleArtifactEntriesTable(manifestRootIdColumn?: PgColum
     ],
   )
 }
-
-export const capsuleArtifactManifestsTable = createCapsuleArtifactManifestsTable(capsuleSnapshotsTable.id)
-
-export const capsuleArtifactManifestRootsTable = createCapsuleArtifactManifestRootsTable(
-  capsuleArtifactManifestsTable.id,
-)
-
-export const capsuleArtifactEntriesTable = createCapsuleArtifactEntriesTable(capsuleArtifactManifestRootsTable.id)

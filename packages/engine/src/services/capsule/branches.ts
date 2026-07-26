@@ -2,14 +2,12 @@ import { and, desc, eq, inArray, isNull, ne } from 'drizzle-orm'
 import {
   CapsuleBranchCommandName,
   TargetType,
-  capsuleBranchesTable,
-  capsulesTable,
   type CapsuleBlueprintDigest,
   type CapsuleBranchStatus,
   type CapsuleChannel,
   type CapsuleCommandAck,
-  type CapsuleHostDbContract,
 } from '@qiln/core/server'
+import type { EnginePersistence } from '../../persistence'
 
 const OPERATIONAL_CAPSULE_LIFECYCLE_STATUSES = ['provisioning', 'active'] as const
 
@@ -59,7 +57,7 @@ type CapsuleBranchRow = {
  */
 export class CapsuleBranchesService {
   constructor(
-    private readonly db: CapsuleHostDbContract,
+    private readonly persistence: EnginePersistence,
     private readonly channel: CapsuleChannel,
   ) {}
 
@@ -74,33 +72,36 @@ export class CapsuleBranchesService {
    * capsule aggregates are excluded from this operational branch surface.
    */
   public async list(ownerId: string): Promise<CapsuleBranchesServiceSummary[]> {
-    const rows = await this.db
+    const { db, tables } = this.persistence
+    const branches = tables.capsuleBranches
+    const capsules = tables.capsules
+    const rows = await db
       .select({
-        id: capsuleBranchesTable.id,
-        capsuleId: capsuleBranchesTable.capsuleId,
-        name: capsuleBranchesTable.name,
-        status: capsuleBranchesTable.status,
-        isRootBranch: capsuleBranchesTable.isRootBranch,
-        cpu: capsuleBranchesTable.cpu,
-        memory: capsuleBranchesTable.memory,
-        blueprintName: capsuleBranchesTable.blueprintName,
-        blueprintDigest: capsuleBranchesTable.blueprintDigest,
-        runtimeIp: capsuleBranchesTable.runtimeIp,
-        createdAt: capsuleBranchesTable.createdAt,
-        updatedAt: capsuleBranchesTable.updatedAt,
+        id: branches.id,
+        capsuleId: branches.capsuleId,
+        name: branches.name,
+        status: branches.status,
+        isRootBranch: branches.isRootBranch,
+        cpu: branches.cpu,
+        memory: branches.memory,
+        blueprintName: branches.blueprintName,
+        blueprintDigest: branches.blueprintDigest,
+        runtimeIp: branches.runtimeIp,
+        createdAt: branches.createdAt,
+        updatedAt: branches.updatedAt,
       })
-      .from(capsuleBranchesTable)
-      .innerJoin(capsulesTable, eq(capsulesTable.id, capsuleBranchesTable.capsuleId))
+      .from(branches)
+      .innerJoin(capsules, eq(capsules.id, branches.capsuleId))
       .where(
         and(
-          eq(capsuleBranchesTable.ownerId, ownerId),
-          eq(capsulesTable.ownerId, ownerId),
-          inArray(capsulesTable.lifecycleStatus, OPERATIONAL_CAPSULE_LIFECYCLE_STATUSES),
-          isNull(capsulesTable.archivedAt),
-          ne(capsuleBranchesTable.status, 'destroyed'),
+          eq(branches.ownerId, ownerId),
+          eq(capsules.ownerId, ownerId),
+          inArray(capsules.lifecycleStatus, OPERATIONAL_CAPSULE_LIFECYCLE_STATUSES),
+          isNull(capsules.archivedAt),
+          ne(branches.status, 'destroyed'),
         ),
       )
-      .orderBy(desc(capsuleBranchesTable.createdAt))
+      .orderBy(desc(branches.createdAt))
     return rows.map(row => this.mapBranchRow(row))
   }
 
@@ -111,32 +112,35 @@ export class CapsuleBranchesService {
    * The lifecycle policy is intentionally identical to `list()`.
    */
   public async state(ownerId: string, capsuleId: string, name: string): Promise<CapsuleBranchesServiceSummary | null> {
-    const [row] = await this.db
+    const { db, tables } = this.persistence
+    const branches = tables.capsuleBranches
+    const capsules = tables.capsules
+    const [row] = await db
       .select({
-        id: capsuleBranchesTable.id,
-        capsuleId: capsuleBranchesTable.capsuleId,
-        name: capsuleBranchesTable.name,
-        status: capsuleBranchesTable.status,
-        isRootBranch: capsuleBranchesTable.isRootBranch,
-        cpu: capsuleBranchesTable.cpu,
-        memory: capsuleBranchesTable.memory,
-        blueprintName: capsuleBranchesTable.blueprintName,
-        blueprintDigest: capsuleBranchesTable.blueprintDigest,
-        runtimeIp: capsuleBranchesTable.runtimeIp,
-        createdAt: capsuleBranchesTable.createdAt,
-        updatedAt: capsuleBranchesTable.updatedAt,
+        id: branches.id,
+        capsuleId: branches.capsuleId,
+        name: branches.name,
+        status: branches.status,
+        isRootBranch: branches.isRootBranch,
+        cpu: branches.cpu,
+        memory: branches.memory,
+        blueprintName: branches.blueprintName,
+        blueprintDigest: branches.blueprintDigest,
+        runtimeIp: branches.runtimeIp,
+        createdAt: branches.createdAt,
+        updatedAt: branches.updatedAt,
       })
-      .from(capsuleBranchesTable)
-      .innerJoin(capsulesTable, eq(capsulesTable.id, capsuleBranchesTable.capsuleId))
+      .from(branches)
+      .innerJoin(capsules, eq(capsules.id, branches.capsuleId))
       .where(
         and(
-          eq(capsuleBranchesTable.ownerId, ownerId),
-          eq(capsuleBranchesTable.capsuleId, capsuleId),
-          eq(capsuleBranchesTable.name, name),
-          eq(capsulesTable.ownerId, ownerId),
-          inArray(capsulesTable.lifecycleStatus, OPERATIONAL_CAPSULE_LIFECYCLE_STATUSES),
-          isNull(capsulesTable.archivedAt),
-          ne(capsuleBranchesTable.status, 'destroyed'),
+          eq(branches.ownerId, ownerId),
+          eq(branches.capsuleId, capsuleId),
+          eq(branches.name, name),
+          eq(capsules.ownerId, ownerId),
+          inArray(capsules.lifecycleStatus, OPERATIONAL_CAPSULE_LIFECYCLE_STATUSES),
+          isNull(capsules.archivedAt),
+          ne(branches.status, 'destroyed'),
         ),
       )
       .limit(1)

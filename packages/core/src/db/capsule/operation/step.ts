@@ -1,9 +1,6 @@
 import { sql } from 'drizzle-orm'
 import { index, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid, type PgColumn } from 'drizzle-orm/pg-core'
 import { CapsuleOperationStepStatusValues } from '../../../schemas'
-import { capsuleBranchesTable } from '../branch/record'
-import { capsulesTable } from '../record'
-import { capsuleOperationsTable } from './record'
 
 export const capsuleOperationStepStatusEnum = pgEnum('capsule_operation_step_status', CapsuleOperationStepStatusValues)
 
@@ -106,10 +103,3 @@ export function createCapsuleOperationStepsTable(
     ],
   )
 }
-
-export const capsuleOperationStepsTable = createCapsuleOperationStepsTable(
-  undefined,
-  capsulesTable.id,
-  capsuleOperationsTable.id,
-  capsuleBranchesTable.id,
-)

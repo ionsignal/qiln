@@ -6,20 +6,16 @@ import {
   CapsuleLifecycleStateSchema,
   CapsuleOperationStatus,
   CapsuleOperationType,
-  capsuleBranchesTable,
-  capsuleBranchResourcesTable,
-  capsuleCreateOperationsTable,
-  capsuleOperationsTable,
-  capsulesTable,
   digestCanonicalJsonValue,
   type CapsuleActorReference,
   type CapsuleBlueprint,
   type CapsuleBlueprintDigest,
   type CapsuleBranchResourceInventoryDigest,
   type CapsuleCreateReceipt,
-  type CapsuleHostDbContract,
   type CapsuleOperationRequestHash,
   type CapsuleOperationStatusValue,
+  type QilnPersistence,
+  type QilnTables,
 } from '@qiln/core/server'
 import { IncusError, isUniqueConstraintViolation } from '../../../../errors'
 import { createFailureDetails, failureCodeFromUnknown, failureMessageFromUnknown } from '../../failures'
@@ -38,14 +34,14 @@ import type {
   CreateCapsuleRepositoryResult,
   CreateCapsuleTerminalResult,
 } from './types'
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
 const NONTERMINAL_CREATE_STATUSES = [CapsuleOperationStatus.ACCEPTED, CapsuleOperationStatus.RUNNING] as const
 
-type CreateTransaction = Parameters<Parameters<CapsuleHostDbContract['transaction']>[0]>[0]
-type PersistedCreateOperation = typeof capsuleOperationsTable.$inferSelect
-type PersistedCreateOperationExtension = typeof capsuleCreateOperationsTable.$inferSelect
-type PersistedCapsule = typeof capsulesTable.$inferSelect
-type PersistedCapsuleBranch = typeof capsuleBranchesTable.$inferSelect
+type PersistedCreateOperation = QilnTables['capsuleOperations']['$inferSelect']
+type PersistedCreateOperationExtension = QilnTables['capsuleCreateOperations']['$inferSelect']
+type PersistedCapsule = QilnTables['capsules']['$inferSelect']
+type PersistedCapsuleBranch = QilnTables['capsuleBranches']['$inferSelect']
 
 interface PreProviderResourceEvidence {
   id: string
@@ -81,10 +77,13 @@ function isNonterminalCreateStatus(
  * acceptance, extension validation, immutable execution input, mutation fences,
  * terminal aggregate transitions, and abandoned-create classification.
  */
-export class CreateCapsuleOperationRepository {
+export class CreateCapsuleOperationRepository<
+  TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
+  TTables extends QilnTables = QilnTables,
+> {
   constructor(
-    private readonly db: CapsuleHostDbContract,
-    private readonly reader: CapsuleOperationReader,
+    private readonly persistence: QilnPersistence<TDatabase, TTables>,
+    private readonly reader: CapsuleOperationReader<TDatabase, TTables>,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -128,17 +127,16 @@ export class CreateCapsuleOperationRepository {
    */
   public async acceptCreate(input: AcceptCreateCapsuleOperationInput): Promise<CreateCapsuleRepositoryResult> {
     const replay = await this.findIdempotentReplay(input.ownerId, input.actor, input.idempotencyKey, input.requestHash)
-
     if (replay) {
       return replay
     }
-
+    const db = this.persistence.db
+    const { capsules, capsuleOperations, capsuleBranches, capsuleCreateOperations } = this.persistence.tables
     try {
-      return await this.db.transaction(async tx => {
+      return await db.transaction(async tx => {
         const now = new Date()
-
         const [capsule] = await tx
-          .insert(capsulesTable)
+          .insert(capsules)
           .values({
             ownerId: input.ownerId,
             lifecycleStatus: 'provisioning',
@@ -146,18 +144,16 @@ export class CreateCapsuleOperationRepository {
             updatedAt: now,
           })
           .returning({
-            id: capsulesTable.id,
-            lifecycleStatus: capsulesTable.lifecycleStatus,
-            archivedAt: capsulesTable.archivedAt,
-            destroyedAt: capsulesTable.destroyedAt,
+            id: capsules.id,
+            lifecycleStatus: capsules.lifecycleStatus,
+            archivedAt: capsules.archivedAt,
+            destroyedAt: capsules.destroyedAt,
           })
-
         if (!capsule) {
           throw new IncusError('Failed to create the durable capsule aggregate.', 'API_ERROR')
         }
-
         const [operation] = await tx
-          .insert(capsuleOperationsTable)
+          .insert(capsuleOperations)
           .values({
             ownerId: input.ownerId,
             actorType: input.actor.type,
@@ -172,18 +168,16 @@ export class CreateCapsuleOperationRepository {
             updatedAt: now,
           })
           .returning({
-            id: capsuleOperationsTable.id,
-            ownerId: capsuleOperationsTable.ownerId,
-            capsuleId: capsuleOperationsTable.capsuleId,
-            status: capsuleOperationsTable.status,
+            id: capsuleOperations.id,
+            ownerId: capsuleOperations.ownerId,
+            capsuleId: capsuleOperations.capsuleId,
+            status: capsuleOperations.status,
           })
-
         if (!operation) {
           throw new IncusError('Failed to accept the durable capsule create operation.', 'API_ERROR')
         }
-
         const [rootBranch] = await tx
-          .insert(capsuleBranchesTable)
+          .insert(capsuleBranches)
           .values({
             ownerId: input.ownerId,
             capsuleId: capsule.id,
@@ -198,18 +192,16 @@ export class CreateCapsuleOperationRepository {
             updatedAt: now,
           })
           .returning({
-            id: capsuleBranchesTable.id,
-            capsuleId: capsuleBranchesTable.capsuleId,
-            name: capsuleBranchesTable.name,
-            status: capsuleBranchesTable.status,
+            id: capsuleBranches.id,
+            capsuleId: capsuleBranches.capsuleId,
+            name: capsuleBranches.name,
+            status: capsuleBranches.status,
           })
-
         if (!rootBranch) {
           throw new IncusError('Failed to create the provisional capsule root branch.', 'API_ERROR')
         }
-
         const [createExtension] = await tx
-          .insert(capsuleCreateOperationsTable)
+          .insert(capsuleCreateOperations)
           .values({
             operationId: operation.id,
             rootBranchId: rootBranch.id,
@@ -221,10 +213,9 @@ export class CreateCapsuleOperationRepository {
             memory: input.memory,
           })
           .returning({
-            operationId: capsuleCreateOperationsTable.operationId,
-            rootBranchId: capsuleCreateOperationsTable.rootBranchId,
+            operationId: capsuleCreateOperations.operationId,
+            rootBranchId: capsuleCreateOperations.rootBranchId,
           })
-
         if (
           !createExtension ||
           createExtension.operationId !== operation.id ||
@@ -236,7 +227,6 @@ export class CreateCapsuleOperationRepository {
             rootBranchId: rootBranch.id,
           })
         }
-
         return {
           newlyAccepted: true,
           receipt: this.createCreateReceipt({
@@ -285,11 +275,9 @@ export class CreateCapsuleOperationRepository {
         input.idempotencyKey,
         input.requestHash,
       )
-
       if (racedReplay) {
         return racedReplay
       }
-
       throw new IncusError(
         `Capsule root branch '${input.rootBranchName}' conflicts with existing durable state.`,
         'CONFLICT',
@@ -370,10 +358,11 @@ export class CreateCapsuleOperationRepository {
    * Claims one accepted create operation for process-local execution.
    */
   public async claimForExecution(operationId: string) {
+    const db = this.persistence.db
+    const capsuleOperations = this.persistence.tables.capsuleOperations
     const now = new Date()
-
-    const [claimed] = await this.db
-      .update(capsuleOperationsTable)
+    const [claimed] = await db
+      .update(capsuleOperations)
       .set({
         status: CapsuleOperationStatus.RUNNING,
         executionStartedAt: now,
@@ -381,23 +370,21 @@ export class CreateCapsuleOperationRepository {
       })
       .where(
         and(
-          eq(capsuleOperationsTable.id, operationId),
-          eq(capsuleOperationsTable.type, CapsuleOperationType.CREATE),
-          eq(capsuleOperationsTable.status, CapsuleOperationStatus.ACCEPTED),
-          isNull(capsuleOperationsTable.providerMutationStartedAt),
+          eq(capsuleOperations.id, operationId),
+          eq(capsuleOperations.type, CapsuleOperationType.CREATE),
+          eq(capsuleOperations.status, CapsuleOperationStatus.ACCEPTED),
+          isNull(capsuleOperations.providerMutationStartedAt),
         ),
       )
       .returning({
-        ownerId: capsuleOperationsTable.ownerId,
-        capsuleId: capsuleOperationsTable.capsuleId,
+        ownerId: capsuleOperations.ownerId,
+        capsuleId: capsuleOperations.capsuleId,
       })
-
     if (!claimed) {
       throw new IncusError('Capsule create operation could not be claimed from accepted to running.', 'CONFLICT', {
         operationId,
       })
     }
-
     return toCapsuleOperationTransition({
       ownerId: claimed.ownerId,
       operationId,
@@ -417,25 +404,26 @@ export class CreateCapsuleOperationRepository {
     rootBranchId: string,
     digest: CapsuleBranchResourceInventoryDigest,
   ): Promise<void> {
-    const updatedBranches = await this.db
-      .update(capsuleBranchesTable)
+    const db = this.persistence.db
+    const capsuleBranches = this.persistence.tables.capsuleBranches
+    const updatedBranches = await db
+      .update(capsuleBranches)
       .set({
         resourceInventoryDigest: digest,
         updatedAt: new Date(),
       })
       .where(
         and(
-          eq(capsuleBranchesTable.id, rootBranchId),
-          eq(capsuleBranchesTable.ownerId, ownerId),
-          eq(capsuleBranchesTable.status, 'provisioning'),
-          eq(capsuleBranchesTable.isRootBranch, true),
-          isNull(capsuleBranchesTable.resourceInventoryDigest),
+          eq(capsuleBranches.id, rootBranchId),
+          eq(capsuleBranches.ownerId, ownerId),
+          eq(capsuleBranches.status, 'provisioning'),
+          eq(capsuleBranches.isRootBranch, true),
+          isNull(capsuleBranches.resourceInventoryDigest),
         ),
       )
       .returning({
-        id: capsuleBranchesTable.id,
+        id: capsuleBranches.id,
       })
-
     if (updatedBranches.length !== 1) {
       throw new IncusError('Failed to persist the root branch resource inventory proof.', 'CONFLICT', {
         ownerId,
@@ -451,24 +439,25 @@ export class CreateCapsuleOperationRepository {
    * This write must complete before any Incus state-changing call.
    */
   public async commitProviderIntentFence(operationId: string): Promise<void> {
+    const db = this.persistence.db
+    const capsuleOperations = this.persistence.tables.capsuleOperations
     const now = new Date()
-
-    const updatedOperations = await this.db
-      .update(capsuleOperationsTable)
+    const updatedOperations = await db
+      .update(capsuleOperations)
       .set({
         providerMutationStartedAt: now,
         updatedAt: now,
       })
       .where(
         and(
-          eq(capsuleOperationsTable.id, operationId),
-          eq(capsuleOperationsTable.type, CapsuleOperationType.CREATE),
-          eq(capsuleOperationsTable.status, CapsuleOperationStatus.RUNNING),
-          isNull(capsuleOperationsTable.providerMutationStartedAt),
+          eq(capsuleOperations.id, operationId),
+          eq(capsuleOperations.type, CapsuleOperationType.CREATE),
+          eq(capsuleOperations.status, CapsuleOperationStatus.RUNNING),
+          isNull(capsuleOperations.providerMutationStartedAt),
         ),
       )
       .returning({
-        id: capsuleOperationsTable.id,
+        id: capsuleOperations.id,
       })
 
     if (updatedOperations.length !== 1) {
@@ -490,7 +479,9 @@ export class CreateCapsuleOperationRepository {
    * completion authority.
    */
   public async completeCreate(operationId: string): Promise<CreateCapsuleTerminalResult> {
-    return await this.db.transaction(async tx => {
+    const db = this.persistence.db
+    const { capsuleOperations, capsules, capsuleBranches } = this.persistence.tables
+    return await db.transaction(async tx => {
       const operation = await this.lockCreateOperation(tx, operationId)
 
       if (operation.status !== CapsuleOperationStatus.RUNNING || operation.providerMutationStartedAt === null) {
@@ -519,11 +510,9 @@ export class CreateCapsuleOperationRepository {
           rootBranchId: rootBranch.id,
         })
       }
-
       const now = new Date()
-
       const [completedOperation] = await tx
-        .update(capsuleOperationsTable)
+        .update(capsuleOperations)
         .set({
           status: CapsuleOperationStatus.COMPLETED,
           completedAt: now,
@@ -531,36 +520,34 @@ export class CreateCapsuleOperationRepository {
         })
         .where(
           and(
-            eq(capsuleOperationsTable.id, operationId),
-            eq(capsuleOperationsTable.type, CapsuleOperationType.CREATE),
-            eq(capsuleOperationsTable.status, CapsuleOperationStatus.RUNNING),
+            eq(capsuleOperations.id, operationId),
+            eq(capsuleOperations.type, CapsuleOperationType.CREATE),
+            eq(capsuleOperations.status, CapsuleOperationStatus.RUNNING),
           ),
         )
         .returning({
-          id: capsuleOperationsTable.id,
+          id: capsuleOperations.id,
         })
-
       const [activeCapsule] = await tx
-        .update(capsulesTable)
+        .update(capsules)
         .set({
           lifecycleStatus: 'active',
           updatedAt: now,
         })
         .where(
           and(
-            eq(capsulesTable.id, operation.capsuleId),
-            eq(capsulesTable.ownerId, operation.ownerId),
-            eq(capsulesTable.lifecycleStatus, 'provisioning'),
+            eq(capsules.id, operation.capsuleId),
+            eq(capsules.ownerId, operation.ownerId),
+            eq(capsules.lifecycleStatus, 'provisioning'),
           ),
         )
         .returning({
-          lifecycleStatus: capsulesTable.lifecycleStatus,
-          archivedAt: capsulesTable.archivedAt,
-          destroyedAt: capsulesTable.destroyedAt,
+          lifecycleStatus: capsules.lifecycleStatus,
+          archivedAt: capsules.archivedAt,
+          destroyedAt: capsules.destroyedAt,
         })
-
       const [offlineBranch] = await tx
-        .update(capsuleBranchesTable)
+        .update(capsuleBranches)
         .set({
           status: 'offline',
           runtimeIp: null,
@@ -572,18 +559,18 @@ export class CreateCapsuleOperationRepository {
         })
         .where(
           and(
-            eq(capsuleBranchesTable.id, rootBranch.id),
-            eq(capsuleBranchesTable.ownerId, operation.ownerId),
-            eq(capsuleBranchesTable.capsuleId, operation.capsuleId),
-            eq(capsuleBranchesTable.status, 'provisioning'),
-            eq(capsuleBranchesTable.isRootBranch, true),
+            eq(capsuleBranches.id, rootBranch.id),
+            eq(capsuleBranches.ownerId, operation.ownerId),
+            eq(capsuleBranches.capsuleId, operation.capsuleId),
+            eq(capsuleBranches.status, 'provisioning'),
+            eq(capsuleBranches.isRootBranch, true),
           ),
         )
         .returning({
-          id: capsuleBranchesTable.id,
-          capsuleId: capsuleBranchesTable.capsuleId,
-          name: capsuleBranchesTable.name,
-          status: capsuleBranchesTable.status,
+          id: capsuleBranches.id,
+          capsuleId: capsuleBranches.capsuleId,
+          name: capsuleBranches.name,
+          status: capsuleBranches.status,
         })
 
       if (!completedOperation || !activeCapsule || !offlineBranch) {
@@ -591,7 +578,6 @@ export class CreateCapsuleOperationRepository {
           operationId,
         })
       }
-
       return {
         operation: toCapsuleOperationTransition({
           ownerId: operation.ownerId,
@@ -643,16 +629,16 @@ export class CreateCapsuleOperationRepository {
     error: unknown,
     context: Record<string, unknown>,
   ): Promise<CreateCapsuleTerminalResult> {
-    return await this.db.transaction(async tx => {
+    const db = this.persistence.db
+    const { capsuleOperations, capsules, capsuleBranches } = this.persistence.tables
+    return await db.transaction(async tx => {
       const operation = await this.lockCreateOperation(tx, operationId)
-
       if (!isNonterminalCreateStatus(operation.status)) {
         throw new IncusError('Capsule create operation is already terminal.', 'CONFLICT', {
           operationId,
           operationStatus: operation.status,
         })
       }
-
       const extension = await this.lockCreateOperationExtensionIfPresent(tx, operation.id)
       const capsule = await this.lockCapsule(tx, operation.ownerId, operation.capsuleId)
       const rootBranches = await this.lockRootBranchesForClassification(tx, operation.ownerId, operation.capsuleId)
@@ -662,7 +648,6 @@ export class CreateCapsuleOperationRepository {
         operation.id,
         extension?.rootBranchId ?? rootBranch?.id ?? null,
       )
-
       const contradictions = this.collectPreProviderContradictions(
         operation,
         extension,
@@ -670,7 +655,6 @@ export class CreateCapsuleOperationRepository {
         rootBranches,
         resourceEvidence,
       )
-
       if (contradictions.length > 0) {
         return await this.markCleanupRequiredInTransaction(tx, operation, capsule, rootBranch, error, {
           ...context,
@@ -691,7 +675,6 @@ export class CreateCapsuleOperationRepository {
           })),
         })
       }
-
       if (!extension || !rootBranch) {
         throw new IncusError(
           'Safe pre-provider create failure requires complete create-extension and root-branch evidence.',
@@ -702,7 +685,6 @@ export class CreateCapsuleOperationRepository {
           },
         )
       }
-
       const failureDetails = createFailureDetails(error, {
         ...context,
         classification: 'pre_provider_create_failure',
@@ -712,9 +694,8 @@ export class CreateCapsuleOperationRepository {
         rootBranchId: extension.rootBranchId,
       })
       const now = new Date()
-
       const [failedOperation] = await tx
-        .update(capsuleOperationsTable)
+        .update(capsuleOperations)
         .set({
           status: CapsuleOperationStatus.FAILED,
           failedAt: now,
@@ -728,37 +709,35 @@ export class CreateCapsuleOperationRepository {
         })
         .where(
           and(
-            eq(capsuleOperationsTable.id, operationId),
-            eq(capsuleOperationsTable.type, CapsuleOperationType.CREATE),
-            inArray(capsuleOperationsTable.status, NONTERMINAL_CREATE_STATUSES),
-            isNull(capsuleOperationsTable.providerMutationStartedAt),
+            eq(capsuleOperations.id, operationId),
+            eq(capsuleOperations.type, CapsuleOperationType.CREATE),
+            inArray(capsuleOperations.status, NONTERMINAL_CREATE_STATUSES),
+            isNull(capsuleOperations.providerMutationStartedAt),
           ),
         )
         .returning({
-          id: capsuleOperationsTable.id,
+          id: capsuleOperations.id,
         })
-
       const [failedCapsule] = await tx
-        .update(capsulesTable)
+        .update(capsules)
         .set({
           lifecycleStatus: 'creation_failed',
           updatedAt: now,
         })
         .where(
           and(
-            eq(capsulesTable.id, operation.capsuleId),
-            eq(capsulesTable.ownerId, operation.ownerId),
-            eq(capsulesTable.lifecycleStatus, 'provisioning'),
+            eq(capsules.id, operation.capsuleId),
+            eq(capsules.ownerId, operation.ownerId),
+            eq(capsules.lifecycleStatus, 'provisioning'),
           ),
         )
         .returning({
-          lifecycleStatus: capsulesTable.lifecycleStatus,
-          archivedAt: capsulesTable.archivedAt,
-          destroyedAt: capsulesTable.destroyedAt,
+          lifecycleStatus: capsules.lifecycleStatus,
+          archivedAt: capsules.archivedAt,
+          destroyedAt: capsules.destroyedAt,
         })
-
       const [retiredBranch] = await tx
-        .update(capsuleBranchesTable)
+        .update(capsuleBranches)
         .set({
           status: 'destroyed',
           runtimeIp: null,
@@ -766,20 +745,19 @@ export class CreateCapsuleOperationRepository {
         })
         .where(
           and(
-            eq(capsuleBranchesTable.id, extension.rootBranchId),
-            eq(capsuleBranchesTable.ownerId, operation.ownerId),
-            eq(capsuleBranchesTable.capsuleId, operation.capsuleId),
-            eq(capsuleBranchesTable.status, 'provisioning'),
-            eq(capsuleBranchesTable.isRootBranch, true),
+            eq(capsuleBranches.id, extension.rootBranchId),
+            eq(capsuleBranches.ownerId, operation.ownerId),
+            eq(capsuleBranches.capsuleId, operation.capsuleId),
+            eq(capsuleBranches.status, 'provisioning'),
+            eq(capsuleBranches.isRootBranch, true),
           ),
         )
         .returning({
-          id: capsuleBranchesTable.id,
-          capsuleId: capsuleBranchesTable.capsuleId,
-          name: capsuleBranchesTable.name,
-          status: capsuleBranchesTable.status,
+          id: capsuleBranches.id,
+          capsuleId: capsuleBranches.capsuleId,
+          name: capsuleBranches.name,
+          status: capsuleBranches.status,
         })
-
       if (!failedOperation || !failedCapsule || !retiredBranch) {
         throw new IncusError('Failed to atomically finalize the pre-provider capsule create failure.', 'CONFLICT', {
           operationId,
@@ -787,7 +765,6 @@ export class CreateCapsuleOperationRepository {
           rootBranchId: extension.rootBranchId,
         })
       }
-
       return {
         operation: toCapsuleOperationTransition({
           ownerId: operation.ownerId,
@@ -832,8 +809,9 @@ export class CreateCapsuleOperationRepository {
     context: Record<string, unknown>,
   ): Promise<CreateCapsuleTerminalResult> {
     const details = createFailureDetails(error, context)
-
-    return await this.db.transaction(async tx => {
+    const db = this.persistence.db
+    const { capsuleOperations, capsules, capsuleBranches } = this.persistence.tables
+    return await db.transaction(async tx => {
       const operation = await this.lockCreateOperation(tx, operationId)
 
       if (operation.status !== CapsuleOperationStatus.RUNNING || operation.providerMutationStartedAt === null) {
@@ -860,9 +838,8 @@ export class CreateCapsuleOperationRepository {
       }
 
       const now = new Date()
-
       const [failedOperation] = await tx
-        .update(capsuleOperationsTable)
+        .update(capsuleOperations)
         .set({
           status: CapsuleOperationStatus.FAILED,
           failedAt: now,
@@ -874,37 +851,37 @@ export class CreateCapsuleOperationRepository {
         })
         .where(
           and(
-            eq(capsuleOperationsTable.id, operationId),
-            eq(capsuleOperationsTable.type, CapsuleOperationType.CREATE),
-            eq(capsuleOperationsTable.status, CapsuleOperationStatus.RUNNING),
+            eq(capsuleOperations.id, operationId),
+            eq(capsuleOperations.type, CapsuleOperationType.CREATE),
+            eq(capsuleOperations.status, CapsuleOperationStatus.RUNNING),
           ),
         )
         .returning({
-          id: capsuleOperationsTable.id,
+          id: capsuleOperations.id,
         })
 
       const [failedCapsule] = await tx
-        .update(capsulesTable)
+        .update(capsules)
         .set({
           lifecycleStatus: 'creation_failed',
           updatedAt: now,
         })
         .where(
           and(
-            eq(capsulesTable.id, operation.capsuleId),
-            eq(capsulesTable.ownerId, operation.ownerId),
-            eq(capsulesTable.lifecycleStatus, 'provisioning'),
+            eq(capsules.id, operation.capsuleId),
+            eq(capsules.ownerId, operation.ownerId),
+            eq(capsules.lifecycleStatus, 'provisioning'),
           ),
         )
         .returning({
-          lifecycleStatus: capsulesTable.lifecycleStatus,
-          archivedAt: capsulesTable.archivedAt,
-          destroyedAt: capsulesTable.destroyedAt,
+          lifecycleStatus: capsules.lifecycleStatus,
+          archivedAt: capsules.archivedAt,
+          destroyedAt: capsules.destroyedAt,
         })
 
       // Preserve the durable root ID required by create receipt replay.
       const [retiredBranch] = await tx
-        .update(capsuleBranchesTable)
+        .update(capsuleBranches)
         .set({
           status: 'destroyed',
           runtimeIp: null,
@@ -912,26 +889,24 @@ export class CreateCapsuleOperationRepository {
         })
         .where(
           and(
-            eq(capsuleBranchesTable.id, rootBranch.id),
-            eq(capsuleBranchesTable.ownerId, operation.ownerId),
-            eq(capsuleBranchesTable.capsuleId, operation.capsuleId),
-            eq(capsuleBranchesTable.status, 'provisioning'),
-            eq(capsuleBranchesTable.isRootBranch, true),
+            eq(capsuleBranches.id, rootBranch.id),
+            eq(capsuleBranches.ownerId, operation.ownerId),
+            eq(capsuleBranches.capsuleId, operation.capsuleId),
+            eq(capsuleBranches.status, 'provisioning'),
+            eq(capsuleBranches.isRootBranch, true),
           ),
         )
         .returning({
-          id: capsuleBranchesTable.id,
-          capsuleId: capsuleBranchesTable.capsuleId,
-          name: capsuleBranchesTable.name,
-          status: capsuleBranchesTable.status,
+          id: capsuleBranches.id,
+          capsuleId: capsuleBranches.capsuleId,
+          name: capsuleBranches.name,
+          status: capsuleBranches.status,
         })
-
       if (!failedOperation || !failedCapsule || !retiredBranch) {
         throw new IncusError('Failed to atomically finalize the compensated capsule create failure.', 'CONFLICT', {
           operationId,
         })
       }
-
       return {
         operation: toCapsuleOperationTransition({
           ownerId: operation.ownerId,
@@ -969,21 +944,19 @@ export class CreateCapsuleOperationRepository {
     error: unknown,
     context: Record<string, unknown>,
   ): Promise<CreateCapsuleTerminalResult> {
-    return await this.db.transaction(async tx => {
+    const db = this.persistence.db
+    return await db.transaction(async tx => {
       const operation = await this.lockCreateOperation(tx, operationId)
-
       if (!isNonterminalCreateStatus(operation.status)) {
         throw new IncusError('Capsule create operation is already terminal.', 'CONFLICT', {
           operationId,
           operationStatus: operation.status,
         })
       }
-
       const extension = await this.lockCreateOperationExtensionIfPresent(tx, operation.id)
       const capsule = await this.lockCapsule(tx, operation.ownerId, operation.capsuleId)
       const rootBranches = await this.lockRootBranchesForClassification(tx, operation.ownerId, operation.capsuleId)
       const rootBranch = this.selectRootBranchForClassification(extension, rootBranches)
-
       return await this.markCleanupRequiredInTransaction(tx, operation, capsule, rootBranch, error, {
         ...context,
         createExtensionPresent: extension !== null,
@@ -1006,17 +979,14 @@ export class CreateCapsuleOperationRepository {
    */
   public async classifyAbandoned(operationId: string): Promise<CreateCapsuleTerminalResult | null> {
     const operation = await this.reader.loadById(operationId)
-
     if (!operation || operation.type !== CapsuleOperationType.CREATE || !isNonterminalCreateStatus(operation.status)) {
       return null
     }
-
     const error = new IncusError('Capsule create operation was abandoned by a previous Worker process.', 'API_ERROR', {
       operationId,
       providerMutationStartedAt: operation.providerMutationStartedAt,
       policy: 'no_provider_mutation_after_restart',
     })
-
     if (operation.providerMutationStartedAt !== null) {
       return await this.markCleanupRequired(operationId, error, {
         operationId,
@@ -1025,7 +995,6 @@ export class CreateCapsuleOperationRepository {
         providerOwnershipUncertain: true,
       })
     }
-
     return await this.failBeforeProviderMutation(operationId, error, {
       operationId,
       phase: 'startup_abandoned_operation_classification',
@@ -1040,7 +1009,7 @@ export class CreateCapsuleOperationRepository {
   // ---------------------------------------------------------------------------
 
   private async markCleanupRequiredInTransaction(
-    tx: CreateTransaction,
+    tx: Parameters<Parameters<TDatabase['transaction']>[0]>[0],
     operation: PersistedCreateOperation,
     capsule: PersistedCapsule,
     rootBranch: PersistedCapsuleBranch | null,
@@ -1053,12 +1022,11 @@ export class CreateCapsuleOperationRepository {
         operationStatus: operation.status,
       })
     }
-
+    const { capsuleOperations, capsules, capsuleBranches } = this.persistence.tables
     const details = createFailureDetails(error, context)
     const now = new Date()
-
     const [cleanupOperation] = await tx
-      .update(capsuleOperationsTable)
+      .update(capsuleOperations)
       .set({
         status: CapsuleOperationStatus.CLEANUP_REQUIRED,
         failedAt: now,
@@ -1070,33 +1038,30 @@ export class CreateCapsuleOperationRepository {
       })
       .where(
         and(
-          eq(capsuleOperationsTable.id, operation.id),
-          eq(capsuleOperationsTable.type, CapsuleOperationType.CREATE),
-          inArray(capsuleOperationsTable.status, NONTERMINAL_CREATE_STATUSES),
+          eq(capsuleOperations.id, operation.id),
+          eq(capsuleOperations.type, CapsuleOperationType.CREATE),
+          inArray(capsuleOperations.status, NONTERMINAL_CREATE_STATUSES),
         ),
       )
       .returning({
-        id: capsuleOperationsTable.id,
+        id: capsuleOperations.id,
       })
-
     const [cleanupCapsule] = await tx
-      .update(capsulesTable)
+      .update(capsules)
       .set({
         lifecycleStatus: 'cleanup_required',
         updatedAt: now,
       })
-      .where(and(eq(capsulesTable.id, capsule.id), eq(capsulesTable.ownerId, operation.ownerId)))
+      .where(and(eq(capsules.id, capsule.id), eq(capsules.ownerId, operation.ownerId)))
       .returning({
-        lifecycleStatus: capsulesTable.lifecycleStatus,
-        archivedAt: capsulesTable.archivedAt,
-        destroyedAt: capsulesTable.destroyedAt,
+        lifecycleStatus: capsules.lifecycleStatus,
+        archivedAt: capsules.archivedAt,
+        destroyedAt: capsules.destroyedAt,
       })
-
     let cleanupBranch: CreateCapsuleCommittedBranch | null = null
-
     if (rootBranch && rootBranch.status !== 'destroyed') {
       const [updatedBranch] = await tx
-        .update(capsuleBranchesTable)
+        .update(capsuleBranches)
         .set({
           status: 'cleanup_required',
           runtimeIp: null,
@@ -1104,18 +1069,17 @@ export class CreateCapsuleOperationRepository {
         })
         .where(
           and(
-            eq(capsuleBranchesTable.id, rootBranch.id),
-            eq(capsuleBranchesTable.ownerId, operation.ownerId),
-            eq(capsuleBranchesTable.capsuleId, operation.capsuleId),
+            eq(capsuleBranches.id, rootBranch.id),
+            eq(capsuleBranches.ownerId, operation.ownerId),
+            eq(capsuleBranches.capsuleId, operation.capsuleId),
           ),
         )
         .returning({
-          id: capsuleBranchesTable.id,
-          capsuleId: capsuleBranchesTable.capsuleId,
-          name: capsuleBranchesTable.name,
-          status: capsuleBranchesTable.status,
+          id: capsuleBranches.id,
+          capsuleId: capsuleBranches.capsuleId,
+          name: capsuleBranches.name,
+          status: capsuleBranches.status,
         })
-
       cleanupBranch = updatedBranch ?? null
     } else if (rootBranch) {
       cleanupBranch = {
@@ -1125,13 +1089,11 @@ export class CreateCapsuleOperationRepository {
         status: rootBranch.status,
       }
     }
-
     if (!cleanupOperation || !cleanupCapsule) {
       throw new IncusError('Failed to atomically classify capsule creation as cleanup required.', 'CONFLICT', {
         operationId: operation.id,
       })
     }
-
     return {
       operation: toCapsuleOperationTransition({
         ownerId: operation.ownerId,
@@ -1173,15 +1135,17 @@ export class CreateCapsuleOperationRepository {
     }
 
     const details = await this.loadValidatedCreateOperationDetails(operation)
+    const db = this.persistence.db
+    const capsules = this.persistence.tables.capsules
 
-    const [capsule] = await this.db
+    const [capsule] = await db
       .select({
-        lifecycleStatus: capsulesTable.lifecycleStatus,
-        archivedAt: capsulesTable.archivedAt,
-        destroyedAt: capsulesTable.destroyedAt,
+        lifecycleStatus: capsules.lifecycleStatus,
+        archivedAt: capsules.archivedAt,
+        destroyedAt: capsules.destroyedAt,
       })
-      .from(capsulesTable)
-      .where(and(eq(capsulesTable.id, operation.capsuleId), eq(capsulesTable.ownerId, operation.ownerId)))
+      .from(capsules)
+      .where(and(eq(capsules.id, operation.capsuleId), eq(capsules.ownerId, operation.ownerId)))
       .limit(1)
 
     if (!capsule) {
@@ -1517,31 +1481,32 @@ export class CreateCapsuleOperationRepository {
   }
 
   private async lockPreProviderResourceEvidence(
-    tx: CreateTransaction,
+    tx: Parameters<Parameters<TDatabase['transaction']>[0]>[0],
     operationId: string,
     rootBranchId: string | null,
   ): Promise<PreProviderResourceEvidence[]> {
+    const capsuleBranchResources = this.persistence.tables.capsuleBranchResources
     const evidencePredicate =
       rootBranchId === null
-        ? eq(capsuleBranchResourcesTable.createdByOperationId, operationId)
+        ? eq(capsuleBranchResources.createdByOperationId, operationId)
         : or(
-            eq(capsuleBranchResourcesTable.createdByOperationId, operationId),
-            eq(capsuleBranchResourcesTable.branchId, rootBranchId),
+            eq(capsuleBranchResources.createdByOperationId, operationId),
+            eq(capsuleBranchResources.branchId, rootBranchId),
           )
 
     return await tx
       .select({
-        id: capsuleBranchResourcesTable.id,
-        branchId: capsuleBranchResourcesTable.branchId,
-        resourceKey: capsuleBranchResourcesTable.resourceKey,
-        resourceType: capsuleBranchResourcesTable.resourceType,
-        status: capsuleBranchResourcesTable.status,
-        createdByOperationId: capsuleBranchResourcesTable.createdByOperationId,
-        lastOperationId: capsuleBranchResourcesTable.lastOperationId,
+        id: capsuleBranchResources.id,
+        branchId: capsuleBranchResources.branchId,
+        resourceKey: capsuleBranchResources.resourceKey,
+        resourceType: capsuleBranchResources.resourceType,
+        status: capsuleBranchResources.status,
+        createdByOperationId: capsuleBranchResources.createdByOperationId,
+        lastOperationId: capsuleBranchResources.lastOperationId,
       })
-      .from(capsuleBranchResourcesTable)
+      .from(capsuleBranchResources)
       .where(evidencePredicate)
-      .orderBy(asc(capsuleBranchResourcesTable.id))
+      .orderBy(asc(capsuleBranchResources.id))
       .for('update')
   }
 
@@ -1550,21 +1515,21 @@ export class CreateCapsuleOperationRepository {
   // ---------------------------------------------------------------------------
 
   private async loadCreateOperationExtension(operationId: string): Promise<PersistedCreateOperationExtension | null> {
-    const [extension] = await this.db
+    const db = this.persistence.db
+    const capsuleCreateOperations = this.persistence.tables.capsuleCreateOperations
+    const [extension] = await db
       .select()
-      .from(capsuleCreateOperationsTable)
-      .where(eq(capsuleCreateOperationsTable.operationId, operationId))
+      .from(capsuleCreateOperations)
+      .where(eq(capsuleCreateOperations.operationId, operationId))
       .limit(1)
 
     return extension ?? null
   }
 
   private async loadBranchById(branchId: string): Promise<PersistedCapsuleBranch | null> {
-    const [branch] = await this.db
-      .select()
-      .from(capsuleBranchesTable)
-      .where(eq(capsuleBranchesTable.id, branchId))
-      .limit(1)
+    const db = this.persistence.db
+    const capsuleBranches = this.persistence.tables.capsuleBranches
+    const [branch] = await db.select().from(capsuleBranches).where(eq(capsuleBranches.id, branchId)).limit(1)
 
     return branch ?? null
   }
@@ -1574,31 +1539,34 @@ export class CreateCapsuleOperationRepository {
   // ---------------------------------------------------------------------------
 
   private async lockRootBranchesForClassification(
-    tx: CreateTransaction,
+    tx: Parameters<Parameters<TDatabase['transaction']>[0]>[0],
     ownerId: string,
     capsuleId: string,
   ): Promise<PersistedCapsuleBranch[]> {
+    const capsuleBranches = this.persistence.tables.capsuleBranches
     return await tx
       .select()
-      .from(capsuleBranchesTable)
+      .from(capsuleBranches)
       .where(
         and(
-          eq(capsuleBranchesTable.ownerId, ownerId),
-          eq(capsuleBranchesTable.capsuleId, capsuleId),
-          eq(capsuleBranchesTable.isRootBranch, true),
+          eq(capsuleBranches.ownerId, ownerId),
+          eq(capsuleBranches.capsuleId, capsuleId),
+          eq(capsuleBranches.isRootBranch, true),
         ),
       )
-      .orderBy(asc(capsuleBranchesTable.id))
+      .orderBy(asc(capsuleBranches.id))
       .for('update')
   }
 
-  private async lockCreateOperation(tx: CreateTransaction, operationId: string): Promise<PersistedCreateOperation> {
+  private async lockCreateOperation(
+    tx: Parameters<Parameters<TDatabase['transaction']>[0]>[0],
+    operationId: string,
+  ): Promise<PersistedCreateOperation> {
+    const capsuleOperations = this.persistence.tables.capsuleOperations
     const [operation] = await tx
       .select()
-      .from(capsuleOperationsTable)
-      .where(
-        and(eq(capsuleOperationsTable.id, operationId), eq(capsuleOperationsTable.type, CapsuleOperationType.CREATE)),
-      )
+      .from(capsuleOperations)
+      .where(and(eq(capsuleOperations.id, operationId), eq(capsuleOperations.type, CapsuleOperationType.CREATE)))
       .for('update')
       .limit(1)
 
@@ -1612,7 +1580,7 @@ export class CreateCapsuleOperationRepository {
   }
 
   private async lockCreateOperationExtension(
-    tx: CreateTransaction,
+    tx: Parameters<Parameters<TDatabase['transaction']>[0]>[0],
     operationId: string,
   ): Promise<PersistedCreateOperationExtension> {
     const extension = await this.lockCreateOperationExtensionIfPresent(tx, operationId)
@@ -1627,24 +1595,30 @@ export class CreateCapsuleOperationRepository {
   }
 
   private async lockCreateOperationExtensionIfPresent(
-    tx: CreateTransaction,
+    tx: Parameters<Parameters<TDatabase['transaction']>[0]>[0],
     operationId: string,
   ): Promise<PersistedCreateOperationExtension | null> {
+    const capsuleCreateOperations = this.persistence.tables.capsuleCreateOperations
     const [extension] = await tx
       .select()
-      .from(capsuleCreateOperationsTable)
-      .where(eq(capsuleCreateOperationsTable.operationId, operationId))
+      .from(capsuleCreateOperations)
+      .where(eq(capsuleCreateOperations.operationId, operationId))
       .for('update')
       .limit(1)
 
     return extension ?? null
   }
 
-  private async lockCapsule(tx: CreateTransaction, ownerId: string, capsuleId: string): Promise<PersistedCapsule> {
+  private async lockCapsule(
+    tx: Parameters<Parameters<TDatabase['transaction']>[0]>[0],
+    ownerId: string,
+    capsuleId: string,
+  ): Promise<PersistedCapsule> {
+    const capsules = this.persistence.tables.capsules
     const [capsule] = await tx
       .select()
-      .from(capsulesTable)
-      .where(and(eq(capsulesTable.id, capsuleId), eq(capsulesTable.ownerId, ownerId)))
+      .from(capsules)
+      .where(and(eq(capsules.id, capsuleId), eq(capsules.ownerId, ownerId)))
       .for('update')
       .limit(1)
 
@@ -1658,11 +1632,15 @@ export class CreateCapsuleOperationRepository {
     return capsule
   }
 
-  private async lockBranchById(tx: CreateTransaction, branchId: string): Promise<PersistedCapsuleBranch> {
+  private async lockBranchById(
+    tx: Parameters<Parameters<TDatabase['transaction']>[0]>[0],
+    branchId: string,
+  ): Promise<PersistedCapsuleBranch> {
+    const capsuleBranches = this.persistence.tables.capsuleBranches
     const [branch] = await tx
       .select()
-      .from(capsuleBranchesTable)
-      .where(eq(capsuleBranchesTable.id, branchId))
+      .from(capsuleBranches)
+      .where(eq(capsuleBranches.id, branchId))
       .for('update')
       .limit(1)
 

@@ -1,19 +1,16 @@
 import { and, asc, eq, inArray, isNotNull, isNull } from 'drizzle-orm'
-import {
-  CapsuleOperationStatus,
-  CapsuleOperationType,
-  capsuleOperationsTable,
-  capsuleSnapshotCaptureResourcesTable,
-  type CapsuleHostDbContract,
-} from '@qiln/core/server'
+import { CapsuleOperationStatus, CapsuleOperationType, type QilnPersistence, type QilnTables } from '@qiln/core/server'
 import { IncusError } from '../../../../../errors'
 import { createFailureDetails, failureCodeFromUnknown, failureMessageFromUnknown } from '../../../failures'
 import { toJsonObject } from '../../../persistence/json'
 import type { CaptureResourceRecord, CaptureRootPlan } from '../types'
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
 const COMPENSATED_RESOURCE_STATUSES = ['deleted', 'missing'] as const
 
-function toResource(resource: typeof capsuleSnapshotCaptureResourcesTable.$inferSelect): CaptureResourceRecord {
+type CaptureResourceRow = QilnTables['capsuleSnapshotCaptureResources']['$inferSelect']
+
+function toResource(resource: CaptureResourceRow): CaptureResourceRecord {
   return {
     id: resource.id,
     operationId: resource.operationId,
@@ -44,17 +41,21 @@ function toResource(resource: typeof capsuleSnapshotCaptureResourcesTable.$infer
  * These rows describe execution intent and outcomes. They are never committed
  * snapshot history and cannot authorize a future branch fork.
  */
-export class CaptureResourcePersistence {
-  constructor(private readonly db: CapsuleHostDbContract) {}
+export class CaptureResourcePersistence<
+  TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
+  TTables extends QilnTables = QilnTables,
+> {
+  constructor(private readonly persistence: QilnPersistence<TDatabase, TTables>) {}
 
   public async list(operationId: string): Promise<CaptureResourceRecord[]> {
-    const resources = await this.db
+    const db = this.persistence.db
+    const resources = this.persistence.tables.capsuleSnapshotCaptureResources
+    const records = await db
       .select()
-      .from(capsuleSnapshotCaptureResourcesTable)
-      .where(eq(capsuleSnapshotCaptureResourcesTable.operationId, operationId))
-      .orderBy(asc(capsuleSnapshotCaptureResourcesTable.artifactRootId), asc(capsuleSnapshotCaptureResourcesTable.id))
-
-    return resources.map(toResource)
+      .from(resources)
+      .where(eq(resources.operationId, operationId))
+      .orderBy(asc(resources.artifactRootId), asc(resources.id))
+    return records.map(toResource)
   }
 
   /**
@@ -62,22 +63,19 @@ export class CaptureResourcePersistence {
    * fence has already committed.
    */
   public async creating(operationId: string, root: CaptureRootPlan): Promise<CaptureResourceRecord> {
-    return await this.db.transaction(async tx => {
+    const db = this.persistence.db
+    const operations = this.persistence.tables.capsuleOperations
+    const resources = this.persistence.tables.capsuleSnapshotCaptureResources
+    return await db.transaction(async tx => {
       const [operation] = await tx
         .select({
-          status: capsuleOperationsTable.status,
-          providerMutationStartedAt: capsuleOperationsTable.providerMutationStartedAt,
+          status: operations.status,
+          providerMutationStartedAt: operations.providerMutationStartedAt,
         })
-        .from(capsuleOperationsTable)
-        .where(
-          and(
-            eq(capsuleOperationsTable.id, operationId),
-            eq(capsuleOperationsTable.type, CapsuleOperationType.SNAPSHOT_CAPTURE),
-          ),
-        )
+        .from(operations)
+        .where(and(eq(operations.id, operationId), eq(operations.type, CapsuleOperationType.SNAPSHOT_CAPTURE)))
         .for('update')
         .limit(1)
-
       if (
         !operation ||
         operation.status !== CapsuleOperationStatus.RUNNING ||
@@ -93,10 +91,9 @@ export class CaptureResourcePersistence {
           },
         )
       }
-
       const now = new Date()
       const [resource] = await tx
-        .update(capsuleSnapshotCaptureResourcesTable)
+        .update(resources)
         .set({
           status: 'creating',
           snapshotIntentAt: now,
@@ -104,23 +101,22 @@ export class CaptureResourcePersistence {
         })
         .where(
           and(
-            eq(capsuleSnapshotCaptureResourcesTable.operationId, operationId),
-            eq(capsuleSnapshotCaptureResourcesTable.artifactRootId, root.artifactRootId),
-            eq(capsuleSnapshotCaptureResourcesTable.sourceBranchResourceId, root.sourceBranchResourceId),
-            eq(capsuleSnapshotCaptureResourcesTable.blueprintVolumeName, root.blueprintVolumeName),
-            eq(capsuleSnapshotCaptureResourcesTable.provider, root.provider),
-            eq(capsuleSnapshotCaptureResourcesTable.kind, root.kind),
-            eq(capsuleSnapshotCaptureResourcesTable.project, root.project),
-            eq(capsuleSnapshotCaptureResourcesTable.pool, root.pool),
-            eq(capsuleSnapshotCaptureResourcesTable.sourceVolume, root.sourceVolume),
-            eq(capsuleSnapshotCaptureResourcesTable.snapshotName, root.snapshotName),
-            eq(capsuleSnapshotCaptureResourcesTable.status, 'planned'),
-            isNull(capsuleSnapshotCaptureResourcesTable.snapshotIntentAt),
-            isNull(capsuleSnapshotCaptureResourcesTable.snapshotCreatedAt),
+            eq(resources.operationId, operationId),
+            eq(resources.artifactRootId, root.artifactRootId),
+            eq(resources.sourceBranchResourceId, root.sourceBranchResourceId),
+            eq(resources.blueprintVolumeName, root.blueprintVolumeName),
+            eq(resources.provider, root.provider),
+            eq(resources.kind, root.kind),
+            eq(resources.project, root.project),
+            eq(resources.pool, root.pool),
+            eq(resources.sourceVolume, root.sourceVolume),
+            eq(resources.snapshotName, root.snapshotName),
+            eq(resources.status, 'planned'),
+            isNull(resources.snapshotIntentAt),
+            isNull(resources.snapshotCreatedAt),
           ),
         )
         .returning()
-
       if (!resource) {
         throw new IncusError(
           `Failed to commit provider snapshot intent for artifact root '${root.artifactRootId}'.`,
@@ -138,8 +134,10 @@ export class CaptureResourcePersistence {
 
   public async created(operationId: string, resourceId: string): Promise<CaptureResourceRecord> {
     const now = new Date()
-    const [resource] = await this.db
-      .update(capsuleSnapshotCaptureResourcesTable)
+    const db = this.persistence.db
+    const resources = this.persistence.tables.capsuleSnapshotCaptureResources
+    const [resource] = await db
+      .update(resources)
       .set({
         status: 'created',
         snapshotCreatedAt: now,
@@ -151,22 +149,20 @@ export class CaptureResourcePersistence {
       })
       .where(
         and(
-          eq(capsuleSnapshotCaptureResourcesTable.id, resourceId),
-          eq(capsuleSnapshotCaptureResourcesTable.operationId, operationId),
-          eq(capsuleSnapshotCaptureResourcesTable.status, 'creating'),
-          isNotNull(capsuleSnapshotCaptureResourcesTable.snapshotIntentAt),
-          isNull(capsuleSnapshotCaptureResourcesTable.snapshotCreatedAt),
+          eq(resources.id, resourceId),
+          eq(resources.operationId, operationId),
+          eq(resources.status, 'creating'),
+          isNotNull(resources.snapshotIntentAt),
+          isNull(resources.snapshotCreatedAt),
         ),
       )
       .returning()
-
     if (!resource) {
       throw new IncusError('Failed to persist the confirmed provider snapshot creation outcome.', 'CONFLICT', {
         operationId,
         resourceId,
       })
     }
-
     return toResource(resource)
   }
 
@@ -181,12 +177,14 @@ export class CaptureResourcePersistence {
     error: unknown,
     context: Record<string, unknown>,
   ): Promise<CaptureResourceRecord> {
+    const db = this.persistence.db
+    const resources = this.persistence.tables.capsuleSnapshotCaptureResources
     const now = new Date()
     const details = createFailureDetails(error, context) ?? {
       context,
     }
-    const [resource] = await this.db
-      .update(capsuleSnapshotCaptureResourcesTable)
+    const [resource] = await db
+      .update(resources)
       .set({
         status: 'error',
         failureCode: failureCodeFromUnknown(error),
@@ -197,28 +195,28 @@ export class CaptureResourcePersistence {
       })
       .where(
         and(
-          eq(capsuleSnapshotCaptureResourcesTable.id, resourceId),
-          eq(capsuleSnapshotCaptureResourcesTable.operationId, operationId),
-          inArray(capsuleSnapshotCaptureResourcesTable.status, ['creating', 'deleting']),
-          isNotNull(capsuleSnapshotCaptureResourcesTable.snapshotIntentAt),
+          eq(resources.id, resourceId),
+          eq(resources.operationId, operationId),
+          inArray(resources.status, ['creating', 'deleting']),
+          isNotNull(resources.snapshotIntentAt),
         ),
       )
       .returning()
-
     if (!resource) {
       throw new IncusError('Failed to persist Snapshot Capture provider resource uncertainty.', 'CONFLICT', {
         operationId,
         resourceId,
       })
     }
-
     return toResource(resource)
   }
 
   public async deleting(operationId: string, resourceId: string): Promise<CaptureResourceRecord> {
+    const db = this.persistence.db
+    const resources = this.persistence.tables.capsuleSnapshotCaptureResources
     const now = new Date()
-    const [resource] = await this.db
-      .update(capsuleSnapshotCaptureResourcesTable)
+    const [resource] = await db
+      .update(resources)
       .set({
         status: 'deleting',
         cleanupIntentAt: now,
@@ -226,16 +224,15 @@ export class CaptureResourcePersistence {
       })
       .where(
         and(
-          eq(capsuleSnapshotCaptureResourcesTable.id, resourceId),
-          eq(capsuleSnapshotCaptureResourcesTable.operationId, operationId),
-          eq(capsuleSnapshotCaptureResourcesTable.status, 'created'),
-          isNotNull(capsuleSnapshotCaptureResourcesTable.snapshotIntentAt),
-          isNotNull(capsuleSnapshotCaptureResourcesTable.snapshotCreatedAt),
-          isNull(capsuleSnapshotCaptureResourcesTable.cleanupIntentAt),
+          eq(resources.id, resourceId),
+          eq(resources.operationId, operationId),
+          eq(resources.status, 'created'),
+          isNotNull(resources.snapshotIntentAt),
+          isNotNull(resources.snapshotCreatedAt),
+          isNull(resources.cleanupIntentAt),
         ),
       )
       .returning()
-
     if (!resource) {
       throw new IncusError('Failed to persist provider snapshot cleanup intent.', 'CONFLICT', {
         operationId,
@@ -251,9 +248,11 @@ export class CaptureResourcePersistence {
     resourceId: string,
     outcome: (typeof COMPENSATED_RESOURCE_STATUSES)[number],
   ): Promise<CaptureResourceRecord> {
+    const db = this.persistence.db
+    const resources = this.persistence.tables.capsuleSnapshotCaptureResources
     const now = new Date()
-    const [resource] = await this.db
-      .update(capsuleSnapshotCaptureResourcesTable)
+    const [resource] = await db
+      .update(resources)
       .set({
         status: outcome,
         cleanupCompletedAt: now,
@@ -265,17 +264,16 @@ export class CaptureResourcePersistence {
       })
       .where(
         and(
-          eq(capsuleSnapshotCaptureResourcesTable.id, resourceId),
-          eq(capsuleSnapshotCaptureResourcesTable.operationId, operationId),
-          eq(capsuleSnapshotCaptureResourcesTable.status, 'deleting'),
-          isNotNull(capsuleSnapshotCaptureResourcesTable.snapshotIntentAt),
-          isNotNull(capsuleSnapshotCaptureResourcesTable.snapshotCreatedAt),
-          isNotNull(capsuleSnapshotCaptureResourcesTable.cleanupIntentAt),
-          isNull(capsuleSnapshotCaptureResourcesTable.cleanupCompletedAt),
+          eq(resources.id, resourceId),
+          eq(resources.operationId, operationId),
+          eq(resources.status, 'deleting'),
+          isNotNull(resources.snapshotIntentAt),
+          isNotNull(resources.snapshotCreatedAt),
+          isNotNull(resources.cleanupIntentAt),
+          isNull(resources.cleanupCompletedAt),
         ),
       )
       .returning()
-
     if (!resource) {
       throw new IncusError('Failed to persist provider snapshot compensation outcome.', 'CONFLICT', {
         operationId,

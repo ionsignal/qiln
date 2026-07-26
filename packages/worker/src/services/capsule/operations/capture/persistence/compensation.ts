@@ -1,19 +1,11 @@
 import { and, asc, eq, inArray, isNotNull } from 'drizzle-orm'
-import {
-  CapsuleOperationStatus,
-  CapsuleOperationType,
-  capsuleBranchesTable,
-  capsuleOperationsTable,
-  capsuleSnapshotCaptureOperationsTable,
-  capsuleSnapshotCaptureResourcesTable,
-  capsulesTable,
-  type CapsuleHostDbContract,
-} from '@qiln/core/server'
+import { CapsuleOperationStatus, CapsuleOperationType, type QilnPersistence, type QilnTables } from '@qiln/core/server'
 import { IncusError } from '../../../../../errors'
 import { createFailureDetails, failureCodeFromUnknown, failureMessageFromUnknown } from '../../../failures'
 import { toJsonObject } from '../../../persistence/json'
 import { toCapsuleLifecycleState, toCapsuleOperationTransition } from '../../shared'
 import type { CaptureTerminalResult } from '../types'
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
 const NONTERMINAL_CAPTURE_STATUSES = [CapsuleOperationStatus.ACCEPTED, CapsuleOperationStatus.RUNNING] as const
 
@@ -25,33 +17,35 @@ const NONTERMINAL_CAPTURE_STATUSES = [CapsuleOperationStatus.ACCEPTED, CapsuleOp
  * provider-intent fence must never be ignored or cleared. The durable resource
  * ledger supplies the proof that compensation completed.
  */
-export class CaptureCompensationPersistence {
-  constructor(private readonly db: CapsuleHostDbContract) {}
+export class CaptureCompensationPersistence<
+  TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
+  TTables extends QilnTables = QilnTables,
+> {
+  constructor(private readonly persistence: QilnPersistence<TDatabase, TTables>) {}
 
   public async fail(
     operationId: string,
     error: unknown,
     context: Record<string, unknown>,
   ): Promise<CaptureTerminalResult> {
-    return await this.db.transaction(async tx => {
+    const db = this.persistence.db
+    const branches = this.persistence.tables.capsuleBranches
+    const operations = this.persistence.tables.capsuleOperations
+    const captureOperations = this.persistence.tables.capsuleSnapshotCaptureOperations
+    const captureResources = this.persistence.tables.capsuleSnapshotCaptureResources
+    const capsules = this.persistence.tables.capsules
+    return await db.transaction(async tx => {
       const [operation] = await tx
         .select()
-        .from(capsuleOperationsTable)
-        .where(
-          and(
-            eq(capsuleOperationsTable.id, operationId),
-            eq(capsuleOperationsTable.type, CapsuleOperationType.SNAPSHOT_CAPTURE),
-          ),
-        )
+        .from(operations)
+        .where(and(eq(operations.id, operationId), eq(operations.type, CapsuleOperationType.SNAPSHOT_CAPTURE)))
         .for('update')
         .limit(1)
-
       if (!operation) {
         throw new IncusError('Snapshot Capture operation was not found.', 'NOT_FOUND', {
           operationId,
         })
       }
-
       if (
         !NONTERMINAL_CAPTURE_STATUSES.includes(operation.status as (typeof NONTERMINAL_CAPTURE_STATUSES)[number]) ||
         operation.providerMutationStartedAt === null
@@ -62,14 +56,12 @@ export class CaptureCompensationPersistence {
           providerIntentCommitted: operation.providerMutationStartedAt !== null,
         })
       }
-
       const [extension] = await tx
         .select()
-        .from(capsuleSnapshotCaptureOperationsTable)
-        .where(eq(capsuleSnapshotCaptureOperationsTable.operationId, operationId))
+        .from(captureOperations)
+        .where(eq(captureOperations.operationId, operationId))
         .for('update')
         .limit(1)
-
       if (!extension || extension.snapshotId !== null) {
         throw new IncusError(
           'Compensated Snapshot Capture failure requires an uncommitted capture extension.',
@@ -80,34 +72,30 @@ export class CaptureCompensationPersistence {
           },
         )
       }
-
       const [capsule] = await tx
         .select()
-        .from(capsulesTable)
-        .where(and(eq(capsulesTable.id, operation.capsuleId), eq(capsulesTable.ownerId, operation.ownerId)))
+        .from(capsules)
+        .where(and(eq(capsules.id, operation.capsuleId), eq(capsules.ownerId, operation.ownerId)))
         .for('update')
         .limit(1)
-
       if (!capsule) {
         throw new IncusError('Snapshot Capture capsule was not found.', 'NOT_FOUND', {
           operationId,
           capsuleId: operation.capsuleId,
         })
       }
-
       const [branch] = await tx
         .select()
-        .from(capsuleBranchesTable)
+        .from(branches)
         .where(
           and(
-            eq(capsuleBranchesTable.id, extension.sourceBranchId),
-            eq(capsuleBranchesTable.ownerId, operation.ownerId),
-            eq(capsuleBranchesTable.capsuleId, operation.capsuleId),
+            eq(branches.id, extension.sourceBranchId),
+            eq(branches.ownerId, operation.ownerId),
+            eq(branches.capsuleId, operation.capsuleId),
           ),
         )
         .for('update')
         .limit(1)
-
       if (
         !branch ||
         branch.status !== 'capturing' ||
@@ -120,7 +108,6 @@ export class CaptureCompensationPersistence {
           branchStatus: branch?.status ?? null,
         })
       }
-
       if (capsule.lifecycleStatus !== 'active' || capsule.archivedAt !== null) {
         throw new IncusError('Snapshot Capture capsule is inconsistent during compensated failure.', 'CONFLICT', {
           operationId,
@@ -129,20 +116,17 @@ export class CaptureCompensationPersistence {
           archived: capsule.archivedAt !== null,
         })
       }
-
       const resources = await tx
         .select()
-        .from(capsuleSnapshotCaptureResourcesTable)
-        .where(eq(capsuleSnapshotCaptureResourcesTable.operationId, operationId))
-        .orderBy(asc(capsuleSnapshotCaptureResourcesTable.artifactRootId), asc(capsuleSnapshotCaptureResourcesTable.id))
+        .from(captureResources)
+        .where(eq(captureResources.operationId, operationId))
+        .orderBy(asc(captureResources.artifactRootId), asc(captureResources.id))
         .for('update')
-
       if (resources.length === 0) {
         throw new IncusError('Compensated Snapshot Capture failure has no provider resource accounting.', 'CONFLICT', {
           operationId,
         })
       }
-
       const incomplete = resources.filter(
         resource =>
           (resource.status !== 'deleted' && resource.status !== 'missing') ||
@@ -151,7 +135,6 @@ export class CaptureCompensationPersistence {
           resource.cleanupIntentAt === null ||
           resource.cleanupCompletedAt === null,
       )
-
       if (incomplete.length > 0) {
         throw new IncusError('Snapshot Capture provider compensation is incomplete or uncertain.', 'CONFLICT', {
           operationId,
@@ -166,7 +149,6 @@ export class CaptureCompensationPersistence {
           })),
         })
       }
-
       const details = createFailureDetails(error, {
         ...context,
         classification: 'post_provider_capture_failure_after_complete_compensation',
@@ -175,9 +157,8 @@ export class CaptureCompensationPersistence {
         resourceCount: resources.length,
       })
       const now = new Date()
-
       const [failedOperation] = await tx
-        .update(capsuleOperationsTable)
+        .update(operations)
         .set({
           status: CapsuleOperationStatus.FAILED,
           failedAt: now,
@@ -192,18 +173,17 @@ export class CaptureCompensationPersistence {
         })
         .where(
           and(
-            eq(capsuleOperationsTable.id, operationId),
-            eq(capsuleOperationsTable.type, CapsuleOperationType.SNAPSHOT_CAPTURE),
-            inArray(capsuleOperationsTable.status, NONTERMINAL_CAPTURE_STATUSES),
-            isNotNull(capsuleOperationsTable.providerMutationStartedAt),
+            eq(operations.id, operationId),
+            eq(operations.type, CapsuleOperationType.SNAPSHOT_CAPTURE),
+            inArray(operations.status, NONTERMINAL_CAPTURE_STATUSES),
+            isNotNull(operations.providerMutationStartedAt),
           ),
         )
         .returning({
-          id: capsuleOperationsTable.id,
+          id: operations.id,
         })
-
       const [offlineBranch] = await tx
-        .update(capsuleBranchesTable)
+        .update(branches)
         .set({
           status: 'offline',
           runtimeIp: null,
@@ -215,19 +195,18 @@ export class CaptureCompensationPersistence {
         })
         .where(
           and(
-            eq(capsuleBranchesTable.id, branch.id),
-            eq(capsuleBranchesTable.ownerId, operation.ownerId),
-            eq(capsuleBranchesTable.capsuleId, operation.capsuleId),
-            eq(capsuleBranchesTable.status, 'capturing'),
+            eq(branches.id, branch.id),
+            eq(branches.ownerId, operation.ownerId),
+            eq(branches.capsuleId, operation.capsuleId),
+            eq(branches.status, 'capturing'),
           ),
         )
         .returning({
-          id: capsuleBranchesTable.id,
-          capsuleId: capsuleBranchesTable.capsuleId,
-          name: capsuleBranchesTable.name,
-          status: capsuleBranchesTable.status,
+          id: branches.id,
+          capsuleId: branches.capsuleId,
+          name: branches.name,
+          status: branches.status,
         })
-
       if (!failedOperation || !offlineBranch) {
         throw new IncusError('Failed to atomically finalize compensated Snapshot Capture failure.', 'CONFLICT', {
           operationId,
@@ -235,7 +214,6 @@ export class CaptureCompensationPersistence {
           sourceBranchId: branch.id,
         })
       }
-
       return {
         operation: toCapsuleOperationTransition({
           ownerId: operation.ownerId,

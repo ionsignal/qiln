@@ -50,7 +50,7 @@ export const sessions = pgTable('sessions', {
   }).notNull(),
 })
 
-const capsuleTables = createCapsuleSchema(users.id)
+export const capsuleTables = createCapsuleSchema(users.id)
 
 export {
   capsuleActorTypeEnum,

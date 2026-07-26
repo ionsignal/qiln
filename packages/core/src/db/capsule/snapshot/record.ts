@@ -19,8 +19,6 @@ import {
   type CapsuleSnapshotCapturePolicyPin,
   type CapsuleSnapshotLimitationValue,
 } from '../../../schemas'
-import { capsuleBranchesTable } from '../branch/record'
-import { capsulesTable } from '../record'
 
 export const capsuleSnapshotModeEnum = pgEnum('capsule_snapshot_mode', CapsuleSnapshotModeValues)
 
@@ -119,11 +117,3 @@ export function createCapsuleSnapshotsTable(capsuleIdColumn?: PgColumn, sourceBr
     ],
   )
 }
-
-/**
- * Package-local Drizzle table for direct Core and Worker reads.
- *
- * The host-composed schema recreates the same physical table with references to
- * its composed capsule and branch tables.
- */
-export const capsuleSnapshotsTable = createCapsuleSnapshotsTable(capsulesTable.id, capsuleBranchesTable.id)

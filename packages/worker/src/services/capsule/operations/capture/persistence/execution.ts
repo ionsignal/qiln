@@ -1,13 +1,9 @@
 import { and, eq, isNull } from 'drizzle-orm'
-import {
-  CapsuleOperationStatus,
-  CapsuleOperationType,
-  capsuleOperationsTable,
-  type CapsuleHostDbContract,
-} from '@qiln/core/server'
+import { CapsuleOperationStatus, CapsuleOperationType, type QilnPersistence, type QilnTables } from '@qiln/core/server'
 import { IncusError } from '../../../../../errors'
 import { toCapsuleOperationTransition } from '../../shared'
 import type { CaptureRunningResult } from '../types'
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
 /**
  * Owns Snapshot Capture execution-state transitions on the base operation.
@@ -15,13 +11,18 @@ import type { CaptureRunningResult } from '../types'
  * Capture-specific immutable input remains in the capture extension. Provider
  * mutation cannot begin until `intent()` commits the operation-wide fence.
  */
-export class CaptureExecutionPersistence {
-  constructor(private readonly db: CapsuleHostDbContract) {}
+export class CaptureExecutionPersistence<
+  TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
+  TTables extends QilnTables = QilnTables,
+> {
+  constructor(private readonly persistence: QilnPersistence<TDatabase, TTables>) {}
 
   public async claim(operationId: string): Promise<CaptureRunningResult> {
+    const db = this.persistence.db
+    const operations = this.persistence.tables.capsuleOperations
     const now = new Date()
-    const [operation] = await this.db
-      .update(capsuleOperationsTable)
+    const [operation] = await db
+      .update(operations)
       .set({
         status: CapsuleOperationStatus.RUNNING,
         executionStartedAt: now,
@@ -29,24 +30,22 @@ export class CaptureExecutionPersistence {
       })
       .where(
         and(
-          eq(capsuleOperationsTable.id, operationId),
-          eq(capsuleOperationsTable.type, CapsuleOperationType.SNAPSHOT_CAPTURE),
-          eq(capsuleOperationsTable.status, CapsuleOperationStatus.ACCEPTED),
-          isNull(capsuleOperationsTable.providerMutationStartedAt),
+          eq(operations.id, operationId),
+          eq(operations.type, CapsuleOperationType.SNAPSHOT_CAPTURE),
+          eq(operations.status, CapsuleOperationStatus.ACCEPTED),
+          isNull(operations.providerMutationStartedAt),
         ),
       )
       .returning({
-        ownerId: capsuleOperationsTable.ownerId,
-        capsuleId: capsuleOperationsTable.capsuleId,
-        status: capsuleOperationsTable.status,
+        ownerId: operations.ownerId,
+        capsuleId: operations.capsuleId,
+        status: operations.status,
       })
-
     if (!operation) {
       throw new IncusError('Snapshot Capture operation could not be claimed from accepted to running.', 'CONFLICT', {
         operationId,
       })
     }
-
     return {
       operation: toCapsuleOperationTransition({
         ownerId: operation.ownerId,
@@ -65,25 +64,26 @@ export class CaptureExecutionPersistence {
    * snapshot.
    */
   public async intent(operationId: string): Promise<void> {
+    const db = this.persistence.db
+    const operations = this.persistence.tables.capsuleOperations
     const now = new Date()
-    const updated = await this.db
-      .update(capsuleOperationsTable)
+    const updated = await db
+      .update(operations)
       .set({
         providerMutationStartedAt: now,
         updatedAt: now,
       })
       .where(
         and(
-          eq(capsuleOperationsTable.id, operationId),
-          eq(capsuleOperationsTable.type, CapsuleOperationType.SNAPSHOT_CAPTURE),
-          eq(capsuleOperationsTable.status, CapsuleOperationStatus.RUNNING),
-          isNull(capsuleOperationsTable.providerMutationStartedAt),
+          eq(operations.id, operationId),
+          eq(operations.type, CapsuleOperationType.SNAPSHOT_CAPTURE),
+          eq(operations.status, CapsuleOperationStatus.RUNNING),
+          isNull(operations.providerMutationStartedAt),
         ),
       )
       .returning({
-        id: capsuleOperationsTable.id,
+        id: operations.id,
       })
-
     if (updated.length !== 1) {
       throw new IncusError('Failed to commit the Snapshot Capture provider-intent fence.', 'CONFLICT', {
         operationId,

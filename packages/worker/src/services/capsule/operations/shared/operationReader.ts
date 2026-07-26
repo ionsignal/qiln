@@ -3,11 +3,12 @@ import {
   CapsuleActorReferenceSchema,
   CapsuleOperationReceiptSchema,
   CapsuleOperationStatus,
-  capsuleOperationsTable,
-  type CapsuleHostDbContract,
+  type QilnPersistence,
+  type QilnTables,
   type CapsuleOperationReceipt,
 } from '@qiln/core/server'
 import type { PersistedCapsuleOperation } from './types'
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
 const NONTERMINAL_OPERATION_STATUSES = [CapsuleOperationStatus.ACCEPTED, CapsuleOperationStatus.RUNNING] as const
 
@@ -21,15 +22,16 @@ const NONTERMINAL_OPERATION_STATUSES = [CapsuleOperationStatus.ACCEPTED, Capsule
  * This reader does not make idempotency decisions, mutate durable state,
  * classify abandoned operations, or construct operation-specific receipts.
  */
-export class CapsuleOperationReader {
-  constructor(private readonly db: CapsuleHostDbContract) {}
+export class CapsuleOperationReader<
+  TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
+  TTables extends QilnTables = QilnTables,
+> {
+  constructor(private readonly persistence: QilnPersistence<TDatabase, TTables>) {}
 
   public async loadById(operationId: string): Promise<PersistedCapsuleOperation | null> {
-    const [operation] = await this.db
-      .select()
-      .from(capsuleOperationsTable)
-      .where(eq(capsuleOperationsTable.id, operationId))
-      .limit(1)
+    const db = this.persistence.db
+    const persistence = this.persistence.tables.capsuleOperations
+    const [operation] = await db.select().from(persistence).where(eq(persistence.id, operationId)).limit(1)
     return operation ? this.toPersistedOperation(operation) : null
   }
 
@@ -37,22 +39,24 @@ export class CapsuleOperationReader {
     ownerId: string,
     idempotencyKey: string,
   ): Promise<PersistedCapsuleOperation | null> {
-    const [operation] = await this.db
+    const db = this.persistence.db
+    const persistence = this.persistence.tables.capsuleOperations
+    const [operation] = await db
       .select()
-      .from(capsuleOperationsTable)
-      .where(
-        and(eq(capsuleOperationsTable.ownerId, ownerId), eq(capsuleOperationsTable.idempotencyKey, idempotencyKey)),
-      )
+      .from(persistence)
+      .where(and(eq(persistence.ownerId, ownerId), eq(persistence.idempotencyKey, idempotencyKey)))
       .limit(1)
     return operation ? this.toPersistedOperation(operation) : null
   }
 
   public async listNonterminal(): Promise<PersistedCapsuleOperation[]> {
-    const operations = await this.db
+    const db = this.persistence.db
+    const persistence = this.persistence.tables.capsuleOperations
+    const operations = await db
       .select()
-      .from(capsuleOperationsTable)
-      .where(inArray(capsuleOperationsTable.status, NONTERMINAL_OPERATION_STATUSES))
-      .orderBy(asc(capsuleOperationsTable.acceptedAt), asc(capsuleOperationsTable.id))
+      .from(persistence)
+      .where(inArray(persistence.status, NONTERMINAL_OPERATION_STATUSES))
+      .orderBy(asc(persistence.acceptedAt), asc(persistence.id))
     return operations.map(operation => this.toPersistedOperation(operation))
   }
 
@@ -72,7 +76,7 @@ export class CapsuleOperationReader {
     })
   }
 
-  private toPersistedOperation(operation: typeof capsuleOperationsTable.$inferSelect): PersistedCapsuleOperation {
+  private toPersistedOperation(operation: QilnTables['capsuleOperations']['$inferSelect']): PersistedCapsuleOperation {
     return {
       id: operation.id,
       ownerId: operation.ownerId,

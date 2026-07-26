@@ -17,7 +17,6 @@ import {
   DEFAULT_CAPSULE_BLUEPRINT_NAME,
   type CapsuleBranchResourceInventoryDigest,
 } from '../../../schemas'
-import { capsulesTable } from '../record'
 
 /**
  * Canonical database enum for capsule branch runtime and mutation-fence state.
@@ -121,10 +120,3 @@ export function createCapsuleBranchesTable(ownerIdColumn?: PgColumn, capsuleIdCo
     ],
   )
 }
-
-/**
- * Package-local Drizzle table for direct Core and Worker DML.
- *
- * The host-composed schema owns the users foreign key.
- */
-export const capsuleBranchesTable = createCapsuleBranchesTable(undefined, capsulesTable.id)

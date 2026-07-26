@@ -17,8 +17,6 @@ import {
   CapsuleBranchResourceTypeValues,
   type CapsuleBlueprintIdentifier,
 } from '../../../schemas'
-import { capsuleOperationsTable } from '../operation/record'
-import { capsuleBranchesTable } from './record'
 
 export const capsuleBranchResourceTypeEnum = pgEnum('capsule_branch_resource_type', CapsuleBranchResourceTypeValues)
 export const capsuleBranchResourceStatusEnum = pgEnum(
@@ -144,9 +142,3 @@ export function createCapsuleBranchResourcesTable(
     ],
   )
 }
-
-export const capsuleBranchResourcesTable = createCapsuleBranchResourcesTable(
-  undefined,
-  capsuleBranchesTable.id,
-  capsuleOperationsTable.id,
-)

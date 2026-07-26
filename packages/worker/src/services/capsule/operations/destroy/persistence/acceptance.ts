@@ -3,15 +3,13 @@ import {
   CapsuleDestroyReceiptSchema,
   CapsuleOperationStatus,
   CapsuleOperationType,
-  capsuleBranchesTable,
-  capsuleOperationsTable,
-  capsuleSnapshotsTable,
-  capsulesTable,
   type CapsuleDestroyReceipt,
-  type CapsuleHostDbContract,
   type CapsuleOperationRequestHash,
   type CapsuleOperationStatusValue,
+  type QilnPersistence,
+  type QilnTables,
 } from '@qiln/core/server'
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import { IncusError, isUniqueConstraintViolation } from '../../../../../errors'
 import {
   assertOperationReplayIdentity,
@@ -39,10 +37,13 @@ import type { AcceptDestroyCapsuleOperationInput, DestroyCapsuleRepositoryResult
  * The replay lookup after a uniqueness violation closes the concurrent
  * acceptance race without weakening idempotency identity validation.
  */
-export class DestroyCapsuleAcceptancePersistence {
+export class DestroyCapsuleAcceptancePersistence<
+  TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
+  TTables extends QilnTables = QilnTables,
+> {
   constructor(
-    private readonly db: CapsuleHostDbContract,
-    private readonly reader: CapsuleOperationReader,
+    private readonly persistence: QilnPersistence<TDatabase, TTables>,
+    private readonly reader: CapsuleOperationReader<TDatabase, TTables>,
   ) {}
 
   public async acceptOrReplay(input: AcceptDestroyCapsuleOperationInput): Promise<DestroyCapsuleRepositoryResult> {
@@ -50,9 +51,16 @@ export class DestroyCapsuleAcceptancePersistence {
     if (replay) {
       return replay
     }
+    const db = this.persistence.db
+    const { capsules, capsuleBranches, capsuleOperations, capsuleSnapshots } = this.persistence.tables
     try {
-      return await this.db.transaction(async tx => {
-        const capsule = await lockOwnedDestroyCapsule(tx, input.ownerId, input.capsuleId)
+      return await db.transaction(async tx => {
+        const capsule = await lockOwnedDestroyCapsule<TDatabase, TTables>(
+          tx,
+          this.persistence.tables,
+          input.ownerId,
+          input.capsuleId,
+        )
         if (capsule.lifecycleStatus !== 'active' || capsule.archivedAt === null) {
           throw new IncusError('Capsule must be active and archived before it can be destroyed.', 'CONFLICT', {
             ownerId: input.ownerId,
@@ -72,11 +80,11 @@ export class DestroyCapsuleAcceptancePersistence {
          */
         const [retainedSnapshot] = await tx
           .select({
-            id: capsuleSnapshotsTable.id,
-            mode: capsuleSnapshotsTable.mode,
+            id: capsuleSnapshots.id,
+            mode: capsuleSnapshots.mode,
           })
-          .from(capsuleSnapshotsTable)
-          .where(and(eq(capsuleSnapshotsTable.capsuleId, input.capsuleId), isNull(capsuleSnapshotsTable.archivedAt)))
+          .from(capsuleSnapshots)
+          .where(and(eq(capsuleSnapshots.capsuleId, input.capsuleId), isNull(capsuleSnapshots.archivedAt)))
           .limit(1)
         if (retainedSnapshot) {
           throw new IncusError('Capsule cannot be destroyed while it has retained committed snapshots.', 'CONFLICT', {
@@ -87,13 +95,17 @@ export class DestroyCapsuleAcceptancePersistence {
             policy: 'snapshot_retention_deletion_not_implemented',
           })
         }
-        const branches = await lockDestroyCapsuleBranches(tx, input.capsuleId)
+        const branches = await lockDestroyCapsuleBranches<TDatabase, TTables>(
+          tx,
+          this.persistence.tables,
+          input.capsuleId,
+        )
 
         assertOfflineDestroyCapsuleBranchLineage(input.ownerId, input.capsuleId, branches)
 
         const now = new Date()
         const [operation] = await tx
-          .insert(capsuleOperationsTable)
+          .insert(capsuleOperations)
           .values({
             ownerId: input.ownerId,
             actorType: input.actor.type,
@@ -108,33 +120,32 @@ export class DestroyCapsuleAcceptancePersistence {
             updatedAt: now,
           })
           .returning({
-            id: capsuleOperationsTable.id,
-            ownerId: capsuleOperationsTable.ownerId,
-            capsuleId: capsuleOperationsTable.capsuleId,
-            status: capsuleOperationsTable.status,
+            id: capsuleOperations.id,
+            ownerId: capsuleOperations.ownerId,
+            capsuleId: capsuleOperations.capsuleId,
+            status: capsuleOperations.status,
           })
-
         if (!operation) {
           throw new IncusError('Failed to durably accept the capsule destroy operation.', 'API_ERROR')
         }
         const [destroyingCapsule] = await tx
-          .update(capsulesTable)
+          .update(capsules)
           .set({
             lifecycleStatus: 'destroying',
             updatedAt: now,
           })
           .where(
             and(
-              eq(capsulesTable.id, input.capsuleId),
-              eq(capsulesTable.ownerId, input.ownerId),
-              eq(capsulesTable.lifecycleStatus, 'active'),
-              isNotNull(capsulesTable.archivedAt),
+              eq(capsules.id, input.capsuleId),
+              eq(capsules.ownerId, input.ownerId),
+              eq(capsules.lifecycleStatus, 'active'),
+              isNotNull(capsules.archivedAt),
             ),
           )
           .returning({
-            lifecycleStatus: capsulesTable.lifecycleStatus,
-            archivedAt: capsulesTable.archivedAt,
-            destroyedAt: capsulesTable.destroyedAt,
+            lifecycleStatus: capsules.lifecycleStatus,
+            archivedAt: capsules.archivedAt,
+            destroyedAt: capsules.destroyedAt,
           })
         if (!destroyingCapsule || destroyingCapsule.archivedAt === null) {
           throw new IncusError('Failed to transition the capsule into its destroy mutation fence.', 'CONFLICT', {
@@ -143,7 +154,7 @@ export class DestroyCapsuleAcceptancePersistence {
           })
         }
         const transitionedBranches = await tx
-          .update(capsuleBranchesTable)
+          .update(capsuleBranches)
           .set({
             status: 'destroying',
             runtimeIp: null,
@@ -151,16 +162,16 @@ export class DestroyCapsuleAcceptancePersistence {
           })
           .where(
             and(
-              eq(capsuleBranchesTable.capsuleId, input.capsuleId),
-              eq(capsuleBranchesTable.ownerId, input.ownerId),
-              eq(capsuleBranchesTable.status, 'offline'),
+              eq(capsuleBranches.capsuleId, input.capsuleId),
+              eq(capsuleBranches.ownerId, input.ownerId),
+              eq(capsuleBranches.status, 'offline'),
             ),
           )
           .returning({
-            id: capsuleBranchesTable.id,
-            capsuleId: capsuleBranchesTable.capsuleId,
-            name: capsuleBranchesTable.name,
-            status: capsuleBranchesTable.status,
+            id: capsuleBranches.id,
+            capsuleId: capsuleBranches.capsuleId,
+            name: capsuleBranches.name,
+            status: capsuleBranches.status,
           })
         if (transitionedBranches.length !== branches.length) {
           throw new IncusError(
@@ -244,36 +255,34 @@ export class DestroyCapsuleAcceptancePersistence {
     newlyAccepted: boolean,
     replayed: boolean,
   ): Promise<DestroyCapsuleRepositoryResult> {
-    const [capsule] = await this.db
+    const db = this.persistence.db
+    const { capsules, capsuleBranches } = this.persistence.tables
+    const [capsule] = await db
       .select({
-        lifecycleStatus: capsulesTable.lifecycleStatus,
-        archivedAt: capsulesTable.archivedAt,
-        destroyedAt: capsulesTable.destroyedAt,
+        lifecycleStatus: capsules.lifecycleStatus,
+        archivedAt: capsules.archivedAt,
+        destroyedAt: capsules.destroyedAt,
       })
-      .from(capsulesTable)
-      .where(and(eq(capsulesTable.id, operation.capsuleId), eq(capsulesTable.ownerId, operation.ownerId)))
+      .from(capsules)
+      .where(and(eq(capsules.id, operation.capsuleId), eq(capsules.ownerId, operation.ownerId)))
       .limit(1)
+
     if (!capsule) {
       throw new IncusError('Capsule destroy operation references a missing capsule aggregate.', 'API_ERROR', {
         operationId: operation.id,
         capsuleId: operation.capsuleId,
       })
     }
-    const branches = await this.db
+    const branches = await db
       .select({
-        id: capsuleBranchesTable.id,
-        capsuleId: capsuleBranchesTable.capsuleId,
-        name: capsuleBranchesTable.name,
-        status: capsuleBranchesTable.status,
+        id: capsuleBranches.id,
+        capsuleId: capsuleBranches.capsuleId,
+        name: capsuleBranches.name,
+        status: capsuleBranches.status,
       })
-      .from(capsuleBranchesTable)
-      .where(
-        and(
-          eq(capsuleBranchesTable.capsuleId, operation.capsuleId),
-          eq(capsuleBranchesTable.ownerId, operation.ownerId),
-        ),
-      )
-      .orderBy(asc(capsuleBranchesTable.id))
+      .from(capsuleBranches)
+      .where(and(eq(capsuleBranches.capsuleId, operation.capsuleId), eq(capsuleBranches.ownerId, operation.ownerId)))
+      .orderBy(asc(capsuleBranches.id))
     return {
       newlyAccepted,
       receipt: this.createReceipt({

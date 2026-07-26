@@ -5,7 +5,9 @@ import { OperationSupervisor, WorkerAuthority, type AuthorityLossError } from '.
 import { IncusClient } from './incus/client/index'
 import { ProjectService } from './services/project'
 import { composeCapsuleService, type CapsuleService } from './services/capsule'
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import type { WorkerRuntimeConfig, WorkerRuntimeOptions } from './types'
+import type { QilnTables } from '@qiln/core/server'
 
 const WORKER_LOG_PREFIX = '[QilnWorker]'
 const CHANNEL_LOG_PREFIX = '[QilnWorker CapsuleChannel]'
@@ -71,7 +73,10 @@ function resolveWorkerRuntimeConfig(config?: WorkerRuntimeConfig): ResolvedWorke
  * dedicated PostgreSQL mutation-authority session. PostgreSQL remains
  * authoritative for operation and capsule state.
  */
-export class QilnWorkerRuntime {
+export class QilnWorkerRuntime<
+  TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
+  TTables extends QilnTables = QilnTables,
+> {
   public readonly project: ProjectService
   public readonly capsule: CapsuleService
   public readonly incus: IncusClient
@@ -88,7 +93,7 @@ export class QilnWorkerRuntime {
   private channelShutdown: Promise<void> | null = null
   private fatalError: WorkerRuntimeFailStopError | null = null
 
-  constructor(options: WorkerRuntimeOptions) {
+  constructor(options: WorkerRuntimeOptions<TDatabase, TTables>) {
     this.config = resolveWorkerRuntimeConfig(options.config)
     this.supervisor = new OperationSupervisor({
       loggerPrefix: `${WORKER_LOG_PREFIX} OperationSupervisor`,
@@ -112,13 +117,13 @@ export class QilnWorkerRuntime {
       },
     })
     this.capsule = composeCapsuleService({
-      db: options.db,
       incus: this.incus,
       channel: this.channel,
       project: this.project,
       blueprints: this.blueprints,
       supervisor: this.supervisor,
       experimentalCaptureEnabled: this.config.features?.experimentalCapture ?? false,
+      persistence: options.persistence,
     })
   }
 

@@ -1,12 +1,18 @@
 import postgres from 'postgres'
-import { relations } from '@server/db/schema'
+import { capsuleTables, relations } from '@server/db/schema'
 import { drizzle } from 'drizzle-orm/postgres-js'
+import type { QilnPersistence } from '@qiln/core/server'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
 /**
- * Database Type.
+ * Host database type containing host-owned and composed package relations.
  */
 export type Database = PostgresJsDatabase<typeof relations>
+
+/**
+ * Package persistence dependency backed by the host's final composed schema.
+ */
+export type Persistence = QilnPersistence<Database, typeof capsuleTables>
 
 /**
  * Factory function to create the Postgres Data Layer.
@@ -24,11 +30,16 @@ export function createDataLayer(connectionString: string) {
     relations,
     logger: process.env.NODE_ENV === 'development',
   })
+  const persistence = {
+    db,
+    tables: capsuleTables,
+  } satisfies Persistence
   const close = async () => {
     await queryClient.end()
   }
   return {
     db,
+    persistence,
     close,
   }
 }

@@ -14,20 +14,20 @@ import {
   GlobalError,
   GlobalErrorCode,
   TargetType,
-  capsuleOperationsTable,
   type CapsuleArchiveOperationOutput,
   type CapsuleBlueprintDigest,
   type CapsuleBranchName,
   type CapsuleChannel,
   type CapsuleCreateOutput,
   type CapsuleDestroyOperationOutput,
-  type CapsuleHostDbContract,
   type CapsuleOperationFailure,
   type CapsuleOperationIdempotencyKey,
   type CapsuleOperationStatusValue,
   type CapsuleOperationSummary,
   type CapsuleUnarchiveOperationOutput,
+  type QilnTables,
 } from '@qiln/core/server'
+import type { EnginePersistence } from '../../persistence'
 import type { CapsuleMutationIdentity } from './types'
 
 const CLIENT_SAFE_FAILURE_CODE_PATTERN = /^[A-Z][A-Z0-9_:-]{0,127}$/
@@ -35,7 +35,7 @@ const DEFAULT_CLIENT_FAILURE_CODE = 'CAPSULE_OPERATION_FAILED'
 const DEFAULT_CLIENT_CLEANUP_CODE = 'CAPSULE_OPERATION_CLEANUP_REQUIRED'
 
 type CapsuleOperationSummaryRow = Pick<
-  typeof capsuleOperationsTable.$inferSelect,
+  QilnTables['capsuleOperations']['$inferSelect'],
   | 'id'
   | 'capsuleId'
   | 'actorType'
@@ -79,7 +79,7 @@ export interface CapsuleCreateRequest {
  */
 export class CapsuleOperationsService {
   constructor(
-    private readonly db: CapsuleHostDbContract,
+    private readonly persistence: EnginePersistence,
     private readonly channel: CapsuleChannel,
   ) {}
 
@@ -158,24 +158,26 @@ export class CapsuleOperationsService {
    * indistinguishable from a missing operation.
    */
   public async get(ownerId: string, operationId: string): Promise<CapsuleOperationSummary | null> {
-    const [operation] = await this.db
+    const { db, tables } = this.persistence
+    const operations = tables.capsuleOperations
+    const [operation] = await db
       .select({
-        id: capsuleOperationsTable.id,
-        capsuleId: capsuleOperationsTable.capsuleId,
-        actorType: capsuleOperationsTable.actorType,
-        actorId: capsuleOperationsTable.actorId,
-        type: capsuleOperationsTable.type,
-        status: capsuleOperationsTable.status,
-        acceptedAt: capsuleOperationsTable.acceptedAt,
-        executionStartedAt: capsuleOperationsTable.executionStartedAt,
-        providerMutationStartedAt: capsuleOperationsTable.providerMutationStartedAt,
-        completedAt: capsuleOperationsTable.completedAt,
-        failedAt: capsuleOperationsTable.failedAt,
-        failureCode: capsuleOperationsTable.failureCode,
-        failureMessage: capsuleOperationsTable.failureMessage,
+        id: operations.id,
+        capsuleId: operations.capsuleId,
+        actorType: operations.actorType,
+        actorId: operations.actorId,
+        type: operations.type,
+        status: operations.status,
+        acceptedAt: operations.acceptedAt,
+        executionStartedAt: operations.executionStartedAt,
+        providerMutationStartedAt: operations.providerMutationStartedAt,
+        completedAt: operations.completedAt,
+        failedAt: operations.failedAt,
+        failureCode: operations.failureCode,
+        failureMessage: operations.failureMessage,
       })
-      .from(capsuleOperationsTable)
-      .where(and(eq(capsuleOperationsTable.id, operationId), eq(capsuleOperationsTable.ownerId, ownerId)))
+      .from(operations)
+      .where(and(eq(operations.id, operationId), eq(operations.ownerId, ownerId)))
       .limit(1)
     return operation ? this.toSummary(operation) : null
   }
@@ -187,26 +189,28 @@ export class CapsuleOperationsService {
    * avoids disclosing whether another owner's capsule exists.
    */
   public async list(ownerId: string, capsuleId: string): Promise<CapsuleOperationSummary[]> {
-    const operations = await this.db
+    const { db, tables } = this.persistence
+    const operations = tables.capsuleOperations
+    const records = await db
       .select({
-        id: capsuleOperationsTable.id,
-        capsuleId: capsuleOperationsTable.capsuleId,
-        actorType: capsuleOperationsTable.actorType,
-        actorId: capsuleOperationsTable.actorId,
-        type: capsuleOperationsTable.type,
-        status: capsuleOperationsTable.status,
-        acceptedAt: capsuleOperationsTable.acceptedAt,
-        executionStartedAt: capsuleOperationsTable.executionStartedAt,
-        providerMutationStartedAt: capsuleOperationsTable.providerMutationStartedAt,
-        completedAt: capsuleOperationsTable.completedAt,
-        failedAt: capsuleOperationsTable.failedAt,
-        failureCode: capsuleOperationsTable.failureCode,
-        failureMessage: capsuleOperationsTable.failureMessage,
+        id: operations.id,
+        capsuleId: operations.capsuleId,
+        actorType: operations.actorType,
+        actorId: operations.actorId,
+        type: operations.type,
+        status: operations.status,
+        acceptedAt: operations.acceptedAt,
+        executionStartedAt: operations.executionStartedAt,
+        providerMutationStartedAt: operations.providerMutationStartedAt,
+        completedAt: operations.completedAt,
+        failedAt: operations.failedAt,
+        failureCode: operations.failureCode,
+        failureMessage: operations.failureMessage,
       })
-      .from(capsuleOperationsTable)
-      .where(and(eq(capsuleOperationsTable.ownerId, ownerId), eq(capsuleOperationsTable.capsuleId, capsuleId)))
-      .orderBy(asc(capsuleOperationsTable.acceptedAt), asc(capsuleOperationsTable.id))
-    return operations.map(operation => this.toSummary(operation))
+      .from(operations)
+      .where(and(eq(operations.ownerId, ownerId), eq(operations.capsuleId, capsuleId)))
+      .orderBy(asc(operations.acceptedAt), asc(operations.id))
+    return records.map(operation => this.toSummary(operation))
   }
 
   // TODO(projections): Define a shared convention for explicit, pure server-side projectors that map narrow

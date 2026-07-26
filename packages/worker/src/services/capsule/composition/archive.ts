@@ -1,19 +1,23 @@
-import type { CapsuleHostDbContract } from '@qiln/core/server'
-import type { OperationSupervisor } from '../../../coordination/supervisor'
-import type { CapsuleLifecycleEventPublisher } from '../events/lifecycle'
-import type { CapsuleOperationEventPublisher } from '../events/operation'
-import type { ProviderFreeArchivalOperationLedger } from '../operations/archival/shared/operationLedger'
 import { CapsuleArchiveAbandonmentHandler } from '../operations/archival/archive/abandonment'
 import { CapsuleArchiveExecutor } from '../operations/archival/archive/executor'
 import { CapsuleArchiveRepository } from '../operations/archival/archive/repository'
 import { CapsuleArchiveSubmissionService } from '../operations/archival/archive/submission'
+import type { OperationSupervisor } from '../../../coordination/supervisor'
+import type { CapsuleLifecycleEventPublisher } from '../events/lifecycle'
+import type { CapsuleOperationEventPublisher } from '../events/operation'
+import type { ProviderFreeArchivalOperationLedger } from '../operations/archival/shared/operationLedger'
+import type { QilnPersistence, QilnTables } from '@qiln/core/server'
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
-export interface ComposeArchiveCapabilityOptions {
-  db: CapsuleHostDbContract
+export interface ComposeArchiveCapabilityOptions<
+  TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
+  TTables extends QilnTables = QilnTables,
+> {
   supervisor: OperationSupervisor
-  operationLedger: ProviderFreeArchivalOperationLedger
+  operationLedger: ProviderFreeArchivalOperationLedger<TDatabase, TTables>
   operationEvents: CapsuleOperationEventPublisher
   lifecycleEvents: CapsuleLifecycleEventPublisher
+  persistence: QilnPersistence<TDatabase, TTables>
 }
 
 export interface ComposedArchiveCapability {
@@ -27,8 +31,10 @@ export interface ComposedArchiveCapability {
  * Archive lifecycle eligibility, timestamp policy, terminal classification, and
  * abandonment policy remain owned by the archive repository and handler.
  */
-export function composeArchiveCapability(options: ComposeArchiveCapabilityOptions): ComposedArchiveCapability {
-  const repository = new CapsuleArchiveRepository(options.db, options.operationLedger)
+export function composeArchiveCapability<TDatabase extends PostgresJsDatabase, TTables extends QilnTables>(
+  options: ComposeArchiveCapabilityOptions<TDatabase, TTables>,
+): ComposedArchiveCapability {
+  const repository = new CapsuleArchiveRepository(options.persistence, options.operationLedger)
   const executor = new CapsuleArchiveExecutor({
     repository,
     operationEvents: options.operationEvents,

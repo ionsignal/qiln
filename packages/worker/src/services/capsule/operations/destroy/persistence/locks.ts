@@ -1,19 +1,12 @@
 import { and, asc, eq, inArray } from 'drizzle-orm'
-import {
-  CapsuleOperationType,
-  capsuleBranchesTable,
-  capsuleBranchResourcesTable,
-  capsuleOperationsTable,
-  capsulesTable,
-  type CapsuleHostDbContract,
-} from '@qiln/core/server'
+import { CapsuleOperationType, type QilnTables } from '@qiln/core/server'
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import { IncusError } from '../../../../../errors'
 import type { CapsuleBranchResourceInventoryRow } from '../../../resource/types'
 import type { DestroyCapsuleAcceptedBranch } from '../types'
 
-export type DestroyOperationTransaction = Parameters<Parameters<CapsuleHostDbContract['transaction']>[0]>[0]
-export type PersistedDestroyOperation = typeof capsuleOperationsTable.$inferSelect
-export type PersistedDestroyCapsule = typeof capsulesTable.$inferSelect
+export type PersistedDestroyOperation = QilnTables['capsuleOperations']['$inferSelect']
+export type PersistedDestroyCapsule = QilnTables['capsules']['$inferSelect']
 
 /**
  * Locks one destroy operation inside an existing transaction.
@@ -22,18 +15,19 @@ export type PersistedDestroyCapsule = typeof capsulesTable.$inferSelect
  * identity check. The caller remains responsible for operation status,
  * provider-intent, lifecycle, and terminal-classification policy.
  */
-export async function lockDestroyOperation(
-  tx: DestroyOperationTransaction,
+export async function lockDestroyOperation<TDatabase extends PostgresJsDatabase, TTables extends QilnTables>(
+  tx: Parameters<Parameters<TDatabase['transaction']>[0]>[0],
+  tables: TTables,
   operationId: string,
 ): Promise<PersistedDestroyOperation> {
+  const operations = tables.capsuleOperations
   const [operation] = await tx
     .select()
-    .from(capsuleOperationsTable)
-    .where(
-      and(eq(capsuleOperationsTable.id, operationId), eq(capsuleOperationsTable.type, CapsuleOperationType.DESTROY)),
-    )
+    .from(operations)
+    .where(and(eq(operations.id, operationId), eq(operations.type, CapsuleOperationType.DESTROY)))
     .for('update')
     .limit(1)
+
   if (!operation) {
     throw new IncusError('Capsule destroy operation was not found.', 'NOT_FOUND', {
       operationId,
@@ -47,17 +41,20 @@ export async function lockDestroyOperation(
  *
  * The query enforces aggregate ownership but makes no lifecycle decision.
  */
-export async function lockOwnedDestroyCapsule(
-  tx: DestroyOperationTransaction,
+export async function lockOwnedDestroyCapsule<TDatabase extends PostgresJsDatabase, TTables extends QilnTables>(
+  tx: Parameters<Parameters<TDatabase['transaction']>[0]>[0],
+  tables: TTables,
   ownerId: string,
   capsuleId: string,
 ): Promise<PersistedDestroyCapsule> {
+  const capsules = tables.capsules
   const [capsule] = await tx
     .select()
-    .from(capsulesTable)
-    .where(and(eq(capsulesTable.id, capsuleId), eq(capsulesTable.ownerId, ownerId)))
+    .from(capsules)
+    .where(and(eq(capsules.id, capsuleId), eq(capsules.ownerId, ownerId)))
     .for('update')
     .limit(1)
+
   if (!capsule) {
     throw new IncusError('Capsule not found or access denied.', 'NOT_FOUND', {
       ownerId,
@@ -75,23 +72,25 @@ export async function lockOwnedDestroyCapsule(
  * contradictory branch evidence must be available to operation-specific
  * fail-closed policy.
  */
-export async function lockDestroyCapsuleBranches(
-  tx: DestroyOperationTransaction,
+export async function lockDestroyCapsuleBranches<TDatabase extends PostgresJsDatabase, TTables extends QilnTables>(
+  tx: Parameters<Parameters<TDatabase['transaction']>[0]>[0],
+  tables: TTables,
   capsuleId: string,
 ): Promise<DestroyCapsuleAcceptedBranch[]> {
+  const branches = tables.capsuleBranches
   return await tx
     .select({
-      id: capsuleBranchesTable.id,
-      capsuleId: capsuleBranchesTable.capsuleId,
-      ownerId: capsuleBranchesTable.ownerId,
-      name: capsuleBranchesTable.name,
-      status: capsuleBranchesTable.status,
-      isRootBranch: capsuleBranchesTable.isRootBranch,
-      resourceInventoryDigest: capsuleBranchesTable.resourceInventoryDigest,
+      id: branches.id,
+      capsuleId: branches.capsuleId,
+      ownerId: branches.ownerId,
+      name: branches.name,
+      status: branches.status,
+      isRootBranch: branches.isRootBranch,
+      resourceInventoryDigest: branches.resourceInventoryDigest,
     })
-    .from(capsuleBranchesTable)
-    .where(eq(capsuleBranchesTable.capsuleId, capsuleId))
-    .orderBy(asc(capsuleBranchesTable.id))
+    .from(branches)
+    .where(eq(branches.capsuleId, capsuleId))
+    .orderBy(asc(branches.id))
     .for('update')
 }
 
@@ -107,35 +106,36 @@ export async function lockDestroyCapsuleBranches(
  * policy, terminal status, or operation provenance. Those decisions remain in
  * the destroy planner's fail-closed durable-evidence policy.
  */
-export async function lockDestroyBranchResourceInventories(
-  tx: DestroyOperationTransaction,
+export async function lockDestroyBranchResourceInventories<
+  TDatabase extends PostgresJsDatabase,
+  TTables extends QilnTables,
+>(
+  tx: Parameters<Parameters<TDatabase['transaction']>[0]>[0],
+  tables: TTables,
   branchIds: readonly string[],
 ): Promise<CapsuleBranchResourceInventoryRow[]> {
   if (branchIds.length === 0) {
     return []
   }
+  const resources = tables.capsuleBranchResources
   return await tx
     .select({
-      id: capsuleBranchResourcesTable.id,
-      ownerId: capsuleBranchResourcesTable.ownerId,
-      branchId: capsuleBranchResourcesTable.branchId,
-      branchName: capsuleBranchResourcesTable.branchName,
-      provider: capsuleBranchResourcesTable.provider,
-      resourceType: capsuleBranchResourcesTable.resourceType,
-      resourceKey: capsuleBranchResourcesTable.resourceKey,
-      blueprintVolumeName: capsuleBranchResourcesTable.blueprintVolumeName,
-      status: capsuleBranchResourcesTable.status,
-      cleanupPolicy: capsuleBranchResourcesTable.cleanupPolicy,
-      metadata: capsuleBranchResourcesTable.metadata,
-      createdByOperationId: capsuleBranchResourcesTable.createdByOperationId,
-      lastOperationId: capsuleBranchResourcesTable.lastOperationId,
+      id: resources.id,
+      ownerId: resources.ownerId,
+      branchId: resources.branchId,
+      branchName: resources.branchName,
+      provider: resources.provider,
+      resourceType: resources.resourceType,
+      resourceKey: resources.resourceKey,
+      blueprintVolumeName: resources.blueprintVolumeName,
+      status: resources.status,
+      cleanupPolicy: resources.cleanupPolicy,
+      metadata: resources.metadata,
+      createdByOperationId: resources.createdByOperationId,
+      lastOperationId: resources.lastOperationId,
     })
-    .from(capsuleBranchResourcesTable)
-    .where(inArray(capsuleBranchResourcesTable.branchId, [...branchIds]))
-    .orderBy(
-      asc(capsuleBranchResourcesTable.branchId),
-      asc(capsuleBranchResourcesTable.createdAt),
-      asc(capsuleBranchResourcesTable.id),
-    )
+    .from(resources)
+    .where(inArray(resources.branchId, [...branchIds]))
+    .orderBy(asc(resources.branchId), asc(resources.createdAt), asc(resources.id))
     .for('update')
 }

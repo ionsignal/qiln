@@ -1,6 +1,6 @@
-import type { CapsuleHostDbContract } from '@qiln/core/server'
 import type { inferRouterOutputs } from '@trpc/server'
 import type { QilnEngineController } from './controller'
+import type { EnginePersistence } from './persistence'
 import type { EngineRouter } from './trpc'
 
 export interface EngineNatsConfig {
@@ -13,7 +13,7 @@ export interface EngineConfig {
 }
 
 export interface EnginePluginOptions {
-  db: CapsuleHostDbContract
+  persistence: EnginePersistence
   config?: EngineConfig
 }
 

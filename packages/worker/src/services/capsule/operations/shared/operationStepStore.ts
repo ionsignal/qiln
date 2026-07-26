@@ -1,5 +1,4 @@
 import { and, asc, eq, inArray } from 'drizzle-orm'
-import { CapsuleOperationStepStatus, capsuleOperationStepsTable, type CapsuleHostDbContract } from '@qiln/core/server'
 import { IncusError, isUniqueConstraintViolation } from '../../../../errors'
 import {
   createFailureDetails as createOperationFailureDetails,
@@ -7,6 +6,8 @@ import {
   failureMessageFromUnknown as operationFailureMessageFromUnknown,
 } from '../../failures'
 import { toJsonObject } from '../../persistence/json'
+import { CapsuleOperationStepStatus, type QilnPersistence, type QilnTables } from '@qiln/core/server'
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import type { AbandonedOperationStepFailureInput, CapsuleOperationStepInput } from './types'
 
 const ABANDONED_STEP_ELIGIBLE_STATUSES = [
@@ -20,26 +21,30 @@ const ABANDONED_STEP_ELIGIBLE_STATUSES = [
  * Step rows are durable inspection records. They are not resumable checkpoints,
  * queue jobs, leases, retries, or authority to skip existing work.
  */
-export class CapsuleOperationStepStore {
-  constructor(private readonly db: CapsuleHostDbContract) {}
+export class CapsuleOperationStepStore<
+  TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
+  TTables extends QilnTables = QilnTables,
+> {
+  constructor(private readonly persistence: QilnPersistence<TDatabase, TTables>) {}
 
   public async listStepsForOperation(operationId: string) {
-    return await this.db
+    const db = this.persistence.db
+    const steps = this.persistence.tables.capsuleOperationSteps
+    return await db
       .select()
-      .from(capsuleOperationStepsTable)
-      .where(eq(capsuleOperationStepsTable.operationId, operationId))
-      .orderBy(asc(capsuleOperationStepsTable.createdAt), asc(capsuleOperationStepsTable.id))
+      .from(steps)
+      .where(eq(steps.operationId, operationId))
+      .orderBy(asc(steps.createdAt), asc(steps.id))
   }
 
   public async findStep(operationId: string, stepKey: string) {
-    const [step] = await this.db
+    const db = this.persistence.db
+    const steps = this.persistence.tables.capsuleOperationSteps
+    const [step] = await db
       .select()
-      .from(capsuleOperationStepsTable)
-      .where(
-        and(eq(capsuleOperationStepsTable.operationId, operationId), eq(capsuleOperationStepsTable.stepKey, stepKey)),
-      )
+      .from(steps)
+      .where(and(eq(steps.operationId, operationId), eq(steps.stepKey, stepKey)))
       .limit(1)
-
     return step ?? null
   }
 
@@ -80,8 +85,10 @@ export class CapsuleOperationStepStore {
   }
 
   public async createStep(input: CapsuleOperationStepInput): Promise<string> {
-    const [step] = await this.db
-      .insert(capsuleOperationStepsTable)
+    const db = this.persistence.db
+    const steps = this.persistence.tables.capsuleOperationSteps
+    const [step] = await db
+      .insert(steps)
       .values({
         operationId: input.operationId,
         capsuleId: input.capsuleId,
@@ -95,9 +102,8 @@ export class CapsuleOperationStepStore {
         updatedAt: new Date(),
       })
       .returning({
-        id: capsuleOperationStepsTable.id,
+        id: steps.id,
       })
-
     if (!step) {
       throw new IncusError('Failed to record capsule operation step.', 'API_ERROR', {
         operationId: input.operationId,
@@ -105,7 +111,6 @@ export class CapsuleOperationStepStore {
         stepKey: input.stepKey,
       })
     }
-
     return step.id
   }
 
@@ -131,24 +136,18 @@ export class CapsuleOperationStepStore {
       failureDetails: null,
       updatedAt: now,
     }
-
     if (metadata !== undefined) {
       updateData.metadata = toJsonObject(metadata, 'capsule operation step metadata')
     }
-
-    const transitioned = await this.db
-      .update(capsuleOperationStepsTable)
+    const db = this.persistence.db
+    const steps = this.persistence.tables.capsuleOperationSteps
+    const transitioned = await db
+      .update(steps)
       .set(updateData)
-      .where(
-        and(
-          eq(capsuleOperationStepsTable.id, stepId),
-          eq(capsuleOperationStepsTable.status, CapsuleOperationStepStatus.PENDING),
-        ),
-      )
+      .where(and(eq(steps.id, stepId), eq(steps.status, CapsuleOperationStepStatus.PENDING)))
       .returning({
-        id: capsuleOperationStepsTable.id,
+        id: steps.id,
       })
-
     if (transitioned.length !== 1) {
       throw new IncusError('Failed to persist capsule operation step running state.', 'CONFLICT', {
         stepId,
@@ -168,24 +167,18 @@ export class CapsuleOperationStepStore {
       completedAt: now,
       updatedAt: now,
     }
-
     if (metadata !== undefined) {
       updateData.metadata = toJsonObject(metadata, 'capsule operation step metadata')
     }
-
-    const transitioned = await this.db
-      .update(capsuleOperationStepsTable)
+    const db = this.persistence.db
+    const steps = this.persistence.tables.capsuleOperationSteps
+    const transitioned = await db
+      .update(steps)
       .set(updateData)
-      .where(
-        and(
-          eq(capsuleOperationStepsTable.id, stepId),
-          eq(capsuleOperationStepsTable.status, CapsuleOperationStepStatus.RUNNING),
-        ),
-      )
+      .where(and(eq(steps.id, stepId), eq(steps.status, CapsuleOperationStepStatus.RUNNING)))
       .returning({
-        id: capsuleOperationStepsTable.id,
+        id: steps.id,
       })
-
     if (transitioned.length !== 1) {
       throw new IncusError('Failed to persist capsule operation step completion.', 'CONFLICT', {
         stepId,
@@ -196,9 +189,10 @@ export class CapsuleOperationStepStore {
   public async markStepFailed(stepId: string, error: unknown, context?: Record<string, unknown>): Promise<void> {
     const now = new Date()
     const details = createOperationFailureDetails(error, context)
-
-    const transitioned = await this.db
-      .update(capsuleOperationStepsTable)
+    const db = this.persistence.db
+    const steps = this.persistence.tables.capsuleOperationSteps
+    const transitioned = await db
+      .update(steps)
       .set({
         status: CapsuleOperationStepStatus.FAILED,
         failedAt: now,
@@ -208,16 +202,10 @@ export class CapsuleOperationStepStore {
         failureDetails:
           details === undefined ? undefined : toJsonObject(details, 'capsule operation step failure details'),
       })
-      .where(
-        and(
-          eq(capsuleOperationStepsTable.id, stepId),
-          eq(capsuleOperationStepsTable.status, CapsuleOperationStepStatus.RUNNING),
-        ),
-      )
+      .where(and(eq(steps.id, stepId), eq(steps.status, CapsuleOperationStepStatus.RUNNING)))
       .returning({
-        id: capsuleOperationStepsTable.id,
+        id: steps.id,
       })
-
     if (transitioned.length !== 1) {
       throw new IncusError('Failed to persist capsule operation step failure.', 'CONFLICT', {
         stepId,
@@ -242,9 +230,10 @@ export class CapsuleOperationStepStore {
       },
       'abandoned capsule operation step failure details',
     )
-
-    const transitioned = await this.db
-      .update(capsuleOperationStepsTable)
+    const db = this.persistence.db
+    const steps = this.persistence.tables.capsuleOperationSteps
+    const transitioned = await db
+      .update(steps)
       .set({
         status: CapsuleOperationStepStatus.FAILED,
         failedAt: now,
@@ -253,16 +242,10 @@ export class CapsuleOperationStepStore {
         failureMessage: input.failureMessage,
         failureDetails: details,
       })
-      .where(
-        and(
-          eq(capsuleOperationStepsTable.operationId, input.operationId),
-          inArray(capsuleOperationStepsTable.status, ABANDONED_STEP_ELIGIBLE_STATUSES),
-        ),
-      )
+      .where(and(eq(steps.operationId, input.operationId), inArray(steps.status, ABANDONED_STEP_ELIGIBLE_STATUSES)))
       .returning({
-        id: capsuleOperationStepsTable.id,
+        id: steps.id,
       })
-
     return transitioned.length
   }
 

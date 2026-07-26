@@ -1,5 +1,6 @@
 import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm'
-import { capsuleBranchesTable, capsulesTable, type CapsuleHostDbContract } from '@qiln/core/server'
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
+import type { QilnPersistence, QilnTables } from '@qiln/core/server'
 import { IncusError } from '../../../errors'
 import { createFailureDetails, failureCodeFromUnknown, failureMessageFromUnknown } from '../failures'
 import { toJsonObject } from '../persistence/json'
@@ -33,37 +34,44 @@ const RUNTIME_RECONCILIATION_STATUSES = ['offline', 'starting', 'online', 'stopp
  * Transitional branch states are durable mutation fences, and every state write
  * revalidates the active, unarchived capsule aggregate.
  */
-export class CapsuleBranchStore {
-  constructor(private readonly db: CapsuleHostDbContract) {}
+export class CapsuleBranchStore<
+  TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
+  TTables extends QilnTables = QilnTables,
+> {
+  constructor(private readonly persistence: QilnPersistence<TDatabase, TTables>) {}
 
   public async listBranches(ownerId: string) {
-    return await this.db
+    const db = this.persistence.db
+    const branches = this.persistence.tables.capsuleBranches
+    return await db
       .select()
-      .from(capsuleBranchesTable)
-      .where(
-        and(eq(capsuleBranchesTable.ownerId, ownerId), inArray(capsuleBranchesTable.status, ACTIVE_BRANCH_STATUSES)),
-      )
-      .orderBy(desc(capsuleBranchesTable.createdAt))
+      .from(branches)
+      .where(and(eq(branches.ownerId, ownerId), inArray(branches.status, ACTIVE_BRANCH_STATUSES)))
+      .orderBy(desc(branches.createdAt))
   }
 
   public async listBranchesForCapsule(ownerId: string, capsuleId: string) {
-    return await this.db
+    const db = this.persistence.db
+    const branches = this.persistence.tables.capsuleBranches
+    return await db
       .select()
-      .from(capsuleBranchesTable)
-      .where(and(eq(capsuleBranchesTable.ownerId, ownerId), eq(capsuleBranchesTable.capsuleId, capsuleId)))
-      .orderBy(asc(capsuleBranchesTable.id))
+      .from(branches)
+      .where(and(eq(branches.ownerId, ownerId), eq(branches.capsuleId, capsuleId)))
+      .orderBy(asc(branches.id))
   }
 
   public async findBranch(ownerId: string, capsuleId: string, name: string) {
-    const [branch] = await this.db
+    const db = this.persistence.db
+    const branches = this.persistence.tables.capsuleBranches
+    const [branch] = await db
       .select()
-      .from(capsuleBranchesTable)
+      .from(branches)
       .where(
         and(
-          eq(capsuleBranchesTable.ownerId, ownerId),
-          eq(capsuleBranchesTable.capsuleId, capsuleId),
-          eq(capsuleBranchesTable.name, name),
-          inArray(capsuleBranchesTable.status, ACTIVE_BRANCH_STATUSES),
+          eq(branches.ownerId, ownerId),
+          eq(branches.capsuleId, capsuleId),
+          eq(branches.name, name),
+          inArray(branches.status, ACTIVE_BRANCH_STATUSES),
         ),
       )
       .limit(1)
@@ -71,39 +79,33 @@ export class CapsuleBranchStore {
   }
 
   public async findActiveBranchById(ownerId: string, branchId: string) {
-    const [branch] = await this.db
+    const db = this.persistence.db
+    const branches = this.persistence.tables.capsuleBranches
+    const [branch] = await db
       .select()
-      .from(capsuleBranchesTable)
+      .from(branches)
       .where(
-        and(
-          eq(capsuleBranchesTable.id, branchId),
-          eq(capsuleBranchesTable.ownerId, ownerId),
-          inArray(capsuleBranchesTable.status, ACTIVE_BRANCH_STATUSES),
-        ),
+        and(eq(branches.id, branchId), eq(branches.ownerId, ownerId), inArray(branches.status, ACTIVE_BRANCH_STATUSES)),
       )
       .limit(1)
     return branch ?? null
   }
 
   public async findRootBranch(ownerId: string, capsuleId: string) {
-    const branches = await this.db
+    const db = this.persistence.db
+    const branches = this.persistence.tables.capsuleBranches
+    const records = await db
       .select()
-      .from(capsuleBranchesTable)
-      .where(
-        and(
-          eq(capsuleBranchesTable.ownerId, ownerId),
-          eq(capsuleBranchesTable.capsuleId, capsuleId),
-          eq(capsuleBranchesTable.isRootBranch, true),
-        ),
-      )
+      .from(branches)
+      .where(and(eq(branches.ownerId, ownerId), eq(branches.capsuleId, capsuleId), eq(branches.isRootBranch, true)))
       .limit(2)
-    if (branches.length > 1) {
+    if (records.length > 1) {
       throw new IncusError('Capsule has multiple durable root branches.', 'CONFLICT', {
         ownerId,
         capsuleId,
       })
     }
-    return branches[0] ?? null
+    return records[0] ?? null
   }
 
   /**
@@ -113,24 +115,26 @@ export class CapsuleBranchStore {
    * provisioning, and failed-creation aggregates are intentionally excluded.
    */
   public async listRuntimeReconciliationCandidates(): Promise<BranchRuntimeReconciliationCandidate[]> {
-    return await this.db
+    const db = this.persistence.db
+    const { capsules, capsuleBranches } = this.persistence.tables
+    return await db
       .select({
-        id: capsuleBranchesTable.id,
-        capsuleId: capsuleBranchesTable.capsuleId,
-        ownerId: capsuleBranchesTable.ownerId,
-        name: capsuleBranchesTable.name,
-        status: capsuleBranchesTable.status,
+        id: capsuleBranches.id,
+        capsuleId: capsuleBranches.capsuleId,
+        ownerId: capsuleBranches.ownerId,
+        name: capsuleBranches.name,
+        status: capsuleBranches.status,
       })
-      .from(capsuleBranchesTable)
-      .innerJoin(capsulesTable, eq(capsulesTable.id, capsuleBranchesTable.capsuleId))
+      .from(capsuleBranches)
+      .innerJoin(capsules, eq(capsules.id, capsuleBranches.capsuleId))
       .where(
         and(
-          eq(capsulesTable.lifecycleStatus, 'active'),
-          isNull(capsulesTable.archivedAt),
-          inArray(capsuleBranchesTable.status, RUNTIME_RECONCILIATION_STATUSES),
+          eq(capsules.lifecycleStatus, 'active'),
+          isNull(capsules.archivedAt),
+          inArray(capsuleBranches.status, RUNTIME_RECONCILIATION_STATUSES),
         ),
       )
-      .orderBy(asc(capsuleBranchesTable.ownerId), asc(capsuleBranchesTable.id))
+      .orderBy(asc(capsuleBranches.ownerId), asc(capsuleBranches.id))
   }
 
   public async beginBranchStart(
@@ -152,20 +156,22 @@ export class CapsuleBranchStore {
   public async recordConfirmedRuntimeState(
     input: ConfirmedBranchRuntimeStateInput,
   ): Promise<ConfirmedBranchRuntimeStateResult> {
-    return await this.db.transaction(async tx => {
+    const db = this.persistence.db
+    const branches = this.persistence.tables.capsuleBranches
+    return await db.transaction(async tx => {
       await this.lockActiveCapsule(tx, input.ownerId, input.capsuleId)
       const [branch] = await tx
         .select({
-          id: capsuleBranchesTable.id,
-          name: capsuleBranchesTable.name,
-          status: capsuleBranchesTable.status,
+          id: branches.id,
+          name: branches.name,
+          status: branches.status,
         })
-        .from(capsuleBranchesTable)
+        .from(branches)
         .where(
           and(
-            eq(capsuleBranchesTable.id, input.branchId),
-            eq(capsuleBranchesTable.ownerId, input.ownerId),
-            eq(capsuleBranchesTable.capsuleId, input.capsuleId),
+            eq(branches.id, input.branchId),
+            eq(branches.ownerId, input.ownerId),
+            eq(branches.capsuleId, input.capsuleId),
           ),
         )
         .for('update')
@@ -191,7 +197,7 @@ export class CapsuleBranchStore {
       const statusChanged = branch.status !== input.confirmedStatus
       const runtimeIp = input.confirmedStatus === 'online' ? input.runtimeIp : null
       const [updated] = await tx
-        .update(capsuleBranchesTable)
+        .update(branches)
         .set({
           status: input.confirmedStatus,
           runtimeIp,
@@ -203,14 +209,14 @@ export class CapsuleBranchStore {
         })
         .where(
           and(
-            eq(capsuleBranchesTable.id, input.branchId),
-            eq(capsuleBranchesTable.ownerId, input.ownerId),
-            eq(capsuleBranchesTable.capsuleId, input.capsuleId),
-            eq(capsuleBranchesTable.status, branch.status),
+            eq(branches.id, input.branchId),
+            eq(branches.ownerId, input.ownerId),
+            eq(branches.capsuleId, input.capsuleId),
+            eq(branches.status, branch.status),
           ),
         )
         .returning({
-          name: capsuleBranchesTable.name,
+          name: branches.name,
         })
       if (!updated) {
         throw new IncusError('Failed to persist provider-confirmed branch runtime state.', 'CONFLICT', {
@@ -234,20 +240,22 @@ export class CapsuleBranchStore {
     const failureDetails = createFailureDetails(input.error, input.context) ?? {
       context: input.context,
     }
-    return await this.db.transaction(async tx => {
+    const db = this.persistence.db
+    const branches = this.persistence.tables.capsuleBranches
+    return await db.transaction(async tx => {
       await this.lockActiveCapsule(tx, input.ownerId, input.capsuleId)
       const [branch] = await tx
         .select({
-          id: capsuleBranchesTable.id,
-          name: capsuleBranchesTable.name,
-          status: capsuleBranchesTable.status,
+          id: branches.id,
+          name: branches.name,
+          status: branches.status,
         })
-        .from(capsuleBranchesTable)
+        .from(branches)
         .where(
           and(
-            eq(capsuleBranchesTable.id, input.branchId),
-            eq(capsuleBranchesTable.ownerId, input.ownerId),
-            eq(capsuleBranchesTable.capsuleId, input.capsuleId),
+            eq(branches.id, input.branchId),
+            eq(branches.ownerId, input.ownerId),
+            eq(branches.capsuleId, input.capsuleId),
           ),
         )
         .for('update')
@@ -271,7 +279,7 @@ export class CapsuleBranchStore {
       }
       const statusChanged = branch.status !== 'error'
       const [updated] = await tx
-        .update(capsuleBranchesTable)
+        .update(branches)
         .set({
           status: 'error',
           runtimeIp: null,
@@ -283,14 +291,14 @@ export class CapsuleBranchStore {
         })
         .where(
           and(
-            eq(capsuleBranchesTable.id, input.branchId),
-            eq(capsuleBranchesTable.ownerId, input.ownerId),
-            eq(capsuleBranchesTable.capsuleId, input.capsuleId),
-            eq(capsuleBranchesTable.status, branch.status),
+            eq(branches.id, input.branchId),
+            eq(branches.ownerId, input.ownerId),
+            eq(branches.capsuleId, input.capsuleId),
+            eq(branches.status, branch.status),
           ),
         )
         .returning({
-          name: capsuleBranchesTable.name,
+          name: branches.name,
         })
       if (!updated) {
         throw new IncusError('Failed to persist capsule branch runtime uncertainty.', 'CONFLICT', {
@@ -316,23 +324,19 @@ export class CapsuleBranchStore {
     requiredStatus: 'offline' | 'online',
     transitionalStatus: 'starting' | 'stopping',
   ): Promise<BranchRuntimeTransitionContext> {
-    return await this.db.transaction(async tx => {
+    const db = this.persistence.db
+    const branches = this.persistence.tables.capsuleBranches
+    return await db.transaction(async tx => {
       await this.lockActiveCapsule(tx, ownerId, capsuleId)
       const [branch] = await tx
         .select({
-          id: capsuleBranchesTable.id,
-          capsuleId: capsuleBranchesTable.capsuleId,
-          name: capsuleBranchesTable.name,
-          status: capsuleBranchesTable.status,
+          id: branches.id,
+          capsuleId: branches.capsuleId,
+          name: branches.name,
+          status: branches.status,
         })
-        .from(capsuleBranchesTable)
-        .where(
-          and(
-            eq(capsuleBranchesTable.ownerId, ownerId),
-            eq(capsuleBranchesTable.capsuleId, capsuleId),
-            eq(capsuleBranchesTable.name, branchName),
-          ),
-        )
+        .from(branches)
+        .where(and(eq(branches.ownerId, ownerId), eq(branches.capsuleId, capsuleId), eq(branches.name, branchName)))
         .for('update')
         .limit(1)
       if (!branch) {
@@ -355,7 +359,7 @@ export class CapsuleBranchStore {
         )
       }
       const [transitioned] = await tx
-        .update(capsuleBranchesTable)
+        .update(branches)
         .set({
           status: transitionalStatus,
           runtimeIp: transitionalStatus === 'stopping' ? null : undefined,
@@ -365,9 +369,9 @@ export class CapsuleBranchStore {
           runtimeErrorAt: null,
           updatedAt: new Date(),
         })
-        .where(and(eq(capsuleBranchesTable.id, branch.id), eq(capsuleBranchesTable.status, requiredStatus)))
+        .where(and(eq(branches.id, branch.id), eq(branches.status, requiredStatus)))
         .returning({
-          id: capsuleBranchesTable.id,
+          id: branches.id,
         })
       if (!transitioned) {
         throw new IncusError(
@@ -394,18 +398,19 @@ export class CapsuleBranchStore {
   }
 
   private async lockActiveCapsule(
-    tx: Parameters<Parameters<CapsuleHostDbContract['transaction']>[0]>[0],
+    tx: Parameters<Parameters<TDatabase['transaction']>[0]>[0],
     ownerId: string,
     capsuleId: string,
   ): Promise<void> {
+    const capsules = this.persistence.tables.capsules
     const [capsule] = await tx
       .select({
-        id: capsulesTable.id,
-        lifecycleStatus: capsulesTable.lifecycleStatus,
-        archivedAt: capsulesTable.archivedAt,
+        id: capsules.id,
+        lifecycleStatus: capsules.lifecycleStatus,
+        archivedAt: capsules.archivedAt,
       })
-      .from(capsulesTable)
-      .where(and(eq(capsulesTable.id, capsuleId), eq(capsulesTable.ownerId, ownerId)))
+      .from(capsules)
+      .where(and(eq(capsules.id, capsuleId), eq(capsules.ownerId, ownerId)))
       .for('update')
       .limit(1)
     if (!capsule) {

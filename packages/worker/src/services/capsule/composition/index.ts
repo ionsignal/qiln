@@ -18,10 +18,14 @@ import { composeUnarchiveCapability } from './unarchive'
 import type { ProjectService } from '../../project'
 import type { IncusClient } from '../../../incus/client/index'
 import type { OperationSupervisor } from '../../../coordination/supervisor'
-import type { CapsuleBlueprintRegistry, CapsuleChannel, CapsuleHostDbContract } from '@qiln/core/server'
+import type { CapsuleBlueprintRegistry, CapsuleChannel, QilnPersistence, QilnTables } from '@qiln/core/server'
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
-export interface ComposeCapsuleServiceOptions {
-  db: CapsuleHostDbContract
+export interface ComposeCapsuleServiceOptions<
+  TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
+  TTables extends QilnTables = QilnTables,
+> {
+  persistence: QilnPersistence<TDatabase, TTables>
   incus: IncusClient
   channel: CapsuleChannel
   project: ProjectService
@@ -42,17 +46,36 @@ export interface ComposeCapsuleServiceOptions {
  * mutation, command registration, reconciliation, event publication, or
  * operation scheduling.
  */
-export function composeCapsuleService(options: ComposeCapsuleServiceOptions): CapsuleService {
-  const operationReader = new CapsuleOperationReader(options.db)
-  const operationSteps = new CapsuleOperationStepStore(options.db)
-  const resources = new CapsuleBranchResourceStore(options.db)
-
+export function composeCapsuleService<TDatabase extends PostgresJsDatabase, TTables extends QilnTables>(
+  options: ComposeCapsuleServiceOptions<TDatabase, TTables>,
+): CapsuleService {
+  // Helpers
+  const operationReader = new CapsuleOperationReader(options.persistence)
+  const operationSteps = new CapsuleOperationStepStore(options.persistence)
+  const resources = new CapsuleBranchResourceStore(options.persistence)
+  // Events
   const operationEvents = new CapsuleOperationEventPublisher(options.channel)
   const lifecycleEvents = new CapsuleLifecycleEventPublisher(options.channel)
   const branchEvents = new CapsuleBranchEventPublisher(options.channel)
-
+  // Archival Operations
+  const archivalOperationLedger = new ProviderFreeArchivalOperationLedger(options.persistence, operationReader)
+  const archive = composeArchiveCapability({
+    persistence: options.persistence,
+    supervisor: options.supervisor,
+    operationLedger: archivalOperationLedger,
+    operationEvents,
+    lifecycleEvents,
+  })
+  const unarchive = composeUnarchiveCapability({
+    persistence: options.persistence,
+    supervisor: options.supervisor,
+    operationLedger: archivalOperationLedger,
+    operationEvents,
+    lifecycleEvents,
+  })
+  // Create/Destroy Operation
   const create = composeCreateCapability({
-    db: options.db,
+    persistence: options.persistence,
     incus: options.incus,
     project: options.project,
     blueprints: options.blueprints,
@@ -64,28 +87,8 @@ export function composeCapsuleService(options: ComposeCapsuleServiceOptions): Ca
     lifecycleEvents,
     branchEvents,
   })
-
-  /**
-   * Archive and unarchive intentionally share only their provider-free archival
-   * ledger mechanics. Their lifecycle and timestamp policies remain separate.
-   */
-  const archivalOperationLedger = new ProviderFreeArchivalOperationLedger(options.db, operationReader)
-  const archive = composeArchiveCapability({
-    db: options.db,
-    supervisor: options.supervisor,
-    operationLedger: archivalOperationLedger,
-    operationEvents,
-    lifecycleEvents,
-  })
-  const unarchive = composeUnarchiveCapability({
-    db: options.db,
-    supervisor: options.supervisor,
-    operationLedger: archivalOperationLedger,
-    operationEvents,
-    lifecycleEvents,
-  })
   const destroy = composeDestroyCapability({
-    db: options.db,
+    persistence: options.persistence,
     incus: options.incus,
     supervisor: options.supervisor,
     operationReader,
@@ -95,8 +98,9 @@ export function composeCapsuleService(options: ComposeCapsuleServiceOptions): Ca
     lifecycleEvents,
     branchEvents,
   })
+  // Snapshot Capture Operation
   const capture = composeCaptureCapability({
-    db: options.db,
+    persistence: options.persistence,
     incus: options.incus,
     supervisor: options.supervisor,
     operationReader,
@@ -106,15 +110,18 @@ export function composeCapsuleService(options: ComposeCapsuleServiceOptions): Ca
     branchEvents,
     enabled: options.experimentalCaptureEnabled,
   })
+  // Branch
   const branch = composeBranchCapability({
-    db: options.db,
+    persistence: options.persistence,
     incus: options.incus,
     project: options.project,
     branchEvents,
   })
+  // Snapshot
   const snapshot = composeSnapshotCapability({
-    db: options.db,
+    persistence: options.persistence,
   })
+  // Abandonment
   const abandonmentHandlers = new CapsuleOperationAbandonmentHandlerRegistry([
     create.abandonment,
     archive.abandonment,

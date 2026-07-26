@@ -1,12 +1,6 @@
 import { and, asc, eq, inArray, isNotNull, isNull, ne } from 'drizzle-orm'
-import {
-  CapsuleOperationStatus,
-  CapsuleOperationType,
-  capsuleBranchesTable,
-  capsuleOperationsTable,
-  capsulesTable,
-  type CapsuleHostDbContract,
-} from '@qiln/core/server'
+import { CapsuleOperationStatus, CapsuleOperationType, type QilnPersistence, type QilnTables } from '@qiln/core/server'
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import { IncusError } from '../../../../../errors'
 import {
   createFailureDetails as createOperationFailureDetails,
@@ -25,7 +19,6 @@ import {
   lockDestroyCapsuleBranches,
   lockDestroyOperation,
   lockOwnedDestroyCapsule,
-  type DestroyOperationTransaction,
   type PersistedDestroyCapsule,
   type PersistedDestroyOperation,
 } from './locks'
@@ -48,10 +41,13 @@ const NONTERMINAL_DESTROY_STATUSES = [CapsuleOperationStatus.ACCEPTED, CapsuleOp
  * boundary is responsible only for loading and locking evidence, invoking that
  * policy, and committing the selected operation-specific transaction.
  */
-export class DestroyCapsuleClassificationPersistence {
+export class DestroyCapsuleClassificationPersistence<
+  TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
+  TTables extends QilnTables = QilnTables,
+> {
   constructor(
-    private readonly db: CapsuleHostDbContract,
-    private readonly reader: CapsuleOperationReader,
+    private readonly persistence: QilnPersistence<TDatabase, TTables>,
+    private readonly reader: CapsuleOperationReader<TDatabase, TTables>,
   ) {}
 
   /**
@@ -67,14 +63,21 @@ export class DestroyCapsuleClassificationPersistence {
     error: unknown,
     context: Record<string, unknown>,
   ): Promise<DestroyCapsuleTerminalResult | null> {
-    return await this.db.transaction(async tx => {
-      const operation = await lockDestroyOperation(tx, operationId)
+    const db = this.persistence.db
+    const tables = this.persistence.tables
+    return await db.transaction(async tx => {
+      const operation = await lockDestroyOperation<TDatabase, TTables>(tx, tables, operationId)
       const terminality = inspectDestroyOperationTerminality(operation.status)
       if (terminality.kind === 'already_terminal') {
         return null
       }
-      const capsule = await lockOwnedDestroyCapsule(tx, operation.ownerId, operation.capsuleId)
-      const branches = await lockDestroyCapsuleBranches(tx, operation.capsuleId)
+      const capsule = await lockOwnedDestroyCapsule<TDatabase, TTables>(
+        tx,
+        tables,
+        operation.ownerId,
+        operation.capsuleId,
+      )
+      const branches = await lockDestroyCapsuleBranches<TDatabase, TTables>(tx, tables, operation.capsuleId)
       const lineage = inspectDestroyCapsuleBranchLineage(operation.ownerId, operation.capsuleId, branches, 'destroying')
       const decision = decideDestroyNonterminalFailure({
         operation: {
@@ -154,13 +157,14 @@ export class DestroyCapsuleClassificationPersistence {
    * provider-intent fence was committed.
    */
   private async failBeforeProviderMutationInTransaction(
-    tx: DestroyOperationTransaction,
+    tx: Parameters<Parameters<TDatabase['transaction']>[0]>[0],
     operation: PersistedDestroyOperation,
     capsule: PersistedDestroyCapsule,
     branches: readonly DestroyCapsuleAcceptedBranch[],
     error: unknown,
     context: Record<string, unknown>,
   ): Promise<DestroyCapsuleTerminalResult> {
+    const { capsuleOperations, capsules, capsuleBranches } = this.persistence.tables
     const lineage = inspectDestroyCapsuleBranchLineage(operation.ownerId, operation.capsuleId, branches, 'destroying')
     if (
       !isDestroyNonterminalOperationStatus(operation.status) ||
@@ -182,7 +186,7 @@ export class DestroyCapsuleClassificationPersistence {
     const originalArchivedAt = capsule.archivedAt
     const now = new Date()
     const [failedOperation] = await tx
-      .update(capsuleOperationsTable)
+      .update(capsuleOperations)
       .set({
         status: CapsuleOperationStatus.FAILED,
         failedAt: now,
@@ -196,36 +200,36 @@ export class DestroyCapsuleClassificationPersistence {
       })
       .where(
         and(
-          eq(capsuleOperationsTable.id, operation.id),
-          eq(capsuleOperationsTable.type, CapsuleOperationType.DESTROY),
-          inArray(capsuleOperationsTable.status, NONTERMINAL_DESTROY_STATUSES),
-          isNull(capsuleOperationsTable.providerMutationStartedAt),
+          eq(capsuleOperations.id, operation.id),
+          eq(capsuleOperations.type, CapsuleOperationType.DESTROY),
+          inArray(capsuleOperations.status, NONTERMINAL_DESTROY_STATUSES),
+          isNull(capsuleOperations.providerMutationStartedAt),
         ),
       )
       .returning({
-        id: capsuleOperationsTable.id,
+        id: capsuleOperations.id,
       })
     const [restoredCapsule] = await tx
-      .update(capsulesTable)
+      .update(capsules)
       .set({
         lifecycleStatus: 'active',
         updatedAt: now,
       })
       .where(
         and(
-          eq(capsulesTable.id, operation.capsuleId),
-          eq(capsulesTable.ownerId, operation.ownerId),
-          eq(capsulesTable.lifecycleStatus, 'destroying'),
-          isNotNull(capsulesTable.archivedAt),
+          eq(capsules.id, operation.capsuleId),
+          eq(capsules.ownerId, operation.ownerId),
+          eq(capsules.lifecycleStatus, 'destroying'),
+          isNotNull(capsules.archivedAt),
         ),
       )
       .returning({
-        lifecycleStatus: capsulesTable.lifecycleStatus,
-        archivedAt: capsulesTable.archivedAt,
-        destroyedAt: capsulesTable.destroyedAt,
+        lifecycleStatus: capsules.lifecycleStatus,
+        archivedAt: capsules.archivedAt,
+        destroyedAt: capsules.destroyedAt,
       })
     const restoredBranches = await tx
-      .update(capsuleBranchesTable)
+      .update(capsuleBranches)
       .set({
         status: 'offline',
         runtimeIp: null,
@@ -233,16 +237,16 @@ export class DestroyCapsuleClassificationPersistence {
       })
       .where(
         and(
-          eq(capsuleBranchesTable.capsuleId, operation.capsuleId),
-          eq(capsuleBranchesTable.ownerId, operation.ownerId),
-          eq(capsuleBranchesTable.status, 'destroying'),
+          eq(capsuleBranches.capsuleId, operation.capsuleId),
+          eq(capsuleBranches.ownerId, operation.ownerId),
+          eq(capsuleBranches.status, 'destroying'),
         ),
       )
       .returning({
-        id: capsuleBranchesTable.id,
-        capsuleId: capsuleBranchesTable.capsuleId,
-        name: capsuleBranchesTable.name,
-        status: capsuleBranchesTable.status,
+        id: capsuleBranches.id,
+        capsuleId: capsuleBranches.capsuleId,
+        name: capsuleBranches.name,
+        status: capsuleBranches.status,
       })
     if (
       !failedOperation ||
@@ -287,7 +291,7 @@ export class DestroyCapsuleClassificationPersistence {
    * cleanup-required after provider intent or contradictory durable evidence.
    */
   private async markCleanupRequiredInTransaction(
-    tx: DestroyOperationTransaction,
+    tx: Parameters<Parameters<TDatabase['transaction']>[0]>[0],
     operation: PersistedDestroyOperation,
     capsule: PersistedDestroyCapsule,
     error: unknown,
@@ -299,10 +303,11 @@ export class DestroyCapsuleClassificationPersistence {
         operationStatus: operation.status,
       })
     }
+    const { capsuleOperations, capsules, capsuleBranches } = this.persistence.tables
     const failureDetails = createOperationFailureDetails(error, context)
     const now = new Date()
     const [cleanupOperation] = await tx
-      .update(capsuleOperationsTable)
+      .update(capsuleOperations)
       .set({
         status: CapsuleOperationStatus.CLEANUP_REQUIRED,
         failedAt: now,
@@ -319,13 +324,13 @@ export class DestroyCapsuleClassificationPersistence {
       })
       .where(
         and(
-          eq(capsuleOperationsTable.id, operation.id),
-          eq(capsuleOperationsTable.type, CapsuleOperationType.DESTROY),
-          inArray(capsuleOperationsTable.status, NONTERMINAL_DESTROY_STATUSES),
+          eq(capsuleOperations.id, operation.id),
+          eq(capsuleOperations.type, CapsuleOperationType.DESTROY),
+          inArray(capsuleOperations.status, NONTERMINAL_DESTROY_STATUSES),
         ),
       )
       .returning({
-        id: capsuleOperationsTable.id,
+        id: capsuleOperations.id,
       })
     if (!cleanupOperation) {
       throw new IncusError('Failed to mark capsule destroy operation cleanup-required.', 'CONFLICT', {
@@ -340,22 +345,22 @@ export class DestroyCapsuleClassificationPersistence {
     }
     if (capsule.lifecycleStatus !== 'destroyed') {
       const [cleanupCapsule] = await tx
-        .update(capsulesTable)
+        .update(capsules)
         .set({
           lifecycleStatus: 'cleanup_required',
           updatedAt: now,
         })
         .where(
           and(
-            eq(capsulesTable.id, operation.capsuleId),
-            eq(capsulesTable.ownerId, operation.ownerId),
-            ne(capsulesTable.lifecycleStatus, 'destroyed'),
+            eq(capsules.id, operation.capsuleId),
+            eq(capsules.ownerId, operation.ownerId),
+            ne(capsules.lifecycleStatus, 'destroyed'),
           ),
         )
         .returning({
-          lifecycleStatus: capsulesTable.lifecycleStatus,
-          archivedAt: capsulesTable.archivedAt,
-          destroyedAt: capsulesTable.destroyedAt,
+          lifecycleStatus: capsules.lifecycleStatus,
+          archivedAt: capsules.archivedAt,
+          destroyedAt: capsules.destroyedAt,
         })
       if (!cleanupCapsule) {
         throw new IncusError(
@@ -370,7 +375,7 @@ export class DestroyCapsuleClassificationPersistence {
       committedCapsule = cleanupCapsule
     }
     await tx
-      .update(capsuleBranchesTable)
+      .update(capsuleBranches)
       .set({
         status: 'cleanup_required',
         runtimeIp: null,
@@ -378,26 +383,21 @@ export class DestroyCapsuleClassificationPersistence {
       })
       .where(
         and(
-          eq(capsuleBranchesTable.capsuleId, operation.capsuleId),
-          eq(capsuleBranchesTable.ownerId, operation.ownerId),
-          ne(capsuleBranchesTable.status, 'destroyed'),
+          eq(capsuleBranches.capsuleId, operation.capsuleId),
+          eq(capsuleBranches.ownerId, operation.ownerId),
+          ne(capsuleBranches.status, 'destroyed'),
         ),
       )
     const committedBranches = await tx
       .select({
-        id: capsuleBranchesTable.id,
-        capsuleId: capsuleBranchesTable.capsuleId,
-        name: capsuleBranchesTable.name,
-        status: capsuleBranchesTable.status,
+        id: capsuleBranches.id,
+        capsuleId: capsuleBranches.capsuleId,
+        name: capsuleBranches.name,
+        status: capsuleBranches.status,
       })
-      .from(capsuleBranchesTable)
-      .where(
-        and(
-          eq(capsuleBranchesTable.capsuleId, operation.capsuleId),
-          eq(capsuleBranchesTable.ownerId, operation.ownerId),
-        ),
-      )
-      .orderBy(asc(capsuleBranchesTable.id))
+      .from(capsuleBranches)
+      .where(and(eq(capsuleBranches.capsuleId, operation.capsuleId), eq(capsuleBranches.ownerId, operation.ownerId)))
+      .orderBy(asc(capsuleBranches.id))
     return {
       operation: toCapsuleOperationTransition({
         ownerId: operation.ownerId,

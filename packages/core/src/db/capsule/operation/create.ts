@@ -1,7 +1,5 @@
 import { jsonb, pgTable, text, uniqueIndex, uuid, type PgColumn } from 'drizzle-orm/pg-core'
 import type { CapsuleBlueprint, CapsuleBlueprintDigest, CapsuleBranchName } from '../../../schemas'
-import { capsuleBranchesTable } from '../branch/record'
-import { capsuleOperationsTable } from './record'
 
 function createOperationIdColumn(operationIdColumn?: PgColumn) {
   return operationIdColumn
@@ -55,14 +53,3 @@ export function createCapsuleCreateOperationsTable(operationIdColumn?: PgColumn,
     table => [uniqueIndex('capsule_create_operations_root_branch_unique_idx').on(table.rootBranchId)],
   )
 }
-
-/**
- * Package-local Drizzle table for direct Core and Worker DML.
- *
- * The host-composed schema recreates the same physical table with references to
- * its composed operation and branch tables.
- */
-export const capsuleCreateOperationsTable = createCapsuleCreateOperationsTable(
-  capsuleOperationsTable.id,
-  capsuleBranchesTable.id,
-)

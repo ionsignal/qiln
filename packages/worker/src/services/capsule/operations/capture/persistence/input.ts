@@ -3,15 +3,12 @@ import {
   CapsuleOperationStatus,
   CapsuleOperationType,
   CapsuleSnapshotMode,
-  capsuleBranchesTable,
-  capsuleBranchResourcesTable,
-  capsuleSnapshotCaptureOperationsTable,
-  capsuleSnapshotCaptureResourcesTable,
-  capsulesTable,
   verifyCapsuleSnapshotCapturePolicyPin,
-  type CapsuleHostDbContract,
+  type QilnPersistence,
+  type QilnTables,
 } from '@qiln/core/server'
 import { IncusError } from '../../../../../errors'
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import type { CapsuleOperationReader } from '../../shared'
 import type { CapsuleBranchResourceInventoryRow } from '../../../resource'
 import type { CapturePlanner } from '../plan'
@@ -24,14 +21,20 @@ import type { CaptureExecutionInput, CaptureResourceRecord, CaptureSourceBranch 
  * This boundary performs no registry access, provider discovery, dependency
  * resolution, collection, scheduling, or mutation.
  */
-export class CaptureInputPersistence {
+export class CaptureInputPersistence<
+  TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
+  TTables extends QilnTables = QilnTables,
+> {
   constructor(
-    private readonly db: CapsuleHostDbContract,
-    private readonly reader: CapsuleOperationReader,
+    private readonly persistence: QilnPersistence<TDatabase, TTables>,
+    private readonly reader: CapsuleOperationReader<TDatabase, TTables>,
     private readonly planner: CapturePlanner,
   ) {}
 
   public async load(operationId: string): Promise<CaptureExecutionInput> {
+    const db = this.persistence.db
+    const captureOperations = this.persistence.tables.capsuleSnapshotCaptureOperations
+    const capsules = this.persistence.tables.capsules
     const operation = await this.reader.loadById(operationId)
     if (!operation) {
       throw new IncusError('Snapshot Capture operation was not found.', 'NOT_FOUND', {
@@ -51,10 +54,10 @@ export class CaptureInputPersistence {
         providerMutationStartedAt: operation.providerMutationStartedAt?.toISOString() ?? null,
       })
     }
-    const [extension] = await this.db
+    const [extension] = await db
       .select()
-      .from(capsuleSnapshotCaptureOperationsTable)
-      .where(eq(capsuleSnapshotCaptureOperationsTable.operationId, operationId))
+      .from(captureOperations)
+      .where(eq(captureOperations.operationId, operationId))
       .limit(1)
     if (!extension || extension.snapshotId !== null) {
       throw new IncusError(
@@ -85,15 +88,14 @@ export class CaptureInputPersistence {
         policyDigest: policy.digest,
       })
     }
-    const [capsule] = await this.db
+    const [capsule] = await db
       .select({
-        lifecycleStatus: capsulesTable.lifecycleStatus,
-        archivedAt: capsulesTable.archivedAt,
+        lifecycleStatus: capsules.lifecycleStatus,
+        archivedAt: capsules.archivedAt,
       })
-      .from(capsulesTable)
-      .where(and(eq(capsulesTable.id, operation.capsuleId), eq(capsulesTable.ownerId, operation.ownerId)))
+      .from(capsules)
+      .where(and(eq(capsules.id, operation.capsuleId), eq(capsules.ownerId, operation.ownerId)))
       .limit(1)
-
     if (!capsule || capsule.lifecycleStatus !== 'active' || capsule.archivedAt !== null) {
       throw new IncusError('Snapshot Capture capsule is no longer active and unarchived.', 'CONFLICT', {
         operationId,
@@ -124,7 +126,9 @@ export class CaptureInputPersistence {
     const inventory = await this.inventory(branch.id)
     const plan = this.planner.create(operationId, operation.ownerId, operation.capsuleId, branch, policy, inventory)
     const captureResources = await this.resources(operationId)
+
     this.planner.assertResources(operationId, plan, captureResources)
+
     return {
       operationId,
       ownerId: operation.ownerId,
@@ -139,28 +143,24 @@ export class CaptureInputPersistence {
   }
 
   private async branch(ownerId: string, capsuleId: string, branchId: string): Promise<CaptureSourceBranch> {
-    const [branch] = await this.db
+    const db = this.persistence.db
+    const branches = this.persistence.tables.capsuleBranches
+    const [branch] = await db
       .select({
-        id: capsuleBranchesTable.id,
-        ownerId: capsuleBranchesTable.ownerId,
-        capsuleId: capsuleBranchesTable.capsuleId,
-        name: capsuleBranchesTable.name,
-        status: capsuleBranchesTable.status,
-        isRootBranch: capsuleBranchesTable.isRootBranch,
-        blueprintName: capsuleBranchesTable.blueprintName,
-        blueprintDigest: capsuleBranchesTable.blueprintDigest,
-        cpu: capsuleBranchesTable.cpu,
-        memory: capsuleBranchesTable.memory,
-        resourceInventoryDigest: capsuleBranchesTable.resourceInventoryDigest,
+        id: branches.id,
+        ownerId: branches.ownerId,
+        capsuleId: branches.capsuleId,
+        name: branches.name,
+        status: branches.status,
+        isRootBranch: branches.isRootBranch,
+        blueprintName: branches.blueprintName,
+        blueprintDigest: branches.blueprintDigest,
+        cpu: branches.cpu,
+        memory: branches.memory,
+        resourceInventoryDigest: branches.resourceInventoryDigest,
       })
-      .from(capsuleBranchesTable)
-      .where(
-        and(
-          eq(capsuleBranchesTable.id, branchId),
-          eq(capsuleBranchesTable.ownerId, ownerId),
-          eq(capsuleBranchesTable.capsuleId, capsuleId),
-        ),
-      )
+      .from(branches)
+      .where(and(eq(branches.id, branchId), eq(branches.ownerId, ownerId), eq(branches.capsuleId, capsuleId)))
       .limit(1)
     if (!branch) {
       throw new IncusError('Snapshot Capture source branch was not found.', 'NOT_FOUND', {
@@ -173,53 +173,57 @@ export class CaptureInputPersistence {
   }
 
   private async inventory(branchId: string): Promise<CapsuleBranchResourceInventoryRow[]> {
-    return await this.db
+    const db = this.persistence.db
+    const resources = this.persistence.tables.capsuleBranchResources
+    return await db
       .select({
-        id: capsuleBranchResourcesTable.id,
-        ownerId: capsuleBranchResourcesTable.ownerId,
-        branchId: capsuleBranchResourcesTable.branchId,
-        branchName: capsuleBranchResourcesTable.branchName,
-        provider: capsuleBranchResourcesTable.provider,
-        resourceType: capsuleBranchResourcesTable.resourceType,
-        resourceKey: capsuleBranchResourcesTable.resourceKey,
-        blueprintVolumeName: capsuleBranchResourcesTable.blueprintVolumeName,
-        status: capsuleBranchResourcesTable.status,
-        cleanupPolicy: capsuleBranchResourcesTable.cleanupPolicy,
-        metadata: capsuleBranchResourcesTable.metadata,
-        createdByOperationId: capsuleBranchResourcesTable.createdByOperationId,
-        lastOperationId: capsuleBranchResourcesTable.lastOperationId,
+        id: resources.id,
+        ownerId: resources.ownerId,
+        branchId: resources.branchId,
+        branchName: resources.branchName,
+        provider: resources.provider,
+        resourceType: resources.resourceType,
+        resourceKey: resources.resourceKey,
+        blueprintVolumeName: resources.blueprintVolumeName,
+        status: resources.status,
+        cleanupPolicy: resources.cleanupPolicy,
+        metadata: resources.metadata,
+        createdByOperationId: resources.createdByOperationId,
+        lastOperationId: resources.lastOperationId,
       })
-      .from(capsuleBranchResourcesTable)
-      .where(eq(capsuleBranchResourcesTable.branchId, branchId))
-      .orderBy(asc(capsuleBranchResourcesTable.createdAt), asc(capsuleBranchResourcesTable.id))
+      .from(resources)
+      .where(eq(resources.branchId, branchId))
+      .orderBy(asc(resources.createdAt), asc(resources.id))
   }
 
   private async resources(operationId: string): Promise<CaptureResourceRecord[]> {
-    return await this.db
+    const db = this.persistence.db
+    const resources = this.persistence.tables.capsuleSnapshotCaptureResources
+    return await db
       .select({
-        id: capsuleSnapshotCaptureResourcesTable.id,
-        operationId: capsuleSnapshotCaptureResourcesTable.operationId,
-        sourceBranchResourceId: capsuleSnapshotCaptureResourcesTable.sourceBranchResourceId,
-        artifactRootId: capsuleSnapshotCaptureResourcesTable.artifactRootId,
-        blueprintVolumeName: capsuleSnapshotCaptureResourcesTable.blueprintVolumeName,
-        provider: capsuleSnapshotCaptureResourcesTable.provider,
-        kind: capsuleSnapshotCaptureResourcesTable.kind,
-        project: capsuleSnapshotCaptureResourcesTable.project,
-        pool: capsuleSnapshotCaptureResourcesTable.pool,
-        sourceVolume: capsuleSnapshotCaptureResourcesTable.sourceVolume,
-        snapshotName: capsuleSnapshotCaptureResourcesTable.snapshotName,
-        status: capsuleSnapshotCaptureResourcesTable.status,
-        snapshotIntentAt: capsuleSnapshotCaptureResourcesTable.snapshotIntentAt,
-        snapshotCreatedAt: capsuleSnapshotCaptureResourcesTable.snapshotCreatedAt,
-        cleanupIntentAt: capsuleSnapshotCaptureResourcesTable.cleanupIntentAt,
-        cleanupCompletedAt: capsuleSnapshotCaptureResourcesTable.cleanupCompletedAt,
-        failureCode: capsuleSnapshotCaptureResourcesTable.failureCode,
-        failureMessage: capsuleSnapshotCaptureResourcesTable.failureMessage,
-        failureDetails: capsuleSnapshotCaptureResourcesTable.failureDetails,
-        failureAt: capsuleSnapshotCaptureResourcesTable.failureAt,
+        id: resources.id,
+        operationId: resources.operationId,
+        sourceBranchResourceId: resources.sourceBranchResourceId,
+        artifactRootId: resources.artifactRootId,
+        blueprintVolumeName: resources.blueprintVolumeName,
+        provider: resources.provider,
+        kind: resources.kind,
+        project: resources.project,
+        pool: resources.pool,
+        sourceVolume: resources.sourceVolume,
+        snapshotName: resources.snapshotName,
+        status: resources.status,
+        snapshotIntentAt: resources.snapshotIntentAt,
+        snapshotCreatedAt: resources.snapshotCreatedAt,
+        cleanupIntentAt: resources.cleanupIntentAt,
+        cleanupCompletedAt: resources.cleanupCompletedAt,
+        failureCode: resources.failureCode,
+        failureMessage: resources.failureMessage,
+        failureDetails: resources.failureDetails,
+        failureAt: resources.failureAt,
       })
-      .from(capsuleSnapshotCaptureResourcesTable)
-      .where(eq(capsuleSnapshotCaptureResourcesTable.operationId, operationId))
-      .orderBy(asc(capsuleSnapshotCaptureResourcesTable.artifactRootId), asc(capsuleSnapshotCaptureResourcesTable.id))
+      .from(resources)
+      .where(eq(resources.operationId, operationId))
+      .orderBy(asc(resources.artifactRootId), asc(resources.id))
   }
 }

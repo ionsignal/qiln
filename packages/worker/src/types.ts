@@ -1,4 +1,5 @@
-import type { CapsuleHostDbContract } from '@qiln/core/server'
+import type { QilnPersistence, QilnTables } from '@qiln/core/server'
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
 export interface WorkerNatsConfig {
   servers: string | string[]
@@ -33,7 +34,10 @@ export interface WorkerRuntimeConfig {
   features?: WorkerFeatureConfig
 }
 
-export interface WorkerRuntimeOptions {
-  db: CapsuleHostDbContract
+export interface WorkerRuntimeOptions<
+  TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
+  TTables extends QilnTables = QilnTables,
+> {
+  persistence: QilnPersistence<TDatabase, TTables>
   config?: WorkerRuntimeConfig
 }

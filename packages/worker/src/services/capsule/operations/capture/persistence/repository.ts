@@ -1,4 +1,5 @@
-import type { CapsuleHostDbContract, CapsuleOperationRequestHash } from '@qiln/core/server'
+import type { CapsuleOperationRequestHash, QilnPersistence, QilnTables } from '@qiln/core/server'
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import type { CapsuleOperationReader } from '../../shared'
 import type { CapturePlanner } from '../plan'
 import { CaptureAcceptancePersistence } from './accept'
@@ -25,24 +26,31 @@ import type {
  * Cohesive persistence modules own their transaction boundaries. This facade
  * opens no transaction itself.
  */
-export class CaptureRepository {
-  private readonly acceptance: CaptureAcceptancePersistence
-  private readonly input: CaptureInputPersistence
-  private readonly execution: CaptureExecutionPersistence
-  private readonly commitPersistence: CaptureCommitPersistence
-  private readonly failure: CaptureFailurePersistence
-  private readonly compensation: CaptureCompensationPersistence
+export class CaptureRepository<
+  TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
+  TTables extends QilnTables = QilnTables,
+> {
+  private readonly acceptance: CaptureAcceptancePersistence<TDatabase, TTables>
+  private readonly input: CaptureInputPersistence<TDatabase, TTables>
+  private readonly execution: CaptureExecutionPersistence<TDatabase, TTables>
+  private readonly commitPersistence: CaptureCommitPersistence<TDatabase, TTables>
+  private readonly failure: CaptureFailurePersistence<TDatabase, TTables>
+  private readonly compensation: CaptureCompensationPersistence<TDatabase, TTables>
 
-  public readonly resources: CaptureResourcePersistence
+  public readonly resources: CaptureResourcePersistence<TDatabase, TTables>
 
-  constructor(db: CapsuleHostDbContract, reader: CapsuleOperationReader, planner: CapturePlanner) {
-    this.acceptance = new CaptureAcceptancePersistence(db, reader, planner)
-    this.input = new CaptureInputPersistence(db, reader, planner)
-    this.execution = new CaptureExecutionPersistence(db)
-    this.resources = new CaptureResourcePersistence(db)
-    this.commitPersistence = new CaptureCommitPersistence(db)
-    this.failure = new CaptureFailurePersistence(db, reader, planner)
-    this.compensation = new CaptureCompensationPersistence(db)
+  constructor(
+    persistence: QilnPersistence<TDatabase, TTables>,
+    reader: CapsuleOperationReader<TDatabase, TTables>,
+    planner: CapturePlanner,
+  ) {
+    this.acceptance = new CaptureAcceptancePersistence(persistence, reader, planner)
+    this.input = new CaptureInputPersistence(persistence, reader, planner)
+    this.execution = new CaptureExecutionPersistence(persistence)
+    this.resources = new CaptureResourcePersistence(persistence)
+    this.commitPersistence = new CaptureCommitPersistence(persistence)
+    this.failure = new CaptureFailurePersistence(persistence, reader, planner)
+    this.compensation = new CaptureCompensationPersistence(persistence)
   }
 
   public async accept(

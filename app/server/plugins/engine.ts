@@ -1,12 +1,10 @@
 import fp from 'fastify-plugin'
 import { enginePlugin } from '@qiln/engine/server'
-import type { CapsuleHostDbContract } from '@qiln/core/server'
 
 export default fp(
   async fastify => {
-    const db = fastify.db as unknown as CapsuleHostDbContract
     await fastify.register(enginePlugin, {
-      db,
+      persistence: fastify.persistence,
       config: fastify.config,
     })
     fastify.log.info('[Engine] QilnEngine module registered.')

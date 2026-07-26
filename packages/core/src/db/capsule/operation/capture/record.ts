@@ -6,9 +6,7 @@ import type {
   CapsuleSnapshotCapturePolicyDigest,
   CapsuleSnapshotCapturePolicyPin,
 } from '../../../../schemas'
-import { capsuleBranchesTable } from '../../branch/record'
-import { capsuleSnapshotModeEnum, capsuleSnapshotsTable } from '../../snapshot/record'
-import { capsuleOperationsTable } from '../record'
+import { capsuleSnapshotModeEnum } from '../../snapshot/record'
 
 function createOperationIdColumn(operationIdColumn?: PgColumn) {
   return operationIdColumn
@@ -88,9 +86,3 @@ export function createCapsuleSnapshotCaptureOperationsTable(
     ],
   )
 }
-
-export const capsuleSnapshotCaptureOperationsTable = createCapsuleSnapshotCaptureOperationsTable(
-  capsuleOperationsTable.id,
-  capsuleBranchesTable.id,
-  capsuleSnapshotsTable.id,
-)

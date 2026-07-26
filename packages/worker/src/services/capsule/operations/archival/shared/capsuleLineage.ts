@@ -1,14 +1,15 @@
 import { and, asc, eq } from 'drizzle-orm'
-import { capsuleBranchesTable, capsulesTable, type CapsuleHostDbContract } from '@qiln/core/server'
 import { IncusError } from '../../../../../errors'
+import type { QilnPersistence, QilnTables } from '@qiln/core/server'
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
-export type ArchivalOperationTransaction = Parameters<Parameters<CapsuleHostDbContract['transaction']>[0]>[0]
 export type ArchivalCapsuleRecord = Pick<
-  typeof capsulesTable.$inferSelect,
+  QilnTables['capsules']['$inferSelect'],
   'id' | 'ownerId' | 'lifecycleStatus' | 'archivedAt' | 'destroyedAt'
 >
+
 export type ArchivalBranchRecord = Pick<
-  typeof capsuleBranchesTable.$inferSelect,
+  QilnTables['capsuleBranches']['$inferSelect'],
   'id' | 'capsuleId' | 'ownerId' | 'name' | 'status' | 'isRootBranch'
 >
 
@@ -34,21 +35,23 @@ export interface OfflineBranchLineageInspection {
  * This is intended for replay-result mapping after the operation-specific
  * acceptance transaction has already committed.
  */
-export async function readOwnedArchivalCapsule(
-  db: CapsuleHostDbContract,
+export async function readOwnedArchivalCapsule<TDatabase extends PostgresJsDatabase, TTables extends QilnTables>(
+  persistence: QilnPersistence<TDatabase, TTables>,
   ownerId: string,
   capsuleId: string,
 ): Promise<ArchivalCapsuleRecord | null> {
+  const db = persistence.db
+  const capsules = persistence.tables.capsules
   const [capsule] = await db
     .select({
-      id: capsulesTable.id,
-      ownerId: capsulesTable.ownerId,
-      lifecycleStatus: capsulesTable.lifecycleStatus,
-      archivedAt: capsulesTable.archivedAt,
-      destroyedAt: capsulesTable.destroyedAt,
+      id: capsules.id,
+      ownerId: capsules.ownerId,
+      lifecycleStatus: capsules.lifecycleStatus,
+      archivedAt: capsules.archivedAt,
+      destroyedAt: capsules.destroyedAt,
     })
-    .from(capsulesTable)
-    .where(and(eq(capsulesTable.id, capsuleId), eq(capsulesTable.ownerId, ownerId)))
+    .from(capsules)
+    .where(and(eq(capsules.id, capsuleId), eq(capsules.ownerId, ownerId)))
     .limit(1)
   return capsule ?? null
 }
@@ -59,21 +62,23 @@ export async function readOwnedArchivalCapsule(
  * The caller owns transaction scope and lifecycle policy. This helper opens no
  * nested transaction and performs no archive or unarchive eligibility checks.
  */
-export async function lockOwnedArchivalCapsule(
-  tx: ArchivalOperationTransaction,
+export async function lockOwnedArchivalCapsule<TDatabase extends PostgresJsDatabase, TTables extends QilnTables>(
+  tx: Parameters<Parameters<TDatabase['transaction']>[0]>[0],
+  tables: TTables,
   ownerId: string,
   capsuleId: string,
 ): Promise<ArchivalCapsuleRecord> {
+  const capsules = tables.capsules
   const [capsule] = await tx
     .select({
-      id: capsulesTable.id,
-      ownerId: capsulesTable.ownerId,
-      lifecycleStatus: capsulesTable.lifecycleStatus,
-      archivedAt: capsulesTable.archivedAt,
-      destroyedAt: capsulesTable.destroyedAt,
+      id: capsules.id,
+      ownerId: capsules.ownerId,
+      lifecycleStatus: capsules.lifecycleStatus,
+      archivedAt: capsules.archivedAt,
+      destroyedAt: capsules.destroyedAt,
     })
-    .from(capsulesTable)
-    .where(and(eq(capsulesTable.id, capsuleId), eq(capsulesTable.ownerId, ownerId)))
+    .from(capsules)
+    .where(and(eq(capsules.id, capsuleId), eq(capsules.ownerId, ownerId)))
     .for('update')
     .limit(1)
   if (!capsule) {
@@ -93,22 +98,24 @@ export async function lockOwnedArchivalCapsule(
  * foreign-owner row attached to the capsule is contradictory durable evidence
  * that operation-specific policy must classify fail-closed.
  */
-export async function lockArchivalCapsuleBranches(
-  tx: ArchivalOperationTransaction,
+export async function lockArchivalCapsuleBranches<TDatabase extends PostgresJsDatabase, TTables extends QilnTables>(
+  tx: Parameters<Parameters<TDatabase['transaction']>[0]>[0],
+  tables: TTables,
   capsuleId: string,
 ): Promise<ArchivalBranchRecord[]> {
+  const branches = tables.capsuleBranches
   return await tx
     .select({
-      id: capsuleBranchesTable.id,
-      capsuleId: capsuleBranchesTable.capsuleId,
-      ownerId: capsuleBranchesTable.ownerId,
-      name: capsuleBranchesTable.name,
-      status: capsuleBranchesTable.status,
-      isRootBranch: capsuleBranchesTable.isRootBranch,
+      id: branches.id,
+      capsuleId: branches.capsuleId,
+      ownerId: branches.ownerId,
+      name: branches.name,
+      status: branches.status,
+      isRootBranch: branches.isRootBranch,
     })
-    .from(capsuleBranchesTable)
-    .where(eq(capsuleBranchesTable.capsuleId, capsuleId))
-    .orderBy(asc(capsuleBranchesTable.id))
+    .from(branches)
+    .where(eq(branches.capsuleId, capsuleId))
+    .orderBy(asc(branches.id))
     .for('update')
 }
 

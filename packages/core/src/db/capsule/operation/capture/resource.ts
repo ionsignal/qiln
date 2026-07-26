@@ -16,9 +16,7 @@ import {
   type CapsuleArtifactRootId,
   type CapsuleBlueprintIdentifier,
 } from '../../../../schemas'
-import { capsuleBranchResourcesTable } from '../../branch/resource'
 import { capsuleSnapshotResourceKindEnum, capsuleSnapshotResourceProviderEnum } from '../../snapshot/resource'
-import { capsuleSnapshotCaptureOperationsTable } from './record'
 
 export const capsuleSnapshotCaptureResourceStatusEnum = pgEnum(
   'capsule_snapshot_capture_resource_status',
@@ -243,8 +241,3 @@ export function createCapsuleSnapshotCaptureResourcesTable(
     ],
   )
 }
-
-export const capsuleSnapshotCaptureResourcesTable = createCapsuleSnapshotCaptureResourcesTable(
-  capsuleSnapshotCaptureOperationsTable.operationId,
-  capsuleBranchResourcesTable.id,
-)

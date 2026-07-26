@@ -1,12 +1,6 @@
 import { and, asc, eq, isNull } from 'drizzle-orm'
-import {
-  CapsuleOperationStatus,
-  CapsuleOperationType,
-  capsuleBranchesTable,
-  capsuleOperationsTable,
-  capsulesTable,
-  type CapsuleHostDbContract,
-} from '@qiln/core/server'
+import { CapsuleOperationStatus, CapsuleOperationType, type QilnPersistence, type QilnTables } from '@qiln/core/server'
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import { IncusError } from '../../../../../errors'
 import {
   toCapsuleOperationTransition,
@@ -23,10 +17,13 @@ import type { DestroyCapsuleAcceptedBranch, DestroyCapsuleExecutionInput } from 
  * immutable execution identity and aggregate state before allowing the
  * accepted-to-running transition or provider-intent commitment.
  */
-export class DestroyCapsuleExecutionPersistence {
+export class DestroyCapsuleExecutionPersistence<
+  TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
+  TTables extends QilnTables = QilnTables,
+> {
   constructor(
-    private readonly db: CapsuleHostDbContract,
-    private readonly reader: CapsuleOperationReader,
+    private readonly persistence: QilnPersistence<TDatabase, TTables>,
+    private readonly reader: CapsuleOperationReader<TDatabase, TTables>,
   ) {}
 
   public async loadAcceptedExecutionInput(operationId: string): Promise<DestroyCapsuleExecutionInput> {
@@ -54,13 +51,15 @@ export class DestroyCapsuleExecutionPersistence {
         providerMutationStartedAt: operation.providerMutationStartedAt.toISOString(),
       })
     }
-    const [capsule] = await this.db
+    const db = this.persistence.db
+    const capsules = this.persistence.tables.capsules
+    const [capsule] = await db
       .select({
-        lifecycleStatus: capsulesTable.lifecycleStatus,
-        archivedAt: capsulesTable.archivedAt,
+        lifecycleStatus: capsules.lifecycleStatus,
+        archivedAt: capsules.archivedAt,
       })
-      .from(capsulesTable)
-      .where(and(eq(capsulesTable.id, operation.capsuleId), eq(capsulesTable.ownerId, operation.ownerId)))
+      .from(capsules)
+      .where(and(eq(capsules.id, operation.capsuleId), eq(capsules.ownerId, operation.ownerId)))
       .limit(1)
     if (!capsule || capsule.lifecycleStatus !== 'destroying' || capsule.archivedAt === null) {
       throw new IncusError('Capsule destroy aggregate does not match its accepted destroy fence.', 'CONFLICT', {
@@ -89,9 +88,11 @@ export class DestroyCapsuleExecutionPersistence {
    * of the compare-and-set fence.
    */
   public async claimAccepted(operationId: string): Promise<CapsuleOperationTransitionOutput> {
+    const db = this.persistence.db
+    const operations = this.persistence.tables.capsuleOperations
     const now = new Date()
-    const [claimed] = await this.db
-      .update(capsuleOperationsTable)
+    const [claimed] = await db
+      .update(operations)
       .set({
         status: CapsuleOperationStatus.RUNNING,
         executionStartedAt: now,
@@ -99,16 +100,16 @@ export class DestroyCapsuleExecutionPersistence {
       })
       .where(
         and(
-          eq(capsuleOperationsTable.id, operationId),
-          eq(capsuleOperationsTable.type, CapsuleOperationType.DESTROY),
-          eq(capsuleOperationsTable.status, CapsuleOperationStatus.ACCEPTED),
-          isNull(capsuleOperationsTable.providerMutationStartedAt),
+          eq(operations.id, operationId),
+          eq(operations.type, CapsuleOperationType.DESTROY),
+          eq(operations.status, CapsuleOperationStatus.ACCEPTED),
+          isNull(operations.providerMutationStartedAt),
         ),
       )
       .returning({
-        ownerId: capsuleOperationsTable.ownerId,
-        capsuleId: capsuleOperationsTable.capsuleId,
-        status: capsuleOperationsTable.status,
+        ownerId: operations.ownerId,
+        capsuleId: operations.capsuleId,
+        status: operations.status,
       })
     if (!claimed) {
       throw new IncusError('Capsule destroy operation could not be claimed from accepted to running.', 'CONFLICT', {
@@ -131,23 +132,25 @@ export class DestroyCapsuleExecutionPersistence {
    * deletion, volume deletion, or other provider mutation.
    */
   public async commitProviderIntentFence(operationId: string): Promise<void> {
+    const db = this.persistence.db
+    const operations = this.persistence.tables.capsuleOperations
     const now = new Date()
-    const updated = await this.db
-      .update(capsuleOperationsTable)
+    const updated = await db
+      .update(operations)
       .set({
         providerMutationStartedAt: now,
         updatedAt: now,
       })
       .where(
         and(
-          eq(capsuleOperationsTable.id, operationId),
-          eq(capsuleOperationsTable.type, CapsuleOperationType.DESTROY),
-          eq(capsuleOperationsTable.status, CapsuleOperationStatus.RUNNING),
-          isNull(capsuleOperationsTable.providerMutationStartedAt),
+          eq(operations.id, operationId),
+          eq(operations.type, CapsuleOperationType.DESTROY),
+          eq(operations.status, CapsuleOperationStatus.RUNNING),
+          isNull(operations.providerMutationStartedAt),
         ),
       )
       .returning({
-        id: capsuleOperationsTable.id,
+        id: operations.id,
       })
     if (updated.length !== 1) {
       throw new IncusError('Failed to commit the capsule destroy provider-intent fence.', 'CONFLICT', {
@@ -157,18 +160,20 @@ export class DestroyCapsuleExecutionPersistence {
   }
 
   private async loadAcceptedBranches(ownerId: string, capsuleId: string): Promise<DestroyCapsuleAcceptedBranch[]> {
-    return await this.db
+    const db = this.persistence.db
+    const branches = this.persistence.tables.capsuleBranches
+    return await db
       .select({
-        id: capsuleBranchesTable.id,
-        capsuleId: capsuleBranchesTable.capsuleId,
-        ownerId: capsuleBranchesTable.ownerId,
-        name: capsuleBranchesTable.name,
-        status: capsuleBranchesTable.status,
-        isRootBranch: capsuleBranchesTable.isRootBranch,
-        resourceInventoryDigest: capsuleBranchesTable.resourceInventoryDigest,
+        id: branches.id,
+        capsuleId: branches.capsuleId,
+        ownerId: branches.ownerId,
+        name: branches.name,
+        status: branches.status,
+        isRootBranch: branches.isRootBranch,
+        resourceInventoryDigest: branches.resourceInventoryDigest,
       })
-      .from(capsuleBranchesTable)
-      .where(and(eq(capsuleBranchesTable.ownerId, ownerId), eq(capsuleBranchesTable.capsuleId, capsuleId)))
-      .orderBy(asc(capsuleBranchesTable.id))
+      .from(branches)
+      .where(and(eq(branches.ownerId, ownerId), eq(branches.capsuleId, capsuleId)))
+      .orderBy(asc(branches.id))
   }
 }

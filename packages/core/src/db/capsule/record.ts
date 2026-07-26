@@ -76,9 +76,3 @@ export function createCapsulesTable(ownerIdColumn?: PgColumn) {
     ],
   )
 }
-
-/**
- * Package-local Drizzle table for Core and Worker DML against the host-owned
- * physical table. The host-composed schema owns the users foreign key.
- */
-export const capsulesTable = createCapsulesTable()

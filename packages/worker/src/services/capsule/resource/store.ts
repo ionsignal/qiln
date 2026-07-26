@@ -3,14 +3,15 @@ import {
   CapsuleBranchResourceCleanupPolicy,
   CapsuleBranchResourceStatus,
   CapsuleBranchResourceType,
-  capsuleBranchResourcesTable,
   digestCanonicalJsonValue,
-  type CapsuleHostDbContract,
+  type QilnPersistence,
+  type QilnTables,
 } from '@qiln/core/server'
 import { IncusError, isUniqueConstraintViolation } from '../../../errors'
 import { createFailureDetails, failureCodeFromUnknown, failureMessageFromUnknown } from '../failures'
 import { toJsonObject } from '../persistence/json'
 import type { BranchResourceInput, CapsuleBranchResourceInventoryRow } from './types'
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
 const DEFAULT_RESOURCE_PROVIDER = 'incus'
 const CREATE_INTENT_ELIGIBLE_RESOURCE_STATUSES = [CapsuleBranchResourceStatus.PLANNED] as const
@@ -66,25 +67,32 @@ function resourceIdentityDigest(
  * external, and derived resources cannot enter the direct provider deletion
  * path.
  */
-export class CapsuleBranchResourceStore {
-  constructor(private readonly db: CapsuleHostDbContract) {}
+export class CapsuleBranchResourceStore<
+  TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
+  TTables extends QilnTables = QilnTables,
+> {
+  constructor(private readonly persistence: QilnPersistence<TDatabase, TTables>) {}
 
   public async findBranchResourceByOperationKey(operationId: string, resourceKey: string) {
-    return await this.db.query.capsuleBranchResources.findFirst({
-      where: {
-        createdByOperationId: operationId,
-        resourceKey,
-      },
-    })
+    const db = this.persistence.db
+    const resources = this.persistence.tables.capsuleBranchResources
+    const [resource] = await db
+      .select()
+      .from(resources)
+      .where(and(eq(resources.createdByOperationId, operationId), eq(resources.resourceKey, resourceKey)))
+      .limit(1)
+    return resource ?? null
   }
 
   public async findBranchResourceByBranchKey(branchId: string, resourceKey: string) {
-    return await this.db.query.capsuleBranchResources.findFirst({
-      where: {
-        branchId,
-        resourceKey,
-      },
-    })
+    const db = this.persistence.db
+    const resources = this.persistence.tables.capsuleBranchResources
+    const [resource] = await db
+      .select()
+      .from(resources)
+      .where(and(eq(resources.branchId, branchId), eq(resources.resourceKey, resourceKey)))
+      .limit(1)
+    return resource ?? null
   }
 
   public async ensureBranchResource(input: BranchResourceInput): Promise<string> {
@@ -123,10 +131,12 @@ export class CapsuleBranchResourceStore {
   }
 
   public async createBranchResource(input: BranchResourceInput): Promise<string> {
+    const db = this.persistence.db
+    const resources = this.persistence.tables.capsuleBranchResources
     const provider = input.provider ?? DEFAULT_RESOURCE_PROVIDER
     const metadata = normalizedMetadata(input.metadata, 'capsule branch resource metadata')
-    const [resource] = await this.db
-      .insert(capsuleBranchResourcesTable)
+    const [resource] = await db
+      .insert(resources)
       .values({
         createdByOperationId: input.operationId,
         lastOperationId: input.operationId,
@@ -143,9 +153,8 @@ export class CapsuleBranchResourceStore {
         updatedAt: new Date(),
       })
       .returning({
-        id: capsuleBranchResourcesTable.id,
+        id: resources.id,
       })
-
     if (!resource) {
       throw new IncusError('Failed to record capsule branch resource.', 'API_ERROR', {
         operationId: input.operationId,
@@ -157,8 +166,10 @@ export class CapsuleBranchResourceStore {
   }
 
   public async recordBranchResourceAdoption(resourceId: string, operationId: string): Promise<void> {
-    const updatedResources = await this.db
-      .update(capsuleBranchResourcesTable)
+    const db = this.persistence.db
+    const resources = this.persistence.tables.capsuleBranchResources
+    const updatedResources = await db
+      .update(resources)
       .set({
         status: CapsuleBranchResourceStatus.ADOPTED,
         lastOperationId: operationId,
@@ -166,13 +177,13 @@ export class CapsuleBranchResourceStore {
       })
       .where(
         and(
-          eq(capsuleBranchResourcesTable.id, resourceId),
-          eq(capsuleBranchResourcesTable.createdByOperationId, operationId),
-          inArray(capsuleBranchResourcesTable.status, CREATE_INTENT_ELIGIBLE_RESOURCE_STATUSES),
+          eq(resources.id, resourceId),
+          eq(resources.createdByOperationId, operationId),
+          inArray(resources.status, CREATE_INTENT_ELIGIBLE_RESOURCE_STATUSES),
         ),
       )
       .returning({
-        id: capsuleBranchResourcesTable.id,
+        id: resources.id,
       })
     if (updatedResources.length !== 1) {
       throw new IncusError(
@@ -187,8 +198,10 @@ export class CapsuleBranchResourceStore {
   }
 
   public async recordBranchResourceCreateIntent(resourceId: string, operationId: string): Promise<void> {
-    const updatedResources = await this.db
-      .update(capsuleBranchResourcesTable)
+    const db = this.persistence.db
+    const resources = this.persistence.tables.capsuleBranchResources
+    const updatedResources = await db
+      .update(resources)
       .set({
         status: CapsuleBranchResourceStatus.CREATING,
         lastOperationId: operationId,
@@ -196,13 +209,13 @@ export class CapsuleBranchResourceStore {
       })
       .where(
         and(
-          eq(capsuleBranchResourcesTable.id, resourceId),
-          eq(capsuleBranchResourcesTable.createdByOperationId, operationId),
-          inArray(capsuleBranchResourcesTable.status, CREATE_INTENT_ELIGIBLE_RESOURCE_STATUSES),
+          eq(resources.id, resourceId),
+          eq(resources.createdByOperationId, operationId),
+          inArray(resources.status, CREATE_INTENT_ELIGIBLE_RESOURCE_STATUSES),
         ),
       )
       .returning({
-        id: capsuleBranchResourcesTable.id,
+        id: resources.id,
       })
     if (updatedResources.length !== 1) {
       throw new IncusError(
@@ -217,8 +230,10 @@ export class CapsuleBranchResourceStore {
   }
 
   public async recordBranchResourceCreateOutcome(resourceId: string, operationId: string): Promise<void> {
-    const updatedResources = await this.db
-      .update(capsuleBranchResourcesTable)
+    const db = this.persistence.db
+    const resources = this.persistence.tables.capsuleBranchResources
+    const updatedResources = await db
+      .update(resources)
       .set({
         status: CapsuleBranchResourceStatus.CREATED,
         lastOperationId: operationId,
@@ -229,14 +244,14 @@ export class CapsuleBranchResourceStore {
       })
       .where(
         and(
-          eq(capsuleBranchResourcesTable.id, resourceId),
-          eq(capsuleBranchResourcesTable.createdByOperationId, operationId),
-          eq(capsuleBranchResourcesTable.status, CapsuleBranchResourceStatus.CREATING),
-          eq(capsuleBranchResourcesTable.lastOperationId, operationId),
+          eq(resources.id, resourceId),
+          eq(resources.createdByOperationId, operationId),
+          eq(resources.status, CapsuleBranchResourceStatus.CREATING),
+          eq(resources.lastOperationId, operationId),
         ),
       )
       .returning({
-        id: capsuleBranchResourcesTable.id,
+        id: resources.id,
       })
     if (updatedResources.length !== 1) {
       throw new IncusError(
@@ -256,9 +271,11 @@ export class CapsuleBranchResourceStore {
     error: unknown,
     context?: Record<string, unknown>,
   ): Promise<void> {
+    const db = this.persistence.db
+    const resources = this.persistence.tables.capsuleBranchResources
     const details = createFailureDetails(error, context)
-    const updatedResources = await this.db
-      .update(capsuleBranchResourcesTable)
+    const updatedResources = await db
+      .update(resources)
       .set({
         status: CapsuleBranchResourceStatus.ERROR,
         lastOperationId: operationId,
@@ -270,14 +287,14 @@ export class CapsuleBranchResourceStore {
       })
       .where(
         and(
-          eq(capsuleBranchResourcesTable.id, resourceId),
-          eq(capsuleBranchResourcesTable.createdByOperationId, operationId),
-          eq(capsuleBranchResourcesTable.status, CapsuleBranchResourceStatus.CREATING),
-          eq(capsuleBranchResourcesTable.lastOperationId, operationId),
+          eq(resources.id, resourceId),
+          eq(resources.createdByOperationId, operationId),
+          eq(resources.status, CapsuleBranchResourceStatus.CREATING),
+          eq(resources.lastOperationId, operationId),
         ),
       )
       .returning({
-        id: capsuleBranchResourcesTable.id,
+        id: resources.id,
       })
     if (updatedResources.length !== 1) {
       throw new IncusError(
@@ -292,8 +309,10 @@ export class CapsuleBranchResourceStore {
   }
 
   public async recordBranchResourceDeleteIntent(resourceId: string, operationId: string): Promise<void> {
-    const updatedResources = await this.db
-      .update(capsuleBranchResourcesTable)
+    const db = this.persistence.db
+    const resources = this.persistence.tables.capsuleBranchResources
+    const updatedResources = await db
+      .update(resources)
       .set({
         status: CapsuleBranchResourceStatus.DELETING,
         lastOperationId: operationId,
@@ -301,14 +320,14 @@ export class CapsuleBranchResourceStore {
       })
       .where(
         and(
-          eq(capsuleBranchResourcesTable.id, resourceId),
-          inArray(capsuleBranchResourcesTable.status, DIRECT_DELETE_INTENT_ELIGIBLE_RESOURCE_STATUSES),
-          eq(capsuleBranchResourcesTable.cleanupPolicy, CapsuleBranchResourceCleanupPolicy.DELETE_WITH_BRANCH),
-          inArray(capsuleBranchResourcesTable.resourceType, DIRECT_DELETE_RESOURCE_TYPES),
+          eq(resources.id, resourceId),
+          inArray(resources.status, DIRECT_DELETE_INTENT_ELIGIBLE_RESOURCE_STATUSES),
+          eq(resources.cleanupPolicy, CapsuleBranchResourceCleanupPolicy.DELETE_WITH_BRANCH),
+          inArray(resources.resourceType, DIRECT_DELETE_RESOURCE_TYPES),
         ),
       )
       .returning({
-        id: capsuleBranchResourcesTable.id,
+        id: resources.id,
       })
     if (updatedResources.length !== 1) {
       throw new IncusError(
@@ -327,8 +346,10 @@ export class CapsuleBranchResourceStore {
     operationId: string,
     outcome: DirectDeleteOutcomeResourceStatus,
   ): Promise<void> {
-    const updatedResources = await this.db
-      .update(capsuleBranchResourcesTable)
+    const db = this.persistence.db
+    const resources = this.persistence.tables.capsuleBranchResources
+    const updatedResources = await db
+      .update(resources)
       .set({
         status: outcome,
         lastOperationId: operationId,
@@ -339,15 +360,15 @@ export class CapsuleBranchResourceStore {
       })
       .where(
         and(
-          eq(capsuleBranchResourcesTable.id, resourceId),
-          eq(capsuleBranchResourcesTable.status, CapsuleBranchResourceStatus.DELETING),
-          eq(capsuleBranchResourcesTable.lastOperationId, operationId),
-          eq(capsuleBranchResourcesTable.cleanupPolicy, CapsuleBranchResourceCleanupPolicy.DELETE_WITH_BRANCH),
-          inArray(capsuleBranchResourcesTable.resourceType, DIRECT_DELETE_RESOURCE_TYPES),
+          eq(resources.id, resourceId),
+          eq(resources.status, CapsuleBranchResourceStatus.DELETING),
+          eq(resources.lastOperationId, operationId),
+          eq(resources.cleanupPolicy, CapsuleBranchResourceCleanupPolicy.DELETE_WITH_BRANCH),
+          inArray(resources.resourceType, DIRECT_DELETE_RESOURCE_TYPES),
         ),
       )
       .returning({
-        id: capsuleBranchResourcesTable.id,
+        id: resources.id,
       })
     if (updatedResources.length !== 1) {
       throw new IncusError(
@@ -368,9 +389,11 @@ export class CapsuleBranchResourceStore {
     error: unknown,
     context?: Record<string, unknown>,
   ): Promise<void> {
+    const db = this.persistence.db
+    const resources = this.persistence.tables.capsuleBranchResources
     const details = createFailureDetails(error, context)
-    const updatedResources = await this.db
-      .update(capsuleBranchResourcesTable)
+    const updatedResources = await db
+      .update(resources)
       .set({
         status: CapsuleBranchResourceStatus.ERROR,
         lastOperationId: operationId,
@@ -382,15 +405,15 @@ export class CapsuleBranchResourceStore {
       })
       .where(
         and(
-          eq(capsuleBranchResourcesTable.id, resourceId),
-          eq(capsuleBranchResourcesTable.status, CapsuleBranchResourceStatus.DELETING),
-          eq(capsuleBranchResourcesTable.lastOperationId, operationId),
-          eq(capsuleBranchResourcesTable.cleanupPolicy, CapsuleBranchResourceCleanupPolicy.DELETE_WITH_BRANCH),
-          inArray(capsuleBranchResourcesTable.resourceType, DIRECT_DELETE_RESOURCE_TYPES),
+          eq(resources.id, resourceId),
+          eq(resources.status, CapsuleBranchResourceStatus.DELETING),
+          eq(resources.lastOperationId, operationId),
+          eq(resources.cleanupPolicy, CapsuleBranchResourceCleanupPolicy.DELETE_WITH_BRANCH),
+          inArray(resources.resourceType, DIRECT_DELETE_RESOURCE_TYPES),
         ),
       )
       .returning({
-        id: capsuleBranchResourcesTable.id,
+        id: resources.id,
       })
     if (updatedResources.length !== 1) {
       throw new IncusError(
@@ -411,8 +434,10 @@ export class CapsuleBranchResourceStore {
    * resource reached a terminal direct-resource outcome.
    */
   public async recordDestroyDerivedResourceDeletion(resourceId: string, operationId: string): Promise<void> {
-    const updatedResources = await this.db
-      .update(capsuleBranchResourcesTable)
+    const db = this.persistence.db
+    const resources = this.persistence.tables.capsuleBranchResources
+    const updatedResources = await db
+      .update(resources)
       .set({
         status: CapsuleBranchResourceStatus.DELETED,
         lastOperationId: operationId,
@@ -423,14 +448,14 @@ export class CapsuleBranchResourceStore {
       })
       .where(
         and(
-          eq(capsuleBranchResourcesTable.id, resourceId),
-          eq(capsuleBranchResourcesTable.resourceType, CapsuleBranchResourceType.PROVISIONING_FILE),
-          eq(capsuleBranchResourcesTable.cleanupPolicy, CapsuleBranchResourceCleanupPolicy.DELETE_WITH_BRANCH),
-          eq(capsuleBranchResourcesTable.status, CapsuleBranchResourceStatus.CREATED),
+          eq(resources.id, resourceId),
+          eq(resources.resourceType, CapsuleBranchResourceType.PROVISIONING_FILE),
+          eq(resources.cleanupPolicy, CapsuleBranchResourceCleanupPolicy.DELETE_WITH_BRANCH),
+          eq(resources.status, CapsuleBranchResourceStatus.CREATED),
         ),
       )
       .returning({
-        id: capsuleBranchResourcesTable.id,
+        id: resources.id,
       })
     if (updatedResources.length !== 1) {
       throw new IncusError('Failed to finalize destroy-time provisioning-file resource outcome.', 'CONFLICT', {
@@ -448,8 +473,10 @@ export class CapsuleBranchResourceStore {
    * not authorization to delete a direct provider resource.
    */
   public async recordCreateCompensatedDerivedResourceDeletion(resourceId: string, operationId: string): Promise<void> {
-    const updatedResources = await this.db
-      .update(capsuleBranchResourcesTable)
+    const db = this.persistence.db
+    const resources = this.persistence.tables.capsuleBranchResources
+    const updatedResources = await db
+      .update(resources)
       .set({
         status: CapsuleBranchResourceStatus.DELETED,
         lastOperationId: operationId,
@@ -460,14 +487,14 @@ export class CapsuleBranchResourceStore {
       })
       .where(
         and(
-          eq(capsuleBranchResourcesTable.id, resourceId),
-          eq(capsuleBranchResourcesTable.resourceType, CapsuleBranchResourceType.PROVISIONING_FILE),
-          eq(capsuleBranchResourcesTable.cleanupPolicy, CapsuleBranchResourceCleanupPolicy.DELETE_WITH_BRANCH),
-          inArray(capsuleBranchResourcesTable.status, BOOTSTRAP_DERIVED_DELETE_ELIGIBLE_RESOURCE_STATUSES),
+          eq(resources.id, resourceId),
+          eq(resources.resourceType, CapsuleBranchResourceType.PROVISIONING_FILE),
+          eq(resources.cleanupPolicy, CapsuleBranchResourceCleanupPolicy.DELETE_WITH_BRANCH),
+          inArray(resources.status, BOOTSTRAP_DERIVED_DELETE_ELIGIBLE_RESOURCE_STATUSES),
         ),
       )
       .returning({
-        id: capsuleBranchResourcesTable.id,
+        id: resources.id,
       })
     if (updatedResources.length !== 1) {
       throw new IncusError('Failed to persist compensated create provisioning-file cleanup.', 'CONFLICT', {
@@ -498,13 +525,11 @@ export class CapsuleBranchResourceStore {
     if (details !== undefined) {
       updateData.failureDetails = toJsonObject(details, 'capsule branch resource failure details')
     }
-    const updated = await this.db
-      .update(capsuleBranchResourcesTable)
-      .set(updateData)
-      .where(eq(capsuleBranchResourcesTable.id, resourceId))
-      .returning({
-        id: capsuleBranchResourcesTable.id,
-      })
+    const db = this.persistence.db
+    const resources = this.persistence.tables.capsuleBranchResources
+    const updated = await db.update(resources).set(updateData).where(eq(resources.id, resourceId)).returning({
+      id: resources.id,
+    })
     if (updated.length !== 1) {
       throw new IncusError('Capsule branch resource was not found while recording its failure.', 'NOT_FOUND', {
         resourceId,
@@ -513,35 +538,37 @@ export class CapsuleBranchResourceStore {
   }
 
   public async listBranchResources(ownerId: string, branchName: string) {
-    return await this.db.query.capsuleBranchResources.findMany({
-      where: {
-        ownerId,
-        branchName,
-      },
-      orderBy: (resources, { asc }) => [asc(resources.createdAt), asc(resources.id)],
-    })
+    const db = this.persistence.db
+    const resources = this.persistence.tables.capsuleBranchResources
+    return await db
+      .select()
+      .from(resources)
+      .where(and(eq(resources.ownerId, ownerId), eq(resources.branchName, branchName)))
+      .orderBy(asc(resources.createdAt), asc(resources.id))
   }
 
   public async listBranchResourceInventoryByBranchId(branchId: string): Promise<CapsuleBranchResourceInventoryRow[]> {
-    return await this.db
+    const db = this.persistence.db
+    const resources = this.persistence.tables.capsuleBranchResources
+    return await db
       .select({
-        id: capsuleBranchResourcesTable.id,
-        ownerId: capsuleBranchResourcesTable.ownerId,
-        branchId: capsuleBranchResourcesTable.branchId,
-        branchName: capsuleBranchResourcesTable.branchName,
-        provider: capsuleBranchResourcesTable.provider,
-        resourceType: capsuleBranchResourcesTable.resourceType,
-        resourceKey: capsuleBranchResourcesTable.resourceKey,
-        blueprintVolumeName: capsuleBranchResourcesTable.blueprintVolumeName,
-        status: capsuleBranchResourcesTable.status,
-        cleanupPolicy: capsuleBranchResourcesTable.cleanupPolicy,
-        metadata: capsuleBranchResourcesTable.metadata,
-        createdByOperationId: capsuleBranchResourcesTable.createdByOperationId,
-        lastOperationId: capsuleBranchResourcesTable.lastOperationId,
+        id: resources.id,
+        ownerId: resources.ownerId,
+        branchId: resources.branchId,
+        branchName: resources.branchName,
+        provider: resources.provider,
+        resourceType: resources.resourceType,
+        resourceKey: resources.resourceKey,
+        blueprintVolumeName: resources.blueprintVolumeName,
+        status: resources.status,
+        cleanupPolicy: resources.cleanupPolicy,
+        metadata: resources.metadata,
+        createdByOperationId: resources.createdByOperationId,
+        lastOperationId: resources.lastOperationId,
       })
-      .from(capsuleBranchResourcesTable)
-      .where(eq(capsuleBranchResourcesTable.branchId, branchId))
-      .orderBy(asc(capsuleBranchResourcesTable.createdAt), asc(capsuleBranchResourcesTable.id))
+      .from(resources)
+      .where(eq(resources.branchId, branchId))
+      .orderBy(asc(resources.createdAt), asc(resources.id))
   }
 
   public async listBranchResourceInventories(
@@ -550,29 +577,27 @@ export class CapsuleBranchResourceStore {
     if (branchIds.length === 0) {
       return []
     }
-    return await this.db
+    const db = this.persistence.db
+    const resources = this.persistence.tables.capsuleBranchResources
+    return await db
       .select({
-        id: capsuleBranchResourcesTable.id,
-        ownerId: capsuleBranchResourcesTable.ownerId,
-        branchId: capsuleBranchResourcesTable.branchId,
-        branchName: capsuleBranchResourcesTable.branchName,
-        provider: capsuleBranchResourcesTable.provider,
-        resourceType: capsuleBranchResourcesTable.resourceType,
-        resourceKey: capsuleBranchResourcesTable.resourceKey,
-        blueprintVolumeName: capsuleBranchResourcesTable.blueprintVolumeName,
-        status: capsuleBranchResourcesTable.status,
-        cleanupPolicy: capsuleBranchResourcesTable.cleanupPolicy,
-        metadata: capsuleBranchResourcesTable.metadata,
-        createdByOperationId: capsuleBranchResourcesTable.createdByOperationId,
-        lastOperationId: capsuleBranchResourcesTable.lastOperationId,
+        id: resources.id,
+        ownerId: resources.ownerId,
+        branchId: resources.branchId,
+        branchName: resources.branchName,
+        provider: resources.provider,
+        resourceType: resources.resourceType,
+        resourceKey: resources.resourceKey,
+        blueprintVolumeName: resources.blueprintVolumeName,
+        status: resources.status,
+        cleanupPolicy: resources.cleanupPolicy,
+        metadata: resources.metadata,
+        createdByOperationId: resources.createdByOperationId,
+        lastOperationId: resources.lastOperationId,
       })
-      .from(capsuleBranchResourcesTable)
-      .where(inArray(capsuleBranchResourcesTable.branchId, [...branchIds]))
-      .orderBy(
-        asc(capsuleBranchResourcesTable.branchId),
-        asc(capsuleBranchResourcesTable.createdAt),
-        asc(capsuleBranchResourcesTable.id),
-      )
+      .from(resources)
+      .where(inArray(resources.branchId, [...branchIds]))
+      .orderBy(asc(resources.branchId), asc(resources.createdAt), asc(resources.id))
   }
 
   private assertExistingResourceIdentity(

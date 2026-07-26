@@ -1,4 +1,3 @@
-import type { CapsuleHostDbContract } from '@qiln/core/server'
 import { CaptureCollector } from '../operations/capture/collect'
 import { CaptureExecutor } from '../operations/capture/executor'
 import { CaptureGitCollector } from '../operations/capture/git'
@@ -13,17 +12,22 @@ import type { CapsuleBranchEventPublisher } from '../events/branch'
 import type { CapsuleLifecycleEventPublisher } from '../events/lifecycle'
 import type { CapsuleOperationEventPublisher } from '../events/operation'
 import type { CapsuleOperationReader, CapsuleOperationStepStore } from '../operations/shared'
+import type { QilnPersistence, QilnTables } from '@qiln/core/server'
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
-export interface ComposeCaptureCapabilityOptions {
-  db: CapsuleHostDbContract
+export interface ComposeCaptureCapabilityOptions<
+  TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
+  TTables extends QilnTables = QilnTables,
+> {
   incus: IncusClient
   supervisor: OperationSupervisor
-  operationReader: CapsuleOperationReader
-  operationSteps: CapsuleOperationStepStore
+  operationReader: CapsuleOperationReader<TDatabase, TTables>
+  operationSteps: CapsuleOperationStepStore<TDatabase, TTables>
   operationEvents: CapsuleOperationEventPublisher
   lifecycleEvents: CapsuleLifecycleEventPublisher
   branchEvents: CapsuleBranchEventPublisher
   enabled: boolean
+  persistence: QilnPersistence<TDatabase, TTables>
 }
 
 export interface ComposedCaptureCapability {
@@ -37,9 +41,11 @@ export interface ComposedCaptureCapability {
  * Construction performs no SQL, provider mutation, command registration,
  * scheduling, collection, or event publication.
  */
-export function composeCaptureCapability(options: ComposeCaptureCapabilityOptions): ComposedCaptureCapability {
+export function composeCaptureCapability<TDatabase extends PostgresJsDatabase, TTables extends QilnTables>(
+  options: ComposeCaptureCapabilityOptions<TDatabase, TTables>,
+): ComposedCaptureCapability {
   const planner = new CapturePlanner()
-  const repository = new CaptureRepository(options.db, options.operationReader, planner)
+  const repository = new CaptureRepository(options.persistence, options.operationReader, planner)
   const provider = new CaptureProvider({
     incus: options.incus,
     resources: repository.resources,

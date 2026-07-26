@@ -6,9 +6,6 @@ import {
   type CapsuleBlueprintIdentifier,
   type CapsuleSnapshotDependencyDigest,
 } from '../../../schemas'
-import { capsuleBranchResourcesTable } from '../branch/resource'
-import { capsuleArtifactManifestRootsTable } from './manifest'
-import { capsuleSnapshotsTable } from './record'
 
 export const capsuleSnapshotDependencyKindEnum = pgEnum(
   'capsule_snapshot_dependency_kind',
@@ -94,9 +91,3 @@ export function createCapsuleSnapshotDependencyReferencesTable(
     ],
   )
 }
-
-export const capsuleSnapshotDependencyReferencesTable = createCapsuleSnapshotDependencyReferencesTable(
-  capsuleSnapshotsTable.id,
-  capsuleArtifactManifestRootsTable.id,
-  capsuleBranchResourcesTable.id,
-)

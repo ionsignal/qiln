@@ -3,6 +3,6 @@ export * from './branch'
 export * from './operation'
 export * from './snapshot'
 
-export { capsuleRuntimeSchema, createCapsuleSchema, defineCapsuleRelations } from './schema'
+export { createCapsuleSchema, defineCapsuleRelations } from './schema'
 
-export type { CapsuleHostDbContract, CapsuleRelationHelpers } from './schema'
+export type { CapsuleRelationHelpers, CapsuleTables } from './schema'
