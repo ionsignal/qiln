@@ -13,6 +13,8 @@ import {
 } from 'drizzle-orm/pg-core'
 import {
   CapsuleSnapshotModeValues,
+  type CapsuleBlueprintDigest,
+  type CapsuleBlueprintPin,
   type CapsuleBranchName,
   type CapsuleBranchResourceInventoryDigest,
   type CapsuleSnapshotCapturePolicyDigest,
@@ -46,12 +48,16 @@ function createSourceBranchIdColumn(sourceBranchIdColumn?: PgColumn) {
  * transaction that links the capture operation result and terminalizes the base
  * operation.
  *
- * Experimental snapshots are committed history, but their mode and limitations
- * explicitly prevent them from becoming branch-fork, promotion, rollback, or
- * restoration authority.
+ * The complete historical Blueprint pin is committed with the snapshot so
+ * future branch forks and route revisions never depend on mutable registry
+ * state or on traversing the original create operation lineage.
  *
- * `archivedAt` is the only intentionally mutable lifecycle field. Capture
- * policy, source identity, resource-inventory evidence, mode, limitations,
+ * Experimental snapshots are committed history, but their mode and limitations
+ * explicitly prevent them from receiving production traffic. Hardened mode is
+ * reserved for a future writer that proves its stronger evidence contract.
+ *
+ * `archivedAt` is the only intentionally mutable lifecycle field. Blueprint,
+ * capture policy, source identity, resource-inventory evidence, assurance,
  * manifest evidence, Git records, dependency references, and physical provider
  * references are immutable by repository policy.
  */
@@ -71,6 +77,10 @@ export function createCapsuleSnapshotsTable(capsuleIdColumn?: PgColumn, sourceBr
       sourceBranchResourceInventoryDigest: text('source_branch_resource_inventory_digest')
         .$type<CapsuleBranchResourceInventoryDigest>()
         .notNull(),
+      blueprintSchemaVersion: integer('blueprint_schema_version').notNull(),
+      blueprintName: text('blueprint_name').notNull(),
+      blueprintDigest: text('blueprint_digest').$type<CapsuleBlueprintDigest>().notNull(),
+      blueprintPin: jsonb('blueprint_pin').$type<CapsuleBlueprintPin>().notNull(),
       capturePolicySchemaVersion: integer('capture_policy_schema_version').notNull(),
       capturePolicyDigest: text('capture_policy_digest').$type<CapsuleSnapshotCapturePolicyDigest>().notNull(),
       capturePolicyPin: jsonb('capture_policy_pin').$type<CapsuleSnapshotCapturePolicyPin>().notNull(),
@@ -92,8 +102,11 @@ export function createCapsuleSnapshotsTable(capsuleIdColumn?: PgColumn, sourceBr
     table => [
       index('capsule_snapshots_capsule_created_idx').on(table.capsuleId, table.createdAt),
       index('capsule_snapshots_source_branch_idx').on(table.sourceBranchId),
+      index('capsule_snapshots_blueprint_digest_idx').on(table.blueprintDigest),
       index('capsule_snapshots_policy_digest_idx').on(table.capturePolicyDigest),
       index('capsule_snapshots_mode_idx').on(table.mode),
+      check('capsule_snapshots_blueprint_schema_check', sql`${table.blueprintSchemaVersion} = 1`),
+      check('capsule_snapshots_blueprint_digest_check', sql`${table.blueprintDigest} ~ '^sha256:[a-f0-9]{64}$'`),
       check('capsule_snapshots_policy_schema_check', sql`${table.capturePolicySchemaVersion} = 1`),
       check('capsule_snapshots_policy_digest_check', sql`${table.capturePolicyDigest} ~ '^sha256:[a-f0-9]{64}$'`),
       check(
@@ -101,12 +114,18 @@ export function createCapsuleSnapshotsTable(capsuleIdColumn?: PgColumn, sourceBr
         sql`${table.sourceBranchResourceInventoryDigest} ~ '^sha256:[a-f0-9]{64}$'`,
       ),
       check(
-        'capsule_snapshots_experimental_limitations_check',
+        'capsule_snapshots_assurance_check',
         sql`(
-          ${table.mode} <> 'experimental'
-          OR (
-            jsonb_typeof(${table.limitations}) = 'array'
+          (
+            ${table.mode} = 'experimental'
+            AND jsonb_typeof(${table.limitations}) = 'array'
             AND jsonb_array_length(${table.limitations}) > 0
+          )
+          OR
+          (
+            ${table.mode} = 'hardened'
+            AND jsonb_typeof(${table.limitations}) = 'array'
+            AND jsonb_array_length(${table.limitations}) = 0
           )
         )`,
       ),

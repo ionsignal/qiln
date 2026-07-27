@@ -1,13 +1,13 @@
 import { CapsuleSnapshotService } from '../snapshot/service'
 import { CapsuleSnapshotStore } from '../snapshot/store'
-import type { QilnPersistence, QilnTables } from '@qiln/core/server'
+import type { CapsulePersistence, CapsuleTables } from '@qiln/core/server'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
 export interface ComposeSnapshotCapabilityOptions<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
-  TTables extends QilnTables = QilnTables,
+  TTables extends CapsuleTables = CapsuleTables,
 > {
-  persistence: QilnPersistence<TDatabase, TTables>
+  persistence: CapsulePersistence<TDatabase, TTables>
 }
 
 /**
@@ -16,7 +16,7 @@ export interface ComposeSnapshotCapabilityOptions<
  * Snapshot capture remains absent. This composition creates no writer and does
  * not infer artifact completeness or physical snapshot ownership.
  */
-export function composeSnapshotCapability<TDatabase extends PostgresJsDatabase, TTables extends QilnTables>(
+export function composeSnapshotCapability<TDatabase extends PostgresJsDatabase, TTables extends CapsuleTables>(
   options: ComposeSnapshotCapabilityOptions<TDatabase, TTables>,
 ): CapsuleSnapshotService {
   const snapshots = new CapsuleSnapshotStore(options.persistence)

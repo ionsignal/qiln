@@ -6,8 +6,8 @@ import {
   type CapsuleDestroyReceipt,
   type CapsuleOperationRequestHash,
   type CapsuleOperationStatusValue,
-  type QilnPersistence,
-  type QilnTables,
+  type CapsulePersistence,
+  type CapsuleTables,
 } from '@qiln/core/server'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import { IncusError, isUniqueConstraintViolation } from '../../../../../errors'
@@ -39,10 +39,10 @@ import type { AcceptDestroyCapsuleOperationInput, DestroyCapsuleRepositoryResult
  */
 export class DestroyCapsuleAcceptancePersistence<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
-  TTables extends QilnTables = QilnTables,
+  TTables extends CapsuleTables = CapsuleTables,
 > {
   constructor(
-    private readonly persistence: QilnPersistence<TDatabase, TTables>,
+    private readonly persistence: CapsulePersistence<TDatabase, TTables>,
     private readonly reader: CapsuleOperationReader<TDatabase, TTables>,
   ) {}
 

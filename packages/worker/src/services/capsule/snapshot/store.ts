@@ -1,5 +1,10 @@
-import { and, asc, eq, isNotNull } from 'drizzle-orm'
-import { CapsuleOperationType, CapsuleSnapshotMode, type QilnPersistence, type QilnTables } from '@qiln/core/server'
+import { and, asc, eq, isNotNull, or } from 'drizzle-orm'
+import {
+  CapsuleOperationType,
+  CapsuleSnapshotMode,
+  type CapsulePersistence,
+  type CapsuleTables,
+} from '@qiln/core/server'
 import { IncusError } from '../../../errors'
 import type { CapsuleSnapshotListOptions, CapsuleSnapshotRecord } from './types'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
@@ -8,16 +13,16 @@ import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
  * Persistence boundary for committed capsule snapshot history.
  *
  * Experimental visibility changes only which committed rows are returned. It
- * does not weaken ownership, operation completion, manifest linkage, or
- * immutable capture-evidence checks.
+ * does not weaken ownership, operation completion, manifest linkage, immutable
+ * Blueprint evidence, or immutable capture-policy checks.
  */
 export class CapsuleSnapshotStore<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
-  TTables extends QilnTables = QilnTables,
+  TTables extends CapsuleTables = CapsuleTables,
 > {
-  constructor(private readonly persistence: QilnPersistence<TDatabase, TTables>) {}
+  constructor(private readonly persistence: CapsulePersistence<TDatabase, TTables>) {}
 
-  public async listForOwner(
+  public async list(
     ownerId: string,
     capsuleId: string,
     options: CapsuleSnapshotListOptions = {},
@@ -42,9 +47,7 @@ export class CapsuleSnapshotStore<
         capsuleId,
       })
     }
-    if (!options.includeExperimental) {
-      return []
-    }
+    const visibility = options.includeExperimental ? undefined : eq(capsuleSnapshots.mode, CapsuleSnapshotMode.HARDENED)
     return await db
       .select({
         id: capsuleSnapshots.id,
@@ -52,6 +55,10 @@ export class CapsuleSnapshotStore<
         sourceBranchId: capsuleSnapshots.sourceBranchId,
         sourceBranchName: capsuleSnapshots.sourceBranchName,
         sourceBranchResourceInventoryDigest: capsuleSnapshots.sourceBranchResourceInventoryDigest,
+        blueprintSchemaVersion: capsuleSnapshots.blueprintSchemaVersion,
+        blueprintName: capsuleSnapshots.blueprintName,
+        blueprintDigest: capsuleSnapshots.blueprintDigest,
+        blueprintPin: capsuleSnapshots.blueprintPin,
         capturePolicySchemaVersion: capsuleSnapshots.capturePolicySchemaVersion,
         capturePolicyDigest: capsuleSnapshots.capturePolicyDigest,
         capturePolicyPin: capsuleSnapshots.capturePolicyPin,
@@ -74,6 +81,10 @@ export class CapsuleSnapshotStore<
             capsuleSnapshotCaptureOperations.sourceBranchResourceInventoryDigest,
             capsuleSnapshots.sourceBranchResourceInventoryDigest,
           ),
+          eq(capsuleSnapshotCaptureOperations.blueprintSchemaVersion, capsuleSnapshots.blueprintSchemaVersion),
+          eq(capsuleSnapshotCaptureOperations.blueprintName, capsuleSnapshots.blueprintName),
+          eq(capsuleSnapshotCaptureOperations.blueprintDigest, capsuleSnapshots.blueprintDigest),
+          eq(capsuleSnapshotCaptureOperations.blueprintPin, capsuleSnapshots.blueprintPin),
           eq(capsuleSnapshotCaptureOperations.capturePolicySchemaVersion, capsuleSnapshots.capturePolicySchemaVersion),
           eq(capsuleSnapshotCaptureOperations.capturePolicyDigest, capsuleSnapshots.capturePolicyDigest),
           eq(capsuleSnapshotCaptureOperations.capturePolicyPin, capsuleSnapshots.capturePolicyPin),
@@ -92,7 +103,14 @@ export class CapsuleSnapshotStore<
         ),
       )
       .where(
-        and(eq(capsuleSnapshots.capsuleId, capsule.id), eq(capsuleSnapshots.mode, CapsuleSnapshotMode.EXPERIMENTAL)),
+        and(
+          eq(capsuleSnapshots.capsuleId, capsule.id),
+          visibility ??
+            or(
+              eq(capsuleSnapshots.mode, CapsuleSnapshotMode.EXPERIMENTAL),
+              eq(capsuleSnapshots.mode, CapsuleSnapshotMode.HARDENED),
+            ),
+        ),
       )
       .orderBy(asc(capsuleSnapshots.createdAt), asc(capsuleSnapshots.id))
   }

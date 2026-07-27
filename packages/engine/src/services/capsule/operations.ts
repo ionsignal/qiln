@@ -25,7 +25,7 @@ import {
   type CapsuleOperationStatusValue,
   type CapsuleOperationSummary,
   type CapsuleUnarchiveOperationOutput,
-  type QilnTables,
+  type CapsuleTables,
 } from '@qiln/core/server'
 import type { EnginePersistence } from '../../persistence'
 import type { CapsuleMutationIdentity } from './types'
@@ -35,7 +35,7 @@ const DEFAULT_CLIENT_FAILURE_CODE = 'CAPSULE_OPERATION_FAILED'
 const DEFAULT_CLIENT_CLEANUP_CODE = 'CAPSULE_OPERATION_CLEANUP_REQUIRED'
 
 type CapsuleOperationSummaryRow = Pick<
-  QilnTables['capsuleOperations']['$inferSelect'],
+  CapsuleTables['capsuleOperations']['$inferSelect'],
   | 'id'
   | 'capsuleId'
   | 'actorType'

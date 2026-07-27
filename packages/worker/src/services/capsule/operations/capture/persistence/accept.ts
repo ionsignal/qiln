@@ -4,12 +4,12 @@ import {
   CapsuleOperationType,
   CapsuleSnapshotCaptureReceiptSchema,
   createCapsuleSnapshotCapturePolicyPin,
-  type CapsuleBlueprint,
+  verifyCapsuleBlueprintPin,
+  verifyCapsuleSnapshotCapturePolicyPin,
   type CapsuleOperationStatusValue,
-  type CapsuleSnapshotCapturePolicyPin,
   type CapsuleSnapshotCaptureReceipt,
-  type QilnPersistence,
-  type QilnTables,
+  type CapsulePersistence,
+  type CapsuleTables,
 } from '@qiln/core/server'
 import { IncusError, isUniqueConstraintViolation } from '../../../../../errors'
 import {
@@ -21,22 +21,29 @@ import {
 } from '../../shared'
 import type { CapsuleBranchResourceInventoryRow } from '../../../resource'
 import type { CapturePlanner } from '../plan'
-import type { AcceptCaptureCapsuleInput, CaptureAcceptanceResult, CaptureSourceBranch } from '../types'
+import type {
+  AcceptCaptureCapsuleInput,
+  CaptureAcceptanceResult,
+  CaptureSourceBranch,
+  CaptureExecutionInput,
+} from '../types'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
+
+type CapturePins = Pick<CaptureExecutionInput, 'blueprint' | 'capturePolicy'>
 
 /**
  * Owns atomic Snapshot Capture acceptance and idempotent replay.
  *
- * Acceptance persists immutable input, planned provider identities, and the
- * source-branch capture fence in one transaction. It performs no provider
- * mutation and does not schedule an executor.
+ * Acceptance persists immutable Blueprint input, capture-policy input, planned
+ * provider identities, and the source-branch capture fence in one transaction.
+ * It performs no provider mutation and does not schedule an executor.
  */
 export class CaptureAcceptancePersistence<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
-  TTables extends QilnTables = QilnTables,
+  TTables extends CapsuleTables = CapsuleTables,
 > {
   constructor(
-    private readonly persistence: QilnPersistence<TDatabase, TTables>,
+    private readonly persistence: CapsulePersistence<TDatabase, TTables>,
     private readonly reader: CapsuleOperationReader<TDatabase, TTables>,
     private readonly planner: CapturePlanner,
   ) {}
@@ -78,7 +85,7 @@ export class CaptureAcceptancePersistence<
           })
         }
         const resources = await this.lockInventory(tx, branch.id)
-        const policy = await this.loadPolicy(tx, branch)
+        const pins = await this.loadPins(tx, branch)
         const now = new Date()
         const [operation] = await tx
           .insert(capsuleOperations)
@@ -104,7 +111,14 @@ export class CaptureAcceptancePersistence<
         if (!operation) {
           throw new IncusError('Failed to durably accept the Snapshot Capture operation.', 'API_ERROR')
         }
-        const plan = this.planner.create(operation.id, input.ownerId, input.capsuleId, branch, policy, resources)
+        const plan = this.planner.create(
+          operation.id,
+          input.ownerId,
+          input.capsuleId,
+          branch,
+          pins.capturePolicy,
+          resources,
+        )
         const [extension] = await tx
           .insert(capsuleSnapshotCaptureOperations)
           .values({
@@ -112,9 +126,13 @@ export class CaptureAcceptancePersistence<
             sourceBranchId: branch.id,
             sourceBranchName: branch.name,
             sourceBranchResourceInventoryDigest: branch.resourceInventoryDigest,
-            capturePolicySchemaVersion: policy.schemaVersion,
-            capturePolicyDigest: policy.digest,
-            capturePolicyPin: policy,
+            blueprintSchemaVersion: pins.blueprint.blueprint.schema_version,
+            blueprintName: pins.blueprint.name,
+            blueprintDigest: pins.blueprint.digest,
+            blueprintPin: pins.blueprint,
+            capturePolicySchemaVersion: pins.capturePolicy.schemaVersion,
+            capturePolicyDigest: pins.capturePolicy.digest,
+            capturePolicyPin: pins.capturePolicy,
             snapshotId: null,
           })
           .returning({
@@ -244,14 +262,12 @@ export class CaptureAcceptancePersistence<
     if (!operation) {
       return null
     }
-
     assertOperationReplayIdentity(operation, {
       operationType: CapsuleOperationType.SNAPSHOT_CAPTURE,
       actor,
       requestHash,
       requestDescription: 'Snapshot Capture',
     })
-
     return await this.result(operation, false, true)
   }
 
@@ -273,6 +289,22 @@ export class CaptureAcceptancePersistence<
         capsuleId: operation.capsuleId,
       })
     }
+    const blueprint = verifyCapsuleBlueprintPin(extension.blueprintPin)
+    const capturePolicy = verifyCapsuleSnapshotCapturePolicyPin(extension.capturePolicyPin)
+    if (
+      blueprint.blueprint.schema_version !== extension.blueprintSchemaVersion ||
+      blueprint.name !== extension.blueprintName ||
+      blueprint.digest !== extension.blueprintDigest ||
+      capturePolicy.schemaVersion !== extension.capturePolicySchemaVersion ||
+      capturePolicy.digest !== extension.capturePolicyDigest ||
+      capturePolicy.blueprintName !== blueprint.name ||
+      capturePolicy.blueprintDigest !== blueprint.digest
+    ) {
+      throw new IncusError('Snapshot Capture operation contains contradictory immutable pin evidence.', 'API_ERROR', {
+        operationId: operation.id,
+        capsuleId: operation.capsuleId,
+      })
+    }
     const [capsule] = await db
       .select()
       .from(capsules)
@@ -284,6 +316,8 @@ export class CaptureAcceptancePersistence<
         capsuleId: capsuleBranches.capsuleId,
         name: capsuleBranches.name,
         status: capsuleBranches.status,
+        blueprintName: capsuleBranches.blueprintName,
+        blueprintDigest: capsuleBranches.blueprintDigest,
       })
       .from(capsuleBranches)
       .where(
@@ -294,7 +328,13 @@ export class CaptureAcceptancePersistence<
         ),
       )
       .limit(1)
-    if (!capsule || !branch || branch.name !== extension.sourceBranchName) {
+    if (
+      !capsule ||
+      !branch ||
+      branch.name !== extension.sourceBranchName ||
+      branch.blueprintName !== blueprint.name ||
+      branch.blueprintDigest !== blueprint.digest
+    ) {
       throw new IncusError(
         'Snapshot Capture replay references incomplete or contradictory durable aggregate state.',
         'API_ERROR',
@@ -328,7 +368,12 @@ export class CaptureAcceptancePersistence<
         archivedAt: capsule.archivedAt,
         destroyedAt: capsule.destroyedAt,
       }),
-      branch,
+      branch: {
+        id: branch.id,
+        capsuleId: branch.capsuleId,
+        name: branch.name,
+        status: branch.status,
+      },
     }
   }
 
@@ -440,10 +485,10 @@ export class CaptureAcceptancePersistence<
       .for('update')
   }
 
-  private async loadPolicy(
+  private async loadPins(
     tx: Parameters<Parameters<TDatabase['transaction']>[0]>[0],
     branch: CaptureSourceBranch,
-  ): Promise<CapsuleSnapshotCapturePolicyPin> {
+  ): Promise<CapturePins> {
     const { capsuleCreateOperations, capsuleOperations } = this.persistence.tables
     const [extension] = await tx
       .select()
@@ -490,10 +535,15 @@ export class CaptureAcceptancePersistence<
         },
       )
     }
-    return createCapsuleSnapshotCapturePolicyPin({
+    const blueprint = verifyCapsuleBlueprintPin({
       name: extension.blueprintName,
       digest: extension.blueprintDigest,
-      blueprint: extension.blueprintSnapshot as CapsuleBlueprint,
+      blueprint: extension.blueprintSnapshot,
     })
+    const capturePolicy = createCapsuleSnapshotCapturePolicyPin(blueprint)
+    return {
+      blueprint,
+      capturePolicy,
+    }
   }
 }

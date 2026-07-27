@@ -3,9 +3,10 @@ import {
   CapsuleOperationStatus,
   CapsuleOperationType,
   CapsuleSnapshotMode,
+  verifyCapsuleBlueprintPin,
   verifyCapsuleSnapshotCapturePolicyPin,
-  type QilnPersistence,
-  type QilnTables,
+  type CapsulePersistence,
+  type CapsuleTables,
 } from '@qiln/core/server'
 import { IncusError } from '../../../../../errors'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
@@ -23,10 +24,10 @@ import type { CaptureExecutionInput, CaptureResourceRecord, CaptureSourceBranch 
  */
 export class CaptureInputPersistence<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
-  TTables extends QilnTables = QilnTables,
+  TTables extends CapsuleTables = CapsuleTables,
 > {
   constructor(
-    private readonly persistence: QilnPersistence<TDatabase, TTables>,
+    private readonly persistence: CapsulePersistence<TDatabase, TTables>,
     private readonly reader: CapsuleOperationReader<TDatabase, TTables>,
     private readonly planner: CapturePlanner,
   ) {}
@@ -75,17 +76,21 @@ export class CaptureInputPersistence<
         requestedMode: extension.requestedMode,
       })
     }
-    const policy = verifyCapsuleSnapshotCapturePolicyPin(extension.capturePolicyPin)
+    const blueprint = verifyCapsuleBlueprintPin(extension.blueprintPin)
+    const capturePolicy = verifyCapsuleSnapshotCapturePolicyPin(extension.capturePolicyPin)
     if (
-      policy.schemaVersion !== extension.capturePolicySchemaVersion ||
-      policy.digest !== extension.capturePolicyDigest
+      blueprint.blueprint.schema_version !== extension.blueprintSchemaVersion ||
+      blueprint.name !== extension.blueprintName ||
+      blueprint.digest !== extension.blueprintDigest ||
+      capturePolicy.schemaVersion !== extension.capturePolicySchemaVersion ||
+      capturePolicy.digest !== extension.capturePolicyDigest ||
+      capturePolicy.blueprintName !== blueprint.name ||
+      capturePolicy.blueprintDigest !== blueprint.digest
     ) {
-      throw new IncusError('Snapshot Capture operation policy evidence is internally inconsistent.', 'CONFLICT', {
+      throw new IncusError('Snapshot Capture operation pin evidence is internally inconsistent.', 'CONFLICT', {
         operationId,
-        persistedSchemaVersion: extension.capturePolicySchemaVersion,
-        policySchemaVersion: policy.schemaVersion,
-        persistedDigest: extension.capturePolicyDigest,
-        policyDigest: policy.digest,
+        blueprintDigest: extension.blueprintDigest,
+        capturePolicyDigest: extension.capturePolicyDigest,
       })
     }
     const [capsule] = await db
@@ -109,7 +114,9 @@ export class CaptureInputPersistence<
       branch.status !== 'capturing' ||
       !branch.isRootBranch ||
       branch.name !== extension.sourceBranchName ||
-      branch.resourceInventoryDigest !== extension.sourceBranchResourceInventoryDigest
+      branch.resourceInventoryDigest !== extension.sourceBranchResourceInventoryDigest ||
+      branch.blueprintName !== blueprint.name ||
+      branch.blueprintDigest !== blueprint.digest
     ) {
       throw new IncusError('Snapshot Capture source branch no longer matches its accepted capture fence.', 'CONFLICT', {
         operationId,
@@ -120,15 +127,24 @@ export class CaptureInputPersistence<
         expectedSourceBranchName: extension.sourceBranchName,
         sourceBranchInventoryDigest: branch.resourceInventoryDigest,
         expectedInventoryDigest: extension.sourceBranchResourceInventoryDigest,
+        sourceBranchBlueprintName: branch.blueprintName,
+        expectedBlueprintName: blueprint.name,
+        sourceBranchBlueprintDigest: branch.blueprintDigest,
+        expectedBlueprintDigest: blueprint.digest,
         isRootBranch: branch.isRootBranch,
       })
     }
     const inventory = await this.inventory(branch.id)
-    const plan = this.planner.create(operationId, operation.ownerId, operation.capsuleId, branch, policy, inventory)
+    const plan = this.planner.create(
+      operationId,
+      operation.ownerId,
+      operation.capsuleId,
+      branch,
+      capturePolicy,
+      inventory,
+    )
     const captureResources = await this.resources(operationId)
-
     this.planner.assertResources(operationId, plan, captureResources)
-
     return {
       operationId,
       ownerId: operation.ownerId,
@@ -136,8 +152,9 @@ export class CaptureInputPersistence<
       sourceBranchId: extension.sourceBranchId,
       sourceBranchName: extension.sourceBranchName,
       sourceBranchResourceInventoryDigest: extension.sourceBranchResourceInventoryDigest,
+      blueprint,
       requestedMode: extension.requestedMode,
-      capturePolicy: policy,
+      capturePolicy,
       plan,
     }
   }

@@ -6,18 +6,18 @@ import type { OperationSupervisor } from '../../../coordination/supervisor'
 import type { CapsuleLifecycleEventPublisher } from '../events/lifecycle'
 import type { CapsuleOperationEventPublisher } from '../events/operation'
 import type { ProviderFreeArchivalOperationLedger } from '../operations/archival/shared/operationLedger'
-import type { QilnPersistence, QilnTables } from '@qiln/core/server'
+import type { CapsulePersistence, CapsuleTables } from '@qiln/core/server'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
 export interface ComposeUnarchiveCapabilityOptions<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
-  TTables extends QilnTables = QilnTables,
+  TTables extends CapsuleTables = CapsuleTables,
 > {
   supervisor: OperationSupervisor
   operationLedger: ProviderFreeArchivalOperationLedger<TDatabase, TTables>
   operationEvents: CapsuleOperationEventPublisher
   lifecycleEvents: CapsuleLifecycleEventPublisher
-  persistence: QilnPersistence<TDatabase, TTables>
+  persistence: CapsulePersistence<TDatabase, TTables>
 }
 
 export interface ComposedUnarchiveCapability {
@@ -31,7 +31,7 @@ export interface ComposedUnarchiveCapability {
  * Exact archive-timestamp preservation and unarchive-specific terminal policy
  * remain explicit within the unarchive repository.
  */
-export function composeUnarchiveCapability<TDatabase extends PostgresJsDatabase, TTables extends QilnTables>(
+export function composeUnarchiveCapability<TDatabase extends PostgresJsDatabase, TTables extends CapsuleTables>(
   options: ComposeUnarchiveCapabilityOptions<TDatabase, TTables>,
 ): ComposedUnarchiveCapability {
   const repository = new CapsuleUnarchiveRepository(options.persistence, options.operationLedger)

@@ -11,6 +11,13 @@ import {
   capsuleOperationStatusEnum,
   capsuleOperationStepStatusEnum,
   capsuleOperationTypeEnum,
+  capsuleRouteAliasStatusEnum,
+  capsuleRouteExposureEnum,
+  capsuleRouteMethodEnum,
+  capsuleRouteProviderEnum,
+  capsuleRouteProviderStatusEnum,
+  capsuleRouteRevisionActionEnum,
+  capsuleRouteRevisionStatusEnum,
   capsuleSnapshotCaptureResourceStatusEnum,
   capsuleSnapshotDependencyDigestKindEnum,
   capsuleSnapshotDependencyKindEnum,
@@ -63,6 +70,13 @@ export {
   capsuleOperationStatusEnum,
   capsuleOperationStepStatusEnum,
   capsuleOperationTypeEnum,
+  capsuleRouteAliasStatusEnum,
+  capsuleRouteExposureEnum,
+  capsuleRouteMethodEnum,
+  capsuleRouteProviderEnum,
+  capsuleRouteProviderStatusEnum,
+  capsuleRouteRevisionActionEnum,
+  capsuleRouteRevisionStatusEnum,
   capsuleSnapshotCaptureResourceStatusEnum,
   capsuleSnapshotDependencyDigestKindEnum,
   capsuleSnapshotDependencyKindEnum,
@@ -89,6 +103,11 @@ export const {
   capsuleSnapshotResourceReferences,
   capsuleSnapshotCaptureOperations,
   capsuleSnapshotCaptureResources,
+  capsuleRouteAliases,
+  capsuleRouteHeads,
+  capsuleRouteRevisions,
+  capsuleRouteOperations,
+  capsuleRouteProviderApplications,
 } = capsuleTables
 
 /**
@@ -107,6 +126,13 @@ export const schema = {
   capsuleOperationStatusEnum,
   capsuleOperationStepStatusEnum,
   capsuleOperationTypeEnum,
+  capsuleRouteAliasStatusEnum,
+  capsuleRouteExposureEnum,
+  capsuleRouteMethodEnum,
+  capsuleRouteProviderEnum,
+  capsuleRouteProviderStatusEnum,
+  capsuleRouteRevisionActionEnum,
+  capsuleRouteRevisionStatusEnum,
   capsuleSnapshotCaptureResourceStatusEnum,
   capsuleSnapshotDependencyDigestKindEnum,
   capsuleSnapshotDependencyKindEnum,
@@ -118,7 +144,7 @@ export const schema = {
 } as const
 
 /**
- * Defines all host and Core capsule relations using the Drizzle v1 relations
+ * Defines all host and capsule-domain relations using the Drizzle v1 relations
  * API. Duplicate relation names fail during fragment composition.
  */
 export const relations = defineRelations(schema, helpers =>

@@ -5,14 +5,14 @@ import { CapsuleBranchStore } from '../branch/store'
 import type { IncusClient } from '../../../incus/client/index'
 import type { ProjectService } from '../../project'
 import type { CapsuleBranchEventPublisher } from '../events/branch'
-import type { QilnPersistence, QilnTables } from '@qiln/core/server'
+import type { CapsulePersistence, CapsuleTables } from '@qiln/core/server'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
 export interface ComposeBranchCapabilityOptions<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
-  TTables extends QilnTables = QilnTables,
+  TTables extends CapsuleTables = CapsuleTables,
 > {
-  persistence: QilnPersistence<TDatabase, TTables>
+  persistence: CapsulePersistence<TDatabase, TTables>
   incus: IncusClient
   project: ProjectService
   branchEvents: CapsuleBranchEventPublisher
@@ -24,7 +24,7 @@ export interface ComposeBranchCapabilityOptions<
  * This capability owns observation and runtime reconciliation only. Root branch
  * creation and future snapshot-based branch forks remain operation concerns.
  */
-export function composeBranchCapability<TDatabase extends PostgresJsDatabase, TTables extends QilnTables>(
+export function composeBranchCapability<TDatabase extends PostgresJsDatabase, TTables extends CapsuleTables>(
   options: ComposeBranchCapabilityOptions<TDatabase, TTables>,
 ): CapsuleBranchRuntimeService {
   const branches = new CapsuleBranchStore(options.persistence)

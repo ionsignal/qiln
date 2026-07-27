@@ -1,4 +1,4 @@
-import type { QilnPersistence, QilnTables } from '@qiln/core/server'
+import type { CapsulePersistence, CapsuleTables } from '@qiln/core/server'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
 /**
@@ -8,4 +8,4 @@ import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
  * handles. Engine services depend only on the capsule table contract they
  * require for authoritative reads.
  */
-export type EnginePersistence = QilnPersistence<PostgresJsDatabase, QilnTables>
+export type EnginePersistence = CapsulePersistence<PostgresJsDatabase, CapsuleTables>

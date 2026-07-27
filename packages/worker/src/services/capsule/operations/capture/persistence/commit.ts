@@ -10,10 +10,11 @@ import {
   digestCapsuleArtifactManifest,
   normalizeCapsuleArtifactManifest,
   verifyCapsuleSnapshotCapturePolicyPin,
+  verifyCapsuleBlueprintPin,
   type CapsuleArtifactManifest,
   type CapsuleSnapshotLimitationValue,
-  type QilnPersistence,
-  type QilnTables,
+  type CapsulePersistence,
+  type CapsuleTables,
 } from '@qiln/core/server'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import { IncusError } from '../../../../../errors'
@@ -72,9 +73,9 @@ function sameLimitations(
  */
 export class CaptureCommitPersistence<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
-  TTables extends QilnTables = QilnTables,
+  TTables extends CapsuleTables = CapsuleTables,
 > {
-  constructor(private readonly persistence: QilnPersistence<TDatabase, TTables>) {}
+  constructor(private readonly persistence: CapsulePersistence<TDatabase, TTables>) {}
 
   public async commit(input: CommitCaptureInput): Promise<CaptureCommitResult> {
     const manifest = normalizeCapsuleArtifactManifest(input.collection.manifest)
@@ -137,11 +138,30 @@ export class CaptureCommitPersistence<
           requestedMode: extension.requestedMode,
         })
       }
+      const blueprint = verifyCapsuleBlueprintPin(extension.blueprintPin)
+      const executionBlueprint = verifyCapsuleBlueprintPin(input.execution.blueprint)
+      if (
+        blueprint.blueprint.schema_version !== extension.blueprintSchemaVersion ||
+        blueprint.name !== extension.blueprintName ||
+        blueprint.digest !== extension.blueprintDigest ||
+        executionBlueprint.name !== blueprint.name ||
+        executionBlueprint.digest !== blueprint.digest
+      ) {
+        throw new IncusError('Snapshot Capture Blueprint evidence changed before atomic commit.', 'CONFLICT', {
+          operationId: operation.id,
+          persistedBlueprintName: extension.blueprintName,
+          persistedBlueprintDigest: extension.blueprintDigest,
+          executionBlueprintName: executionBlueprint.name,
+          executionBlueprintDigest: executionBlueprint.digest,
+        })
+      }
       const policy = verifyCapsuleSnapshotCapturePolicyPin(extension.capturePolicyPin)
       if (
         policy.schemaVersion !== extension.capturePolicySchemaVersion ||
         policy.digest !== extension.capturePolicyDigest ||
-        policy.digest !== input.execution.capturePolicy.digest
+        policy.digest !== input.execution.capturePolicy.digest ||
+        policy.blueprintName !== blueprint.name ||
+        policy.blueprintDigest !== blueprint.digest
       ) {
         throw new IncusError('Snapshot Capture policy evidence changed before atomic commit.', 'CONFLICT', {
           operationId: operation.id,
@@ -163,7 +183,9 @@ export class CaptureCommitPersistence<
       if (
         branch.status !== 'capturing' ||
         branch.name !== extension.sourceBranchName ||
-        branch.resourceInventoryDigest !== extension.sourceBranchResourceInventoryDigest
+        branch.resourceInventoryDigest !== extension.sourceBranchResourceInventoryDigest ||
+        branch.blueprintName !== blueprint.name ||
+        branch.blueprintDigest !== blueprint.digest
       ) {
         throw new IncusError(
           'Snapshot Capture source branch no longer matches its durable capture fence.',
@@ -191,6 +213,10 @@ export class CaptureCommitPersistence<
           sourceBranchId: branch.id,
           sourceBranchName: branch.name,
           sourceBranchResourceInventoryDigest: extension.sourceBranchResourceInventoryDigest,
+          blueprintSchemaVersion: extension.blueprintSchemaVersion,
+          blueprintName: extension.blueprintName,
+          blueprintDigest: extension.blueprintDigest,
+          blueprintPin: blueprint,
           capturePolicySchemaVersion: extension.capturePolicySchemaVersion,
           capturePolicyDigest: extension.capturePolicyDigest,
           capturePolicyPin: policy,

@@ -1,4 +1,4 @@
-import type { CapsuleOperationRequestHash, QilnPersistence, QilnTables } from '@qiln/core/server'
+import type { CapsuleOperationRequestHash, CapsulePersistence, CapsuleTables } from '@qiln/core/server'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import type { CapsuleOperationReader, CapsuleOperationTransitionOutput } from '../../shared'
 import { DestroyCapsuleAcceptancePersistence } from './acceptance'
@@ -23,14 +23,14 @@ import type {
  */
 export class DestroyCapsuleOperationRepository<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
-  TTables extends QilnTables = QilnTables,
+  TTables extends CapsuleTables = CapsuleTables,
 > {
   private readonly acceptance: DestroyCapsuleAcceptancePersistence<TDatabase, TTables>
   private readonly execution: DestroyCapsuleExecutionPersistence<TDatabase, TTables>
   private readonly classification: DestroyCapsuleClassificationPersistence<TDatabase, TTables>
 
   constructor(
-    private readonly persistence: QilnPersistence<TDatabase, TTables>,
+    private readonly persistence: CapsulePersistence<TDatabase, TTables>,
     reader: CapsuleOperationReader<TDatabase, TTables>,
   ) {
     this.acceptance = new DestroyCapsuleAcceptancePersistence(persistence, reader)

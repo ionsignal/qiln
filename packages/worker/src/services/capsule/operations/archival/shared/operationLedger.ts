@@ -2,8 +2,8 @@ import { and, eq, isNull } from 'drizzle-orm'
 import {
   CapsuleOperationStatus,
   CapsuleOperationType,
-  type QilnPersistence,
-  type QilnTables,
+  type CapsulePersistence,
+  type CapsuleTables,
   type CapsuleActorReference,
   type CapsuleOperationRequestHash,
 } from '@qiln/core/server'
@@ -49,10 +49,10 @@ export interface ClaimProviderFreeArchivalOperationInput {
  */
 export class ProviderFreeArchivalOperationLedger<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
-  TTables extends QilnTables = QilnTables,
+  TTables extends CapsuleTables = CapsuleTables,
 > {
   constructor(
-    private readonly persistence: QilnPersistence<TDatabase, TTables>,
+    private readonly persistence: CapsulePersistence<TDatabase, TTables>,
     private readonly reader: CapsuleOperationReader<TDatabase, TTables>,
   ) {}
 

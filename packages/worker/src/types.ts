@@ -1,4 +1,4 @@
-import type { QilnPersistence, QilnTables } from '@qiln/core/server'
+import type { CapsulePersistence, CapsuleTables } from '@qiln/core/server'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
 export interface WorkerNatsConfig {
@@ -36,8 +36,8 @@ export interface WorkerRuntimeConfig {
 
 export interface WorkerRuntimeOptions<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
-  TTables extends QilnTables = QilnTables,
+  TTables extends CapsuleTables = CapsuleTables,
 > {
-  persistence: QilnPersistence<TDatabase, TTables>
+  persistence: CapsulePersistence<TDatabase, TTables>
   config?: WorkerRuntimeConfig
 }

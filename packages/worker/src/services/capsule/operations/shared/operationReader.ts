@@ -3,8 +3,8 @@ import {
   CapsuleActorReferenceSchema,
   CapsuleOperationReceiptSchema,
   CapsuleOperationStatus,
-  type QilnPersistence,
-  type QilnTables,
+  type CapsulePersistence,
+  type CapsuleTables,
   type CapsuleOperationReceipt,
 } from '@qiln/core/server'
 import type { PersistedCapsuleOperation } from './types'
@@ -24,9 +24,9 @@ const NONTERMINAL_OPERATION_STATUSES = [CapsuleOperationStatus.ACCEPTED, Capsule
  */
 export class CapsuleOperationReader<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
-  TTables extends QilnTables = QilnTables,
+  TTables extends CapsuleTables = CapsuleTables,
 > {
-  constructor(private readonly persistence: QilnPersistence<TDatabase, TTables>) {}
+  constructor(private readonly persistence: CapsulePersistence<TDatabase, TTables>) {}
 
   public async loadById(operationId: string): Promise<PersistedCapsuleOperation | null> {
     const db = this.persistence.db
@@ -76,7 +76,9 @@ export class CapsuleOperationReader<
     })
   }
 
-  private toPersistedOperation(operation: QilnTables['capsuleOperations']['$inferSelect']): PersistedCapsuleOperation {
+  private toPersistedOperation(
+    operation: CapsuleTables['capsuleOperations']['$inferSelect'],
+  ): PersistedCapsuleOperation {
     return {
       id: operation.id,
       ownerId: operation.ownerId,

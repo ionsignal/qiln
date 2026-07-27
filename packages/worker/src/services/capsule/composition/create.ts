@@ -13,11 +13,11 @@ import type { CapsuleOperationReader } from '../operations/shared/operationReade
 import type { CapsuleOperationStepStore } from '../operations/shared/operationStepStore'
 import type { CapsuleBranchResourceStore } from '../resource/store'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
-import type { CapsuleBlueprintRegistry, QilnPersistence, QilnTables } from '@qiln/core/server'
+import type { CapsuleBlueprintRegistry, CapsulePersistence, CapsuleTables } from '@qiln/core/server'
 
 export interface ComposeCreateCapabilityOptions<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
-  TTables extends QilnTables = QilnTables,
+  TTables extends CapsuleTables = CapsuleTables,
 > {
   incus: IncusClient
   project: ProjectService
@@ -29,7 +29,7 @@ export interface ComposeCreateCapabilityOptions<
   operationEvents: CapsuleOperationEventPublisher
   lifecycleEvents: CapsuleLifecycleEventPublisher
   branchEvents: CapsuleBranchEventPublisher
-  persistence: QilnPersistence<TDatabase, TTables>
+  persistence: CapsulePersistence<TDatabase, TTables>
 }
 
 export interface ComposedCreateCapability {
@@ -43,7 +43,7 @@ export interface ComposedCreateCapability {
  * This function only constructs objects. It performs no SQL, provider mutation,
  * operation scheduling, event publication, or command registration.
  */
-export function composeCreateCapability<TDatabase extends PostgresJsDatabase, TTables extends QilnTables>(
+export function composeCreateCapability<TDatabase extends PostgresJsDatabase, TTables extends CapsuleTables>(
   options: ComposeCreateCapabilityOptions<TDatabase, TTables>,
 ): ComposedCreateCapability {
   const repository = new CreateCapsuleOperationRepository(options.persistence, options.operationReader)

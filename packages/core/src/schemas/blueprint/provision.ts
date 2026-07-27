@@ -92,15 +92,6 @@ export const CapsuleBlueprintFileDefinitionSchema = z
     }
   })
 
-export const CapsuleBlueprintPortDefinitionSchema = z
-  .object({
-    name: CapsuleBlueprintIdentifierSchema,
-    port: z.number().int().min(1).max(65535),
-    protocol: z.enum(['tcp', 'udp']),
-    exposure: z.enum(['internal', 'proxy']),
-  })
-  .strict()
-
 export const CapsuleBlueprintRuntimeSchema = z
   .object({
     config: CapsuleBlueprintConfigMapSchema.default({}),
@@ -118,5 +109,4 @@ export type CapsuleBlueprintEmptyVolume = z.infer<typeof CapsuleBlueprintEmptyVo
 export type CapsuleBlueprintBindMountVolume = z.infer<typeof CapsuleBlueprintBindMountVolumeSchema>
 export type CapsuleBlueprintVolumeDefinition = z.infer<typeof CapsuleBlueprintVolumeDefinitionSchema>
 export type CapsuleBlueprintFileDefinition = z.infer<typeof CapsuleBlueprintFileDefinitionSchema>
-export type CapsuleBlueprintPortDefinition = z.infer<typeof CapsuleBlueprintPortDefinitionSchema>
 export type CapsuleBlueprintRuntime = z.infer<typeof CapsuleBlueprintRuntimeSchema>

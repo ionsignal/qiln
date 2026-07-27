@@ -6,8 +6,8 @@ import {
   type CapsuleArchiveReceipt,
   type CapsuleOperationRequestHash,
   type CapsuleOperationStatusValue,
-  type QilnPersistence,
-  type QilnTables,
+  type CapsulePersistence,
+  type CapsuleTables,
 } from '@qiln/core/server'
 import { IncusError, isUniqueConstraintViolation } from '../../../../../errors'
 import {
@@ -42,7 +42,7 @@ import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
 const NONTERMINAL_ARCHIVE_STATUSES = [CapsuleOperationStatus.ACCEPTED, CapsuleOperationStatus.RUNNING] as const
 
-type PersistedArchiveOperation = QilnTables['capsuleOperations']['$inferSelect']
+type PersistedArchiveOperation = CapsuleTables['capsuleOperations']['$inferSelect']
 
 function isNonterminalArchiveStatus(
   status: CapsuleOperationStatusValue,
@@ -60,10 +60,10 @@ function isNonterminalArchiveStatus(
  */
 export class CapsuleArchiveRepository<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
-  TTables extends QilnTables = QilnTables,
+  TTables extends CapsuleTables = CapsuleTables,
 > {
   constructor(
-    private readonly persistence: QilnPersistence<TDatabase, TTables>,
+    private readonly persistence: CapsulePersistence<TDatabase, TTables>,
     private readonly operationLedger: ProviderFreeArchivalOperationLedger<TDatabase, TTables>,
   ) {}
 

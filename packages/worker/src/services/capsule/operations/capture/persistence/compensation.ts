@@ -1,5 +1,10 @@
 import { and, asc, eq, inArray, isNotNull } from 'drizzle-orm'
-import { CapsuleOperationStatus, CapsuleOperationType, type QilnPersistence, type QilnTables } from '@qiln/core/server'
+import {
+  CapsuleOperationStatus,
+  CapsuleOperationType,
+  type CapsulePersistence,
+  type CapsuleTables,
+} from '@qiln/core/server'
 import { IncusError } from '../../../../../errors'
 import { createFailureDetails, failureCodeFromUnknown, failureMessageFromUnknown } from '../../../failures'
 import { toJsonObject } from '../../../persistence/json'
@@ -19,9 +24,9 @@ const NONTERMINAL_CAPTURE_STATUSES = [CapsuleOperationStatus.ACCEPTED, CapsuleOp
  */
 export class CaptureCompensationPersistence<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
-  TTables extends QilnTables = QilnTables,
+  TTables extends CapsuleTables = CapsuleTables,
 > {
-  constructor(private readonly persistence: QilnPersistence<TDatabase, TTables>) {}
+  constructor(private readonly persistence: CapsulePersistence<TDatabase, TTables>) {}
 
   public async fail(
     operationId: string,

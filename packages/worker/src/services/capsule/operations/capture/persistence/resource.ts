@@ -1,5 +1,10 @@
 import { and, asc, eq, inArray, isNotNull, isNull } from 'drizzle-orm'
-import { CapsuleOperationStatus, CapsuleOperationType, type QilnPersistence, type QilnTables } from '@qiln/core/server'
+import {
+  CapsuleOperationStatus,
+  CapsuleOperationType,
+  type CapsulePersistence,
+  type CapsuleTables,
+} from '@qiln/core/server'
 import { IncusError } from '../../../../../errors'
 import { createFailureDetails, failureCodeFromUnknown, failureMessageFromUnknown } from '../../../failures'
 import { toJsonObject } from '../../../persistence/json'
@@ -8,7 +13,7 @@ import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
 const COMPENSATED_RESOURCE_STATUSES = ['deleted', 'missing'] as const
 
-type CaptureResourceRow = QilnTables['capsuleSnapshotCaptureResources']['$inferSelect']
+type CaptureResourceRow = CapsuleTables['capsuleSnapshotCaptureResources']['$inferSelect']
 
 function toResource(resource: CaptureResourceRow): CaptureResourceRecord {
   return {
@@ -43,9 +48,9 @@ function toResource(resource: CaptureResourceRow): CaptureResourceRecord {
  */
 export class CaptureResourcePersistence<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
-  TTables extends QilnTables = QilnTables,
+  TTables extends CapsuleTables = CapsuleTables,
 > {
-  constructor(private readonly persistence: QilnPersistence<TDatabase, TTables>) {}
+  constructor(private readonly persistence: CapsulePersistence<TDatabase, TTables>) {}
 
   public async list(operationId: string): Promise<CaptureResourceRecord[]> {
     const db = this.persistence.db

@@ -7,7 +7,7 @@ import { ProjectService } from './services/project'
 import { composeCapsuleService, type CapsuleService } from './services/capsule'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import type { WorkerRuntimeConfig, WorkerRuntimeOptions } from './types'
-import type { QilnTables } from '@qiln/core/server'
+import type { CapsuleTables } from '@qiln/core/server'
 
 const WORKER_LOG_PREFIX = '[QilnWorker]'
 const CHANNEL_LOG_PREFIX = '[QilnWorker CapsuleChannel]'
@@ -75,7 +75,7 @@ function resolveWorkerRuntimeConfig(config?: WorkerRuntimeConfig): ResolvedWorke
  */
 export class QilnWorkerRuntime<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
-  TTables extends QilnTables = QilnTables,
+  TTables extends CapsuleTables = CapsuleTables,
 > {
   public readonly project: ProjectService
   public readonly capsule: CapsuleService

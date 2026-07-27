@@ -4,6 +4,7 @@ export * from './capsule/lifecycle'
 export * from './capsule/operations'
 export * from './capsule/snapshot/mode'
 export * from './capsule/snapshot/record'
+export * from './capsule/routing'
 
 export {
   CapsuleArtifactManifestDigestSchema,
@@ -23,10 +24,31 @@ export type {
   CapsuleSnapshotCapturePolicyReference,
 } from './capsule/snapshot/policy'
 
+export {
+  CapsuleBlueprintApplicationExposure,
+  CapsuleBlueprintApplicationExposureSchema,
+  CapsuleBlueprintApplicationPathSchema,
+  CapsuleBlueprintApplicationProtocol,
+  CapsuleBlueprintApplicationProtocolSchema,
+  CapsuleBlueprintApplicationSchema,
+  CapsuleBlueprintApplicationVerificationSchema,
+  CapsuleBlueprintEndpointContractMode,
+  CapsuleBlueprintEndpointContractModeSchema,
+  CapsuleBlueprintVerificationMethod,
+  CapsuleBlueprintVerificationMethodSchema,
+} from './blueprint/application'
+
+export type {
+  CapsuleBlueprintApplication,
+  CapsuleBlueprintApplicationPath,
+  CapsuleBlueprintApplicationVerification,
+} from './blueprint/application'
+
 export type {
   CapsuleBlueprintDigest,
   CapsuleBlueprintManifest,
   CapsuleBlueprintManifestItem,
+  CapsuleBlueprintReference,
 } from './blueprint/catalog'
 
 export {
@@ -34,4 +56,5 @@ export {
   CapsuleBlueprintDigestSchema,
   CapsuleBlueprintManifestItemSchema,
   CapsuleBlueprintManifestSchema,
+  CapsuleBlueprintReferenceSchema,
 } from './blueprint/catalog'

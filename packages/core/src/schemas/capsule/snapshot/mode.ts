@@ -4,16 +4,20 @@ import { z } from 'zod'
  * Snapshot modes describe the strength of evidence committed with capsule
  * history.
  *
- * The initial experimental mode deliberately makes no fork, restoration,
- * promotion, or rollback claim.
+ * Experimental snapshots may support explicitly experimental forks and route
+ * aliases while retaining limitations. Hardened snapshots are reserved for a
+ * future writer that proves complete restoration and production-routing
+ * requirements.
  */
 export const CapsuleSnapshotMode = {
   EXPERIMENTAL: 'experimental',
+  HARDENED: 'hardened',
 } as const
 
 export type CapsuleSnapshotModeValue = (typeof CapsuleSnapshotMode)[keyof typeof CapsuleSnapshotMode]
 
-export const CapsuleSnapshotModeValues = [CapsuleSnapshotMode.EXPERIMENTAL] as const
+export const CapsuleSnapshotModeValues = [CapsuleSnapshotMode.EXPERIMENTAL, CapsuleSnapshotMode.HARDENED] as const
+
 export const CapsuleSnapshotModeSchema = z.enum(CapsuleSnapshotModeValues)
 
 export const CapsuleSnapshotLimitation = {
@@ -34,7 +38,6 @@ export const CapsuleSnapshotLimitationSchema = z.enum(CapsuleSnapshotLimitationV
 
 export const CapsuleSnapshotLimitationsSchema = z
   .array(CapsuleSnapshotLimitationSchema)
-  .min(1)
   .superRefine((limitations, context) => {
     const seen = new Set<CapsuleSnapshotLimitationValue>()
 
@@ -52,9 +55,32 @@ export const CapsuleSnapshotLimitationsSchema = z
     })
   })
 
+export const CapsuleSnapshotAssuranceSchema = z
+  .object({
+    mode: CapsuleSnapshotModeSchema,
+    limitations: CapsuleSnapshotLimitationsSchema,
+  })
+  .strict()
+  .superRefine((assurance, context) => {
+    if (assurance.mode === CapsuleSnapshotMode.EXPERIMENTAL && assurance.limitations.length === 0) {
+      context.addIssue({
+        code: 'custom',
+        path: ['limitations'],
+        message: 'Experimental capsule snapshots must disclose at least one assurance limitation.',
+      })
+    }
+
+    if (assurance.mode === CapsuleSnapshotMode.HARDENED && assurance.limitations.length > 0) {
+      context.addIssue({
+        code: 'custom',
+        path: ['limitations'],
+        message: 'Hardened capsule snapshots cannot retain experimental assurance limitations.',
+      })
+    }
+  })
+
 /**
- * The complete limitation set committed by the snapshot-backed experimental
- * collector.
+ * The complete limitation set committed by the current experimental collector.
  *
  * This value is Worker-owned. It must never be accepted from browser input.
  */
@@ -65,3 +91,4 @@ export const ExperimentalCapsuleSnapshotLimitations = [
 ] as const satisfies readonly CapsuleSnapshotLimitationValue[]
 
 export type CapsuleSnapshotLimitations = z.infer<typeof CapsuleSnapshotLimitationsSchema>
+export type CapsuleSnapshotAssurance = z.infer<typeof CapsuleSnapshotAssuranceSchema>

@@ -12,12 +12,12 @@ import type { CapsuleBranchEventPublisher } from '../events/branch'
 import type { CapsuleLifecycleEventPublisher } from '../events/lifecycle'
 import type { CapsuleOperationEventPublisher } from '../events/operation'
 import type { CapsuleOperationReader, CapsuleOperationStepStore } from '../operations/shared'
-import type { QilnPersistence, QilnTables } from '@qiln/core/server'
+import type { CapsulePersistence, CapsuleTables } from '@qiln/core/server'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
 export interface ComposeCaptureCapabilityOptions<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
-  TTables extends QilnTables = QilnTables,
+  TTables extends CapsuleTables = CapsuleTables,
 > {
   incus: IncusClient
   supervisor: OperationSupervisor
@@ -27,7 +27,7 @@ export interface ComposeCaptureCapabilityOptions<
   lifecycleEvents: CapsuleLifecycleEventPublisher
   branchEvents: CapsuleBranchEventPublisher
   enabled: boolean
-  persistence: QilnPersistence<TDatabase, TTables>
+  persistence: CapsulePersistence<TDatabase, TTables>
 }
 
 export interface ComposedCaptureCapability {
@@ -41,7 +41,7 @@ export interface ComposedCaptureCapability {
  * Construction performs no SQL, provider mutation, command registration,
  * scheduling, collection, or event publication.
  */
-export function composeCaptureCapability<TDatabase extends PostgresJsDatabase, TTables extends QilnTables>(
+export function composeCaptureCapability<TDatabase extends PostgresJsDatabase, TTables extends CapsuleTables>(
   options: ComposeCaptureCapabilityOptions<TDatabase, TTables>,
 ): ComposedCaptureCapability {
   const planner = new CapturePlanner()

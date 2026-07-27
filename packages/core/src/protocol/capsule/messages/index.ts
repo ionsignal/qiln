@@ -30,6 +30,15 @@ import {
   CapsuleOperationEventSchemas,
 } from './operations'
 import {
+  CapsuleRouteCommandDefinitions,
+  CapsuleRouteCommandName,
+  CapsuleRouteCommandNameValues,
+  CapsuleRouteEventDefinitions,
+  CapsuleRouteEventName,
+  CapsuleRouteEventNameValues,
+  CapsuleRouteEventSchemas,
+} from './routing'
+import {
   CapsuleSnapshotCommandDefinitions,
   CapsuleSnapshotCommandName,
   CapsuleSnapshotCommandNameValues,
@@ -46,12 +55,14 @@ export * from './branch'
 export * from './create'
 export * from './lifecycle'
 export * from './operations'
+export * from './routing'
 export * from './snapshot'
 
 export const CapsuleCommandName = {
   ...CapsuleCreateCommandName,
   ...CapsuleBranchCommandName,
   ...CapsuleOperationCommandName,
+  ...CapsuleRouteCommandName,
   ...CapsuleSnapshotCommandName,
   ...CapsuleBlueprintCommandName,
 } as const
@@ -62,6 +73,7 @@ export const CapsuleCommandNameValues = [
   ...CapsuleCreateCommandNameValues,
   ...CapsuleBranchCommandNameValues,
   ...CapsuleOperationCommandNameValues,
+  ...CapsuleRouteCommandNameValues,
   ...CapsuleSnapshotCommandNameValues,
   ...CapsuleBlueprintCommandNameValues,
 ] as const
@@ -72,6 +84,7 @@ export const CapsuleEventName = {
   ...CapsuleBranchEventName,
   ...CapsuleLifecycleEventName,
   ...CapsuleOperationEventName,
+  ...CapsuleRouteEventName,
   ...CapsuleSnapshotEventName,
 } as const
 
@@ -81,6 +94,7 @@ export const CapsuleEventNameValues = [
   ...CapsuleBranchEventNameValues,
   ...CapsuleLifecycleEventNameValues,
   ...CapsuleOperationEventNameValues,
+  ...CapsuleRouteEventNameValues,
   ...CapsuleSnapshotEventNameValues,
 ] as const
 
@@ -90,6 +104,7 @@ export const CapsuleCommandDefinitions = {
   ...CapsuleCreateCommandDefinitions,
   ...CapsuleBranchCommandDefinitions,
   ...CapsuleOperationCommandDefinitions,
+  ...CapsuleRouteCommandDefinitions,
   ...CapsuleSnapshotCommandDefinitions,
   ...CapsuleBlueprintCommandDefinitions,
 } as const satisfies Record<CapsuleCommandName, CapsuleCommandDefinition>
@@ -102,6 +117,7 @@ export const CapsuleEventDefinitions = {
   ...CapsuleBranchEventDefinitions,
   ...CapsuleLifecycleEventDefinitions,
   ...CapsuleOperationEventDefinitions,
+  ...CapsuleRouteEventDefinitions,
   ...CapsuleSnapshotEventDefinitions,
 } as const satisfies Record<CapsuleEventName, CapsuleEventDefinition>
 
@@ -113,6 +129,7 @@ const CapsuleEventSchemas = [
   ...CapsuleBranchEventSchemas,
   ...CapsuleLifecycleEventSchemas,
   ...CapsuleOperationEventSchemas,
+  ...CapsuleRouteEventSchemas,
   ...CapsuleSnapshotEventSchemas,
 ] as const
 

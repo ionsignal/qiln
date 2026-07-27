@@ -3,6 +3,7 @@ import path from 'node:path'
 import { parse } from 'yaml'
 import { z, type ZodError } from 'zod'
 import { GlobalError, GlobalErrorCode } from '../errors'
+import { createCapsuleBlueprintPin, digestCapsuleBlueprint } from '../digest/blueprint'
 import { digestCanonicalJsonValue } from '../digest/canonical'
 import {
   CapsuleBlueprintDigestSchema,
@@ -11,12 +12,7 @@ import {
   type CapsuleBlueprintManifest,
   type CapsuleBlueprintManifestItem,
 } from '../schemas/blueprint/catalog'
-import {
-  CapsuleBlueprintPinSchema,
-  CapsuleBlueprintSchema,
-  type CapsuleBlueprint,
-  type CapsuleBlueprintPin,
-} from '../schemas/blueprint/schema'
+import { CapsuleBlueprintSchema, type CapsuleBlueprint, type CapsuleBlueprintPin } from '../schemas/blueprint/schema'
 
 const DEFAULT_LOGGER_PREFIX = '[CapsuleBlueprintRegistry]'
 
@@ -92,7 +88,7 @@ function deepFreeze<T>(value: T): T {
 
 function digestCanonicalValue(value: unknown): CapsuleBlueprintDigest {
   const digest = digestCanonicalJsonValue(value, {
-    context: 'capsule blueprint digest input',
+    context: 'capsule blueprint catalog digest input',
   })
   const parsedDigest = CapsuleBlueprintDigestSchema.safeParse(digest)
   if (!parsedDigest.success) {
@@ -213,7 +209,7 @@ export class CapsuleBlueprintRegistry {
         name,
       })
     }
-    const actualDigest = digestCanonicalValue(blueprint)
+    const actualDigest = digestCapsuleBlueprint(blueprint)
     if (actualDigest !== parsedDigest.data) {
       throw new GlobalError(
         `Capsule blueprint '${name}' digest does not match the reviewed manifest item.`,
@@ -225,20 +221,7 @@ export class CapsuleBlueprintRegistry {
         },
       )
     }
-    const pin = {
-      name: blueprint.name,
-      digest: actualDigest,
-      blueprint,
-    }
-    const parsedPin = CapsuleBlueprintPinSchema.safeParse(pin)
-    if (!parsedPin.success) {
-      throw new GlobalError(
-        'Generated capsule blueprint pin failed validation.',
-        GlobalErrorCode.INTERNAL_ERROR,
-        validationDetails(parsedPin.error),
-      )
-    }
-    return deepFreeze(parsedPin.data)
+    return deepFreeze(createCapsuleBlueprintPin(blueprint, actualDigest))
   }
 
   public get(name: string): CapsuleBlueprint | undefined {
@@ -260,7 +243,7 @@ export class CapsuleBlueprintRegistry {
         name: blueprint.name,
         displayName: blueprint.display_name,
         description: blueprint.description,
-        digest: digestCanonicalValue(blueprint),
+        digest: digestCapsuleBlueprint(blueprint),
       }))
     const catalogDigest = digestCanonicalValue({
       schemaVersion: 1,

@@ -1,7 +1,7 @@
 import postgres from 'postgres'
 import { capsuleTables, relations } from '@server/db/schema'
 import { drizzle } from 'drizzle-orm/postgres-js'
-import type { QilnPersistence } from '@qiln/core/server'
+import type { CapsulePersistence } from '@qiln/core/server'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
 /**
@@ -12,7 +12,7 @@ export type Database = PostgresJsDatabase<typeof relations>
 /**
  * Package persistence dependency backed by the host's final composed schema.
  */
-export type Persistence = QilnPersistence<Database, typeof capsuleTables>
+export type Persistence = CapsulePersistence<Database, typeof capsuleTables>
 
 /**
  * Factory function to create the Postgres Data Layer.

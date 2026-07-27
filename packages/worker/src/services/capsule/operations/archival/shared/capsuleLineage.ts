@@ -1,15 +1,15 @@
 import { and, asc, eq } from 'drizzle-orm'
 import { IncusError } from '../../../../../errors'
-import type { QilnPersistence, QilnTables } from '@qiln/core/server'
+import type { CapsulePersistence, CapsuleTables } from '@qiln/core/server'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
 export type ArchivalCapsuleRecord = Pick<
-  QilnTables['capsules']['$inferSelect'],
+  CapsuleTables['capsules']['$inferSelect'],
   'id' | 'ownerId' | 'lifecycleStatus' | 'archivedAt' | 'destroyedAt'
 >
 
 export type ArchivalBranchRecord = Pick<
-  QilnTables['capsuleBranches']['$inferSelect'],
+  CapsuleTables['capsuleBranches']['$inferSelect'],
   'id' | 'capsuleId' | 'ownerId' | 'name' | 'status' | 'isRootBranch'
 >
 
@@ -35,8 +35,8 @@ export interface OfflineBranchLineageInspection {
  * This is intended for replay-result mapping after the operation-specific
  * acceptance transaction has already committed.
  */
-export async function readOwnedArchivalCapsule<TDatabase extends PostgresJsDatabase, TTables extends QilnTables>(
-  persistence: QilnPersistence<TDatabase, TTables>,
+export async function readOwnedArchivalCapsule<TDatabase extends PostgresJsDatabase, TTables extends CapsuleTables>(
+  persistence: CapsulePersistence<TDatabase, TTables>,
   ownerId: string,
   capsuleId: string,
 ): Promise<ArchivalCapsuleRecord | null> {
@@ -62,7 +62,7 @@ export async function readOwnedArchivalCapsule<TDatabase extends PostgresJsDatab
  * The caller owns transaction scope and lifecycle policy. This helper opens no
  * nested transaction and performs no archive or unarchive eligibility checks.
  */
-export async function lockOwnedArchivalCapsule<TDatabase extends PostgresJsDatabase, TTables extends QilnTables>(
+export async function lockOwnedArchivalCapsule<TDatabase extends PostgresJsDatabase, TTables extends CapsuleTables>(
   tx: Parameters<Parameters<TDatabase['transaction']>[0]>[0],
   tables: TTables,
   ownerId: string,
@@ -98,7 +98,7 @@ export async function lockOwnedArchivalCapsule<TDatabase extends PostgresJsDatab
  * foreign-owner row attached to the capsule is contradictory durable evidence
  * that operation-specific policy must classify fail-closed.
  */
-export async function lockArchivalCapsuleBranches<TDatabase extends PostgresJsDatabase, TTables extends QilnTables>(
+export async function lockArchivalCapsuleBranches<TDatabase extends PostgresJsDatabase, TTables extends CapsuleTables>(
   tx: Parameters<Parameters<TDatabase['transaction']>[0]>[0],
   tables: TTables,
   capsuleId: string,

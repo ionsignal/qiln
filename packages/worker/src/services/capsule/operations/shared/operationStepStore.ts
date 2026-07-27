@@ -6,7 +6,7 @@ import {
   failureMessageFromUnknown as operationFailureMessageFromUnknown,
 } from '../../failures'
 import { toJsonObject } from '../../persistence/json'
-import { CapsuleOperationStepStatus, type QilnPersistence, type QilnTables } from '@qiln/core/server'
+import { CapsuleOperationStepStatus, type CapsulePersistence, type CapsuleTables } from '@qiln/core/server'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import type { AbandonedOperationStepFailureInput, CapsuleOperationStepInput } from './types'
 
@@ -23,9 +23,9 @@ const ABANDONED_STEP_ELIGIBLE_STATUSES = [
  */
 export class CapsuleOperationStepStore<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
-  TTables extends QilnTables = QilnTables,
+  TTables extends CapsuleTables = CapsuleTables,
 > {
-  constructor(private readonly persistence: QilnPersistence<TDatabase, TTables>) {}
+  constructor(private readonly persistence: CapsulePersistence<TDatabase, TTables>) {}
 
   public async listStepsForOperation(operationId: string) {
     const db = this.persistence.db

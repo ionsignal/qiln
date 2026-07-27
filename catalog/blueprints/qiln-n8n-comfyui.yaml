@@ -182,13 +182,29 @@ snapshot_capture:
     - application: n8n
       support: evaluation_only
 
-application:
-  ports:
-    - name: n8n-ingress
-      port: 5678
-      protocol: tcp
-      exposure: proxy
-    - name: comfyui-internal
-      port: 8188
-      protocol: tcp
-      exposure: internal
+applications:
+  - name: n8n
+    port: 5678
+    protocol: http
+    entrypoint: /
+    exposure: proxy
+    endpoint:
+      mode: passthrough
+    verification:
+      method: GET
+      path: /healthz
+      expected_statuses:
+        - 200
+
+  - name: comfyui
+    port: 8188
+    protocol: http
+    entrypoint: /
+    exposure: internal
+    endpoint:
+      mode: passthrough
+    verification:
+      method: GET
+      path: /
+      expected_statuses:
+        - 200

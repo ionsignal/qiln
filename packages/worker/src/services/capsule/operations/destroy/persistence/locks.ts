@@ -1,12 +1,12 @@
 import { and, asc, eq, inArray } from 'drizzle-orm'
-import { CapsuleOperationType, type QilnTables } from '@qiln/core/server'
+import { CapsuleOperationType, type CapsuleTables } from '@qiln/core/server'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import { IncusError } from '../../../../../errors'
 import type { CapsuleBranchResourceInventoryRow } from '../../../resource/types'
 import type { DestroyCapsuleAcceptedBranch } from '../types'
 
-export type PersistedDestroyOperation = QilnTables['capsuleOperations']['$inferSelect']
-export type PersistedDestroyCapsule = QilnTables['capsules']['$inferSelect']
+export type PersistedDestroyOperation = CapsuleTables['capsuleOperations']['$inferSelect']
+export type PersistedDestroyCapsule = CapsuleTables['capsules']['$inferSelect']
 
 /**
  * Locks one destroy operation inside an existing transaction.
@@ -15,7 +15,7 @@ export type PersistedDestroyCapsule = QilnTables['capsules']['$inferSelect']
  * identity check. The caller remains responsible for operation status,
  * provider-intent, lifecycle, and terminal-classification policy.
  */
-export async function lockDestroyOperation<TDatabase extends PostgresJsDatabase, TTables extends QilnTables>(
+export async function lockDestroyOperation<TDatabase extends PostgresJsDatabase, TTables extends CapsuleTables>(
   tx: Parameters<Parameters<TDatabase['transaction']>[0]>[0],
   tables: TTables,
   operationId: string,
@@ -41,7 +41,7 @@ export async function lockDestroyOperation<TDatabase extends PostgresJsDatabase,
  *
  * The query enforces aggregate ownership but makes no lifecycle decision.
  */
-export async function lockOwnedDestroyCapsule<TDatabase extends PostgresJsDatabase, TTables extends QilnTables>(
+export async function lockOwnedDestroyCapsule<TDatabase extends PostgresJsDatabase, TTables extends CapsuleTables>(
   tx: Parameters<Parameters<TDatabase['transaction']>[0]>[0],
   tables: TTables,
   ownerId: string,
@@ -72,7 +72,7 @@ export async function lockOwnedDestroyCapsule<TDatabase extends PostgresJsDataba
  * contradictory branch evidence must be available to operation-specific
  * fail-closed policy.
  */
-export async function lockDestroyCapsuleBranches<TDatabase extends PostgresJsDatabase, TTables extends QilnTables>(
+export async function lockDestroyCapsuleBranches<TDatabase extends PostgresJsDatabase, TTables extends CapsuleTables>(
   tx: Parameters<Parameters<TDatabase['transaction']>[0]>[0],
   tables: TTables,
   capsuleId: string,
@@ -108,7 +108,7 @@ export async function lockDestroyCapsuleBranches<TDatabase extends PostgresJsDat
  */
 export async function lockDestroyBranchResourceInventories<
   TDatabase extends PostgresJsDatabase,
-  TTables extends QilnTables,
+  TTables extends CapsuleTables,
 >(
   tx: Parameters<Parameters<TDatabase['transaction']>[0]>[0],
   tables: TTables,

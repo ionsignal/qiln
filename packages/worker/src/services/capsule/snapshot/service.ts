@@ -1,7 +1,8 @@
 import {
   CapsuleSnapshotLimitationsSchema,
   CapsuleSnapshotListOutputSchema,
-  CapsuleSnapshotMode,
+  createCapsuleBlueprintReference,
+  verifyCapsuleBlueprintPin,
   verifyCapsuleSnapshotCapturePolicyPin,
   type CapsuleSnapshotListOutput,
 } from '@qiln/core/server'
@@ -34,20 +35,38 @@ function toIsoTimestamp(value: Date, field: string, snapshotId: string): string 
 export class CapsuleSnapshotService {
   constructor(private readonly snapshots: CapsuleSnapshotStore) {}
 
-  public async listForOwner(
+  public async list(
     ownerId: string,
     capsuleId: string,
     options: CapsuleSnapshotListOptions = {},
   ): Promise<CapsuleSnapshotListOutput> {
-    const snapshots = await this.snapshots.listForOwner(ownerId, capsuleId, options)
-    return CapsuleSnapshotListOutputSchema.parse(snapshots.map(snapshot => this.toSummary(snapshot)))
+    const snapshots = await this.snapshots.list(ownerId, capsuleId, options)
+    return CapsuleSnapshotListOutputSchema.parse(snapshots.map(snapshot => this.summary(snapshot)))
   }
 
-  private toSummary(snapshot: CapsuleSnapshotRecord) {
+  private summary(snapshot: CapsuleSnapshotRecord) {
+    const blueprint = verifyCapsuleBlueprintPin(snapshot.blueprintPin)
     const capturePolicy = verifyCapsuleSnapshotCapturePolicyPin(snapshot.capturePolicyPin)
     if (
+      blueprint.blueprint.schema_version !== snapshot.blueprintSchemaVersion ||
+      blueprint.name !== snapshot.blueprintName ||
+      blueprint.digest !== snapshot.blueprintDigest
+    ) {
+      throw new IncusError('Committed capsule snapshot Blueprint evidence is internally inconsistent.', 'API_ERROR', {
+        snapshotId: snapshot.id,
+        persistedSchemaVersion: snapshot.blueprintSchemaVersion,
+        pinSchemaVersion: blueprint.blueprint.schema_version,
+        persistedName: snapshot.blueprintName,
+        pinName: blueprint.name,
+        persistedDigest: snapshot.blueprintDigest,
+        pinDigest: blueprint.digest,
+      })
+    }
+    if (
       capturePolicy.schemaVersion !== snapshot.capturePolicySchemaVersion ||
-      capturePolicy.digest !== snapshot.capturePolicyDigest
+      capturePolicy.digest !== snapshot.capturePolicyDigest ||
+      capturePolicy.blueprintName !== blueprint.name ||
+      capturePolicy.blueprintDigest !== blueprint.digest
     ) {
       throw new IncusError(
         'Committed capsule snapshot capture-policy evidence is internally inconsistent.',
@@ -61,12 +80,6 @@ export class CapsuleSnapshotService {
         },
       )
     }
-    if (snapshot.mode !== CapsuleSnapshotMode.EXPERIMENTAL) {
-      throw new IncusError('Committed capsule snapshot uses an unsupported evidence mode.', 'API_ERROR', {
-        snapshotId: snapshot.id,
-        mode: snapshot.mode,
-      })
-    }
     const limitations = CapsuleSnapshotLimitationsSchema.parse(snapshot.limitations)
     return {
       id: snapshot.id,
@@ -74,6 +87,7 @@ export class CapsuleSnapshotService {
       sourceBranchId: snapshot.sourceBranchId,
       sourceBranchName: snapshot.sourceBranchName,
       sourceBranchResourceInventoryDigest: snapshot.sourceBranchResourceInventoryDigest,
+      blueprint: createCapsuleBlueprintReference(blueprint),
       capturePolicy: {
         schemaVersion: capturePolicy.schemaVersion,
         digest: capturePolicy.digest,
@@ -82,9 +96,10 @@ export class CapsuleSnapshotService {
         schemaVersion: snapshot.artifactManifestSchemaVersion,
         digest: snapshot.artifactManifestDigest,
       },
-      mode: snapshot.mode,
-      forkReady: false as const,
-      limitations,
+      assurance: {
+        mode: snapshot.mode,
+        limitations,
+      },
       createdAt: toIsoTimestamp(snapshot.createdAt, 'createdAt', snapshot.id),
       archivedAt: snapshot.archivedAt === null ? null : toIsoTimestamp(snapshot.archivedAt, 'archivedAt', snapshot.id),
     }

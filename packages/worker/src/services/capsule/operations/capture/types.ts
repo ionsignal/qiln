@@ -2,6 +2,7 @@ import type {
   CapsuleActorReference,
   CapsuleArtifactManifest,
   CapsuleArtifactManifestDigest,
+  CapsuleBlueprintPin,
   CapsuleBranchName,
   CapsuleBranchResourceInventoryDigest,
   CapsuleBranchStatus,
@@ -113,6 +114,7 @@ export interface CaptureExecutionInput {
   sourceBranchId: string
   sourceBranchName: CapsuleBranchName
   sourceBranchResourceInventoryDigest: CapsuleBranchResourceInventoryDigest
+  blueprint: CapsuleBlueprintPin
   requestedMode: CapsuleSnapshotModeValue
   capturePolicy: CapsuleSnapshotCapturePolicyPin
   plan: CapturePlan

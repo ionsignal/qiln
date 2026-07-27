@@ -14,8 +14,8 @@ import {
   type CapsuleCreateReceipt,
   type CapsuleOperationRequestHash,
   type CapsuleOperationStatusValue,
-  type QilnPersistence,
-  type QilnTables,
+  type CapsulePersistence,
+  type CapsuleTables,
 } from '@qiln/core/server'
 import { IncusError, isUniqueConstraintViolation } from '../../../../errors'
 import { createFailureDetails, failureCodeFromUnknown, failureMessageFromUnknown } from '../../failures'
@@ -38,10 +38,10 @@ import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
 const NONTERMINAL_CREATE_STATUSES = [CapsuleOperationStatus.ACCEPTED, CapsuleOperationStatus.RUNNING] as const
 
-type PersistedCreateOperation = QilnTables['capsuleOperations']['$inferSelect']
-type PersistedCreateOperationExtension = QilnTables['capsuleCreateOperations']['$inferSelect']
-type PersistedCapsule = QilnTables['capsules']['$inferSelect']
-type PersistedCapsuleBranch = QilnTables['capsuleBranches']['$inferSelect']
+type PersistedCreateOperation = CapsuleTables['capsuleOperations']['$inferSelect']
+type PersistedCreateOperationExtension = CapsuleTables['capsuleCreateOperations']['$inferSelect']
+type PersistedCapsule = CapsuleTables['capsules']['$inferSelect']
+type PersistedCapsuleBranch = CapsuleTables['capsuleBranches']['$inferSelect']
 
 interface PreProviderResourceEvidence {
   id: string
@@ -79,10 +79,10 @@ function isNonterminalCreateStatus(
  */
 export class CreateCapsuleOperationRepository<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
-  TTables extends QilnTables = QilnTables,
+  TTables extends CapsuleTables = CapsuleTables,
 > {
   constructor(
-    private readonly persistence: QilnPersistence<TDatabase, TTables>,
+    private readonly persistence: CapsulePersistence<TDatabase, TTables>,
     private readonly reader: CapsuleOperationReader<TDatabase, TTables>,
   ) {}
 

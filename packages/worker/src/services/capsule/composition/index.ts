@@ -2,6 +2,7 @@ import { CapsuleService } from '../facade'
 import { CapsuleBranchEventPublisher } from '../events/branch'
 import { CapsuleLifecycleEventPublisher } from '../events/lifecycle'
 import { CapsuleOperationEventPublisher } from '../events/operation'
+import { CapsuleRouteEventPublisher } from '../events/route'
 import { CapsuleOperationAbandonmentCoordinator } from '../operations/abandonment/coordinator'
 import { CapsuleOperationAbandonmentHandlerRegistry } from '../operations/abandonment/handler'
 import { ProviderFreeArchivalOperationLedger } from '../operations/archival/shared/operationLedger'
@@ -13,19 +14,20 @@ import { composeBranchCapability } from './branch'
 import { composeCaptureCapability } from './capture'
 import { composeCreateCapability } from './create'
 import { composeDestroyCapability } from './destroy'
+import { composeRoutingCapability } from './routing'
 import { composeSnapshotCapability } from './snapshot'
 import { composeUnarchiveCapability } from './unarchive'
 import type { ProjectService } from '../../project'
 import type { IncusClient } from '../../../incus/client/index'
 import type { OperationSupervisor } from '../../../coordination/supervisor'
-import type { CapsuleBlueprintRegistry, CapsuleChannel, QilnPersistence, QilnTables } from '@qiln/core/server'
+import type { CapsuleBlueprintRegistry, CapsuleChannel, CapsulePersistence, CapsuleTables } from '@qiln/core/server'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
 export interface ComposeCapsuleServiceOptions<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
-  TTables extends QilnTables = QilnTables,
+  TTables extends CapsuleTables = CapsuleTables,
 > {
-  persistence: QilnPersistence<TDatabase, TTables>
+  persistence: CapsulePersistence<TDatabase, TTables>
   incus: IncusClient
   channel: CapsuleChannel
   project: ProjectService
@@ -46,18 +48,16 @@ export interface ComposeCapsuleServiceOptions<
  * mutation, command registration, reconciliation, event publication, or
  * operation scheduling.
  */
-export function composeCapsuleService<TDatabase extends PostgresJsDatabase, TTables extends QilnTables>(
+export function composeCapsuleService<TDatabase extends PostgresJsDatabase, TTables extends CapsuleTables>(
   options: ComposeCapsuleServiceOptions<TDatabase, TTables>,
 ): CapsuleService {
-  // Helpers
   const operationReader = new CapsuleOperationReader(options.persistence)
   const operationSteps = new CapsuleOperationStepStore(options.persistence)
   const resources = new CapsuleBranchResourceStore(options.persistence)
-  // Events
   const operationEvents = new CapsuleOperationEventPublisher(options.channel)
   const lifecycleEvents = new CapsuleLifecycleEventPublisher(options.channel)
   const branchEvents = new CapsuleBranchEventPublisher(options.channel)
-  // Archival Operations
+  const routeEvents = new CapsuleRouteEventPublisher(options.channel)
   const archivalOperationLedger = new ProviderFreeArchivalOperationLedger(options.persistence, operationReader)
   const archive = composeArchiveCapability({
     persistence: options.persistence,
@@ -73,7 +73,6 @@ export function composeCapsuleService<TDatabase extends PostgresJsDatabase, TTab
     operationEvents,
     lifecycleEvents,
   })
-  // Create/Destroy Operation
   const create = composeCreateCapability({
     persistence: options.persistence,
     incus: options.incus,
@@ -98,7 +97,6 @@ export function composeCapsuleService<TDatabase extends PostgresJsDatabase, TTab
     lifecycleEvents,
     branchEvents,
   })
-  // Snapshot Capture Operation
   const capture = composeCaptureCapability({
     persistence: options.persistence,
     incus: options.incus,
@@ -110,24 +108,27 @@ export function composeCapsuleService<TDatabase extends PostgresJsDatabase, TTab
     branchEvents,
     enabled: options.experimentalCaptureEnabled,
   })
-  // Branch
   const branch = composeBranchCapability({
     persistence: options.persistence,
     incus: options.incus,
     project: options.project,
     branchEvents,
   })
-  // Snapshot
   const snapshot = composeSnapshotCapability({
     persistence: options.persistence,
   })
-  // Abandonment
+  const route = composeRoutingCapability({
+    persistence: options.persistence,
+    operationEvents,
+    routeEvents,
+  })
   const abandonmentHandlers = new CapsuleOperationAbandonmentHandlerRegistry([
     create.abandonment,
     archive.abandonment,
     unarchive.abandonment,
     destroy.abandonment,
     capture.abandonment,
+    ...route.abandonment,
   ])
   const abandonmentCoordinator = new CapsuleOperationAbandonmentCoordinator({
     reader: operationReader,
@@ -142,6 +143,7 @@ export function composeCapsuleService<TDatabase extends PostgresJsDatabase, TTab
     capture: capture.submission,
     branch,
     snapshot,
+    route: route.service,
     abandonmentCoordinator,
   })
 }

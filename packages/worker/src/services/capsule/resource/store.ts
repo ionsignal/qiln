@@ -4,8 +4,8 @@ import {
   CapsuleBranchResourceStatus,
   CapsuleBranchResourceType,
   digestCanonicalJsonValue,
-  type QilnPersistence,
-  type QilnTables,
+  type CapsulePersistence,
+  type CapsuleTables,
 } from '@qiln/core/server'
 import { IncusError, isUniqueConstraintViolation } from '../../../errors'
 import { createFailureDetails, failureCodeFromUnknown, failureMessageFromUnknown } from '../failures'
@@ -69,9 +69,9 @@ function resourceIdentityDigest(
  */
 export class CapsuleBranchResourceStore<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
-  TTables extends QilnTables = QilnTables,
+  TTables extends CapsuleTables = CapsuleTables,
 > {
-  constructor(private readonly persistence: QilnPersistence<TDatabase, TTables>) {}
+  constructor(private readonly persistence: CapsulePersistence<TDatabase, TTables>) {}
 
   public async findBranchResourceByOperationKey(operationId: string, resourceKey: string) {
     const db = this.persistence.db

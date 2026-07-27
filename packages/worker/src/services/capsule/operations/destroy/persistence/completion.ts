@@ -1,5 +1,10 @@
 import { and, eq, isNotNull, isNull } from 'drizzle-orm'
-import { CapsuleOperationStatus, CapsuleOperationType, type QilnPersistence, type QilnTables } from '@qiln/core/server'
+import {
+  CapsuleOperationStatus,
+  CapsuleOperationType,
+  type CapsulePersistence,
+  type CapsuleTables,
+} from '@qiln/core/server'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import { IncusError } from '../../../../../errors'
 import { toCapsuleLifecycleState, toCapsuleOperationTransition } from '../../shared'
@@ -34,8 +39,8 @@ const planner = new DestroyCapsulePlanner()
  * accepted as completion authority. Resource rows are locked and revalidated in
  * the same transaction that commits terminal aggregate state.
  */
-export async function completeDestroyCapsule<TDatabase extends PostgresJsDatabase, TTables extends QilnTables>(
-  persistence: QilnPersistence<TDatabase, TTables>,
+export async function completeDestroyCapsule<TDatabase extends PostgresJsDatabase, TTables extends CapsuleTables>(
+  persistence: CapsulePersistence<TDatabase, TTables>,
   operationId: string,
 ): Promise<DestroyCapsuleTerminalResult> {
   const db = persistence.db

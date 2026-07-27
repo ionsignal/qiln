@@ -11,12 +11,12 @@ import type { CapsuleOperationEventPublisher } from '../events/operation'
 import type { CapsuleOperationReader } from '../operations/shared/operationReader'
 import type { CapsuleOperationStepStore } from '../operations/shared/operationStepStore'
 import type { CapsuleBranchResourceStore } from '../resource/store'
-import type { QilnPersistence, QilnTables } from '@qiln/core/server'
+import type { CapsulePersistence, CapsuleTables } from '@qiln/core/server'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
 export interface ComposeDestroyCapabilityOptions<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
-  TTables extends QilnTables = QilnTables,
+  TTables extends CapsuleTables = CapsuleTables,
 > {
   incus: IncusClient
   supervisor: OperationSupervisor
@@ -26,7 +26,7 @@ export interface ComposeDestroyCapabilityOptions<
   operationEvents: CapsuleOperationEventPublisher
   lifecycleEvents: CapsuleLifecycleEventPublisher
   branchEvents: CapsuleBranchEventPublisher
-  persistence: QilnPersistence<TDatabase, TTables>
+  persistence: CapsulePersistence<TDatabase, TTables>
 }
 
 export interface ComposedDestroyCapability {
@@ -41,7 +41,7 @@ export interface ComposedDestroyCapability {
  * provider deletion. Durable ownership verification, deletion order, provider
  * intent, and failure classification remain operation-specific.
  */
-export function composeDestroyCapability<TDatabase extends PostgresJsDatabase, TTables extends QilnTables>(
+export function composeDestroyCapability<TDatabase extends PostgresJsDatabase, TTables extends CapsuleTables>(
   options: ComposeDestroyCapabilityOptions<TDatabase, TTables>,
 ): ComposedDestroyCapability {
   const repository = new DestroyCapsuleOperationRepository(options.persistence, options.operationReader)

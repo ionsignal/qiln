@@ -3,8 +3,9 @@ import {
   CapsuleOperationStatus,
   CapsuleOperationType,
   verifyCapsuleSnapshotCapturePolicyPin,
-  type QilnPersistence,
-  type QilnTables,
+  verifyCapsuleBlueprintPin,
+  type CapsulePersistence,
+  type CapsuleTables,
   type CapsuleOperationStatusValue,
 } from '@qiln/core/server'
 import { IncusError } from '../../../../../errors'
@@ -24,9 +25,9 @@ import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
 const NONTERMINAL_CAPTURE_STATUSES = [CapsuleOperationStatus.ACCEPTED, CapsuleOperationStatus.RUNNING] as const
 
-type PersistedCaptureOperation = QilnTables['capsuleOperations']['$inferSelect']
-type PersistedCaptureCapsule = QilnTables['capsules']['$inferSelect']
-type PersistedCaptureExtension = QilnTables['capsuleSnapshotCaptureOperations']['$inferSelect']
+type PersistedCaptureOperation = CapsuleTables['capsuleOperations']['$inferSelect']
+type PersistedCaptureCapsule = CapsuleTables['capsules']['$inferSelect']
+type PersistedCaptureExtension = CapsuleTables['capsuleSnapshotCaptureOperations']['$inferSelect']
 
 function isNonterminal(status: CapsuleOperationStatusValue): status is (typeof NONTERMINAL_CAPTURE_STATUSES)[number] {
   return status === CapsuleOperationStatus.ACCEPTED || status === CapsuleOperationStatus.RUNNING
@@ -42,10 +43,10 @@ function isNonterminal(status: CapsuleOperationStatusValue): status is (typeof N
  */
 export class CaptureFailurePersistence<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
-  TTables extends QilnTables = QilnTables,
+  TTables extends CapsuleTables = CapsuleTables,
 > {
   constructor(
-    private readonly persistence: QilnPersistence<TDatabase, TTables>,
+    private readonly persistence: CapsulePersistence<TDatabase, TTables>,
     private readonly reader: CapsuleOperationReader<TDatabase, TTables>,
     private readonly planner: CapturePlanner,
   ) {}
@@ -105,12 +106,20 @@ export class CaptureFailurePersistence<
       let evidenceError: unknown
       if (extension && sourceBranch) {
         try {
+          const blueprint = verifyCapsuleBlueprintPin(extension.blueprintPin)
           const policy = verifyCapsuleSnapshotCapturePolicyPin(extension.capturePolicyPin)
           if (
+            blueprint.blueprint.schema_version !== extension.blueprintSchemaVersion ||
+            blueprint.name !== extension.blueprintName ||
+            blueprint.digest !== extension.blueprintDigest ||
             policy.schemaVersion !== extension.capturePolicySchemaVersion ||
-            policy.digest !== extension.capturePolicyDigest
+            policy.digest !== extension.capturePolicyDigest ||
+            policy.blueprintName !== blueprint.name ||
+            policy.blueprintDigest !== blueprint.digest ||
+            sourceBranch.blueprintName !== blueprint.name ||
+            sourceBranch.blueprintDigest !== blueprint.digest
           ) {
-            reasons.push('capture_policy_reference_mismatch')
+            reasons.push('capture_pin_reference_mismatch')
           } else {
             const inventory = await this.lockInventory(tx, sourceBranch.id)
             const plan = this.planner.create(

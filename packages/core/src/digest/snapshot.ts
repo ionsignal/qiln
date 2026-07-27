@@ -1,7 +1,7 @@
 import { z, type ZodError } from 'zod'
 import { GlobalError, GlobalErrorCode } from '../errors'
+import { verifyCapsuleBlueprintPin } from './blueprint'
 import { digestCanonicalJsonValue } from './canonical'
-import { CapsuleBlueprintPinSchema, type CapsuleBlueprintPin } from '../schemas/blueprint/schema'
 import { classifyAbsolutePosixPathRelationship, joinAbsoluteAndRelativePosixPath } from '../schemas/posix'
 import {
   CapsuleSnapshotCapturePolicyDigestSchema,
@@ -217,34 +217,6 @@ function bodyFromPin(pin: CapsuleSnapshotCapturePolicyPin): CapsuleSnapshotCaptu
   }
 }
 
-function assertHistoricalBlueprintPin(pin: CapsuleBlueprintPin): void {
-  if (pin.name !== pin.blueprint.name) {
-    throw new GlobalError(
-      'Historical capsule blueprint pin name does not match its blueprint snapshot.',
-      GlobalErrorCode.CONFLICT,
-      {
-        pinName: pin.name,
-        blueprintName: pin.blueprint.name,
-      },
-    )
-  }
-
-  const actualDigest = digestCanonicalJsonValue(pin.blueprint, {
-    context: `historical capsule blueprint '${pin.name}'`,
-  })
-  if (actualDigest !== pin.digest) {
-    throw new GlobalError(
-      'Historical capsule blueprint snapshot does not match its pinned digest.',
-      GlobalErrorCode.CONFLICT,
-      {
-        blueprintName: pin.name,
-        expectedDigest: pin.digest,
-        actualDigest,
-      },
-    )
-  }
-}
-
 /**
  * Derives an immutable, self-contained capture-policy pin from a validated
  * historical capsule blueprint pin.
@@ -254,17 +226,7 @@ function assertHistoricalBlueprintPin(pin: CapsuleBlueprintPin): void {
  * policy input exclusively from PostgreSQL.
  */
 export function createCapsuleSnapshotCapturePolicyPin(value: unknown): CapsuleSnapshotCapturePolicyPin {
-  const parsedBlueprintPin = CapsuleBlueprintPinSchema.safeParse(value)
-  if (!parsedBlueprintPin.success) {
-    throw new GlobalError(
-      'Historical capsule blueprint pin failed validation.',
-      GlobalErrorCode.BAD_REQUEST,
-      validationDetails(parsedBlueprintPin.error),
-    )
-  }
-  const blueprintPin = parsedBlueprintPin.data
-
-  assertHistoricalBlueprintPin(blueprintPin)
+  const blueprintPin = verifyCapsuleBlueprintPin(value)
 
   const volumesByName = new Map(
     blueprintPin.blueprint.provisioning.volumes.map(volume => [volume.name, volume] as const),

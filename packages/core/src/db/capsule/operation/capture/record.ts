@@ -1,6 +1,8 @@
 import { sql } from 'drizzle-orm'
 import { check, index, integer, jsonb, pgTable, text, uniqueIndex, uuid, type PgColumn } from 'drizzle-orm/pg-core'
 import type {
+  CapsuleBlueprintDigest,
+  CapsuleBlueprintPin,
   CapsuleBranchName,
   CapsuleBranchResourceInventoryDigest,
   CapsuleSnapshotCapturePolicyDigest,
@@ -35,10 +37,14 @@ function createNullableSnapshotIdColumn(snapshotIdColumn?: PgColumn) {
 /**
  * Creates the Snapshot Capture operation extension.
  *
- * The extension owns immutable acceptance-time source-branch, capture-policy,
- * and requested-mode evidence. `snapshotId` remains null until the atomic
- * capture commit transaction links this operation to committed snapshot
- * history.
+ * The extension owns immutable acceptance-time source-branch, Blueprint,
+ * capture-policy, and requested-mode evidence. `snapshotId` remains null until
+ * the atomic capture commit transaction links this operation to committed
+ * snapshot history.
+ *
+ * The complete historical Blueprint pin makes accepted capture execution
+ * independent of mutable YAML catalog state and allows committed snapshots to
+ * retain routable application definitions.
  *
  * PostgreSQL cannot prove that the referenced base operation has the
  * `snapshot_capture` discriminator. Every repository path that uses this
@@ -63,6 +69,10 @@ export function createCapsuleSnapshotCaptureOperationsTable(
       sourceBranchResourceInventoryDigest: text('source_branch_resource_inventory_digest')
         .$type<CapsuleBranchResourceInventoryDigest>()
         .notNull(),
+      blueprintSchemaVersion: integer('blueprint_schema_version').notNull(),
+      blueprintName: text('blueprint_name').notNull(),
+      blueprintDigest: text('blueprint_digest').$type<CapsuleBlueprintDigest>().notNull(),
+      blueprintPin: jsonb('blueprint_pin').$type<CapsuleBlueprintPin>().notNull(),
       capturePolicySchemaVersion: integer('capture_policy_schema_version').notNull(),
       capturePolicyDigest: text('capture_policy_digest').$type<CapsuleSnapshotCapturePolicyDigest>().notNull(),
       capturePolicyPin: jsonb('capture_policy_pin').$type<CapsuleSnapshotCapturePolicyPin>().notNull(),
@@ -71,9 +81,15 @@ export function createCapsuleSnapshotCaptureOperationsTable(
     },
     table => [
       index('capsule_snapshot_capture_operations_source_branch_idx').on(table.sourceBranchId),
+      index('capsule_snapshot_capture_operations_blueprint_digest_idx').on(table.blueprintDigest),
       index('capsule_snapshot_capture_operations_policy_digest_idx').on(table.capturePolicyDigest),
       index('capsule_snapshot_capture_operations_mode_idx').on(table.requestedMode),
       uniqueIndex('capsule_snapshot_capture_operations_snapshot_unique_idx').on(table.snapshotId),
+      check('capsule_snapshot_capture_operations_blueprint_schema_check', sql`${table.blueprintSchemaVersion} = 1`),
+      check(
+        'capsule_snapshot_capture_operations_blueprint_digest_check',
+        sql`${table.blueprintDigest} ~ '^sha256:[a-f0-9]{64}$'`,
+      ),
       check('capsule_snapshot_capture_operations_policy_schema_check', sql`${table.capturePolicySchemaVersion} = 1`),
       check(
         'capsule_snapshot_capture_operations_policy_digest_check',

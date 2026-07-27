@@ -18,7 +18,7 @@ export function registerCapsuleSnapshotHandlers(worker: QilnWorkerRuntime): void
   worker.channel.handle(
     CapsuleSnapshotCommandName.SNAPSHOTS_LIST,
     async input => {
-      return await worker.capsule.snapshot.listForOwner(input.target.id, input.capsuleId, {
+      return await worker.capsule.snapshot.list(input.target.id, input.capsuleId, {
         includeExperimental: input.includeExperimental,
       })
     },

@@ -1,4 +1,4 @@
-import type { CapsuleOperationRequestHash, QilnPersistence, QilnTables } from '@qiln/core/server'
+import type { CapsuleOperationRequestHash, CapsulePersistence, CapsuleTables } from '@qiln/core/server'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import type { CapsuleOperationReader } from '../../shared'
 import type { CapturePlanner } from '../plan'
@@ -28,7 +28,7 @@ import type {
  */
 export class CaptureRepository<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
-  TTables extends QilnTables = QilnTables,
+  TTables extends CapsuleTables = CapsuleTables,
 > {
   private readonly acceptance: CaptureAcceptancePersistence<TDatabase, TTables>
   private readonly input: CaptureInputPersistence<TDatabase, TTables>
@@ -40,7 +40,7 @@ export class CaptureRepository<
   public readonly resources: CaptureResourcePersistence<TDatabase, TTables>
 
   constructor(
-    persistence: QilnPersistence<TDatabase, TTables>,
+    persistence: CapsulePersistence<TDatabase, TTables>,
     reader: CapsuleOperationReader<TDatabase, TTables>,
     planner: CapturePlanner,
   ) {

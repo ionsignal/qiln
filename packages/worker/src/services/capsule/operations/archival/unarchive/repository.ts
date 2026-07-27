@@ -6,8 +6,8 @@ import {
   type CapsuleOperationRequestHash,
   type CapsuleOperationStatusValue,
   type CapsuleUnarchiveReceipt,
-  type QilnPersistence,
-  type QilnTables,
+  type CapsulePersistence,
+  type CapsuleTables,
 } from '@qiln/core/server'
 import { IncusError, isUniqueConstraintViolation } from '../../../../../errors'
 import {
@@ -42,7 +42,7 @@ import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
 const NONTERMINAL_UNARCHIVE_STATUSES = [CapsuleOperationStatus.ACCEPTED, CapsuleOperationStatus.RUNNING] as const
 
-type PersistedUnarchiveOperation = QilnTables['capsuleOperations']['$inferSelect']
+type PersistedUnarchiveOperation = CapsuleTables['capsuleOperations']['$inferSelect']
 
 function isNonterminalUnarchiveStatus(
   status: CapsuleOperationStatusValue,
@@ -65,10 +65,10 @@ function isSameTimestamp(left: Date, right: Date): boolean {
  */
 export class CapsuleUnarchiveRepository<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
-  TTables extends QilnTables = QilnTables,
+  TTables extends CapsuleTables = CapsuleTables,
 > {
   constructor(
-    private readonly persistence: QilnPersistence<TDatabase, TTables>,
+    private readonly persistence: CapsulePersistence<TDatabase, TTables>,
     private readonly operationLedger: ProviderFreeArchivalOperationLedger<TDatabase, TTables>,
   ) {}
 

@@ -8,6 +8,10 @@ import { CapsuleBranchNameSchema } from './branch'
  * `create` initializes the capsule aggregate and its root editable branch.
  * `snapshot_capture` creates immutable committed capsule history from one
  * durably fenced source branch.
+ *
+ * `promote` and `rollback` participate in the same capsule-wide nonterminal
+ * operation fence. Their operation-specific immutable input belongs to the
+ * route-operation extension.
  */
 export const CapsuleOperationType = {
   CREATE: 'create',
@@ -15,6 +19,8 @@ export const CapsuleOperationType = {
   UNARCHIVE: 'unarchive',
   DESTROY: 'destroy',
   SNAPSHOT_CAPTURE: 'snapshot_capture',
+  PROMOTE: 'promote',
+  ROLLBACK: 'rollback',
 } as const
 
 export type CapsuleOperationTypeValue = (typeof CapsuleOperationType)[keyof typeof CapsuleOperationType]
@@ -25,6 +31,8 @@ export const CapsuleOperationTypeValues = [
   CapsuleOperationType.UNARCHIVE,
   CapsuleOperationType.DESTROY,
   CapsuleOperationType.SNAPSHOT_CAPTURE,
+  CapsuleOperationType.PROMOTE,
+  CapsuleOperationType.ROLLBACK,
 ] as const
 
 export const CapsuleOperationTypeSchema = z.enum(CapsuleOperationTypeValues)
@@ -34,7 +42,7 @@ export const CapsuleOperationTypeSchema = z.enum(CapsuleOperationTypeValues)
  *
  * A nonterminal operation is never resumed after Worker process loss. The
  * Worker either safely classifies it as failed before provider intent or marks
- * the affected aggregate cleanup_required when provider state is uncertain.
+ * the affected domain state cleanup_required when provider state is uncertain.
  */
 export const CapsuleOperationStatus = {
   ACCEPTED: 'accepted',

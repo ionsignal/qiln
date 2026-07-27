@@ -1,5 +1,7 @@
 import type {
   CapsuleArtifactManifestDigest,
+  CapsuleBlueprintDigest,
+  CapsuleBlueprintPin,
   CapsuleBranchName,
   CapsuleBranchResourceInventoryDigest,
   CapsuleSnapshotCapturePolicyDigest,
@@ -20,6 +22,10 @@ export interface CapsuleSnapshotRecord {
   sourceBranchId: string
   sourceBranchName: CapsuleBranchName
   sourceBranchResourceInventoryDigest: CapsuleBranchResourceInventoryDigest
+  blueprintSchemaVersion: number
+  blueprintName: string
+  blueprintDigest: CapsuleBlueprintDigest
+  blueprintPin: CapsuleBlueprintPin
   capturePolicySchemaVersion: number
   capturePolicyDigest: CapsuleSnapshotCapturePolicyDigest
   capturePolicyPin: CapsuleSnapshotCapturePolicyPin

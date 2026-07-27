@@ -1,5 +1,10 @@
 import { and, eq, isNull } from 'drizzle-orm'
-import { CapsuleOperationStatus, CapsuleOperationType, type QilnPersistence, type QilnTables } from '@qiln/core/server'
+import {
+  CapsuleOperationStatus,
+  CapsuleOperationType,
+  type CapsulePersistence,
+  type CapsuleTables,
+} from '@qiln/core/server'
 import { IncusError } from '../../../../../errors'
 import { toCapsuleOperationTransition } from '../../shared'
 import type { CaptureRunningResult } from '../types'
@@ -13,9 +18,9 @@ import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
  */
 export class CaptureExecutionPersistence<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
-  TTables extends QilnTables = QilnTables,
+  TTables extends CapsuleTables = CapsuleTables,
 > {
-  constructor(private readonly persistence: QilnPersistence<TDatabase, TTables>) {}
+  constructor(private readonly persistence: CapsulePersistence<TDatabase, TTables>) {}
 
   public async claim(operationId: string): Promise<CaptureRunningResult> {
     const db = this.persistence.db

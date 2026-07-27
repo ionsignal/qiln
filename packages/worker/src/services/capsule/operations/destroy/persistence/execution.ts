@@ -1,5 +1,10 @@
 import { and, asc, eq, isNull } from 'drizzle-orm'
-import { CapsuleOperationStatus, CapsuleOperationType, type QilnPersistence, type QilnTables } from '@qiln/core/server'
+import {
+  CapsuleOperationStatus,
+  CapsuleOperationType,
+  type CapsulePersistence,
+  type CapsuleTables,
+} from '@qiln/core/server'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import { IncusError } from '../../../../../errors'
 import {
@@ -19,10 +24,10 @@ import type { DestroyCapsuleAcceptedBranch, DestroyCapsuleExecutionInput } from 
  */
 export class DestroyCapsuleExecutionPersistence<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
-  TTables extends QilnTables = QilnTables,
+  TTables extends CapsuleTables = CapsuleTables,
 > {
   constructor(
-    private readonly persistence: QilnPersistence<TDatabase, TTables>,
+    private readonly persistence: CapsulePersistence<TDatabase, TTables>,
     private readonly reader: CapsuleOperationReader<TDatabase, TTables>,
   ) {}
 

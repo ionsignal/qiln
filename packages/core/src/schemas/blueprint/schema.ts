@@ -1,11 +1,11 @@
 import { z } from 'zod'
 import { classifyAbsolutePosixPathRelationship, joinAbsoluteAndRelativePosixPath } from '../posix'
+import { CapsuleBlueprintApplicationSchema } from './application'
 import { CapsuleBlueprintSnapshotCapturePolicySchema, type CapsuleBlueprintArtifactRoot } from './capture'
 import { DEFAULT_CAPSULE_BLUEPRINT_NAME, CapsuleBlueprintDigestSchema } from './catalog'
 import {
   CapsuleBlueprintFileDefinitionSchema,
   CapsuleBlueprintIdentifierSchema,
-  CapsuleBlueprintPortDefinitionSchema,
   CapsuleBlueprintRuntimeSchema,
   CapsuleBlueprintVolumeDefinitionSchema,
 } from './provision'
@@ -33,12 +33,7 @@ export const CapsuleBlueprintSchema = z
       .default({ volumes: [], files: [] }),
     runtime: CapsuleBlueprintRuntimeSchema,
     snapshot_capture: CapsuleBlueprintSnapshotCapturePolicySchema,
-    application: z
-      .object({
-        ports: z.array(CapsuleBlueprintPortDefinitionSchema).default([]),
-      })
-      .strict()
-      .optional(),
+    applications: z.array(CapsuleBlueprintApplicationSchema).min(1),
   })
   .strict()
   .superRefine((blueprint, context) => {
@@ -68,7 +63,6 @@ export const CapsuleBlueprintSchema = z
         mountPathIndexes.set(volume.mount_path, index)
       }
     })
-
     const artifactRootsById = new Map<string, CapsuleBlueprintArtifactRoot>()
     const artifactRootIndexesById = new Map<string, number>()
     const artifactRootVolumes = new Set<string>()
@@ -78,7 +72,6 @@ export const CapsuleBlueprintSchema = z
       volume: string
       mountPath: string
     }> = []
-
     blueprint.snapshot_capture.artifact_roots.forEach((root, index) => {
       const existingRootIndex = artifactRootIndexesById.get(root.id)
       if (existingRootIndex !== undefined) {
@@ -100,7 +93,6 @@ export const CapsuleBlueprintSchema = z
       } else {
         artifactRootVolumes.add(root.volume)
       }
-
       const requiredPathIndexes = new Map<string, number>()
       root.required_paths.forEach((requiredPath, requiredPathIndex) => {
         const existingRequiredPathIndex = requiredPathIndexes.get(requiredPath.path)
@@ -114,7 +106,6 @@ export const CapsuleBlueprintSchema = z
           requiredPathIndexes.set(requiredPath.path, requiredPathIndex)
         }
       })
-
       const exclusionPathIndexes = new Map<string, number>()
       root.exclusions.forEach((exclusion, exclusionIndex) => {
         const existingExclusionIndex = exclusionPathIndexes.get(exclusion.path)
@@ -128,7 +119,6 @@ export const CapsuleBlueprintSchema = z
           exclusionPathIndexes.set(exclusion.path, exclusionIndex)
         }
       })
-
       const volume = volumesByName.get(root.volume)
       if (!volume) {
         context.addIssue({
@@ -175,7 +165,6 @@ export const CapsuleBlueprintSchema = z
           })
         }
       }
-
       for (let leftIndex = 0; leftIndex < root.exclusions.length; leftIndex++) {
         const left = root.exclusions[leftIndex]!
         const absoluteLeftPath = joinAbsoluteAndRelativePosixPath(volume.mount_path, left.path)
@@ -193,7 +182,6 @@ export const CapsuleBlueprintSchema = z
           })
         }
       }
-
       root.required_paths.forEach(requiredPath => {
         const absoluteRequiredPath = joinAbsoluteAndRelativePosixPath(volume.mount_path, requiredPath.path)
         root.exclusions.forEach((exclusion, exclusionIndex) => {
@@ -216,7 +204,19 @@ export const CapsuleBlueprintSchema = z
         })
       })
     })
-
+    const applicationIndexes = new Map<string, number>()
+    blueprint.applications.forEach((application, index) => {
+      const existingApplicationIndex = applicationIndexes.get(application.name)
+      if (existingApplicationIndex !== undefined) {
+        context.addIssue({
+          code: 'custom',
+          path: ['applications', index, 'name'],
+          message: `Blueprint application '${application.name}' already appears at index ${existingApplicationIndex}.`,
+        })
+      } else {
+        applicationIndexes.set(application.name, index)
+      }
+    })
     const applicationCapabilityIndexes = new Map<string, number>()
     blueprint.snapshot_capture.application_capabilities.forEach((capability, index) => {
       const existingCapabilityIndex = applicationCapabilityIndexes.get(capability.application)
@@ -229,8 +229,23 @@ export const CapsuleBlueprintSchema = z
       } else {
         applicationCapabilityIndexes.set(capability.application, index)
       }
+      if (!applicationIndexes.has(capability.application)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['snapshot_capture', 'application_capabilities', index, 'application'],
+          message: `Snapshot capture capability references unknown Blueprint application '${capability.application}'.`,
+        })
+      }
     })
-
+    blueprint.applications.forEach((application, index) => {
+      if (!applicationCapabilityIndexes.has(application.name)) {
+        context.addIssue({
+          code: 'custom',
+          path: ['applications', index, 'name'],
+          message: `Blueprint application '${application.name}' must declare one snapshot-capture capability.`,
+        })
+      }
+    })
     for (let leftIndex = 0; leftIndex < resolvedArtifactRoots.length; leftIndex++) {
       const left = resolvedArtifactRoots[leftIndex]!
       for (let rightIndex = leftIndex + 1; rightIndex < resolvedArtifactRoots.length; rightIndex++) {
@@ -295,7 +310,6 @@ export const CapsuleBlueprintSchema = z
         }
       }
     })
-
     const externalMountIndexesByVolume = new Map<string, number>()
     const externalDependencyIndexes = new Map<string, number>()
     const resolvedExternalMounts: Array<{
@@ -368,7 +382,6 @@ export const CapsuleBlueprintSchema = z
         artifactRootId: containingRoots[0]!.id,
       })
     })
-
     for (let leftIndex = 0; leftIndex < resolvedExternalMounts.length; leftIndex++) {
       const left = resolvedExternalMounts[leftIndex]!
       for (let rightIndex = leftIndex + 1; rightIndex < resolvedExternalMounts.length; rightIndex++) {
@@ -382,7 +395,6 @@ export const CapsuleBlueprintSchema = z
         }
       }
     }
-
     blueprint.provisioning.volumes.forEach((volume, index) => {
       if (volume.type !== 'bind') {
         return
@@ -398,7 +410,6 @@ export const CapsuleBlueprintSchema = z
         })
       }
     })
-
     blueprint.snapshot_capture.artifact_roots.forEach((root, rootIndex) => {
       const resolvedRoot = resolvedArtifactRoots.find(candidate => candidate.id === root.id)
       if (!resolvedRoot) {
@@ -419,7 +430,6 @@ export const CapsuleBlueprintSchema = z
           })
         }
       })
-
       root.exclusions.forEach((exclusion, exclusionIndex) => {
         const absoluteExclusionPath = joinAbsoluteAndRelativePosixPath(resolvedRoot.mountPath, exclusion.path)
         const boundary = resolvedExternalMounts.find(
@@ -427,7 +437,6 @@ export const CapsuleBlueprintSchema = z
             externalMount.artifactRootId === root.id &&
             classifyAbsolutePosixPathRelationship(absoluteExclusionPath, externalMount.mountPath) !== 'disjoint',
         )
-
         if (boundary) {
           context.addIssue({
             code: 'custom',
@@ -437,7 +446,6 @@ export const CapsuleBlueprintSchema = z
         }
       })
     })
-
     const gitRepositoryIndexesById = new Map<string, number>()
     const gitRepositoryIndexesByLocation = new Map<string, number>()
     blueprint.snapshot_capture.git_repositories.forEach((repository, index) => {
@@ -485,7 +493,6 @@ export const CapsuleBlueprintSchema = z
           message: `Git repository '${repository.id}' overlaps external mount boundary '${conflictingExternalMount.volume}'. Git repositories and external mount boundaries must be disjoint.`,
         })
       }
-
       root.required_paths.forEach(requiredPath => {
         if (requiredPath.type !== 'file') {
           return
@@ -500,7 +507,6 @@ export const CapsuleBlueprintSchema = z
           message: `Git repository '${repository.id}' cannot equal or be nested beneath required file '${requiredPath.path}'.`,
         })
       })
-
       root.exclusions.forEach((exclusion, exclusionIndex) => {
         const absoluteExclusionPath = joinAbsoluteAndRelativePosixPath(resolvedRoot.mountPath, exclusion.path)
         if (!isSameOrAncestorPath(absoluteExclusionPath, absoluteRepositoryPath)) {
@@ -512,7 +518,6 @@ export const CapsuleBlueprintSchema = z
           message: `Artifact exclusion '${exclusion.path}' cannot equal or contain Git repository '${repository.id}'.`,
         })
       })
-
       /**
        * Declared repositories are intentionally not rejected for strict
        * parent/child nesting. Duplicate locations are rejected above, while
