@@ -2,7 +2,8 @@ import path from 'node:path'
 import { CapsuleBlueprintRegistry, CapsuleNatsChannel } from '@qiln/core/server'
 import { registerCapsuleChannelHandlers } from './channel'
 import { OperationSupervisor, WorkerAuthority, type AuthorityLossError } from './coordination'
-import { IncusClient } from './incus/client/index'
+import { CaddyClient } from './caddy'
+import { IncusClient } from './incus/client'
 import { ProjectService } from './services/project'
 import { composeCapsuleService, type CapsuleService } from './services/capsule'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
@@ -19,6 +20,8 @@ type ResolvedWorkerRuntimeConfig = WorkerRuntimeConfig & {
   database: NonNullable<WorkerRuntimeConfig['database']>
   nats: NonNullable<WorkerRuntimeConfig['nats']>
   incus: NonNullable<WorkerRuntimeConfig['incus']>
+  caddy: NonNullable<WorkerRuntimeConfig['caddy']>
+  routing: NonNullable<WorkerRuntimeConfig['routing']>
 }
 
 class WorkerRuntimeFailStopError extends Error {
@@ -58,11 +61,19 @@ function resolveWorkerRuntimeConfig(config?: WorkerRuntimeConfig): ResolvedWorke
   if (!config.incus) {
     throw new Error(`${WORKER_LOG_PREFIX} Missing required configuration: config.incus is required.`)
   }
+  if (!config.caddy) {
+    throw new Error(`${WORKER_LOG_PREFIX} Missing required configuration: config.caddy is required.`)
+  }
+  if (!config.routing) {
+    throw new Error(`${WORKER_LOG_PREFIX} Missing required configuration: config.routing is required.`)
+  }
   return {
     ...config,
     database: config.database,
     nats: config.nats,
     incus: config.incus,
+    caddy: config.caddy,
+    routing: config.routing,
   }
 }
 
@@ -80,6 +91,7 @@ export class QilnWorkerRuntime<
   public readonly project: ProjectService
   public readonly capsule: CapsuleService
   public readonly incus: IncusClient
+  public readonly caddy: CaddyClient
   public readonly channel: CapsuleNatsChannel
   public readonly blueprints: CapsuleBlueprintRegistry
   public readonly supervisor: OperationSupervisor
@@ -102,6 +114,7 @@ export class QilnWorkerRuntime<
       },
     })
     this.incus = new IncusClient(this.config.incus)
+    this.caddy = new CaddyClient(this.config.caddy)
     this.project = new ProjectService(this.incus)
     this.channel = new CapsuleNatsChannel(this.config.nats, {
       loggerPrefix: CHANNEL_LOG_PREFIX,
@@ -188,6 +201,15 @@ export class QilnWorkerRuntime<
       this.throwIfFailStopped()
 
       /**
+       * Caddy startup validation is deliberately read-only. The Worker must
+       * refuse command intake when the infrastructure-owned route array cannot
+       * prove its expected server, Qiln-only route shapes, and terminal
+       * fallback boundary.
+       */
+      await this.caddy.init()
+      this.throwIfFailStopped()
+
+      /**
        * Durable nonterminal operations from an earlier process are dispatched
        * to their operation-local abandonment handlers before any provider
        * reconciliation or new command intake.
@@ -250,16 +272,13 @@ export class QilnWorkerRuntime<
   private async shutdown(): Promise<void> {
     this.supervisor.beginShutdown()
     let channelShutdownError: unknown
-
     try {
       await this.shutdownChannel()
     } catch (error: unknown) {
       channelShutdownError = error
       console.error(`${WORKER_LOG_PREFIX} Capsule Channel shutdown failed while closing command intake.`, error)
     }
-
     const drain = await this.supervisor.drain(DEFAULT_OPERATION_DRAIN_TIMEOUT_MS)
-
     if (!drain.settled) {
       const drainError = new WorkerRuntimeFailStopError(
         'Supervised capsule operations did not drain before the shutdown deadline. Normal authority release is prohibited.',
@@ -270,6 +289,8 @@ export class QilnWorkerRuntime<
       )
 
       this.markFailStopped(drainError)
+
+      this.caddy.destroy()
       this.incus.destroy()
 
       console.error(`${WORKER_LOG_PREFIX} FATAL: Worker shutdown timed out with active capsule operations.`, {
@@ -282,6 +303,7 @@ export class QilnWorkerRuntime<
     }
 
     this.incus.destroy()
+    this.caddy.destroy()
 
     if (this.fatalError) {
       console.error(
@@ -322,15 +344,13 @@ export class QilnWorkerRuntime<
         recordedBackendPid: this.authority.recordedBackendPid,
       },
     )
-
     this.markFailStopped(failStopError)
     this.supervisor.beginShutdown()
+    this.caddy.destroy()
     this.incus.destroy()
-
     void this.shutdownChannel().catch((channelError: unknown) => {
       console.error(`${WORKER_LOG_PREFIX} Failed to close Capsule Channel intake after authority loss.`, channelError)
     })
-
     console.error(`${WORKER_LOG_PREFIX} FATAL: Worker entered fail-stop state after authority loss.`, {
       error: detailsFromUnknown(error),
       activeOperationIds: this.supervisor.activeOperationIds(),
