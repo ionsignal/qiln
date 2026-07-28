@@ -22,6 +22,7 @@ export interface IncusEventsOptions {
 export class IncusEvents {
   private readonly config: WorkerIncusConfig
   private readonly eventUrl: string
+  private readonly usesSocket: boolean
   private readonly observe: OperationObserver
   private readonly reconcile: () => Promise<void>
 
@@ -33,6 +34,7 @@ export class IncusEvents {
   constructor(options: IncusEventsOptions) {
     this.config = options.config
     this.eventUrl = options.endpoints.eventUrl
+    this.usesSocket = options.endpoints.socketPath !== undefined
     this.observe = options.observe
     this.reconcile = options.reconcile
   }
@@ -95,6 +97,7 @@ export class IncusEvents {
       if (this.closed || this.socket !== socket) {
         return
       }
+
       this.message(data)
     })
     socket.on('error', error => {
@@ -144,14 +147,14 @@ export class IncusEvents {
     const options: ClientOptions = {
       headers: {},
     }
-    if (this.config.socketPath && !this.config.url) {
+    if (this.usesSocket) {
       return options
     }
     options.rejectUnauthorized = this.config.rejectUnauthorized ?? false
     options.cert = this.config.cert
     options.key = this.config.key
-    if (this.config.authToken) {
-      options.headers!['Authorization'] = `Basic ${Buffer.from(this.config.authToken).toString('base64')}`
+    if (this.config.basicAuth) {
+      options.headers!['Authorization'] = `Basic ${Buffer.from(this.config.basicAuth).toString('base64')}`
     }
     return options
   }

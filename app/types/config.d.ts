@@ -1,6 +1,12 @@
 import type { FastifyInstance } from 'fastify'
 import type { QilnEngineController } from '@qiln/engine/server'
-import type { QilnWorkerRuntime, WorkerRuntimeConfig, WorkerFeatureConfig } from '@qiln/worker/server'
+import type {
+  QilnWorkerRuntime,
+  WorkerRuntimeConfig,
+  WorkerFeatureConfig,
+  WorkerCaddyConfig,
+  WorkerRoutingConfig,
+} from '@qiln/worker/server'
 import type { Session } from '@server/plugins/session'
 import type { Database, Persistence } from '@server/db'
 
@@ -42,6 +48,8 @@ type DatabaseConfig = NonNullable<WorkerRuntimeConfig['database']>
 type DefinitionConfig = NonNullable<WorkerRuntimeConfig['definitions']>
 type IncusConfig = NonNullable<WorkerRuntimeConfig['incus']>
 type NatsConfig = NonNullable<WorkerRuntimeConfig['nats']>
+type CaddyConfig = WorkerCaddyConfig
+type RoutingConfig = WorkerRoutingConfig
 type FeatureConfig = Required<WorkerFeatureConfig>
 
 type WorkerHostConfig = Omit<Required<WorkerRuntimeConfig>, 'features'> & {
@@ -80,6 +88,7 @@ declare module 'fastify' {
   interface FastifyRequest {
     session: Session
   }
+
   interface FastifyInstance {
     db: Database
     persistence: Persistence
@@ -100,6 +109,8 @@ export type {
   DatabaseConfig,
   DefinitionConfig,
   IncusConfig,
+  CaddyConfig,
+  RoutingConfig,
   WorkerConfig,
   FeatureConfig,
 }

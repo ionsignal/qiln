@@ -20,11 +20,16 @@ const defaultRateLimitConfig = {
   timeWindow: 250,
 }
 
+const defaultIncusEndpoint = 'unix:///var/snap/incus/common/incus/unix.socket'
+const defaultCaddyEndpoint = 'unix:///run/qiln-caddy/admin.sock'
+const defaultCaddyServer = 'qiln'
+const defaultCaddyFallbackId = 'qiln-route-fallback-experimental'
+const defaultRouteBaseDomain = 'edge.qiln.com'
+
 // Helper to get the application path
 const appPath = process.env.FASTIFY_APP_PATH ?? process.cwd()
 // Helper to safely decode Base64 strings for mTLS certificates
 const decodeBase64 = (value?: string) => (value ? Buffer.from(value, 'base64').toString('utf-8') : undefined)
-
 export default {
   dev,
   host,
@@ -81,13 +86,20 @@ export default {
     token: process.env.NATS_TOKEN || undefined,
   },
   incus: {
-    socketPath: process.env.INCUS_URL
-      ? undefined
-      : process.env.INCUS_SOCKET_PATH || '/var/snap/incus/common/incus/unix.socket',
-    url: process.env.INCUS_URL,
+    endpoint: process.env.INCUS_ENDPOINT || defaultIncusEndpoint,
     cert: decodeBase64(process.env.INCUS_CLIENT_CERT_B64),
     key: decodeBase64(process.env.INCUS_CLIENT_KEY_B64),
-    authToken: process.env.INCUS_AUTH_TOKEN,
+    basicAuth: process.env.INCUS_BASIC_AUTH,
     rejectUnauthorized: process.env.INCUS_REJECT_UNAUTHORIZED === 'true',
+    project: process.env.INCUS_PROJECT || undefined,
+  },
+  caddy: {
+    endpoint: process.env.QILN_CADDY_ENDPOINT || defaultCaddyEndpoint,
+    server: process.env.QILN_CADDY_SERVER || defaultCaddyServer,
+    fallbackId: process.env.QILN_CADDY_FALLBACK_ID || defaultCaddyFallbackId,
+    timeoutMs: parseInt(process.env.QILN_CADDY_REQUEST_TIMEOUT_MS ?? '15000', 10),
+  },
+  routing: {
+    baseDomain: process.env.QILN_ROUTE_BASE_DOMAIN || defaultRouteBaseDomain,
   },
 } satisfies EnvironmentConfig

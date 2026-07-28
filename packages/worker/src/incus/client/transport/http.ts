@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import { Agent, fetch, type Response } from 'undici'
 import { IncusError } from '../../../errors'
+import { parseIncusEndpoint } from '../../../endpoint'
 import { detailsFromUnknown, messageFromUnknown } from './error'
 import type { WorkerIncusConfig } from '../../../types'
 import type { IncusMutationOptions, IncusRawMutationOptions, IncusRequestOptions } from '../types'
@@ -12,26 +13,39 @@ const DEFAULT_PIPELINING = 10
 /**
  * Resolves the shared HTTP and WebSocket endpoints for one Incus transport.
  *
- * A configured network URL takes precedence over the local Unix socket. The
- * runtime normally provides only one transport, but keeping precedence here
- * makes direct construction deterministic as well.
+ * A configured endpoint is either a local Unix socket or an HTTPS origin. The
+ * endpoint never includes the Incus API version path because this transport
+ * owns the `/1.0` API boundary.
  */
 export function resolveIncusEndpoints(config: WorkerIncusConfig): IncusEndpoints {
-  if (config.url) {
-    const url = config.url.replace(/\/+$/, '')
-    return {
-      baseUrl: `${url}/1.0`,
-      eventUrl: `${url.replace(/^http/, 'ws')}/1.0/events?type=operation&all-projects=true`,
-    }
+  let endpoint
+  try {
+    endpoint = parseIncusEndpoint(config.endpoint ?? '')
+  } catch (error: unknown) {
+    throw new IncusError(
+      error instanceof Error ? error.message : 'Invalid Incus endpoint.',
+      'VALIDATION_ERROR',
+      detailsFromUnknown(error),
+    )
   }
-  if (config.socketPath) {
+  if (endpoint.transport === 'unix') {
     return {
       baseUrl: 'http://localhost/1.0',
-      eventUrl: `ws+unix://${config.socketPath}:/1.0/events?type=operation&all-projects=true`,
-      socketPath: config.socketPath,
+      eventUrl: `ws+unix://${endpoint.socketPath}:/1.0/events?type=operation&all-projects=true`,
+      socketPath: endpoint.socketPath,
     }
   }
-  throw new IncusError('Invalid Incus config: Must provide socketPath OR url', 'TRANSPORT_ERROR')
+  const eventUrl = new URL(endpoint.baseUrl)
+  eventUrl.protocol = 'wss:'
+  eventUrl.pathname = '/1.0/events'
+  eventUrl.search = new URLSearchParams({
+    type: 'operation',
+    'all-projects': 'true',
+  }).toString()
+  return {
+    baseUrl: `${endpoint.baseUrl}/1.0`,
+    eventUrl: eventUrl.toString(),
+  }
 }
 
 /**
@@ -81,6 +95,7 @@ export class IncusHttp {
    */
   public init(): void {
     this.assertOpen()
+
     const socketPath = this.endpoints.socketPath
     if (!socketPath) {
       return
@@ -103,6 +118,7 @@ export class IncusHttp {
    */
   public async json(path: string, method: string, options?: IncusMutationOptions): Promise<Response> {
     this.assertOpen()
+
     const headers = this.headers(options)
     if (options?.body !== undefined && !headers.has('Content-Type')) {
       headers.set('Content-Type', 'application/json')
@@ -135,6 +151,7 @@ export class IncusHttp {
    */
   public async raw(path: string, method: string, options?: IncusRawMutationOptions): Promise<Response> {
     this.assertOpen()
+
     const headers = this.headers(options)
     if (options?.body !== undefined && !headers.has('Content-Type')) {
       headers.set('Content-Type', 'application/octet-stream')
@@ -180,8 +197,8 @@ export class IncusHttp {
 
   private headers(options?: IncusRequestOptions): Headers {
     const headers = new Headers()
-    if (this.config.authToken) {
-      headers.set('Authorization', `Basic ${Buffer.from(this.config.authToken).toString('base64')}`)
+    if (this.config.basicAuth) {
+      headers.set('Authorization', `Basic ${Buffer.from(this.config.basicAuth).toString('base64')}`)
     }
     if (options?.etag) {
       headers.set('If-Match', options.etag)
