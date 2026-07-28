@@ -121,6 +121,11 @@ runtime:
 snapshot_capture:
   policy_version: 1
 
+  # Instance rootfs is reconstructed from this pinned Blueprint. Mutable
+  # capsule state must remain in managed artifact-root volumes.
+  instance_rootfs:
+    mode: rebuildable
+
   artifact_roots:
     - id: workspace
       volume: workspace

@@ -140,6 +140,9 @@ function normalizePolicyBody(body: CapsuleSnapshotCapturePolicyPinBody): Capsule
     blueprintName: body.blueprintName,
     blueprintDigest: body.blueprintDigest,
     policyVersion: body.policyVersion,
+    instanceRootfs: {
+      mode: body.instanceRootfs.mode,
+    },
     artifactRoots: body.artifactRoots
       .map(root => ({
         id: root.id,
@@ -210,6 +213,7 @@ function bodyFromPin(pin: CapsuleSnapshotCapturePolicyPin): CapsuleSnapshotCaptu
     blueprintName: pin.blueprintName,
     blueprintDigest: pin.blueprintDigest,
     policyVersion: pin.policyVersion,
+    instanceRootfs: pin.instanceRootfs,
     artifactRoots: pin.artifactRoots,
     externalMounts: pin.externalMounts,
     gitRepositories: pin.gitRepositories,
@@ -322,6 +326,7 @@ export function createCapsuleSnapshotCapturePolicyPin(value: unknown): CapsuleSn
     blueprintName: blueprintPin.name,
     blueprintDigest: blueprintPin.digest,
     policyVersion: blueprintPin.blueprint.snapshot_capture.policy_version,
+    instanceRootfs: blueprintPin.blueprint.snapshot_capture.instance_rootfs,
     artifactRoots,
     externalMounts,
     gitRepositories,

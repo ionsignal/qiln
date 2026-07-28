@@ -204,6 +204,16 @@ export const CapsuleBlueprintSchema = z
         })
       })
     })
+    blueprint.provisioning.volumes.forEach((volume, index) => {
+      if (volume.type === 'bind' || artifactRootVolumes.has(volume.name)) {
+        return
+      }
+      context.addIssue({
+        code: 'custom',
+        path: ['provisioning', 'volumes', index, 'name'],
+        message: `Managed provisioning volume '${volume.name}' must be represented by exactly one required snapshot-capture artifact root.`,
+      })
+    })
     const applicationIndexes = new Map<string, number>()
     blueprint.applications.forEach((application, index) => {
       const existingApplicationIndex = applicationIndexes.get(application.name)

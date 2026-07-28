@@ -3,6 +3,7 @@ import {
   CAPSULE_SNAPSHOT_CAPTURE_POLICY_VERSION,
   CapsuleBlueprintArtifactExclusionSchema,
   CapsuleBlueprintArtifactRequiredPathSchema,
+  CapsuleBlueprintInstanceRootfsSchema,
   CapsuleBlueprintRepositoryRelativePathSchema,
   CapsuleBlueprintSnapshotCaptureApplicationCapabilitySchema,
 } from '../../blueprint/capture'
@@ -31,7 +32,7 @@ export const CapsuleSnapshotCapturePolicyArtifactRootSchema = z
     id: CapsuleArtifactRootIdSchema,
     blueprintVolumeName: CapsuleBlueprintIdentifierSchema,
     logicalPath: CapsuleArtifactLogicalPathSchema,
-    required: z.boolean(),
+    required: z.literal(true),
     requiredPaths: z.array(CapsuleBlueprintArtifactRequiredPathSchema),
     exclusions: z.array(CapsuleBlueprintArtifactExclusionSchema),
   })
@@ -63,6 +64,7 @@ const CapsuleSnapshotCapturePolicyFieldsSchema = z
     blueprintName: CapsuleBlueprintIdentifierSchema,
     blueprintDigest: CapsuleBlueprintDigestSchema,
     policyVersion: z.literal(CAPSULE_SNAPSHOT_CAPTURE_POLICY_VERSION),
+    instanceRootfs: CapsuleBlueprintInstanceRootfsSchema,
     artifactRoots: z.array(CapsuleSnapshotCapturePolicyArtifactRootSchema).min(1),
     externalMounts: z.array(CapsuleSnapshotCapturePolicyExternalMountSchema),
     gitRepositories: z.array(CapsuleSnapshotCapturePolicyGitRepositorySchema),
@@ -460,6 +462,7 @@ export const CapsuleSnapshotCapturePolicyReferenceSchema = z
   .strict()
 
 export type CapsuleSnapshotCapturePolicyDigest = z.infer<typeof CapsuleSnapshotCapturePolicyDigestSchema>
+export type CapsuleSnapshotCapturePolicyInstanceRootfs = z.infer<typeof CapsuleBlueprintInstanceRootfsSchema>
 export type CapsuleSnapshotCapturePolicyArtifactRoot = z.infer<typeof CapsuleSnapshotCapturePolicyArtifactRootSchema>
 export type CapsuleSnapshotCapturePolicyExternalMount = z.infer<typeof CapsuleSnapshotCapturePolicyExternalMountSchema>
 export type CapsuleSnapshotCapturePolicyGitRepository = z.infer<typeof CapsuleSnapshotCapturePolicyGitRepositorySchema>

@@ -65,17 +65,40 @@ export const CapsuleBlueprintArtifactExclusionSchema = z
 /**
  * One Qiln-managed filesystem root included in canonical artifact collection.
  *
- * `volume` references a stable provisioning volume name. The root's logical
- * path is derived from that volume's `mount_path`, preventing duplicate path
- * declarations from drifting apart.
+ * Every managed clone or empty volume must resolve to exactly one required
+ * artifact root. `volume` references the stable provisioning volume name and
+ * the root logical path is derived from that volume's `mount_path`.
  */
 export const CapsuleBlueprintArtifactRootSchema = z
   .object({
     id: CapsuleArtifactRootIdSchema,
     volume: CapsuleBlueprintIdentifierSchema,
-    required: z.boolean().default(true),
+    required: z.literal(true).default(true),
     required_paths: z.array(CapsuleBlueprintArtifactRequiredPathSchema).default([]),
     exclusions: z.array(CapsuleBlueprintArtifactExclusionSchema).default([]),
+  })
+  .strict()
+
+export const CapsuleBlueprintInstanceRootfsMode = {
+  REBUILDABLE: 'rebuildable',
+} as const
+
+export type CapsuleBlueprintInstanceRootfsMode =
+  (typeof CapsuleBlueprintInstanceRootfsMode)[keyof typeof CapsuleBlueprintInstanceRootfsMode]
+
+export const CapsuleBlueprintInstanceRootfsModeValues = [CapsuleBlueprintInstanceRootfsMode.REBUILDABLE] as const
+export const CapsuleBlueprintInstanceRootfsModeSchema = z.enum(CapsuleBlueprintInstanceRootfsModeValues)
+
+/**
+ * Declares how instance rootfs state is handled by Snapshot Capture and fork.
+ *
+ * V1 supports only rebuildable rootfs state. A fork recreates the instance from
+ * the pinned image, runtime configuration, and provisioning files. Mutable
+ * capsule state must therefore live in managed artifact-root volumes.
+ */
+export const CapsuleBlueprintInstanceRootfsSchema = z
+  .object({
+    mode: z.literal(CapsuleBlueprintInstanceRootfsMode.REBUILDABLE),
   })
   .strict()
 
@@ -183,6 +206,7 @@ export const CapsuleBlueprintSnapshotCaptureApplicationCapabilitySchema = z
 export const CapsuleBlueprintSnapshotCapturePolicySchema = z
   .object({
     policy_version: z.literal(CAPSULE_SNAPSHOT_CAPTURE_POLICY_VERSION),
+    instance_rootfs: CapsuleBlueprintInstanceRootfsSchema,
     artifact_roots: z.array(CapsuleBlueprintArtifactRootSchema).min(1),
     external_mounts: z.array(CapsuleBlueprintExternalMountSchema).default([]),
     git_repositories: z.array(CapsuleBlueprintGitRepositorySchema).default([]),
@@ -193,6 +217,7 @@ export const CapsuleBlueprintSnapshotCapturePolicySchema = z
 export type CapsuleBlueprintArtifactRequiredPath = z.infer<typeof CapsuleBlueprintArtifactRequiredPathSchema>
 export type CapsuleBlueprintArtifactExclusion = z.infer<typeof CapsuleBlueprintArtifactExclusionSchema>
 export type CapsuleBlueprintArtifactRoot = z.infer<typeof CapsuleBlueprintArtifactRootSchema>
+export type CapsuleBlueprintInstanceRootfs = z.infer<typeof CapsuleBlueprintInstanceRootfsSchema>
 export type CapsuleBlueprintModelVaultDependency = z.infer<typeof CapsuleBlueprintModelVaultDependencySchema>
 export type CapsuleBlueprintExternalMountDependency = z.infer<typeof CapsuleBlueprintExternalMountDependencySchema>
 export type CapsuleBlueprintExternalMount = z.infer<typeof CapsuleBlueprintExternalMountSchema>
