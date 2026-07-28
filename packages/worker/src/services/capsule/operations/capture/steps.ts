@@ -1,5 +1,6 @@
 export const CaptureStepKey = {
   PLAN: 'plan_capture',
+  VERIFY_ROOTFS: 'verify_rootfs_image',
   SNAPSHOT: 'create_provider_snapshots',
   COLLECT: 'collect_artifacts',
   GIT: 'collect_git',
@@ -16,6 +17,7 @@ export type CaptureStepKey = (typeof CaptureStepKey)[keyof typeof CaptureStepKey
  */
 export const CaptureStepKeys = [
   CaptureStepKey.PLAN,
+  CaptureStepKey.VERIFY_ROOTFS,
   CaptureStepKey.SNAPSHOT,
   CaptureStepKey.COLLECT,
   CaptureStepKey.GIT,

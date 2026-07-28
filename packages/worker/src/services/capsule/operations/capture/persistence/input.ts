@@ -10,9 +10,10 @@ import {
 } from '@qiln/core/server'
 import { IncusError } from '../../../../../errors'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
-import type { CapsuleOperationReader } from '../../shared'
+import { readRootfs, sameRootfs, type CapsuleOperationReader } from '../../shared'
 import type { CapsuleBranchResourceInventoryRow } from '../../../resource'
 import type { CapturePlanner } from '../plan'
+import type { CaptureSourcePersistence } from './source'
 import type { CaptureExecutionInput, CaptureResourceRecord, CaptureSourceBranch } from '../types'
 
 /**
@@ -30,6 +31,7 @@ export class CaptureInputPersistence<
     private readonly persistence: CapsulePersistence<TDatabase, TTables>,
     private readonly reader: CapsuleOperationReader<TDatabase, TTables>,
     private readonly planner: CapturePlanner,
+    private readonly sources: CaptureSourcePersistence<TDatabase, TTables>,
   ) {}
 
   public async load(operationId: string): Promise<CaptureExecutionInput> {
@@ -78,6 +80,11 @@ export class CaptureInputPersistence<
     }
     const blueprint = verifyCapsuleBlueprintPin(extension.blueprintPin)
     const capturePolicy = verifyCapsuleSnapshotCapturePolicyPin(extension.capturePolicyPin)
+    const rootfsImagePin = readRootfs(extension.rootfsImagePin, blueprint.blueprint.image_alias, {
+      operationId,
+      capsuleId: operation.capsuleId,
+      sourceBranchId: extension.sourceBranchId,
+    })
     if (
       blueprint.blueprint.schema_version !== extension.blueprintSchemaVersion ||
       blueprint.name !== extension.blueprintName ||
@@ -112,7 +119,6 @@ export class CaptureInputPersistence<
     const branch = await this.branch(operation.ownerId, operation.capsuleId, extension.sourceBranchId)
     if (
       branch.status !== 'capturing' ||
-      !branch.isRootBranch ||
       branch.name !== extension.sourceBranchName ||
       branch.resourceInventoryDigest !== extension.sourceBranchResourceInventoryDigest ||
       branch.blueprintName !== blueprint.name ||
@@ -134,6 +140,27 @@ export class CaptureInputPersistence<
         isRootBranch: branch.isRootBranch,
       })
     }
+    const source = await this.sources.load(branch)
+    if (
+      source.blueprint.blueprint.schema_version !== extension.blueprintSchemaVersion ||
+      source.blueprint.name !== blueprint.name ||
+      source.blueprint.digest !== blueprint.digest ||
+      !sameRootfs(source.rootfsImagePin, rootfsImagePin) ||
+      source.capturePolicy.schemaVersion !== extension.capturePolicySchemaVersion ||
+      source.capturePolicy.digest !== capturePolicy.digest ||
+      source.capturePolicy.blueprintName !== source.blueprint.name ||
+      source.capturePolicy.blueprintDigest !== source.blueprint.digest
+    ) {
+      throw new IncusError('Snapshot Capture source branch provenance changed after acceptance.', 'CONFLICT', {
+        operationId,
+        capsuleId: operation.capsuleId,
+        sourceBranchId: extension.sourceBranchId,
+        acceptedBlueprintDigest: blueprint.digest,
+        provenanceBlueprintDigest: source.blueprint.digest,
+        acceptedCapturePolicyDigest: capturePolicy.digest,
+        provenanceCapturePolicyDigest: source.capturePolicy.digest,
+      })
+    }
     const inventory = await this.inventory(branch.id)
     const plan = this.planner.create(
       operationId,
@@ -153,6 +180,7 @@ export class CaptureInputPersistence<
       sourceBranchName: extension.sourceBranchName,
       sourceBranchResourceInventoryDigest: extension.sourceBranchResourceInventoryDigest,
       blueprint,
+      rootfsImagePin,
       requestedMode: extension.requestedMode,
       capturePolicy,
       plan,

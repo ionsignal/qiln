@@ -18,7 +18,7 @@ import {
 } from '@qiln/core/server'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import { IncusError } from '../../../../../errors'
-import { toCapsuleLifecycleState, toCapsuleOperationTransition } from '../../shared'
+import { readRootfs, sameRootfs, toCapsuleLifecycleState, toCapsuleOperationTransition } from '../../shared'
 import type { CaptureCommitResult, CaptureResourceRecord, CommitCaptureInput } from '../types'
 
 function compareStableString(left: string, right: string): number {
@@ -140,12 +140,27 @@ export class CaptureCommitPersistence<
       }
       const blueprint = verifyCapsuleBlueprintPin(extension.blueprintPin)
       const executionBlueprint = verifyCapsuleBlueprintPin(input.execution.blueprint)
+      const rootfsImagePin = readRootfs(extension.rootfsImagePin, blueprint.blueprint.image_alias, {
+        operationId: operation.id,
+        capsuleId: operation.capsuleId,
+        sourceBranchId: extension.sourceBranchId,
+      })
+      const executionRootfsImagePin = readRootfs(
+        input.execution.rootfsImagePin,
+        executionBlueprint.blueprint.image_alias,
+        {
+          operationId: operation.id,
+          capsuleId: operation.capsuleId,
+          sourceBranchId: extension.sourceBranchId,
+        },
+      )
       if (
         blueprint.blueprint.schema_version !== extension.blueprintSchemaVersion ||
         blueprint.name !== extension.blueprintName ||
         blueprint.digest !== extension.blueprintDigest ||
         executionBlueprint.name !== blueprint.name ||
-        executionBlueprint.digest !== blueprint.digest
+        executionBlueprint.digest !== blueprint.digest ||
+        !sameRootfs(rootfsImagePin, executionRootfsImagePin)
       ) {
         throw new IncusError('Snapshot Capture Blueprint evidence changed before atomic commit.', 'CONFLICT', {
           operationId: operation.id,
@@ -217,6 +232,7 @@ export class CaptureCommitPersistence<
           blueprintName: extension.blueprintName,
           blueprintDigest: extension.blueprintDigest,
           blueprintPin: blueprint,
+          rootfsImagePin,
           capturePolicySchemaVersion: extension.capturePolicySchemaVersion,
           capturePolicyDigest: extension.capturePolicyDigest,
           capturePolicyPin: policy,
@@ -321,6 +337,7 @@ export class CaptureCommitPersistence<
           snapshotId: snapshot.id,
           manifestRootId: root.id,
           sourceBranchResourceId: resource.sourceBranchResourceId,
+          captureResourceId: resource.id,
           provider: resource.provider,
           kind: resource.kind,
           blueprintVolumeName: resource.blueprintVolumeName,

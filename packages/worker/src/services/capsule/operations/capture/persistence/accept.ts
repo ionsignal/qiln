@@ -3,9 +3,8 @@ import {
   CapsuleOperationStatus,
   CapsuleOperationType,
   CapsuleSnapshotCaptureReceiptSchema,
-  createCapsuleSnapshotCapturePolicyPin,
-  verifyCapsuleBlueprintPin,
   verifyCapsuleSnapshotCapturePolicyPin,
+  verifyCapsuleBlueprintPin,
   type CapsuleOperationStatusValue,
   type CapsuleSnapshotCaptureReceipt,
   type CapsulePersistence,
@@ -19,17 +18,11 @@ import {
   type CapsuleOperationReader,
   type PersistedCapsuleOperation,
 } from '../../shared'
+import { CapturePlanner } from '../plan'
 import type { CapsuleBranchResourceInventoryRow } from '../../../resource'
-import type { CapturePlanner } from '../plan'
-import type {
-  AcceptCaptureCapsuleInput,
-  CaptureAcceptanceResult,
-  CaptureSourceBranch,
-  CaptureExecutionInput,
-} from '../types'
+import type { CaptureSourcePersistence } from './source'
+import type { AcceptCaptureCapsuleInput, CaptureAcceptanceResult, CaptureSourceBranch } from '../types'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
-
-type CapturePins = Pick<CaptureExecutionInput, 'blueprint' | 'capturePolicy'>
 
 /**
  * Owns atomic Snapshot Capture acceptance and idempotent replay.
@@ -46,6 +39,7 @@ export class CaptureAcceptancePersistence<
     private readonly persistence: CapsulePersistence<TDatabase, TTables>,
     private readonly reader: CapsuleOperationReader<TDatabase, TTables>,
     private readonly planner: CapturePlanner,
+    private readonly sources: CaptureSourcePersistence<TDatabase, TTables>,
   ) {}
 
   public async accept(input: AcceptCaptureCapsuleInput): Promise<CaptureAcceptanceResult> {
@@ -68,8 +62,8 @@ export class CaptureAcceptancePersistence<
           })
         }
         const branch = await this.lockBranch(tx, input.ownerId, input.capsuleId, input.sourceBranchId)
-        if (!branch.isRootBranch || branch.status !== 'offline') {
-          throw new IncusError('Evaluation-only Snapshot Capture requires the offline root branch.', 'CONFLICT', {
+        if (branch.status !== 'offline') {
+          throw new IncusError('Snapshot Capture requires an offline editable branch.', 'CONFLICT', {
             ownerId: input.ownerId,
             capsuleId: input.capsuleId,
             sourceBranchId: input.sourceBranchId,
@@ -85,7 +79,7 @@ export class CaptureAcceptancePersistence<
           })
         }
         const resources = await this.lockInventory(tx, branch.id)
-        const pins = await this.loadPins(tx, branch)
+        const pins = await this.sources.lock(tx, branch)
         const now = new Date()
         const [operation] = await tx
           .insert(capsuleOperations)
@@ -130,6 +124,7 @@ export class CaptureAcceptancePersistence<
             blueprintName: pins.blueprint.name,
             blueprintDigest: pins.blueprint.digest,
             blueprintPin: pins.blueprint,
+            rootfsImagePin: pins.rootfsImagePin,
             capturePolicySchemaVersion: pins.capturePolicy.schemaVersion,
             capturePolicyDigest: pins.capturePolicy.digest,
             capturePolicyPin: pins.capturePolicy,
@@ -483,67 +478,5 @@ export class CaptureAcceptancePersistence<
       .where(eq(capsuleBranchResources.branchId, branchId))
       .orderBy(asc(capsuleBranchResources.createdAt), asc(capsuleBranchResources.id))
       .for('update')
-  }
-
-  private async loadPins(
-    tx: Parameters<Parameters<TDatabase['transaction']>[0]>[0],
-    branch: CaptureSourceBranch,
-  ): Promise<CapturePins> {
-    const { capsuleCreateOperations, capsuleOperations } = this.persistence.tables
-    const [extension] = await tx
-      .select()
-      .from(capsuleCreateOperations)
-      .where(eq(capsuleCreateOperations.rootBranchId, branch.id))
-      .for('update')
-      .limit(1)
-    if (!extension) {
-      throw new IncusError(
-        'Snapshot Capture root branch is missing its immutable create operation input.',
-        'CONFLICT',
-        {
-          sourceBranchId: branch.id,
-          capsuleId: branch.capsuleId,
-        },
-      )
-    }
-    const [createOperation] = await tx
-      .select()
-      .from(capsuleOperations)
-      .where(eq(capsuleOperations.id, extension.operationId))
-      .for('update')
-      .limit(1)
-    if (
-      !createOperation ||
-      createOperation.type !== CapsuleOperationType.CREATE ||
-      createOperation.status !== CapsuleOperationStatus.COMPLETED ||
-      createOperation.completedAt === null ||
-      createOperation.ownerId !== branch.ownerId ||
-      createOperation.capsuleId !== branch.capsuleId ||
-      extension.rootBranchName !== branch.name ||
-      extension.blueprintName !== branch.blueprintName ||
-      extension.blueprintDigest !== branch.blueprintDigest ||
-      extension.cpu !== branch.cpu ||
-      extension.memory !== branch.memory
-    ) {
-      throw new IncusError(
-        'Snapshot Capture source branch does not match a completed immutable create operation.',
-        'CONFLICT',
-        {
-          sourceBranchId: branch.id,
-          capsuleId: branch.capsuleId,
-          createOperationId: extension.operationId,
-        },
-      )
-    }
-    const blueprint = verifyCapsuleBlueprintPin({
-      name: extension.blueprintName,
-      digest: extension.blueprintDigest,
-      blueprint: extension.blueprintSnapshot,
-    })
-    const capturePolicy = createCapsuleSnapshotCapturePolicyPin(blueprint)
-    return {
-      blueprint,
-      capturePolicy,
-    }
   }
 }

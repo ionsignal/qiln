@@ -99,20 +99,6 @@ export class CapturePlanner {
       })),
     )
 
-    if (policy.artifactRoots.length !== 1 || policy.artifactRoots[0]?.required !== true) {
-      throw new IncusError(
-        'Evaluation-only Snapshot Capture requires exactly one required managed artifact root.',
-        'CONFLICT',
-        {
-          operationId,
-          capsuleId,
-          sourceBranchId: branch.id,
-          artifactRootCount: policy.artifactRoots.length,
-          requiredArtifactRootCount: policy.artifactRoots.filter(root => root.required).length,
-        },
-      )
-    }
-
     const roots = policy.artifactRoots
       .map<CaptureRootPlan>(root => {
         const candidates = resources.filter(resource => resource.blueprintVolumeName === root.blueprintVolumeName)

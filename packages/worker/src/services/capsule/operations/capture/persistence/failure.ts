@@ -11,9 +11,16 @@ import {
 import { IncusError } from '../../../../../errors'
 import { createFailureDetails, failureCodeFromUnknown, failureMessageFromUnknown } from '../../../failures'
 import { toJsonObject } from '../../../persistence/json'
-import { toCapsuleLifecycleState, toCapsuleOperationTransition, type CapsuleOperationReader } from '../../shared'
+import {
+  readRootfs,
+  sameRootfs,
+  toCapsuleLifecycleState,
+  toCapsuleOperationTransition,
+  type CapsuleOperationReader,
+} from '../../shared'
 import type { CapsuleBranchResourceInventoryRow } from '../../../resource'
 import type { CapturePlanner } from '../plan'
+import type { CaptureSourcePersistence } from './source'
 import type {
   CaptureAbandonedClassificationResult,
   CaptureCommittedBranch,
@@ -49,6 +56,7 @@ export class CaptureFailurePersistence<
     private readonly persistence: CapsulePersistence<TDatabase, TTables>,
     private readonly reader: CapsuleOperationReader<TDatabase, TTables>,
     private readonly planner: CapturePlanner,
+    private readonly sources: CaptureSourcePersistence<TDatabase, TTables>,
   ) {}
 
   public async classify(
@@ -93,9 +101,6 @@ export class CaptureFailurePersistence<
         if (sourceBranch.status !== 'capturing') {
           reasons.push('source_branch_not_capturing')
         }
-        if (!sourceBranch.isRootBranch) {
-          reasons.push('source_branch_not_root')
-        }
         if (extension && sourceBranch.name !== extension.sourceBranchName) {
           reasons.push('source_branch_name_mismatch')
         }
@@ -107,7 +112,13 @@ export class CaptureFailurePersistence<
       if (extension && sourceBranch) {
         try {
           const blueprint = verifyCapsuleBlueprintPin(extension.blueprintPin)
+          const rootfsImagePin = readRootfs(extension.rootfsImagePin, blueprint.blueprint.image_alias, {
+            operationId,
+            capsuleId: operation.capsuleId,
+            sourceBranchId: sourceBranch.id,
+          })
           const policy = verifyCapsuleSnapshotCapturePolicyPin(extension.capturePolicyPin)
+          const source = await this.sources.lock(tx, sourceBranch)
           if (
             blueprint.blueprint.schema_version !== extension.blueprintSchemaVersion ||
             blueprint.name !== extension.blueprintName ||
@@ -115,7 +126,14 @@ export class CaptureFailurePersistence<
             policy.schemaVersion !== extension.capturePolicySchemaVersion ||
             policy.digest !== extension.capturePolicyDigest ||
             policy.blueprintName !== blueprint.name ||
-            policy.blueprintDigest !== blueprint.digest ||
+            sourceBranch.blueprintDigest !== blueprint.digest ||
+            source.blueprint.name !== blueprint.name ||
+            source.blueprint.digest !== blueprint.digest ||
+            !sameRootfs(source.rootfsImagePin, rootfsImagePin) ||
+            source.capturePolicy.schemaVersion !== policy.schemaVersion ||
+            source.capturePolicy.digest !== policy.digest ||
+            source.capturePolicy.blueprintName !== source.blueprint.name ||
+            source.capturePolicy.blueprintDigest !== source.blueprint.digest ||
             sourceBranch.blueprintName !== blueprint.name ||
             sourceBranch.blueprintDigest !== blueprint.digest
           ) {

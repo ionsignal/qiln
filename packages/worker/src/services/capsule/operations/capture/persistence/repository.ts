@@ -9,6 +9,7 @@ import { CaptureExecutionPersistence } from './execution'
 import { CaptureFailurePersistence } from './failure'
 import { CaptureInputPersistence } from './input'
 import { CaptureResourcePersistence } from './resource'
+import { CaptureSourcePersistence } from './source'
 import type {
   CaptureAbandonedClassificationResult,
   CaptureAcceptanceResult,
@@ -44,12 +45,13 @@ export class CaptureRepository<
     reader: CapsuleOperationReader<TDatabase, TTables>,
     planner: CapturePlanner,
   ) {
-    this.acceptance = new CaptureAcceptancePersistence(persistence, reader, planner)
-    this.input = new CaptureInputPersistence(persistence, reader, planner)
+    const sources = new CaptureSourcePersistence(persistence)
+    this.acceptance = new CaptureAcceptancePersistence(persistence, reader, planner, sources)
+    this.input = new CaptureInputPersistence(persistence, reader, planner, sources)
     this.execution = new CaptureExecutionPersistence(persistence)
     this.resources = new CaptureResourcePersistence(persistence)
     this.commitPersistence = new CaptureCommitPersistence(persistence)
-    this.failure = new CaptureFailurePersistence(persistence, reader, planner)
+    this.failure = new CaptureFailurePersistence(persistence, reader, planner, sources)
     this.compensation = new CaptureCompensationPersistence(persistence)
   }
 

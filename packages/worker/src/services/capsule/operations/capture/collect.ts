@@ -319,6 +319,39 @@ export class CaptureCollector {
         policyRootCount: input.policy.artifactRoots.length,
       })
     }
+    const policyRootsById = new Map(input.policy.artifactRoots.map(root => [root.id, root] as const))
+    const plansByRootId = new Map<string, CaptureRootPlan>()
+    for (const plan of input.roots) {
+      if (plansByRootId.has(plan.artifactRootId)) {
+        throw new IncusError('Snapshot Capture collection plan contains a duplicate artifact root.', 'CONFLICT', {
+          operationId: input.operationId,
+          artifactRootId: plan.artifactRootId,
+        })
+      }
+      const root = policyRootsById.get(plan.artifactRootId)
+      if (!root || root.blueprintVolumeName !== plan.blueprintVolumeName) {
+        throw new IncusError(
+          'Snapshot Capture collection plan contains an unknown or contradictory root.',
+          'CONFLICT',
+          {
+            operationId: input.operationId,
+            artifactRootId: plan.artifactRootId,
+            blueprintVolumeName: plan.blueprintVolumeName,
+            expectedBlueprintVolumeName: root?.blueprintVolumeName ?? null,
+          },
+        )
+      }
+      plansByRootId.set(plan.artifactRootId, plan)
+    }
+    for (const root of input.policy.artifactRoots) {
+      if (!plansByRootId.has(root.id)) {
+        throw new IncusError(`Snapshot Capture collection plan is missing artifact root '${root.id}'.`, 'CONFLICT', {
+          operationId: input.operationId,
+          artifactRootId: root.id,
+          blueprintVolumeName: root.blueprintVolumeName,
+        })
+      }
+    }
     const startedAt = Date.now()
     const controller = new AbortController()
     const timeoutError = collectionTimeoutError(input.operationId, limits.timeoutMs)
@@ -339,14 +372,7 @@ export class CaptureCollector {
     try {
       const roots = [...input.policy.artifactRoots].sort((left, right) => compareStableString(left.id, right.id))
       for (const root of roots) {
-        const plan = input.roots.find(candidate => candidate.artifactRootId === root.id)
-        if (!plan || plan.blueprintVolumeName !== root.blueprintVolumeName) {
-          throw new IncusError(`Snapshot Capture collection plan is missing artifact root '${root.id}'.`, 'CONFLICT', {
-            operationId: input.operationId,
-            artifactRootId: root.id,
-            blueprintVolumeName: root.blueprintVolumeName,
-          })
-        }
+        const plan = plansByRootId.get(root.id)!
         const snapshot = input.files.snapshot(plan.pool, plan.sourceVolume, plan.snapshotName)
         const externalBoundaries = new Set(
           input.policy.externalMounts.filter(mount => mount.artifactRootId === root.id).map(mount => mount.logicalPath),

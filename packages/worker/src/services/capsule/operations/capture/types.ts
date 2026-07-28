@@ -13,6 +13,7 @@ import type {
   CapsuleSnapshotGitRepository,
   CapsuleSnapshotLimitationValue,
   CapsuleSnapshotModeValue,
+  CapsuleRootfsImagePin,
 } from '@qiln/core/server'
 import type { CapsuleOperationTransitionOutput } from '../shared'
 
@@ -115,6 +116,7 @@ export interface CaptureExecutionInput {
   sourceBranchName: CapsuleBranchName
   sourceBranchResourceInventoryDigest: CapsuleBranchResourceInventoryDigest
   blueprint: CapsuleBlueprintPin
+  rootfsImagePin: CapsuleRootfsImagePin
   requestedMode: CapsuleSnapshotModeValue
   capturePolicy: CapsuleSnapshotCapturePolicyPin
   plan: CapturePlan

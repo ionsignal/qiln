@@ -37,6 +37,7 @@ type CapturePhase =
   | 'load'
   | 'claim'
   | 'intent'
+  | typeof CaptureStepKey.VERIFY_ROOTFS
   | typeof CaptureStepKey.SNAPSHOT
   | typeof CaptureStepKey.COLLECT
   | typeof CaptureStepKey.GIT
@@ -60,6 +61,7 @@ export class CaptureExecutor {
     let execution: CaptureExecutionInput | null = null
     let phase: CapturePhase = 'load'
     let providerIntentCommitted = false
+    let commitStarted = false
     let commitCompleted = false
 
     try {
@@ -76,6 +78,21 @@ export class CaptureExecutor {
 
       const running = await this.dependencies.repository.claim(operationId)
       this.dependencies.operationEvents.publishChanged(running.operation)
+
+      phase = CaptureStepKey.VERIFY_ROOTFS
+
+      await this.run(
+        capture,
+        CaptureStepKey.VERIFY_ROOTFS,
+        {
+          provider: capture.rootfsImagePin.provider,
+          project: capture.rootfsImagePin.project,
+          fingerprint: capture.rootfsImagePin.fingerprint,
+        },
+        async () => {
+          await this.dependencies.incus.images.verify(capture.rootfsImagePin)
+        },
+      )
 
       phase = 'intent'
 
@@ -118,7 +135,7 @@ export class CaptureExecutor {
           }
           const projectName = capture.plan.roots[0]?.project
           if (!projectName) {
-            throw new IncusError('Experimental Snapshot Capture has no managed artifact root.', 'CONFLICT', {
+            throw new IncusError('Snapshot Capture has no planned managed artifact root.', 'CONFLICT', {
               operationId,
             })
           }
@@ -131,7 +148,9 @@ export class CaptureExecutor {
           })
         },
       )
+
       phase = CaptureStepKey.GIT
+
       const git = await this.run(
         capture,
         CaptureStepKey.GIT,
@@ -147,7 +166,9 @@ export class CaptureExecutor {
         },
       )
       const limitations = this.limitations(collection.limitations, git.limitations)
+
       phase = CaptureStepKey.COMMIT
+
       const committed = await this.run(
         capture,
         CaptureStepKey.COMMIT,
@@ -158,6 +179,7 @@ export class CaptureExecutor {
           limitations,
         },
         async () => {
+          commitStarted = true
           const result = await this.dependencies.repository.commit({
             execution: capture,
             collection: {
@@ -181,6 +203,10 @@ export class CaptureExecutor {
         )
         return
       }
+      if (commitStarted) {
+        await this.classifyFinalizationFailure(operationId, execution, phase, providerIntentCommitted, error)
+        throw error
+      }
       await this.fail(operationId, execution, phase, providerIntentCommitted, error)
       throw error
     }
@@ -194,6 +220,7 @@ export class CaptureExecutor {
       ...collection,
       ...git,
       CapsuleSnapshotLimitation.DEPENDENCY_EVIDENCE_OMITTED,
+      CapsuleSnapshotLimitation.ROOTFS_REBUILD_ONLY,
     ])
     const expected = ExperimentalCapsuleSnapshotLimitations
     const unexpected = [...reported].filter(limitation => !expected.includes(limitation))
@@ -212,6 +239,28 @@ export class CaptureExecutor {
     }
     return [...expected]
   }
+
+  private async classifyFinalizationFailure(
+    operationId: string,
+    execution: CaptureExecutionInput | null,
+    phase: CapturePhase,
+    providerIntentCommitted: boolean,
+    error: unknown,
+  ): Promise<void> {
+    const terminal = await this.dependencies.repository.classify(operationId, error, {
+      operationId,
+      capsuleId: execution?.capsuleId,
+      sourceBranchId: execution?.sourceBranchId,
+      phase: 'experimental_snapshot_capture_finalization_failure',
+      failedPhase: phase,
+      providerIntentCommitted,
+      finalizationAttempted: true,
+    })
+    if (terminal) {
+      this.publish(terminal)
+    }
+  }
+
   private async fail(
     operationId: string,
     execution: CaptureExecutionInput | null,

@@ -13,8 +13,9 @@ export interface ComposeSnapshotCapabilityOptions<
 /**
  * Composes read-only committed capsule snapshot history.
  *
- * Snapshot capture remains absent. This composition creates no writer and does
- * not infer artifact completeness or physical snapshot ownership.
+ * Snapshot Capture remains a separate operation capability. This composition
+ * creates no writer and does not infer artifact completeness or physical
+ * snapshot ownership.
  */
 export function composeSnapshotCapability<TDatabase extends PostgresJsDatabase, TTables extends CapsuleTables>(
   options: ComposeSnapshotCapabilityOptions<TDatabase, TTables>,
