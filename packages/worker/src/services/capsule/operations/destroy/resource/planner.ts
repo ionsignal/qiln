@@ -5,7 +5,7 @@ import {
   type CapsuleBranchResourceStatusValue,
 } from '@qiln/core/server'
 import { IncusError } from '../../../../../errors'
-import { instanceResourceKey, volumeResourceKey } from '../../../resource/identity'
+import { branchInstanceName, instanceResourceKey, volumeResourceKey } from '../../../resource/identity'
 import { assertCapsuleBranchResourceInventoryMatches } from '../../../resource/inventory'
 import {
   parseBindMountResourceMetadata,
@@ -409,7 +409,8 @@ export class DestroyCapsulePlanner {
         validationPhase: validation.phase,
       })
     }
-    if (instance.instanceName !== branch.name) {
+    const expectedInstanceName = branchInstanceName(branch.id)
+    if (instance.instanceName !== expectedInstanceName) {
       throw new IncusError(
         'Capsule branch managed instance identity does not match the durable branch name.',
         'CONFLICT',
@@ -417,6 +418,7 @@ export class DestroyCapsulePlanner {
           capsuleId: branch.capsuleId,
           branchId: branch.id,
           branchName: branch.name,
+          expectedInstanceName,
           instanceName: instance.instanceName,
           validationPhase: validation.phase,
         },
@@ -454,12 +456,18 @@ export class DestroyCapsulePlanner {
     ])
     const provisioningFiles: DestroyCapsuleProvisioningFileResource[] = rawProvisioningFiles.map(
       ({ row, metadata }) => {
-        if (metadata.namespace !== expectedNamespace || metadata.branchName !== branch.name) {
+        if (
+          metadata.namespace !== expectedNamespace ||
+          metadata.branchName !== branch.name ||
+          metadata.instanceName !== expectedInstanceName
+        ) {
           throw new IncusError('Provisioning-file metadata does not match its capsule branch identity.', 'CONFLICT', {
             capsuleId: branch.capsuleId,
             branchId: branch.id,
             resourceId: row.id,
             expectedNamespace,
+            expectedInstanceName,
+            actualInstanceName: metadata.instanceName,
             actualNamespace: metadata.namespace,
             expectedBranchName: branch.name,
             actualBranchName: metadata.branchName,
@@ -468,7 +476,7 @@ export class DestroyCapsulePlanner {
         }
         const backingResourceKey =
           metadata.target === 'instance'
-            ? instanceResourceKey(metadata.namespace, metadata.branchName)
+            ? instanceResourceKey(metadata.namespace, metadata.instanceName)
             : volumeResourceKey(metadata.namespace, metadata.pool, metadata.volumeName)
         const backingResourceId = directResourcesByKey.get(backingResourceKey)
         if (!backingResourceId) {

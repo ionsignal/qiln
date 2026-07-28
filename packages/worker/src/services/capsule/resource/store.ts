@@ -466,16 +466,56 @@ export class CapsuleBranchResourceStore<
   }
 
   /**
-   * Create-only derived cleanup after the backing resource has been proven
-   * compensated.
+   * Records that one provisioning file was restored as part of its positively
+   * created backing resource.
    *
-   * The broader eligible statuses reflect partial provisioning-file creation,
-   * not authorization to delete a direct provider resource.
+   * This transition performs no independent provider mutation.
    */
-  public async recordCreateCompensatedDerivedResourceDeletion(resourceId: string, operationId: string): Promise<void> {
+  public async recordDerivedResourceRestore(resourceId: string, operationId: string): Promise<void> {
     const db = this.persistence.db
     const resources = this.persistence.tables.capsuleBranchResources
-    const updatedResources = await db
+    const updated = await db
+      .update(resources)
+      .set({
+        status: CapsuleBranchResourceStatus.CREATED,
+        lastOperationId: operationId,
+        updatedAt: new Date(),
+        failureCode: null,
+        failureMessage: null,
+        failureDetails: null,
+      })
+      .where(
+        and(
+          eq(resources.id, resourceId),
+          eq(resources.createdByOperationId, operationId),
+          eq(resources.lastOperationId, operationId),
+          eq(resources.resourceType, CapsuleBranchResourceType.PROVISIONING_FILE),
+          eq(resources.cleanupPolicy, CapsuleBranchResourceCleanupPolicy.DELETE_WITH_BRANCH),
+          eq(resources.status, CapsuleBranchResourceStatus.PLANNED),
+        ),
+      )
+      .returning({
+        id: resources.id,
+      })
+    if (updated.length !== 1) {
+      throw new IncusError('Failed to persist derived provisioning-file restoration.', 'CONFLICT', {
+        resourceId,
+        operationId,
+      })
+    }
+  }
+
+  /**
+   * Finalizes a derived provisioning file after its direct backing resource was
+   * positively compensated.
+   *
+   * The caller must prove the backing instance or volume reached deleted or
+   * missing state before invoking this transition.
+   */
+  public async recordDerivedResourceCompensation(resourceId: string, operationId: string): Promise<void> {
+    const db = this.persistence.db
+    const resources = this.persistence.tables.capsuleBranchResources
+    const updated = await db
       .update(resources)
       .set({
         status: CapsuleBranchResourceStatus.DELETED,
@@ -488,6 +528,7 @@ export class CapsuleBranchResourceStore<
       .where(
         and(
           eq(resources.id, resourceId),
+          eq(resources.createdByOperationId, operationId),
           eq(resources.resourceType, CapsuleBranchResourceType.PROVISIONING_FILE),
           eq(resources.cleanupPolicy, CapsuleBranchResourceCleanupPolicy.DELETE_WITH_BRANCH),
           inArray(resources.status, BOOTSTRAP_DERIVED_DELETE_ELIGIBLE_RESOURCE_STATUSES),
@@ -496,8 +537,8 @@ export class CapsuleBranchResourceStore<
       .returning({
         id: resources.id,
       })
-    if (updatedResources.length !== 1) {
-      throw new IncusError('Failed to persist compensated create provisioning-file cleanup.', 'CONFLICT', {
+    if (updated.length !== 1) {
+      throw new IncusError('Failed to persist derived provisioning-file compensation.', 'CONFLICT', {
         resourceId,
         operationId,
       })

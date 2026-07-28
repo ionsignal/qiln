@@ -2,6 +2,7 @@ import { CapsuleBranchResourceCleanupPolicy, CapsuleBranchResourceType, type Cap
 import { interpolate } from '../../../../utils/template'
 import {
   bindMountResourceKey,
+  branchInstanceName,
   branchVolumeName,
   instanceResourceKey,
   projectResourceKey,
@@ -43,16 +44,27 @@ export function createResourceInventoryEntries(plan: CreateCapsuleResourcePlan):
 
 /**
  * Produces the deterministic provider-resource plan for a capsule root branch.
+ *
+ * User-facing branch names remain product identities. Incus instance and volume
+ * names are derived from the durable branch UUID so equal branch names in
+ * different capsules cannot collide inside one owner project.
+ *
+ * `rootfsImagePin` is immutable create-time reconstruction authority. The
+ * Blueprint alias remains audit evidence only and must not be resolved during
+ * provider execution.
  */
 export class CreateCapsuleResourcePlanner {
   public createPlan(input: CreateCapsuleResourcePlanInput): CreateCapsuleResourcePlan {
-    const { namespace, rootBranchName, cpu, memory, blueprint } = input
+    const { namespace, rootBranchId, rootBranchName, cpu, memory, blueprint, rootfsImagePin } = input
+    const instanceName = branchInstanceName(rootBranchId)
     const dynamicDevices: IncusDeviceMap = {}
     const bindMounts: CreateCapsuleBindMountResource[] = []
     const volumes: CreateCapsuleVolumeResource[] = []
     const managedVolumes: ManagedVolume[] = []
+
     for (const volume of blueprint.provisioning.volumes) {
-      const volumeName = branchVolumeName(rootBranchName, volume.name)
+      const volumeName = branchVolumeName(rootBranchId, volume.name)
+
       if (volume.type === 'bind') {
         dynamicDevices[volume.name] = {
           type: 'disk',
@@ -61,6 +73,7 @@ export class CreateCapsuleResourcePlanner {
           readonly: volume.readonly ? 'true' : 'false',
           shift: volume.shifted ? 'true' : 'false',
         }
+
         bindMounts.push({
           kind: 'bindMount',
           deviceName: volume.name,
@@ -85,9 +98,11 @@ export class CreateCapsuleResourcePlanner {
       }
 
       const config: Record<string, string> = {}
+
       if (volume.shifted) {
         config['security.shifted'] = 'true'
       }
+
       volumes.push({
         kind: 'volume',
         volumeType: volume.type,
@@ -129,7 +144,6 @@ export class CreateCapsuleResourcePlanner {
       })
     }
 
-    // Nested managed volumes must win over their parent mount.
     managedVolumes.sort((left, right) => right.mountPath.length - left.mountPath.length)
 
     const config: Record<string, string> = {
@@ -138,14 +152,17 @@ export class CreateCapsuleResourcePlanner {
       'limits.cpu': cpu,
       'limits.memory': memory,
     }
+
     if (managedVolumes.length > 0) {
       const chownCommands = managedVolumes.map(volume => ['chown', '1000:1000', volume.mountPath])
       config['user.vendor-data'] = mergeCloudInit(config['user.vendor-data'], chownCommands)
     }
+
     const devices: IncusDeviceMap = {
       ...blueprint.runtime.devices,
       ...dynamicDevices,
     }
+
     return {
       project: {
         kind: 'project',
@@ -162,23 +179,24 @@ export class CreateCapsuleResourcePlanner {
       volumes,
       instance: {
         kind: 'instance',
-        instanceName: rootBranchName,
-        imageAlias: blueprint.image_alias,
+        instanceName,
+        rootfsImagePin,
         config,
         devices,
         resourceType: CapsuleBranchResourceType.INCUS_INSTANCE,
-        resourceKey: instanceResourceKey(namespace, rootBranchName),
+        resourceKey: instanceResourceKey(namespace, instanceName),
         blueprintVolumeName: null,
         cleanupPolicy: CapsuleBranchResourceCleanupPolicy.DELETE_WITH_BRANCH,
         metadata: {
           namespace,
-          instanceName: rootBranchName,
-          imageAlias: blueprint.image_alias,
+          instanceName,
+          rootfsImagePin,
         },
       },
       files: this.planProvisioningFiles(blueprint, {
         namespace,
         rootBranchName,
+        instanceName,
         config,
         cpu,
         memory,
@@ -193,6 +211,7 @@ export class CreateCapsuleResourcePlanner {
     input: {
       namespace: string
       rootBranchName: string
+      instanceName: string
       config: Record<string, string>
       cpu: string
       memory: string
@@ -209,9 +228,11 @@ export class CreateCapsuleResourcePlanner {
         },
       },
     }
+
     return blueprint.provisioning.files.map(file => {
       const content = file.content === undefined ? '' : interpolate(file.content, interpolationContext)
       const target = resolveFileTarget(file.path, input.managedVolumes)
+
       return {
         kind: 'provisioningFile',
         path: file.path,
@@ -224,10 +245,16 @@ export class CreateCapsuleResourcePlanner {
           type: file.type,
         },
         resourceType: CapsuleBranchResourceType.PROVISIONING_FILE,
-        resourceKey: provisioningFileResourceKey(input.namespace, input.rootBranchName, file.path, target),
+        resourceKey: provisioningFileResourceKey(input.namespace, input.instanceName, file.path, target),
         blueprintVolumeName: null,
         cleanupPolicy: CapsuleBranchResourceCleanupPolicy.DELETE_WITH_BRANCH,
-        metadata: createProvisioningFileResourceMetadata(input.namespace, input.rootBranchName, file.path, target),
+        metadata: createProvisioningFileResourceMetadata(
+          input.namespace,
+          input.rootBranchName,
+          input.instanceName,
+          file.path,
+          target,
+        ),
       }
     })
   }

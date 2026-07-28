@@ -63,6 +63,7 @@ export function composeCreateCapability<TDatabase extends PostgresJsDatabase, TT
     executor,
     options.supervisor,
     options.blueprints,
+    options.incus.images,
     options.operationEvents,
     options.lifecycleEvents,
     options.branchEvents,

@@ -10,6 +10,7 @@ export const CreateCapsuleFailurePhase = {
   CLAIM_OPERATION: 'claim_operation',
   PLAN_RESOURCES: CreateCapsuleStepKey.PLAN_RESOURCES,
   RECORD_RESOURCE_INVENTORY: CreateCapsuleStepKey.RECORD_RESOURCE_INVENTORY,
+  VERIFY_ROOTFS_IMAGE: CreateCapsuleStepKey.VERIFY_ROOTFS_IMAGE,
   COMMIT_PROVIDER_INTENT_FENCE: 'commit_provider_intent_fence',
   ENSURE_NAMESPACE: CreateCapsuleStepKey.ENSURE_NAMESPACE,
   RECORD_BIND_MOUNTS: CreateCapsuleStepKey.RECORD_BIND_MOUNTS,

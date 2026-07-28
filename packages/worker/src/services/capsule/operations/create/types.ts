@@ -8,6 +8,7 @@ import type {
   CapsuleBranchStatus,
   CapsuleCreateReceipt,
   CapsuleLifecycleState,
+  CapsuleRootfsImagePin,
   CapsuleOperationRequestHash,
 } from '@qiln/core/server'
 import type { IncusFilePushOptions } from '../../../../incus/client/types'
@@ -29,6 +30,7 @@ export interface SubmitCreateCapsuleInput {
 export interface AcceptCreateCapsuleOperationInput extends SubmitCreateCapsuleInput {
   requestHash: CapsuleOperationRequestHash
   blueprintSnapshot: CapsuleBlueprint
+  rootfsImagePin: CapsuleRootfsImagePin
 }
 
 export interface CreateCapsuleRepositoryResult {
@@ -61,6 +63,7 @@ export interface CreateCapsuleExecutionInput {
   blueprintName: string
   blueprintDigest: CapsuleBlueprintDigest
   blueprintSnapshot: CapsuleBlueprint
+  rootfsImagePin: CapsuleRootfsImagePin
   cpu: string
   memory: string
 }
@@ -113,7 +116,7 @@ export interface CreateCapsuleVolumeResource extends CreateCapsulePlannedResourc
 export interface CreateCapsuleInstanceResource extends CreateCapsulePlannedResource {
   kind: 'instance'
   instanceName: string
-  imageAlias: string
+  rootfsImagePin: CapsuleRootfsImagePin
   config: Record<string, string>
   devices: IncusDeviceMap
 }
@@ -137,8 +140,10 @@ export interface CreateCapsuleResourcePlan {
 
 export interface CreateCapsuleResourcePlanInput {
   namespace: string
+  rootBranchId: string
   rootBranchName: string
   cpu: string
   memory: string
   blueprint: CapsuleBlueprint
+  rootfsImagePin: CapsuleRootfsImagePin
 }

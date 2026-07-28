@@ -1,4 +1,5 @@
 import { IncusError } from '../../../errors'
+import type { CapsuleRootfsImagePin } from '@qiln/core/server'
 import type { IncusClient } from '../../../incus/client/index'
 import type { ProjectService } from '../../project'
 import type { InstanceCreateInput, ProvisioningFileWriteInput, VolumeCreateInput, VolumeDeleteInput } from './types'
@@ -11,6 +12,10 @@ export class CapsuleResourceDriver {
 
   public async ensureNamespace(ownerId: string): Promise<void> {
     await this.project.ensureNamespace(ownerId)
+  }
+
+  public async verifyRootfs(pin: CapsuleRootfsImagePin): Promise<void> {
+    await this.incus.images.verify(pin)
   }
 
   public async createVolume(namespace: string, volume: VolumeCreateInput): Promise<void> {
@@ -40,7 +45,11 @@ export class CapsuleResourceDriver {
     const project = this.incus.project(namespace)
     await project.instances.create({
       name: instance.instanceName,
-      source: { type: 'image', alias: instance.imageAlias },
+      source: {
+        type: 'image',
+        fingerprint: instance.rootfsImagePin.fingerprint,
+        project: instance.rootfsImagePin.project,
+      },
       config: instance.config,
       devices: instance.devices,
     })
@@ -53,7 +62,7 @@ export class CapsuleResourceDriver {
 
   public async writeProvisioningFile(
     namespace: string,
-    branchName: string,
+    instanceName: string,
     file: ProvisioningFileWriteInput,
   ): Promise<void> {
     const project = this.incus.project(namespace)
@@ -67,6 +76,6 @@ export class CapsuleResourceDriver {
       )
       return
     }
-    await project.files.write(branchName, file.path, file.content, file.options)
+    await project.files.write(instanceName, file.path, file.content, file.options)
   }
 }

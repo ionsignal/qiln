@@ -100,10 +100,12 @@ export class CreateCapsuleExecutor {
         () =>
           this.planner.createPlan({
             namespace: executionContext.namespace,
+            rootBranchId: executionContext.rootBranchId,
             rootBranchName: executionContext.rootBranchName,
             cpu: input.cpu,
             memory: input.memory,
             blueprint: input.blueprintSnapshot,
+            rootfsImagePin: input.rootfsImagePin,
           }),
       )
 
@@ -115,6 +117,20 @@ export class CreateCapsuleExecutor {
           resourceCount: this.resourceCount(resourcePlan),
         },
         () => this.recordResourceInventoryProof(executionContext, resourcePlan),
+      )
+
+      await this.runStep(
+        executionContext,
+        state,
+        CreateCapsuleStepKey.VERIFY_ROOTFS_IMAGE,
+        {
+          provider: input.rootfsImagePin.provider,
+          project: input.rootfsImagePin.project,
+          fingerprint: input.rootfsImagePin.fingerprint,
+        },
+        async () => {
+          await this.dependencies.driver.verifyRootfs(input.rootfsImagePin)
+        },
       )
 
       state.beginTerminalPhase(CreateCapsuleFailurePhase.COMMIT_PROVIDER_INTENT_FENCE)
@@ -161,7 +177,8 @@ export class CreateCapsuleExecutor {
         CreateCapsuleStepKey.CREATE_INSTANCE,
         {
           instanceName: resourcePlan.instance.instanceName,
-          imageAlias: resourcePlan.instance.imageAlias,
+          imageProject: resourcePlan.instance.rootfsImagePin.project,
+          imageFingerprint: resourcePlan.instance.rootfsImagePin.fingerprint,
           resourceKey: resourcePlan.instance.resourceKey,
         },
         () => createRootBranchInstance(this.resourceProvisioning, executionContext, resourcePlan.instance, state),
@@ -174,7 +191,14 @@ export class CreateCapsuleExecutor {
         {
           count: resourcePlan.files.length,
         },
-        () => writeProvisioningFiles(this.resourceProvisioning, executionContext, resourcePlan.files, state),
+        () =>
+          writeProvisioningFiles(
+            this.resourceProvisioning,
+            executionContext,
+            resourcePlan.instance.instanceName,
+            resourcePlan.files,
+            state,
+          ),
       )
 
       await this.runStep(

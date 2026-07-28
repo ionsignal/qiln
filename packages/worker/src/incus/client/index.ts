@@ -1,9 +1,10 @@
 import { IncusTransport } from './transport/client'
 import { ProjectTransport } from './transport/project'
-import { IncusInstancesClient } from './instances'
 import { IncusFilesClient } from './files'
-import { IncusStorageClient } from './storage/index'
+import { IncusImagesClient } from './images'
+import { IncusInstancesClient } from './instances'
 import { IncusProjectsClient } from './projects'
+import { IncusStorageClient } from './storage/index'
 import type { WorkerIncusConfig } from '../../types'
 
 export * from './schemas/response'
@@ -11,12 +12,15 @@ export * from './schemas/state'
 export * from './schemas/instance'
 export * from './schemas/storage'
 export * from './schemas/project'
+export * from './schemas/image'
+export * from './images'
 
 export class IncusClient {
   private readonly transport: IncusTransport
 
   public readonly instances: IncusInstancesClient
   public readonly files: IncusFilesClient
+  public readonly images: IncusImagesClient
   public readonly storage: IncusStorageClient
   public readonly projects: IncusProjectsClient
 
@@ -25,6 +29,7 @@ export class IncusClient {
     const defaultProject = config.project ?? 'default'
     const scoped = new ProjectTransport(this.transport, defaultProject)
     this.projects = new IncusProjectsClient(this.transport)
+    this.images = new IncusImagesClient(this.transport)
     this.instances = new IncusInstancesClient(scoped)
     this.files = new IncusFilesClient(scoped)
     this.storage = new IncusStorageClient(scoped)

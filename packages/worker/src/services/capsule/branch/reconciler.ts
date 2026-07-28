@@ -39,7 +39,7 @@ export class CapsuleBranchRuntimeReconciler {
   }
 
   private async reconcileCandidate(candidate: BranchRuntimeReconciliationCandidate): Promise<void> {
-    const observation = await this.dependencies.observer.observe(candidate.ownerId, candidate.name)
+    const observation = await this.dependencies.observer.observe(candidate.ownerId, candidate.id)
     if (observation.kind === 'confirmed') {
       try {
         const result = await this.dependencies.branches.recordConfirmedRuntimeState({

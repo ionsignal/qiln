@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { CapsuleRootfsImagePinSchema } from '@qiln/core/server'
 import { IncusError } from '../../../errors'
 import type { ProvisioningFileTarget } from './bootstrap/targets'
 
@@ -14,7 +15,7 @@ export const InstanceResourceMetadataSchema = z
   .object({
     namespace: NonEmptyStringSchema,
     instanceName: NonEmptyStringSchema,
-    imageAlias: NonEmptyStringSchema,
+    rootfsImagePin: CapsuleRootfsImagePinSchema,
   })
   .strict()
 
@@ -43,6 +44,7 @@ export const InstanceProvisioningFileResourceMetadataSchema = z
   .object({
     namespace: NonEmptyStringSchema,
     branchName: NonEmptyStringSchema,
+    instanceName: NonEmptyStringSchema,
     path: NonEmptyStringSchema,
     target: z.literal('instance'),
   })
@@ -52,6 +54,7 @@ export const VolumeProvisioningFileResourceMetadataSchema = z
   .object({
     namespace: NonEmptyStringSchema,
     branchName: NonEmptyStringSchema,
+    instanceName: NonEmptyStringSchema,
     path: NonEmptyStringSchema,
     target: z.literal('volume'),
     pool: NonEmptyStringSchema,
@@ -110,6 +113,7 @@ export function parseProvisioningFileResourceMetadata(value: unknown): Provision
 export function createProvisioningFileResourceMetadata(
   namespace: string,
   branchName: string,
+  instanceName: string,
   filePath: string,
   target: ProvisioningFileTarget,
 ): ProvisioningFileResourceMetadata {
@@ -117,6 +121,7 @@ export function createProvisioningFileResourceMetadata(
     return ProvisioningFileResourceMetadataSchema.parse({
       namespace,
       branchName,
+      instanceName,
       path: filePath,
       target: 'volume',
       pool: target.pool,
@@ -127,6 +132,7 @@ export function createProvisioningFileResourceMetadata(
   return ProvisioningFileResourceMetadataSchema.parse({
     namespace,
     branchName,
+    instanceName,
     path: filePath,
     target: 'instance',
   })

@@ -1,4 +1,4 @@
-import type { CapsuleCommandAck } from '@qiln/core/server'
+import { branchInstanceName } from '../resource/identity'
 import { createCapsuleBranchMutationResolutionError } from './resolution'
 import type { CapsuleBranchEventPublisher } from '../events/branch'
 import type { CapsuleBranchRuntimeObserver } from './observer'
@@ -6,6 +6,7 @@ import type { CapsuleBranchRuntimeReconciler } from './reconciler'
 import type { CapsuleBranchStore } from './store'
 import type { IncusClient } from '../../../incus/client/index'
 import type { ProjectService } from '../../project'
+import type { CapsuleCommandAck } from '@qiln/core/server'
 import type {
   BranchRuntimeMutation,
   BranchRuntimeMutationDefinition,
@@ -58,7 +59,7 @@ export class CapsuleBranchRuntimeService {
     if (branch.status !== 'online' && branch.status !== 'starting') {
       return branch
     }
-    const observation = await this.dependencies.observer.observe(ownerId, branch.name)
+    const observation = await this.dependencies.observer.observe(ownerId, branch.id)
     if (observation.kind !== 'confirmed' || observation.status !== 'online') {
       return branch
     }
@@ -149,11 +150,12 @@ export class CapsuleBranchRuntimeService {
   ): Promise<void> {
     const namespace = this.dependencies.project.getNamespace(transition.ownerId)
     const project = this.dependencies.incus.project(namespace)
+    const instanceName = branchInstanceName(transition.branchId)
     if (mutation === 'start') {
-      await project.instances.start(transition.branchName)
+      await project.instances.start(instanceName)
       return
     }
-    await project.instances.stop(transition.branchName)
+    await project.instances.stop(instanceName)
   }
 
   private async readRuntimeIpAfterSuccessfulMutation(
@@ -163,7 +165,7 @@ export class CapsuleBranchRuntimeService {
     if (desiredStatus === 'offline') {
       return null
     }
-    const observation = await this.dependencies.observer.observe(transition.ownerId, transition.branchName)
+    const observation = await this.dependencies.observer.observe(transition.ownerId, transition.branchId)
     if (observation.kind === 'confirmed' && observation.status === 'online') {
       return observation.runtimeIp
     }
@@ -176,7 +178,7 @@ export class CapsuleBranchRuntimeService {
     mutationError: unknown,
     failureStage: string,
   ): Promise<CapsuleCommandAck> {
-    const observation = await this.dependencies.observer.observe(transition.ownerId, transition.branchName)
+    const observation = await this.dependencies.observer.observe(transition.ownerId, transition.branchId)
     if (observation.kind === 'confirmed') {
       try {
         const result = await this.dependencies.branches.recordConfirmedRuntimeState({

@@ -1,4 +1,5 @@
 import { extractIpv4 } from '../../../incus/utils'
+import { branchInstanceName } from '../resource/identity'
 import type { IncusClient } from '../../../incus/client/index'
 import type { ProjectService } from '../../project'
 import type { CapsuleBranchRuntimeObservation } from './types'
@@ -17,11 +18,12 @@ export class CapsuleBranchRuntimeObserver {
     private readonly project: ProjectService,
   ) {}
 
-  public async observe(ownerId: string, branchName: string): Promise<CapsuleBranchRuntimeObservation> {
+  public async observe(ownerId: string, branchId: string): Promise<CapsuleBranchRuntimeObservation> {
     const namespace = this.project.getNamespace(ownerId)
     const project = this.incus.project(namespace)
+    const instanceName = branchInstanceName(branchId)
     try {
-      const { data } = await project.instances.state(branchName)
+      const { data } = await project.instances.state(instanceName)
       if (data.status === 'Running') {
         return {
           kind: 'confirmed',

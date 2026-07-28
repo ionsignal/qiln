@@ -15,11 +15,13 @@ import {
   type CapsuleOperationRequestHash,
   type CapsuleOperationStatusValue,
   type CapsulePersistence,
+  type CapsuleRootfsImagePin,
   type CapsuleTables,
 } from '@qiln/core/server'
 import { IncusError, isUniqueConstraintViolation } from '../../../../errors'
 import { createFailureDetails, failureCodeFromUnknown, failureMessageFromUnknown } from '../../failures'
 import {
+  readRootfs,
   assertOperationReplayIdentity,
   toCapsuleOperationTransition,
   toNullableIsoTimestamp,
@@ -58,6 +60,7 @@ interface ValidatedCreateOperationDetails {
   rootBranch: PersistedCapsuleBranch
   blueprintDigest: CapsuleBlueprintDigest
   blueprintSnapshot: CapsuleBlueprint
+  rootfsImagePin: CapsuleRootfsImagePin
 }
 
 function isNonterminalCreateStatus(
@@ -130,6 +133,12 @@ export class CreateCapsuleOperationRepository<
     if (replay) {
       return replay
     }
+    const rootfsImagePin = readRootfs(input.rootfsImagePin, input.blueprintSnapshot.image_alias, {
+      ownerId: input.ownerId,
+      rootBranchName: input.rootBranchName,
+      blueprintName: input.blueprintName,
+      blueprintDigest: input.blueprintDigest,
+    })
     const db = this.persistence.db
     const { capsules, capsuleOperations, capsuleBranches, capsuleCreateOperations } = this.persistence.tables
     try {
@@ -209,6 +218,7 @@ export class CreateCapsuleOperationRepository<
             blueprintName: input.blueprintName,
             blueprintDigest: input.blueprintDigest,
             blueprintSnapshot: input.blueprintSnapshot,
+            rootfsImagePin,
             cpu: input.cpu,
             memory: input.memory,
           })
@@ -349,6 +359,7 @@ export class CreateCapsuleOperationRepository<
       blueprintName: details.extension.blueprintName,
       blueprintDigest: details.blueprintDigest,
       blueprintSnapshot: details.blueprintSnapshot,
+      rootfsImagePin: details.rootfsImagePin,
       cpu: details.extension.cpu,
       memory: details.extension.memory,
     }
@@ -495,8 +506,6 @@ export class CreateCapsuleOperationRepository<
       const extension = await this.lockCreateOperationExtension(tx, operation.id)
       const capsule = await this.lockCapsule(tx, operation.ownerId, operation.capsuleId)
       const rootBranch = await this.lockBranchById(tx, extension.rootBranchId)
-
-      this.assertCreateOperationExtensionConsistency(operation, extension, [rootBranch])
 
       if (
         capsule.lifecycleStatus !== 'provisioning' ||
@@ -1219,12 +1228,16 @@ export class CreateCapsuleOperationRepository<
     this.assertCreateOperationExtensionConsistency(operation, extension, [rootBranch])
 
     const pinnedBlueprint = this.parseAndValidatePinnedBlueprint(extension)
+    const rootfsImagePin = this.readRootfsImagePin(extension, pinnedBlueprint.blueprintSnapshot)
+
+    this.assertCreateOperationExtensionConsistency(operation, extension, [rootBranch])
 
     return {
       extension,
       rootBranch,
       blueprintDigest: pinnedBlueprint.blueprintDigest,
       blueprintSnapshot: pinnedBlueprint.blueprintSnapshot,
+      rootfsImagePin,
     }
   }
 
@@ -1362,12 +1375,24 @@ export class CreateCapsuleOperationRepository<
     }
 
     try {
-      this.parseAndValidatePinnedBlueprint(extension)
+      const pinnedBlueprint = this.parseAndValidatePinnedBlueprint(extension)
+      this.readRootfsImagePin(extension, pinnedBlueprint.blueprintSnapshot)
     } catch {
-      contradictions.push('create_extension_blueprint_pin_invalid')
+      contradictions.push('create_extension_immutable_input_invalid')
     }
 
     return contradictions
+  }
+
+  private readRootfsImagePin(
+    extension: PersistedCreateOperationExtension,
+    blueprint: CapsuleBlueprint,
+  ): CapsuleRootfsImagePin {
+    return readRootfs(extension.rootfsImagePin, blueprint.image_alias, {
+      operationId: extension.operationId,
+      blueprintName: extension.blueprintName,
+      blueprintDigest: extension.blueprintDigest,
+    })
   }
 
   private parseAndValidatePinnedBlueprint(extension: PersistedCreateOperationExtension): {

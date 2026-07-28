@@ -65,10 +65,7 @@ export class CreateCapsuleCompensation {
         continue
       }
       try {
-        await this.dependencies.resources.recordCreateCompensatedDerivedResourceDeletion(
-          file.resourceId,
-          context.operationId,
-        )
+        await this.dependencies.resources.recordDerivedResourceCompensation(file.resourceId, context.operationId)
       } catch (error: unknown) {
         failures.push(
           createCreateCapsuleCompensationFailure({

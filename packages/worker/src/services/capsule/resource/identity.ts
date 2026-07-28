@@ -1,11 +1,47 @@
+import { IncusError } from '../../../errors'
 import type { ProvisioningFileTarget } from './bootstrap/targets'
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const MAX_INCUS_IDENTITY_LENGTH = 255
 
 function encodeResourceKeySegment(value: string): string {
   return encodeURIComponent(value)
 }
 
-export function branchVolumeName(branchName: string, volumeName: string): string {
-  return `${branchName}-${volumeName}`
+function branchProviderPrefix(branchId: string): string {
+  if (!UUID_PATTERN.test(branchId)) {
+    throw new IncusError('Capsule branch provider identity requires a valid branch UUID.', 'VALIDATION_ERROR', {
+      branchId,
+    })
+  }
+  return `qiln-${branchId.toLowerCase()}`
+}
+
+/**
+ * Derives the Incus instance identity from the durable branch UUID.
+ *
+ * User-facing branch names are scoped to one capsule and therefore cannot be
+ * reused as owner-wide Incus project identities.
+ */
+export function branchInstanceName(branchId: string): string {
+  return branchProviderPrefix(branchId)
+}
+
+/**
+ * Derives one managed Incus volume identity from the durable branch UUID and
+ * stable Blueprint volume identity.
+ */
+export function branchVolumeName(branchId: string, volumeName: string): string {
+  const name = `${branchProviderPrefix(branchId)}-${volumeName}`
+  if (name.length > MAX_INCUS_IDENTITY_LENGTH) {
+    throw new IncusError('Generated capsule branch volume identity is too long.', 'VALIDATION_ERROR', {
+      branchId,
+      volumeName,
+      length: name.length,
+      maxLength: MAX_INCUS_IDENTITY_LENGTH,
+    })
+  }
+  return name
 }
 
 export function projectResourceKey(namespace: string): string {
@@ -26,7 +62,7 @@ export function bindMountResourceKey(namespace: string, hostPath: string, mountP
 
 export function provisioningFileResourceKey(
   namespace: string,
-  branchName: string,
+  instanceName: string,
   filePath: string,
   target: ProvisioningFileTarget,
 ): string {
@@ -41,13 +77,12 @@ export function provisioningFileResourceKey(
       encodeResourceKeySegment(target.internalPath),
     ].join(':')
   }
-
   return [
     'incus',
     'provisioning-file',
     encodeResourceKeySegment(namespace),
     'instance',
-    encodeResourceKeySegment(branchName),
+    encodeResourceKeySegment(instanceName),
     encodeResourceKeySegment(filePath),
   ].join(':')
 }

@@ -1,6 +1,7 @@
 import { CapsuleOperationType, type CapsuleBlueprintRegistry, type CapsuleCreateReceipt } from '@qiln/core/server'
 import { createOperationRequestHash } from '../shared'
 import type { OperationSupervisor } from '../../../../coordination'
+import type { IncusImagesClient } from '../../../../incus/client/images'
 import type { CapsuleBranchEventPublisher } from '../../events/branch'
 import type { CapsuleLifecycleEventPublisher, CapsuleOperationEventPublisher } from '../../events'
 import type { CreateCapsuleExecutor } from './executor'
@@ -30,6 +31,7 @@ export class CreateCapsuleSubmissionService {
     private readonly executor: CreateCapsuleExecutor,
     private readonly supervisor: OperationSupervisor,
     private readonly blueprints: CapsuleBlueprintRegistry,
+    private readonly images: IncusImagesClient,
     private readonly operationEvents: CapsuleOperationEventPublisher,
     private readonly lifecycleEvents: CapsuleLifecycleEventPublisher,
     private readonly branchEvents: CapsuleBranchEventPublisher,
@@ -66,6 +68,7 @@ export class CreateCapsuleSubmissionService {
     }
 
     const blueprintPin = this.blueprints.pin(input.blueprintName, input.blueprintDigest)
+    const rootfsImagePin = await this.images.resolve(blueprintPin.blueprint.image_alias)
 
     /**
      * The repository repeats replay detection during acceptance so concurrent
@@ -77,6 +80,7 @@ export class CreateCapsuleSubmissionService {
       blueprintName: blueprintPin.name,
       blueprintDigest: blueprintPin.digest,
       blueprintSnapshot: blueprintPin.blueprint,
+      rootfsImagePin,
     })
 
     if (!acceptance.newlyAccepted) {

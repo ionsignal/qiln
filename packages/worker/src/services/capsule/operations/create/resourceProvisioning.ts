@@ -172,6 +172,7 @@ export async function createRootBranchInstance(
 export async function writeProvisioningFiles(
   dependencies: CreateCapsuleResourceProvisioningDependencies,
   context: CreateCapsuleOperationContext,
+  instanceName: string,
   files: readonly CreateCapsuleProvisioningFileResource[],
   state: CreateCapsuleExecutionState,
 ): Promise<void> {
@@ -199,7 +200,7 @@ export async function writeProvisioningFiles(
     try {
       await dependencies.resources.recordBranchResourceCreateIntent(resourceId, context.operationId)
       providerMutationAttempted = true
-      await dependencies.driver.writeProvisioningFile(context.namespace, context.rootBranchName, file)
+      await dependencies.driver.writeProvisioningFile(context.namespace, instanceName, file)
       await dependencies.resources.recordBranchResourceCreateOutcome(resourceId, context.operationId)
     } catch (error: unknown) {
       if (providerMutationAttempted) {

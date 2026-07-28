@@ -3,6 +3,7 @@ import type {
   CapsuleBranchResourceCleanupPolicyValue,
   CapsuleBranchResourceStatusValue,
   CapsuleBranchResourceTypeValue,
+  CapsuleRootfsImagePin,
 } from '@qiln/core/server'
 import type { IncusFilePushOptions } from '../../../incus/client/types'
 import type { IncusDeviceMap } from '../../../incus/client'
@@ -78,7 +79,7 @@ export interface VolumeDeleteInput {
 
 export interface InstanceCreateInput {
   instanceName: string
-  imageAlias: string
+  rootfsImagePin: CapsuleRootfsImagePin
   config: Record<string, string>
   devices: IncusDeviceMap
 }
