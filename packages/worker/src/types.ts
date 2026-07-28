@@ -15,13 +15,23 @@ export interface WorkerDefinitionsConfig {
 }
 
 export interface WorkerIncusConfig {
-  socketPath?: string
-  url?: string
+  endpoint?: string
   cert?: string
   key?: string
-  authToken?: string
+  basicAuth?: string
   rejectUnauthorized?: boolean
   project?: string
+}
+
+export interface WorkerCaddyConfig {
+  endpoint: string
+  server: string
+  fallbackId: string
+  timeoutMs?: number
+}
+
+export interface WorkerRoutingConfig {
+  baseDomain: string
 }
 
 export interface WorkerFeatureConfig {
@@ -33,6 +43,8 @@ export interface WorkerRuntimeConfig {
   nats?: WorkerNatsConfig
   definitions?: WorkerDefinitionsConfig
   incus?: WorkerIncusConfig
+  caddy?: WorkerCaddyConfig
+  routing?: WorkerRoutingConfig
   features?: WorkerFeatureConfig
 }
 
