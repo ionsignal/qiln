@@ -5,6 +5,7 @@ import type { CapsuleUnarchiveSubmissionService } from './operations/archival/un
 import type { CaptureSubmission } from './operations/capture/submission'
 import type { CreateCapsuleSubmissionService } from './operations/create/submission'
 import type { DestroyCapsuleSubmissionService } from './operations/destroy/submission'
+import type { ForkSubmission } from './operations/fork/submission'
 import type { CapsuleRouteService } from './routing/service'
 import type { CapsuleSnapshotService } from './snapshot/service'
 
@@ -17,6 +18,7 @@ import type { CapsuleSnapshotService } from './snapshot/service'
  */
 export interface CapsuleServiceCapabilities {
   create: CreateCapsuleSubmissionService
+  fork: ForkSubmission
   archive: CapsuleArchiveSubmissionService
   unarchive: CapsuleUnarchiveSubmissionService
   destroy: DestroyCapsuleSubmissionService
@@ -36,6 +38,7 @@ export interface CapsuleServiceCapabilities {
  */
 export class CapsuleService {
   public readonly create: CreateCapsuleSubmissionService
+  public readonly fork: ForkSubmission
   public readonly archive: CapsuleArchiveSubmissionService
   public readonly unarchive: CapsuleUnarchiveSubmissionService
   public readonly destroy: DestroyCapsuleSubmissionService
@@ -48,6 +51,7 @@ export class CapsuleService {
 
   constructor(capabilities: CapsuleServiceCapabilities) {
     this.create = capabilities.create
+    this.fork = capabilities.fork
     this.archive = capabilities.archive
     this.unarchive = capabilities.unarchive
     this.destroy = capabilities.destroy

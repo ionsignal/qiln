@@ -52,9 +52,10 @@ export function volumeIdentity(pool: string, volume: string): IncusCustomVolumeI
 /**
  * Validates and constructs one exact custom-volume snapshot identity.
  *
- * The qualified Files API volume identity is derived internally so snapshot
- * creation, reads, compensation, and committed provider references cannot
- * disagree about how `<source-volume>/<snapshot-name>` is formed.
+ * The qualified Files API and clone-source identity is derived internally so
+ * snapshot creation, reads, cloning, compensation, and committed provider
+ * references cannot disagree about how `<source-volume>/<snapshot-name>` is
+ * formed.
  */
 export function snapshotIdentity(
   pool: string,

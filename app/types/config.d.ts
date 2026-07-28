@@ -1,7 +1,6 @@
-import type { UserInputConfig } from 'c12'
 import type { FastifyInstance } from 'fastify'
 import type { QilnEngineController } from '@qiln/engine/server'
-import type { QilnWorkerRuntime } from '@qiln/worker/server'
+import type { QilnWorkerRuntime, WorkerRuntimeConfig, WorkerFeatureConfig } from '@qiln/worker/server'
 import type { Session } from '@server/plugins/session'
 import type { Database, Persistence } from '@server/db'
 
@@ -35,34 +34,18 @@ type MailgunConfig = {
   mailingList: string
 }
 
-type DatabaseConfig = {
-  url: string
-}
-
-type DefinitionConfig = {
-  path: string
-}
-
 type WorkerConfig = {
   embedded: boolean
 }
 
-type FeatureConfig = {
-  experimentalCapture: boolean
-}
+type DatabaseConfig = NonNullable<WorkerRuntimeConfig['database']>
+type DefinitionConfig = NonNullable<WorkerRuntimeConfig['definitions']>
+type IncusConfig = NonNullable<WorkerRuntimeConfig['incus']>
+type NatsConfig = NonNullable<WorkerRuntimeConfig['nats']>
+type FeatureConfig = Required<WorkerFeatureConfig>
 
-export interface IncusConfig {
-  socketPath?: string
-  url?: string
-  cert?: string
-  key?: string
-  authToken?: string
-  rejectUnauthorized?: boolean
-}
-
-type NatsConfig = {
-  servers: string | string[]
-  token?: string
+type WorkerHostConfig = Omit<Required<WorkerRuntimeConfig>, 'features'> & {
+  features: FeatureConfig
 }
 
 type Server = {
@@ -71,26 +54,21 @@ type Server = {
   stop: () => Promise<void>
 }
 
-type Config = {
+type Config = WorkerHostConfig & {
   dev: boolean
   listen: boolean
   host: string
   port: number
   path: string
   ssl: string
-  definitions: DefinitionConfig
   worker: WorkerConfig
-  features: FeatureConfig
   cookies: CookiesConfig
   multipart: MultipartConfig
   limit: LimitConfig
   mailgun: MailgunConfig
-  database: DatabaseConfig
-  nats: NatsConfig
-  incus: IncusConfig
 }
 
-type EnvironmentConfig = UserInputConfig & Config
+type EnvironmentConfig = Config
 
 declare module 'http' {
   interface IncomingMessage {
@@ -120,6 +98,8 @@ export type {
   MailgunConfig,
   NatsConfig,
   DatabaseConfig,
+  DefinitionConfig,
+  IncusConfig,
   WorkerConfig,
   FeatureConfig,
 }

@@ -14,6 +14,7 @@ import { composeBranchCapability } from './branch'
 import { composeCaptureCapability } from './capture'
 import { composeCreateCapability } from './create'
 import { composeDestroyCapability } from './destroy'
+import { composeForkCapability } from './fork'
 import { composeRoutingCapability } from './routing'
 import { composeSnapshotCapability } from './snapshot'
 import { composeUnarchiveCapability } from './unarchive'
@@ -33,7 +34,7 @@ export interface ComposeCapsuleServiceOptions<
   project: ProjectService
   blueprints: CapsuleBlueprintRegistry
   supervisor: OperationSupervisor
-  experimentalCaptureEnabled: boolean
+  experimentalSnapshotsEnabled: boolean
 }
 
 /**
@@ -86,6 +87,19 @@ export function composeCapsuleService<TDatabase extends PostgresJsDatabase, TTab
     lifecycleEvents,
     branchEvents,
   })
+  const fork = composeForkCapability({
+    persistence: options.persistence,
+    incus: options.incus,
+    project: options.project,
+    supervisor: options.supervisor,
+    operationReader,
+    operationSteps,
+    resources,
+    operationEvents,
+    lifecycleEvents,
+    branchEvents,
+    enabled: options.experimentalSnapshotsEnabled,
+  })
   const destroy = composeDestroyCapability({
     persistence: options.persistence,
     incus: options.incus,
@@ -106,7 +120,7 @@ export function composeCapsuleService<TDatabase extends PostgresJsDatabase, TTab
     operationEvents,
     lifecycleEvents,
     branchEvents,
-    enabled: options.experimentalCaptureEnabled,
+    enabled: options.experimentalSnapshotsEnabled,
   })
   const branch = composeBranchCapability({
     persistence: options.persistence,
@@ -124,6 +138,7 @@ export function composeCapsuleService<TDatabase extends PostgresJsDatabase, TTab
   })
   const abandonmentHandlers = new CapsuleOperationAbandonmentHandlerRegistry([
     create.abandonment,
+    fork.abandonment,
     archive.abandonment,
     unarchive.abandonment,
     destroy.abandonment,
@@ -137,6 +152,7 @@ export function composeCapsuleService<TDatabase extends PostgresJsDatabase, TTab
   })
   return new CapsuleService({
     create: create.submission,
+    fork: fork.submission,
     archive: archive.submission,
     unarchive: unarchive.submission,
     destroy: destroy.submission,

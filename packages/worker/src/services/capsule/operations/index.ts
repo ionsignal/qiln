@@ -1,5 +1,6 @@
 export * from './shared'
 export * from './create'
+export * from './fork'
 export * from './archival'
 export * from './destroy'
 export * from './capture'

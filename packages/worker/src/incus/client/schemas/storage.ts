@@ -31,6 +31,30 @@ export const IncusVolumeClonePayloadSchema = z
   .strict()
 
 /**
+ * Narrow copy payload for cloning one exact custom-volume snapshot.
+ *
+ * The source name is constructed internally from separately validated source
+ * volume and snapshot identities. Callers cannot supply an arbitrary
+ * snapshot-qualified provider name.
+ */
+export const IncusVolumeSnapshotClonePayloadSchema = z
+  .object({
+    name: z.string(),
+    type: z.literal('custom'),
+    source: z
+      .object({
+        name: z.string(),
+        type: z.literal('copy'),
+        pool: z.string(),
+        project: z.string(),
+        volume_only: z.literal(true),
+      })
+      .strict(),
+    config: IncusVolumeConfigSchema.optional(),
+  })
+  .strict()
+
+/**
  * Narrow payload used by experimental Snapshot Capture.
  *
  * Expiry is deliberately omitted. Retention and snapshot deletion will be
@@ -58,5 +82,6 @@ export const IncusFileDirectoryResponseSchema = z.object({
 
 export type IncusVolumeCreatePayload = z.infer<typeof IncusVolumeCreatePayloadSchema>
 export type IncusVolumeClonePayload = z.infer<typeof IncusVolumeClonePayloadSchema>
+export type IncusVolumeSnapshotClonePayload = z.infer<typeof IncusVolumeSnapshotClonePayloadSchema>
 export type IncusCustomVolumeSnapshotCreatePayload = z.infer<typeof IncusCustomVolumeSnapshotCreatePayloadSchema>
 export type IncusFileDirectoryResponse = z.infer<typeof IncusFileDirectoryResponseSchema>

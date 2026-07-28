@@ -10,6 +10,10 @@ export interface WorkerDatabaseConfig {
   url: string
 }
 
+export interface WorkerDefinitionsConfig {
+  path: string
+}
+
 export interface WorkerIncusConfig {
   socketPath?: string
   url?: string
@@ -21,15 +25,13 @@ export interface WorkerIncusConfig {
 }
 
 export interface WorkerFeatureConfig {
-  experimentalCapture?: boolean
+  experimentalSnapshots?: boolean
 }
 
 export interface WorkerRuntimeConfig {
   database?: WorkerDatabaseConfig
   nats?: WorkerNatsConfig
-  definitions?: {
-    path: string
-  }
+  definitions?: WorkerDefinitionsConfig
   incus?: WorkerIncusConfig
   features?: WorkerFeatureConfig
 }
