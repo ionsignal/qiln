@@ -46,6 +46,10 @@ function createCapsuleIdColumn(capsuleIdColumn?: PgColumn) {
 
 /**
  * Creates the physical `capsule_branches` table.
+ *
+ * User-facing branch names are scoped to one capsule. Provider instance and
+ * volume identities must be derived separately and must not reuse branch names
+ * as owner-wide infrastructure identities.
  */
 export function createCapsuleBranchesTable(ownerIdColumn?: PgColumn, capsuleIdColumn?: PgColumn) {
   const ownerId = createOwnerIdColumn(ownerIdColumn)
@@ -92,8 +96,8 @@ export function createCapsuleBranchesTable(ownerIdColumn?: PgColumn, capsuleIdCo
       index('capsule_branches_capsule_idx').on(table.capsuleId),
       index('capsule_branches_runtime_status_idx').on(table.status),
       index('capsule_branches_owner_runtime_status_idx').on(table.ownerId, table.status),
-      uniqueIndex('capsule_branches_owner_runtime_name_unique_idx')
-        .on(table.ownerId, table.name)
+      uniqueIndex('capsule_branches_capsule_runtime_name_unique_idx')
+        .on(table.capsuleId, table.name)
         .where(sql`${table.status} <> 'destroyed'`),
       uniqueIndex('capsule_branches_capsule_root_unique_idx')
         .on(table.capsuleId)

@@ -33,9 +33,11 @@ export const CapsuleSnapshotResourceKindSchema = z.enum(CapsuleSnapshotResourceK
 /**
  * Immutable physical Incus snapshot identity for one managed artifact root.
  *
- * `sourceBranchResourceId` links this evidence to Qiln's durable resource
- * ownership ledger. Future forks must use this committed identity rather than
- * rediscovering a source snapshot from live provider inventory.
+ * `sourceBranchResourceId` links this evidence to Qiln's durable branch
+ * resource ledger. `captureResourceId` identifies the exact successful
+ * operation-scoped provider mutation copied into committed snapshot history.
+ * Future forks must use this committed identity rather than rediscovering a
+ * source snapshot from live provider inventory.
  */
 export const CapsuleSnapshotIncusVolumeReferenceSchema = z
   .object({
@@ -44,6 +46,7 @@ export const CapsuleSnapshotIncusVolumeReferenceSchema = z
     artifactRootId: CapsuleArtifactRootIdSchema,
     blueprintVolumeName: CapsuleBlueprintIdentifierSchema,
     sourceBranchResourceId: z.uuid(),
+    captureResourceId: z.uuid(),
     project: IncusResourceIdentitySchema,
     pool: IncusResourceIdentitySchema,
     sourceVolume: IncusResourceIdentitySchema,

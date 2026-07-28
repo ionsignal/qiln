@@ -17,6 +17,7 @@ import {
   type CapsuleBlueprintPin,
   type CapsuleBranchName,
   type CapsuleBranchResourceInventoryDigest,
+  type CapsuleRootfsImagePin,
   type CapsuleSnapshotCapturePolicyDigest,
   type CapsuleSnapshotCapturePolicyPin,
   type CapsuleSnapshotLimitationValue,
@@ -48,18 +49,19 @@ function createSourceBranchIdColumn(sourceBranchIdColumn?: PgColumn) {
  * transaction that links the capture operation result and terminalizes the base
  * operation.
  *
- * The complete historical Blueprint pin is committed with the snapshot so
- * future branch forks and route revisions never depend on mutable registry
- * state or on traversing the original create operation lineage.
+ * The complete historical Blueprint pin and immutable rootfs image pin are
+ * committed with the snapshot so future branch forks and route revisions never
+ * depend on mutable registry state, image aliases, or traversing the original
+ * create operation lineage.
  *
  * Experimental snapshots are committed history, but their mode and limitations
  * explicitly prevent them from receiving production traffic. Hardened mode is
  * reserved for a future writer that proves its stronger evidence contract.
  *
  * `archivedAt` is the only intentionally mutable lifecycle field. Blueprint,
- * capture policy, source identity, resource-inventory evidence, assurance,
- * manifest evidence, Git records, dependency references, and physical provider
- * references are immutable by repository policy.
+ * rootfs image, capture policy, source identity, resource-inventory evidence,
+ * assurance, manifest evidence, Git records, dependency references, and
+ * physical provider references are immutable by repository policy.
  */
 export function createCapsuleSnapshotsTable(capsuleIdColumn?: PgColumn, sourceBranchIdColumn?: PgColumn) {
   const capsuleId = createCapsuleIdColumn(capsuleIdColumn)
@@ -81,6 +83,7 @@ export function createCapsuleSnapshotsTable(capsuleIdColumn?: PgColumn, sourceBr
       blueprintName: text('blueprint_name').notNull(),
       blueprintDigest: text('blueprint_digest').$type<CapsuleBlueprintDigest>().notNull(),
       blueprintPin: jsonb('blueprint_pin').$type<CapsuleBlueprintPin>().notNull(),
+      rootfsImagePin: jsonb('rootfs_image_pin').$type<CapsuleRootfsImagePin>().notNull(),
       capturePolicySchemaVersion: integer('capture_policy_schema_version').notNull(),
       capturePolicyDigest: text('capture_policy_digest').$type<CapsuleSnapshotCapturePolicyDigest>().notNull(),
       capturePolicyPin: jsonb('capture_policy_pin').$type<CapsuleSnapshotCapturePolicyPin>().notNull(),

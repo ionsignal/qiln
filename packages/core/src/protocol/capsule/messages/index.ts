@@ -14,6 +14,7 @@ import {
   CapsuleBranchEventSchemas,
 } from './branch'
 import { CapsuleCreateCommandDefinitions, CapsuleCreateCommandName, CapsuleCreateCommandNameValues } from './create'
+import { CapsuleForkCommandDefinitions, CapsuleForkCommandName, CapsuleForkCommandNameValues } from './fork'
 import {
   CapsuleLifecycleEventDefinitions,
   CapsuleLifecycleEventName,
@@ -53,6 +54,7 @@ export * from './definitions'
 export * from './blueprints'
 export * from './branch'
 export * from './create'
+export * from './fork'
 export * from './lifecycle'
 export * from './operations'
 export * from './routing'
@@ -60,6 +62,7 @@ export * from './snapshot'
 
 export const CapsuleCommandName = {
   ...CapsuleCreateCommandName,
+  ...CapsuleForkCommandName,
   ...CapsuleBranchCommandName,
   ...CapsuleOperationCommandName,
   ...CapsuleRouteCommandName,
@@ -71,6 +74,7 @@ export type CapsuleCommandName = (typeof CapsuleCommandName)[keyof typeof Capsul
 
 export const CapsuleCommandNameValues = [
   ...CapsuleCreateCommandNameValues,
+  ...CapsuleForkCommandNameValues,
   ...CapsuleBranchCommandNameValues,
   ...CapsuleOperationCommandNameValues,
   ...CapsuleRouteCommandNameValues,
@@ -102,6 +106,7 @@ export const CapsuleEventNameSchema = z.enum(CapsuleEventNameValues)
 
 export const CapsuleCommandDefinitions = {
   ...CapsuleCreateCommandDefinitions,
+  ...CapsuleForkCommandDefinitions,
   ...CapsuleBranchCommandDefinitions,
   ...CapsuleOperationCommandDefinitions,
   ...CapsuleRouteCommandDefinitions,

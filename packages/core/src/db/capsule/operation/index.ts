@@ -1,4 +1,5 @@
 export * from './record'
 export * from './create'
+export * from './fork'
 export * from './capture'
 export * from './step'

@@ -8,17 +8,21 @@ export interface Helpers {
     capsuleBranches: RelationFragmentOneFn<'capsuleBranches'>
     capsuleOperations: RelationFragmentOneFn<'capsuleOperations'>
     capsuleCreateOperations: RelationFragmentOneFn<'capsuleCreateOperations'>
+    capsuleForkOperations: RelationFragmentOneFn<'capsuleForkOperations'>
     capsuleBranchResources: RelationFragmentOneFn<'capsuleBranchResources'>
     capsuleSnapshots: RelationFragmentOneFn<'capsuleSnapshots'>
     capsuleArtifactManifests: RelationFragmentOneFn<'capsuleArtifactManifests'>
     capsuleArtifactManifestRoots: RelationFragmentOneFn<'capsuleArtifactManifestRoots'>
     capsuleSnapshotGitRepositories: RelationFragmentOneFn<'capsuleSnapshotGitRepositories'>
     capsuleSnapshotCaptureOperations: RelationFragmentOneFn<'capsuleSnapshotCaptureOperations'>
+    capsuleSnapshotCaptureResources: RelationFragmentOneFn<'capsuleSnapshotCaptureResources'>
+    capsuleSnapshotResourceReferences: RelationFragmentOneFn<'capsuleSnapshotResourceReferences'>
   }
   many: {
     capsules: RelationFragmentManyFn<'capsules'>
     capsuleBranches: RelationFragmentManyFn<'capsuleBranches'>
     capsuleOperations: RelationFragmentManyFn<'capsuleOperations'>
+    capsuleForkOperations: RelationFragmentManyFn<'capsuleForkOperations'>
     capsuleOperationSteps: RelationFragmentManyFn<'capsuleOperationSteps'>
     capsuleBranchResources: RelationFragmentManyFn<'capsuleBranchResources'>
     capsuleSnapshots: RelationFragmentManyFn<'capsuleSnapshots'>
@@ -51,6 +55,11 @@ export interface Helpers {
   capsuleCreateOperations: {
     operationId: RelationsBuilderColumnBase<'capsuleCreateOperations'>
     rootBranchId: RelationsBuilderColumnBase<'capsuleCreateOperations'>
+  }
+  capsuleForkOperations: {
+    operationId: RelationsBuilderColumnBase<'capsuleForkOperations'>
+    sourceSnapshotId: RelationsBuilderColumnBase<'capsuleForkOperations'>
+    targetBranchId: RelationsBuilderColumnBase<'capsuleForkOperations'>
   }
   capsuleOperationSteps: {
     ownerId: RelationsBuilderColumnBase<'capsuleOperationSteps'>
@@ -98,6 +107,7 @@ export interface Helpers {
     snapshotId: RelationsBuilderColumnBase<'capsuleSnapshotResourceReferences'>
     manifestRootId: RelationsBuilderColumnBase<'capsuleSnapshotResourceReferences'>
     sourceBranchResourceId: RelationsBuilderColumnBase<'capsuleSnapshotResourceReferences'>
+    captureResourceId: RelationsBuilderColumnBase<'capsuleSnapshotResourceReferences'>
   }
   capsuleSnapshotCaptureOperations: {
     operationId: RelationsBuilderColumnBase<'capsuleSnapshotCaptureOperations'>
@@ -105,6 +115,7 @@ export interface Helpers {
     snapshotId: RelationsBuilderColumnBase<'capsuleSnapshotCaptureOperations'>
   }
   capsuleSnapshotCaptureResources: {
+    id: RelationsBuilderColumnBase<'capsuleSnapshotCaptureResources'>
     operationId: RelationsBuilderColumnBase<'capsuleSnapshotCaptureResources'>
     sourceBranchResourceId: RelationsBuilderColumnBase<'capsuleSnapshotCaptureResources'>
   }
@@ -159,6 +170,11 @@ export function defineRelations(helpers: Helpers) {
         to: helpers.capsuleCreateOperations.rootBranchId,
         optional: true,
       }),
+      forkOperation: helpers.one.capsuleForkOperations({
+        from: helpers.capsuleBranches.id,
+        to: helpers.capsuleForkOperations.targetBranchId,
+        optional: true,
+      }),
       operationSteps: helpers.many.capsuleOperationSteps({
         from: helpers.capsuleBranches.id,
         to: helpers.capsuleOperationSteps.branchId,
@@ -192,6 +208,11 @@ export function defineRelations(helpers: Helpers) {
         to: helpers.capsuleCreateOperations.operationId,
         optional: true,
       }),
+      forkOperation: helpers.one.capsuleForkOperations({
+        from: helpers.capsuleOperations.id,
+        to: helpers.capsuleForkOperations.operationId,
+        optional: true,
+      }),
       snapshotCaptureOperation: helpers.one.capsuleSnapshotCaptureOperations({
         from: helpers.capsuleOperations.id,
         to: helpers.capsuleSnapshotCaptureOperations.operationId,
@@ -218,6 +239,23 @@ export function defineRelations(helpers: Helpers) {
       }),
       rootBranch: helpers.one.capsuleBranches({
         from: helpers.capsuleCreateOperations.rootBranchId,
+        to: helpers.capsuleBranches.id,
+        optional: false,
+      }),
+    },
+    capsuleForkOperations: {
+      operation: helpers.one.capsuleOperations({
+        from: helpers.capsuleForkOperations.operationId,
+        to: helpers.capsuleOperations.id,
+        optional: false,
+      }),
+      sourceSnapshot: helpers.one.capsuleSnapshots({
+        from: helpers.capsuleForkOperations.sourceSnapshotId,
+        to: helpers.capsuleSnapshots.id,
+        optional: false,
+      }),
+      targetBranch: helpers.one.capsuleBranches({
+        from: helpers.capsuleForkOperations.targetBranchId,
         to: helpers.capsuleBranches.id,
         optional: false,
       }),
@@ -298,6 +336,10 @@ export function defineRelations(helpers: Helpers) {
         from: helpers.capsuleSnapshots.id,
         to: helpers.capsuleSnapshotCaptureOperations.snapshotId,
         optional: true,
+      }),
+      forks: helpers.many.capsuleForkOperations({
+        from: helpers.capsuleSnapshots.id,
+        to: helpers.capsuleForkOperations.sourceSnapshotId,
       }),
       gitRepositories: helpers.many.capsuleSnapshotGitRepositories({
         from: helpers.capsuleSnapshots.id,
@@ -409,6 +451,11 @@ export function defineRelations(helpers: Helpers) {
         to: helpers.capsuleBranchResources.id,
         optional: false,
       }),
+      captureResource: helpers.one.capsuleSnapshotCaptureResources({
+        from: helpers.capsuleSnapshotResourceReferences.captureResourceId,
+        to: helpers.capsuleSnapshotCaptureResources.id,
+        optional: false,
+      }),
     },
     capsuleSnapshotCaptureOperations: {
       operation: helpers.one.capsuleOperations({
@@ -441,6 +488,11 @@ export function defineRelations(helpers: Helpers) {
         from: helpers.capsuleSnapshotCaptureResources.sourceBranchResourceId,
         to: helpers.capsuleBranchResources.id,
         optional: false,
+      }),
+      snapshotResourceReference: helpers.one.capsuleSnapshotResourceReferences({
+        from: helpers.capsuleSnapshotCaptureResources.id,
+        to: helpers.capsuleSnapshotResourceReferences.captureResourceId,
+        optional: true,
       }),
     },
   }

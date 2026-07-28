@@ -40,22 +40,35 @@ function createSourceResourceIdColumn(sourceResourceIdColumn?: PgColumn) {
     : uuid('source_branch_resource_id').notNull()
 }
 
+function createCaptureResourceIdColumn(captureResourceIdColumn?: PgColumn) {
+  return captureResourceIdColumn
+    ? uuid('capture_resource_id')
+        .notNull()
+        .references(() => captureResourceIdColumn, { onDelete: 'restrict' })
+    : uuid('capture_resource_id').notNull()
+}
+
 /**
  * Creates immutable physical provider snapshot references.
  *
  * These rows are the only future fork authority for managed storage. Provider
  * snapshot identities must never be rediscovered or inferred from live Incus
  * inventory after capture commit.
+ *
+ * Each row retains the exact operation-scoped capture resource whose successful
+ * provider outcome was copied into committed history. Capture commit must prove
+ * all source, root, operation, and provider identities agree.
  */
 export function createCapsuleSnapshotResourceReferencesTable(
   snapshotIdColumn?: PgColumn,
   manifestRootIdColumn?: PgColumn,
   sourceResourceIdColumn?: PgColumn,
+  captureResourceIdColumn?: PgColumn,
 ) {
   const snapshotId = createSnapshotIdColumn(snapshotIdColumn)
   const manifestRootId = createManifestRootIdColumn(manifestRootIdColumn)
   const sourceBranchResourceId = createSourceResourceIdColumn(sourceResourceIdColumn)
-
+  const captureResourceId = createCaptureResourceIdColumn(captureResourceIdColumn)
   return pgTable(
     'capsule_snapshot_resource_references',
     {
@@ -65,6 +78,7 @@ export function createCapsuleSnapshotResourceReferencesTable(
       snapshotId,
       manifestRootId,
       sourceBranchResourceId,
+      captureResourceId,
       provider: capsuleSnapshotResourceProviderEnum('provider').notNull(),
       kind: capsuleSnapshotResourceKindEnum('kind').notNull(),
       blueprintVolumeName: text('blueprint_volume_name').$type<CapsuleBlueprintIdentifier>().notNull(),
@@ -77,6 +91,7 @@ export function createCapsuleSnapshotResourceReferencesTable(
       index('capsule_snap_resource_ref_snapshot_idx').on(table.snapshotId),
       index('capsule_snap_resource_ref_root_idx').on(table.manifestRootId),
       index('capsule_snap_resource_ref_source_resource_idx').on(table.sourceBranchResourceId),
+      uniqueIndex('capsule_snap_resource_ref_capture_resource_unique_idx').on(table.captureResourceId),
       uniqueIndex('capsule_snap_resource_ref_snapshot_root_unique_idx').on(table.snapshotId, table.manifestRootId),
       uniqueIndex('capsule_snap_resource_ref_snapshot_volume_unique_idx').on(
         table.snapshotId,

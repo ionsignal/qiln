@@ -1,5 +1,10 @@
 import { jsonb, pgTable, text, uniqueIndex, uuid, type PgColumn } from 'drizzle-orm/pg-core'
-import type { CapsuleBlueprint, CapsuleBlueprintDigest, CapsuleBranchName } from '../../../schemas'
+import type {
+  CapsuleBlueprint,
+  CapsuleBlueprintDigest,
+  CapsuleBranchName,
+  CapsuleRootfsImagePin,
+} from '../../../schemas'
 
 function createOperationIdColumn(operationIdColumn?: PgColumn) {
   return operationIdColumn
@@ -26,6 +31,10 @@ function createRootBranchIdColumn(rootBranchIdColumn?: PgColumn) {
  * extension owns only create-specific immutable input and the root branch
  * produced by that mutation.
  *
+ * `rootfsImagePin` records the exact image selected from the mutable Blueprint
+ * alias before provider mutation. Future Snapshot Capture and fork paths use
+ * this pin rather than resolving the alias again.
+ *
  * The referenced root branch remains the domain object. This row describes the
  * create mutation and must not become an alternate source of mutable branch
  * lifecycle or runtime state.
@@ -47,6 +56,7 @@ export function createCapsuleCreateOperationsTable(operationIdColumn?: PgColumn,
       blueprintName: text('blueprint_name').notNull(),
       blueprintDigest: text('blueprint_digest').$type<CapsuleBlueprintDigest>().notNull(),
       blueprintSnapshot: jsonb('blueprint_snapshot').$type<CapsuleBlueprint>().notNull(),
+      rootfsImagePin: jsonb('rootfs_image_pin').$type<CapsuleRootfsImagePin>().notNull(),
       cpu: text('cpu').notNull(),
       memory: text('memory').notNull(),
     },

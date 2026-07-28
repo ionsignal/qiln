@@ -6,8 +6,9 @@ import { CapsuleBranchNameSchema } from './branch'
  * Durable control-plane mutation types for a capsule aggregate.
  *
  * `create` initializes the capsule aggregate and its root editable branch.
- * `snapshot_capture` creates immutable committed capsule history from one
- * durably fenced source branch.
+ * `fork` creates a new editable branch from immutable committed snapshot
+ * history. `snapshot_capture` creates immutable committed capsule history from
+ * one durably fenced source branch.
  *
  * `promote` and `rollback` participate in the same capsule-wide nonterminal
  * operation fence. Their operation-specific immutable input belongs to the
@@ -15,6 +16,7 @@ import { CapsuleBranchNameSchema } from './branch'
  */
 export const CapsuleOperationType = {
   CREATE: 'create',
+  FORK: 'fork',
   ARCHIVE: 'archive',
   UNARCHIVE: 'unarchive',
   DESTROY: 'destroy',
@@ -27,6 +29,7 @@ export type CapsuleOperationTypeValue = (typeof CapsuleOperationType)[keyof type
 
 export const CapsuleOperationTypeValues = [
   CapsuleOperationType.CREATE,
+  CapsuleOperationType.FORK,
   CapsuleOperationType.ARCHIVE,
   CapsuleOperationType.UNARCHIVE,
   CapsuleOperationType.DESTROY,
@@ -120,6 +123,16 @@ export const CapsuleCreateReceiptSchema = CapsuleOperationReceiptSchema.extend({
   rootBranchName: CapsuleBranchNameSchema,
 }).strict()
 
+/**
+ * Receipt for durable branch-fork acceptance or replay.
+ */
+export const CapsuleForkReceiptSchema = CapsuleOperationReceiptSchema.extend({
+  operationType: z.literal(CapsuleOperationType.FORK),
+  sourceSnapshotId: z.uuid(),
+  branchId: z.uuid(),
+  branchName: CapsuleBranchNameSchema,
+}).strict()
+
 export const CapsuleArchiveReceiptSchema = CapsuleOperationReceiptSchema.extend({
   operationType: z.literal(CapsuleOperationType.ARCHIVE),
 }).strict()
@@ -184,6 +197,7 @@ export type CapsuleOperationIdempotencyKey = z.infer<typeof CapsuleOperationIdem
 export type CapsuleOperationRequestHash = z.infer<typeof CapsuleOperationRequestHashSchema>
 export type CapsuleOperationReceipt = z.infer<typeof CapsuleOperationReceiptSchema>
 export type CapsuleCreateReceipt = z.infer<typeof CapsuleCreateReceiptSchema>
+export type CapsuleForkReceipt = z.infer<typeof CapsuleForkReceiptSchema>
 export type CapsuleArchiveReceipt = z.infer<typeof CapsuleArchiveReceiptSchema>
 export type CapsuleUnarchiveReceipt = z.infer<typeof CapsuleUnarchiveReceiptSchema>
 export type CapsuleDestroyReceipt = z.infer<typeof CapsuleDestroyReceiptSchema>

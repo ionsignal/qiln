@@ -6,6 +6,7 @@ import {
   createCapsuleSnapshotCaptureResourcesTable,
 } from '../operation/capture'
 import { createCapsuleCreateOperationsTable } from '../operation/create'
+import { createCapsuleForkOperationsTable } from '../operation/fork'
 import { createCapsuleOperationsTable } from '../operation/record'
 import { createCapsuleOperationStepsTable } from '../operation/step'
 import { createCapsulesTable } from '../record'
@@ -43,6 +44,11 @@ export function createSchema<TUserIdColumn extends PgColumn>(userIdColumn: TUser
     capsuleBranches.id,
   )
   const capsuleSnapshots = createCapsuleSnapshotsTable(capsules.id, capsuleBranches.id)
+  const capsuleForkOperations = createCapsuleForkOperationsTable(
+    capsuleOperations.id,
+    capsuleSnapshots.id,
+    capsuleBranches.id,
+  )
   const capsuleArtifactManifests = createCapsuleArtifactManifestsTable(capsuleSnapshots.id)
   const capsuleArtifactManifestRoots = createCapsuleArtifactManifestRootsTable(capsuleArtifactManifests.id)
   const capsuleArtifactEntries = createCapsuleArtifactEntriesTable(capsuleArtifactManifestRoots.id)
@@ -56,11 +62,6 @@ export function createSchema<TUserIdColumn extends PgColumn>(userIdColumn: TUser
     capsuleArtifactManifestRoots.id,
     capsuleBranchResources.id,
   )
-  const capsuleSnapshotResourceReferences = createCapsuleSnapshotResourceReferencesTable(
-    capsuleSnapshots.id,
-    capsuleArtifactManifestRoots.id,
-    capsuleBranchResources.id,
-  )
   const capsuleSnapshotCaptureOperations = createCapsuleSnapshotCaptureOperationsTable(
     capsuleOperations.id,
     capsuleBranches.id,
@@ -70,11 +71,18 @@ export function createSchema<TUserIdColumn extends PgColumn>(userIdColumn: TUser
     capsuleSnapshotCaptureOperations.operationId,
     capsuleBranchResources.id,
   )
+  const capsuleSnapshotResourceReferences = createCapsuleSnapshotResourceReferencesTable(
+    capsuleSnapshots.id,
+    capsuleArtifactManifestRoots.id,
+    capsuleBranchResources.id,
+    capsuleSnapshotCaptureResources.id,
+  )
   return {
     capsules,
     capsuleBranches,
     capsuleOperations,
     capsuleCreateOperations,
+    capsuleForkOperations,
     capsuleOperationSteps,
     capsuleBranchResources,
     capsuleSnapshots,

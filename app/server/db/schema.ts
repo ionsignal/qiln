@@ -91,6 +91,7 @@ export const {
   capsuleBranches,
   capsuleOperations,
   capsuleCreateOperations,
+  capsuleForkOperations,
   capsuleOperationSteps,
   capsuleBranchResources,
   capsuleSnapshots,

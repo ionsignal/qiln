@@ -5,6 +5,7 @@ import type {
   CapsuleBlueprintPin,
   CapsuleBranchName,
   CapsuleBranchResourceInventoryDigest,
+  CapsuleRootfsImagePin,
   CapsuleSnapshotCapturePolicyDigest,
   CapsuleSnapshotCapturePolicyPin,
 } from '../../../../schemas'
@@ -37,14 +38,14 @@ function createNullableSnapshotIdColumn(snapshotIdColumn?: PgColumn) {
 /**
  * Creates the Snapshot Capture operation extension.
  *
- * The extension owns immutable acceptance-time source-branch, Blueprint,
- * capture-policy, and requested-mode evidence. `snapshotId` remains null until
- * the atomic capture commit transaction links this operation to committed
+ * The extension owns immutable acceptance-time source-branch, Blueprint, rootfs
+ * image, capture-policy, and requested-mode evidence. `snapshotId` remains null
+ * until the atomic capture commit transaction links this operation to committed
  * snapshot history.
  *
- * The complete historical Blueprint pin makes accepted capture execution
- * independent of mutable YAML catalog state and allows committed snapshots to
- * retain routable application definitions.
+ * The complete historical Blueprint pin and immutable rootfs image pin make
+ * accepted capture execution independent of mutable YAML catalog state and
+ * allow committed snapshots to retain reproducible reconstruction authority.
  *
  * PostgreSQL cannot prove that the referenced base operation has the
  * `snapshot_capture` discriminator. Every repository path that uses this
@@ -73,6 +74,7 @@ export function createCapsuleSnapshotCaptureOperationsTable(
       blueprintName: text('blueprint_name').notNull(),
       blueprintDigest: text('blueprint_digest').$type<CapsuleBlueprintDigest>().notNull(),
       blueprintPin: jsonb('blueprint_pin').$type<CapsuleBlueprintPin>().notNull(),
+      rootfsImagePin: jsonb('rootfs_image_pin').$type<CapsuleRootfsImagePin>().notNull(),
       capturePolicySchemaVersion: integer('capture_policy_schema_version').notNull(),
       capturePolicyDigest: text('capture_policy_digest').$type<CapsuleSnapshotCapturePolicyDigest>().notNull(),
       capturePolicyPin: jsonb('capture_policy_pin').$type<CapsuleSnapshotCapturePolicyPin>().notNull(),
