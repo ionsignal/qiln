@@ -98,24 +98,6 @@ qiln/
 └── drizzle.config.ts                   # Host-owned schema generation
 ```
 
-## Code quality and readiness
-
-Qiln is developed with extensive AI and LLM assistance, but generated code is never considered finished by default. Our highest priority is elegant, human-readable code that people can understand, review, reason about, and safely evolve.
-
-We iteratively refine implementations toward clear boundaries, explicit state transitions, durable invariants, and fail-closed behavior. We believe readability is foundational to safety and security.
-
-The scores below are our candid assessment of current implementation structure and feature completeness. They are not a security audit, production certification, or guarantee of suitability for a specific environment. Our goal is to reach **5/5** across every area, with human readability and maintainability leading that work.
-
-| Area                     | Responsibility                                                                  | Code quality | Production readiness |
-| ------------------------ | ------------------------------------------------------------------------------- | -----------: | -------------------: |
-| Core contracts           | Schemas, pins, digests, protocol, database fragments                            |      3.0/5.0 |              3.2/5.0 |
-| Capsule operations       | Durable acceptance, fences, execution, compensation, abandonment classification |      2.5/5.0 |              2.0/5.0 |
-| Routing and Caddy        | Live previews, managed Caddy routes, verification, route persistence            |      3.5/5.0 |              2.0/5.0 |
-| Infrastructure authority | Worker exclusivity, fail-stop behavior, Incus and storage boundaries            |      3.5/5.0 |              2.0/5.0 |
-| Host runtime             | Fastify lifecycle, final Drizzle composition, embedded Worker development mode  |      3.5/5.0 |              2.0/5.0 |
-| Blueprint catalog        | Initial n8n + ComfyUI capsule definition and capture policy                     |      3.5/5.0 |              2.0/5.0 |
-| **Overall**              | **Pre-release capsule platform**                                                |  **3.3/5.0** |          **2.2/5.0** |
-
 ## Development status
 
 | Capability                                                     | Status                                |
@@ -161,6 +143,24 @@ Qiln is pre-release software for controlled alpha environments.
 - Production routing is not exposed.
 - Current Blueprint capabilities do not claim complete secret, dependency, Git, or production restoration semantics.
 - Incus, ZFS, PostgreSQL, NATS, and Caddy are infrastructure details behind the capsule model.
+
+## Code quality and readiness
+
+Qiln is developed with extensive AI and LLM assistance, but generated code is never considered finished by default. Our highest priority is elegant, human-readable code that people can understand, review, reason about, and safely evolve.
+
+We iteratively refine implementations toward clear boundaries, explicit state transitions, durable invariants, and fail-closed behavior. We believe readability is foundational to safety and security.
+
+The scores below are our candid assessment of current implementation structure and feature completeness. They are not a security audit, production certification, or guarantee of suitability for a specific environment. Our goal is to reach **5/5** across every area, with human readability and maintainability leading that work.
+
+| Area                     | Responsibility                                                                  | Code quality | Production readiness |
+| ------------------------ | ------------------------------------------------------------------------------- | -----------: | -------------------: |
+| Core contracts           | Schemas, pins, digests, protocol, database fragments                            |      3.0/5.0 |              3.2/5.0 |
+| Capsule operations       | Durable acceptance, fences, execution, compensation, abandonment classification |      2.5/5.0 |              2.0/5.0 |
+| Routing and Caddy        | Live previews, managed Caddy routes, verification, route persistence            |      3.5/5.0 |              2.0/5.0 |
+| Infrastructure authority | Worker exclusivity, fail-stop behavior, Incus and storage boundaries            |      3.5/5.0 |              2.0/5.0 |
+| Host runtime             | Fastify lifecycle, final Drizzle composition, embedded Worker development mode  |      3.5/5.0 |              2.0/5.0 |
+| Blueprint catalog        | Initial n8n + ComfyUI capsule definition and capture policy                     |      3.5/5.0 |              2.0/5.0 |
+| **Overall**              | **Pre-release capsule platform**                                                |  **3.3/5.0** |          **2.2/5.0** |
 
 ## License
 
