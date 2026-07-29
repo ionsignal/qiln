@@ -1,6 +1,6 @@
 <img src="./assets/brand/qiln-readme.png" alt="Qiln — versioned AI workflow capsules" width="900">
 
-[Website](https://qiln.com) | [Documentation](https://qiln.com/docs) | [Blog](https://qiln.com/blog)
+[Website](https://qiln.com) | [Installation](#installation) | [Documentation](https://qiln.com/docs) | [Blog](https://qiln.com/blog)
 
 # Qiln
 
@@ -102,6 +102,8 @@ qiln/
 
 | Capability                                                     | Status                                |
 | -------------------------------------------------------------- | ------------------------------------- |
+| Installation Instructions                                      | Planned                               |
+| Installation Wizard                                            | Planned                               |
 | Capsule creation and durable operation ledger                  | Implemented                           |
 | Editable branch lifecycle and runtime reconciliation           | Implemented                           |
 | Immutable Blueprint, rootfs-image, and capture-policy pins     | Implemented                           |
@@ -132,6 +134,10 @@ Caddy access is Worker-only and constrained to a Qiln-managed route array with s
 Qiln is currently **CLI-first**.
 
 UX/UI is not yet the current focus. UI work is scheduled for October 2026 release. The present implementation emphasis is durable capsule behavior, safe infrastructure boundaries, and operational correctness.
+
+## Installation
+
+Installation documentation and instructions coming soon...
 
 ## Current boundaries
 
