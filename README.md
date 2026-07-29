@@ -104,13 +104,13 @@ qiln-stealth/
 
 | Area                     | Source                                                                      | Responsibility                                                                  | Code quality | Production readiness |
 | ------------------------ | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------- | -----------: | -------------------: |
-| Core contracts           | `packages/core/src`                                                         | Schemas, pins, digests, protocol, database fragments                            |          4/5 |                  3/5 |
-| Capsule operations       | `packages/worker/src/services/capsule/operations`                           | Durable acceptance, fences, execution, compensation, abandonment classification |          4/5 |                  2/5 |
-| Routing and Caddy        | `packages/worker/src/services/capsule/routing`, `packages/worker/src/caddy` | Live previews, managed Caddy routes, verification, route persistence            |          4/5 |                  2/5 |
-| Infrastructure authority | `packages/worker/src/coordination`, `packages/worker/src/incus`             | Worker exclusivity, fail-stop behavior, Incus and storage boundaries            |          4/5 |                  2/5 |
-| Host runtime             | `app/server`                                                                | Fastify lifecycle, final Drizzle composition, embedded Worker development mode  |          3/5 |                  2/5 |
-| Blueprint catalog        | `catalog/blueprints`                                                        | Initial n8n + ComfyUI capsule definition and capture policy                     |          3/5 |                  2/5 |
-| **Overall**              | —                                                                           | Pre-release capsule platform                                                    |      **4/5** |              **2/5** |
+| Core contracts           | `packages/core/src`                                                         | Schemas, pins, digests, protocol, database fragments                            |      3.0/5.0 |              3.2/5.0 |
+| Capsule operations       | `packages/worker/src/services/capsule/operations`                           | Durable acceptance, fences, execution, compensation, abandonment classification |      2.5/5.0 |              2.0/5.0 |
+| Routing and Caddy        | `packages/worker/src/services/capsule/routing`, `packages/worker/src/caddy` | Live previews, managed Caddy routes, verification, route persistence            |      3.5/5.0 |              2.0/5.0 |
+| Infrastructure authority | `packages/worker/src/coordination`, `packages/worker/src/incus`             | Worker exclusivity, fail-stop behavior, Incus and storage boundaries            |      3.5/5.0 |              2.0/5.0 |
+| Host runtime             | `app/server`                                                                | Fastify lifecycle, final Drizzle composition, embedded Worker development mode  |      3.5/5.0 |              2.0/5.0 |
+| Blueprint catalog        | `catalog/blueprints`                                                        | Initial n8n + ComfyUI capsule definition and capture policy                     |      3.5/5.0 |              2.0/5.0 |
+| **Overall**              | —                                                                           | **Pre-release capsule platform**                                                |  **3.3/5.0** |          **2.2/5.0** |
 
 Scores reflect implementation structure and feature completeness, not a security audit or production certification.
 
@@ -130,7 +130,7 @@ Caddy access is Worker-only and constrained to a Qiln-managed route array with s
 
 Qiln is currently **CLI-first**.
 
-UX/UI is not the current focus. UI work is scheduled for October 2026 release. The present implementation emphasis is durable capsule behavior, safe infrastructure boundaries, and operational correctness.
+UX/UI is not yet the current focus. UI work is scheduled for October 2026 release. The present implementation emphasis is durable capsule behavior, safe infrastructure boundaries, and operational correctness.
 
 ## Current boundaries
 
