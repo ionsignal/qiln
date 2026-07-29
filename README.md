@@ -55,10 +55,10 @@ Qiln keeps production separate from editing. Branches are where humans and agent
 | Live previews for eligible online branches                     | Implemented for alpha environments    |
 | Privileged Caddy route management and verification             | Implemented                           |
 | Durable route aliases, revisions, heads, and provider evidence | Implemented                           |
-| Golden-test and diff-review execution                          | Not exposed                           |
-| Promote and rollback execution                                 | Not exposed                           |
-| Immutable release runtimes                                     | Not exposed                           |
-| Production route aliases                                       | Not exposed                           |
+| Golden-test and diff-review execution                          |                                       |
+| Promote and rollback execution                                 |                                       |
+| Immutable release runtimes                                     |                                       |
+| Production route aliases                                       |                                       |
 
 The initial capsule Blueprint is **n8n + ComfyUI**. Their capture and application capabilities remain intentionally explicit: snapshot support is experimental, and the current contracts do not claim production release readiness.
 
