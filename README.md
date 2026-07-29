@@ -1,6 +1,6 @@
-<!-- README.md -->
-
 <img src="./assets/brand/qiln-readme.png" alt="Qiln — versioned AI workflow capsules" width="900">
+
+[Website](https://qiln.com) | [Documentation](https://qiln.com/docs) | [Blog](https://qiln.com/blog)
 
 # Qiln
 
@@ -43,28 +43,24 @@ Snapshots do not automatically create release runtimes. Immutable release routes
 
 Qiln keeps production separate from editing. Branches are where humans and agents make changes; immutable history is where review, release, and rollback decisions belong.
 
-## Development status
-
-| Capability                                                     | Status                                |
-| -------------------------------------------------------------- | ------------------------------------- |
-| Capsule creation and durable operation ledger                  | Implemented                           |
-| Editable branch lifecycle and runtime reconciliation           | Implemented                           |
-| Immutable Blueprint, rootfs-image, and capture-policy pins     | Implemented                           |
-| Experimental Snapshot Capture                                  | Implemented with explicit limitations |
-| Snapshot-based editable forks                                  | Implemented with explicit limitations |
-| Live previews for eligible online branches                     | Implemented for alpha environments    |
-| Privileged Caddy route management and verification             | Implemented                           |
-| Durable route aliases, revisions, heads, and provider evidence | Implemented                           |
-| Golden-test and diff-review execution                          |                                       |
-| Promote and rollback execution                                 |                                       |
-| Immutable release runtimes                                     |                                       |
-| Production route aliases                                       |                                       |
-
 The initial capsule Blueprint is **n8n + ComfyUI**. Their capture and application capabilities remain intentionally explicit: snapshot support is experimental, and the current contracts do not claim production release readiness.
 
 We chose these systems as Qiln’s proof of concept because they reflect the kind of workflow environment we know firsthand: sprawling, stateful, dependency-heavy, and difficult to change safely. They combine multiple Git repositories, custom nodes, workflow exports, databases, large models, generated outputs, shared storage, and opaque runtime state.
 
 Qiln brings that complexity under durable capsule, branch, snapshot, test, diff, and rollback controls—so humans and agents can make changes with clearer boundaries and less guesswork.
+
+## Routing model
+
+Qiln separates mutable review traffic from immutable release traffic.
+
+| Route type        | Points to                                                               | Mutability                 | Status                          |
+| ----------------- | ----------------------------------------------------------------------- | -------------------------- | ------------------------------- |
+| **Live preview**  | An eligible online editable branch                                      | Mutable                    | Available in alpha environments |
+| **Release alias** | An explicit snapshot-derived runtime created by `promote` or `rollback` | Immutable revision history | Planned                         |
+
+A snapshot is durable history and fork input. Capturing a snapshot does not automatically create a release runtime, change traffic, or promote a route.
+
+This allows a capsule to have one `main` branch with one live preview, then gain additional independently previewable branches after snapshot-based forks. Future release aliases remain separate from editable branches.
 
 ## Architecture
 
@@ -113,6 +109,23 @@ qiln-stealth/
 | **Overall**              | **Pre-release capsule platform**                                                |  **3.3/5.0** |          **2.2/5.0** |
 
 Scores reflect implementation structure and feature completeness, not a security audit or production certification.
+
+## Development status
+
+| Capability                                                     | Status                                |
+| -------------------------------------------------------------- | ------------------------------------- |
+| Capsule creation and durable operation ledger                  | Implemented                           |
+| Editable branch lifecycle and runtime reconciliation           | Implemented                           |
+| Immutable Blueprint, rootfs-image, and capture-policy pins     | Implemented                           |
+| Experimental Snapshot Capture                                  | Implemented with explicit limitations |
+| Snapshot-based editable forks                                  | Implemented with explicit limitations |
+| Live previews for eligible online branches                     | Implemented for alpha environments    |
+| Privileged Caddy route management and verification             | Implemented                           |
+| Durable route aliases, revisions, heads, and provider evidence | Implemented                           |
+| Golden-test and diff-review execution                          | Planned                               |
+| Promote and rollback execution                                 | Planned                               |
+| Immutable release runtimes                                     | Planned                               |
+| Production route aliases                                       | Planned                               |
 
 ## Safety model
 
