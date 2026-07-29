@@ -65,7 +65,7 @@ This allows a capsule to have one `main` branch with one live preview, then gain
 ## Architecture
 
 ```text
-qiln-stealth/
+qiln/
 ├── app/
 │   └── server/                         # Host composition, Fastify lifecycle, DB ownership
 ├── packages/
