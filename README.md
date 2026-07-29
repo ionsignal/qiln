@@ -93,7 +93,7 @@ qiln/
 │               ├── snapshot/           # Committed snapshot history reads
 │               └── resource/           # Durable provider-resource ownership inventory
 ├── catalog/
-│   ├── blueprints/                     # Versioned n8n + ComfyUI capsule definitions
+│   ├── blueprints/                     # Versioned reference capsule definitions
 │   └── images/                         # Orchestrator image definitions
 └── drizzle.config.ts                   # Host-owned schema generation
 ```
