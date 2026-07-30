@@ -1,12 +1,14 @@
 import { z } from 'zod'
-import { parseCaddyAdminEndpoint } from '../endpoint'
 import { isIP } from 'node:net'
+import { parseCaddyAdminEndpoint } from '../endpoint'
 
 export const DEFAULT_CADDY_REQUEST_TIMEOUT_MS = 15_000
 
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/
-const CADDY_ROUTE_ID_PATTERN = /^qiln-route-[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/
+const CADDY_EXACT_ROUTE_ID_PATTERN = /^qiln-route-(?!fallback-)[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/
+const CADDY_PREVIEW_ROUTE_ID_PATTERN = /^qiln-preview-[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/
 const CADDY_FALLBACK_ROUTE_ID_PATTERN = /^qiln-route-fallback-[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/
+const CADDY_MANAGED_ROUTE_ID_PATTERN = /^qiln-(?:route|preview)-[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/
 const CADDY_SERVER_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/
 const HOST_LABEL_PATTERN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/
 const HTTP_METHOD_TOKEN_PATTERN = /^[A-Z0-9!#$%&'*+.^_`|~-]+$/
@@ -112,21 +114,29 @@ export const CaddyServerNameSchema = z
   .max(128)
   .regex(CADDY_SERVER_NAME_PATTERN, 'Caddy server name contains unsupported characters.')
 
-const CaddyManagedRouteIdSchema = z
+export const CaddyManagedRouteIdSchema = z
   .string()
   .min(1)
   .max(128)
-  .regex(CADDY_ROUTE_ID_PATTERN, 'Caddy route ID must use the Qiln-managed route namespace.')
+  .regex(CADDY_MANAGED_ROUTE_ID_PATTERN, 'Caddy route ID must use a Qiln-managed route namespace.')
 
-export const CaddyAliasRouteIdSchema = CaddyManagedRouteIdSchema.refine(
-  value => !value.startsWith('qiln-route-fallback-'),
-  'Caddy alias route ID cannot use the reserved fallback route namespace.',
-)
+export const CaddyExactRouteIdSchema = z
+  .string()
+  .min(1)
+  .max(128)
+  .regex(CADDY_EXACT_ROUTE_ID_PATTERN, 'Caddy exact route ID must use the Qiln-managed alias namespace.')
 
-export const CaddyFallbackRouteIdSchema = CaddyManagedRouteIdSchema.refine(
-  value => CADDY_FALLBACK_ROUTE_ID_PATTERN.test(value),
-  'Caddy fallback route ID must use the reserved Qiln fallback route namespace.',
-)
+export const CaddyPreviewRouteIdSchema = z
+  .string()
+  .min(1)
+  .max(128)
+  .regex(CADDY_PREVIEW_ROUTE_ID_PATTERN, 'Caddy preview route ID must use the Qiln-managed preview namespace.')
+
+export const CaddyFallbackRouteIdSchema = z
+  .string()
+  .min(1)
+  .max(128)
+  .regex(CADDY_FALLBACK_ROUTE_ID_PATTERN, 'Caddy fallback route ID must use the reserved Qiln fallback namespace.')
 
 export const CaddyEtagSchema = z
   .string()
@@ -201,11 +211,17 @@ export const CaddyStaticPrivateUpstreamSchema = z
   })
   .strict()
 
-export const CaddyAliasMatcherSchema = z
+export const CaddyExactMatcherSchema = z
   .object({
     host: z.tuple([CaddyCanonicalHostnameSchema]),
     path: z.tuple([CaddyExactPathSchema]),
     method: CaddyHttpMethodListSchema,
+  })
+  .strict()
+
+export const CaddyPreviewMatcherSchema = z
+  .object({
+    host: z.tuple([CaddyCanonicalHostnameSchema]),
   })
   .strict()
 
@@ -217,18 +233,34 @@ export const CaddyReverseProxyHandlerSchema = z
   .strict()
 
 /**
- * Qiln intentionally emits only this native Caddy JSON shape for one stable
- * alias. Excluding optional Caddy fields prevents this client from becoming a
- * generic route editor.
+ * Exact immutable alias route shape used by future promotion and rollback.
  */
-export const CaddyAliasRouteSchema = z
+export const CaddyExactRouteSchema = z
   .object({
-    '@id': CaddyAliasRouteIdSchema,
-    match: z.tuple([CaddyAliasMatcherSchema]),
+    '@id': CaddyExactRouteIdSchema,
+    match: z.tuple([CaddyExactMatcherSchema]),
     handle: z.tuple([CaddyReverseProxyHandlerSchema]),
     terminal: z.literal(true),
   })
   .strict()
+
+/**
+ * Mutable preview route shape for one editable branch application.
+ *
+ * Preview hostnames own all paths beneath the dedicated hostname. Preview
+ * routes cannot introduce path rewrites, matcher expressions, or extra Caddy
+ * handlers.
+ */
+export const CaddyPreviewRouteSchema = z
+  .object({
+    '@id': CaddyPreviewRouteIdSchema,
+    match: z.tuple([CaddyPreviewMatcherSchema]),
+    handle: z.tuple([CaddyReverseProxyHandlerSchema]),
+    terminal: z.literal(true),
+  })
+  .strict()
+
+export const CaddyManagedRouteSchema = z.union([CaddyExactRouteSchema, CaddyPreviewRouteSchema])
 
 export const CaddyStaticNotFoundHandlerSchema = z
   .object({
@@ -251,11 +283,11 @@ export const CaddyFallbackRouteSchema = z
 
 export const CaddyRouteArraySchema = z.array(z.unknown()).min(1)
 
-export const CaddyAliasRouteEntrySchema = z
+export const CaddyManagedRouteEntrySchema = z
   .object({
-    id: CaddyAliasRouteIdSchema,
+    id: CaddyManagedRouteIdSchema,
     index: z.int().nonnegative(),
-    route: CaddyAliasRouteSchema,
+    route: CaddyManagedRouteSchema,
   })
   .strict()
   .superRefine((entry, context) => {
@@ -263,35 +295,35 @@ export const CaddyAliasRouteEntrySchema = z
       context.addIssue({
         code: z.ZodIssueCode.custom,
         path: ['id'],
-        message: 'Caddy alias state ID must match the route @id.',
+        message: 'Caddy route state ID must match the route @id.',
       })
     }
   })
 
-export const CaddyAliasesStateSchema = z
+export const CaddyRoutesStateSchema = z
   .object({
     etag: CaddyEtagSchema,
-    aliases: z.array(CaddyAliasRouteEntrySchema),
+    routes: z.array(CaddyManagedRouteEntrySchema),
   })
   .strict()
   .superRefine((state, context) => {
     const ids = new Set<string>()
-    for (const [position, alias] of state.aliases.entries()) {
-      if (alias.index !== position) {
+    for (const [position, route] of state.routes.entries()) {
+      if (route.index !== position) {
         context.addIssue({
           code: z.ZodIssueCode.custom,
-          path: ['aliases', position, 'index'],
-          message: 'Caddy alias state indexes must be contiguous and ordered before the fallback route.',
+          path: ['routes', position, 'index'],
+          message: 'Caddy managed route indexes must be contiguous and ordered before the fallback route.',
         })
       }
-      if (ids.has(alias.id)) {
+      if (ids.has(route.id)) {
         context.addIssue({
           code: z.ZodIssueCode.custom,
-          path: ['aliases', position, 'id'],
-          message: 'Caddy alias state cannot contain duplicate route IDs.',
+          path: ['routes', position, 'id'],
+          message: 'Caddy managed route state cannot contain duplicate route IDs.',
         })
       }
-      ids.add(alias.id)
+      ids.add(route.id)
     }
   })
 

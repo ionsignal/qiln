@@ -1,24 +1,24 @@
 import { z } from 'zod'
 import { CaddyError, CaddyErrorCode, CaddyMutationOutcome, caddyErrorDetailsFromUnknown } from './error'
 import {
-  CaddyAliasRouteIdSchema,
-  CaddyAliasRouteSchema,
-  CaddyAliasesStateSchema,
-  CaddyEtagSchema,
   CaddyFallbackRouteSchema,
+  CaddyManagedRouteIdSchema,
+  CaddyManagedRouteSchema,
   CaddyRouteArraySchema,
+  CaddyRoutesStateSchema,
+  CaddyEtagSchema,
 } from './schema'
 import { CaddyHttp } from './transport'
-import type { CaddyAliasRoute, CaddyAliasRouteEntry, CaddyAliasesState } from './types'
+import type { CaddyManagedRoute, CaddyManagedRouteEntry, CaddyRoutesState } from './types'
 
-interface CaddyAliasesClientOptions {
+interface CaddyRoutesClientOptions {
   server: string
   fallbackId: string
 }
 
-interface ExpectedAlias {
+interface ExpectedRoute {
   id: string
-  route: CaddyAliasRoute
+  route: CaddyManagedRoute
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -55,107 +55,107 @@ function areJsonValuesEqual(left: unknown, right: unknown): boolean {
 }
 
 /**
- * Controls only Qiln-owned alias route objects within one infrastructure-owned
+ * Controls only Qiln-managed route objects within one infrastructure-owned
  * Caddy route array. It never traverses arbitrary config paths or attempts to
  * repair a route table whose ownership boundary cannot be proven.
  */
-export class CaddyAliasesClient {
+export class CaddyRoutesClient {
   private readonly routeTablePath: string
 
   constructor(
     private readonly transport: CaddyHttp,
-    private readonly options: CaddyAliasesClientOptions,
+    private readonly options: CaddyRoutesClientOptions,
   ) {
     this.routeTablePath = `/config/apps/http/servers/${encodeURIComponent(options.server)}/routes`
   }
 
-  public async read(): Promise<CaddyAliasesState> {
+  public async read(): Promise<CaddyRoutesState> {
     const response = await this.transport.getJson(this.routeTablePath)
     return this.parseManagedRouteTable(response.data, response.etag)
   }
 
-  public async create(route: CaddyAliasRoute, state: CaddyAliasesState): Promise<CaddyAliasesState> {
-    const desiredRoute = this.parseAliasRoute(route, 'Caddy alias create route')
-    const inspectedState = this.parseState(state, 'Caddy alias create state')
-    const ids = desiredRoute['@id']
-    if (this.findAlias(inspectedState, ids)) {
-      throw new CaddyError(`Caddy alias '${ids}' already exists in the supplied route state.`, {
+  public async create(route: CaddyManagedRoute, state: CaddyRoutesState): Promise<CaddyRoutesState> {
+    const desiredRoute = this.parseRoute(route, 'Caddy route create route')
+    const inspectedState = this.parseState(state, 'Caddy route create state')
+    const routeId = desiredRoute['@id']
+    if (this.findRoute(inspectedState, routeId)) {
+      throw new CaddyError(`Caddy route '${routeId}' already exists in the supplied route state.`, {
         code: CaddyErrorCode.CONFLICT,
         outcome: CaddyMutationOutcome.NOT_ATTEMPTED,
         details: {
-          aliasId: ids,
+          routeId,
         },
       })
     }
-    const insertionIndex = inspectedState.aliases.length
+    const insertionIndex = inspectedState.routes.length
     await this.transport.putJson(this.routePositionPath(insertionIndex), desiredRoute, inspectedState.etag)
-    const observedState = await this.readAfterMutation('create', ids)
-    const expectedAliases = [
-      ...this.expectedAliasesFromState(inspectedState),
+    const observedState = await this.readAfterMutation('create', routeId)
+    const expectedRoutes = [
+      ...this.expectedRoutesFromState(inspectedState),
       {
-        id: ids,
+        id: routeId,
         route: desiredRoute,
       },
     ]
 
-    this.assertExpectedAliases(observedState, expectedAliases, 'create', ids)
+    this.assertExpectedRoutes(observedState, expectedRoutes, 'create', routeId)
 
     return observedState
   }
 
-  public async replace(route: CaddyAliasRoute, state: CaddyAliasesState): Promise<CaddyAliasesState> {
-    const desiredRoute = this.parseAliasRoute(route, 'Caddy alias replace route')
-    const inspectedState = this.parseState(state, 'Caddy alias replace state')
-    const aliasId = desiredRoute['@id']
-    const existingAlias = this.findAlias(inspectedState, aliasId)
-    if (!existingAlias) {
-      throw new CaddyError(`Caddy alias '${aliasId}' does not exist in the supplied route state.`, {
+  public async replace(route: CaddyManagedRoute, state: CaddyRoutesState): Promise<CaddyRoutesState> {
+    const desiredRoute = this.parseRoute(route, 'Caddy route replace route')
+    const inspectedState = this.parseState(state, 'Caddy route replace state')
+    const routeId = desiredRoute['@id']
+    const existingRoute = this.findRoute(inspectedState, routeId)
+    if (!existingRoute) {
+      throw new CaddyError(`Caddy route '${routeId}' does not exist in the supplied route state.`, {
         code: CaddyErrorCode.NOT_FOUND,
         outcome: CaddyMutationOutcome.NOT_ATTEMPTED,
         details: {
-          aliasId,
+          routeId,
         },
       })
     }
-    await this.transport.patchJson(this.routePositionPath(existingAlias.index), desiredRoute, inspectedState.etag)
-    const observedState = await this.readAfterMutation('replace', aliasId)
-    const expectedAliases = this.expectedAliasesFromState(inspectedState).map(alias =>
-      alias.id === aliasId
+    await this.transport.patchJson(this.routePositionPath(existingRoute.index), desiredRoute, inspectedState.etag)
+    const observedState = await this.readAfterMutation('replace', routeId)
+    const expectedRoutes = this.expectedRoutesFromState(inspectedState).map(route =>
+      route.id === routeId
         ? {
-            id: aliasId,
+            id: routeId,
             route: desiredRoute,
           }
-        : alias,
+        : route,
     )
 
-    this.assertExpectedAliases(observedState, expectedAliases, 'replace', aliasId)
+    this.assertExpectedRoutes(observedState, expectedRoutes, 'replace', routeId)
 
     return observedState
   }
 
-  public async delete(aliasId: string, state: CaddyAliasesState): Promise<CaddyAliasesState> {
-    const parsedAliasId = this.parseAliasId(aliasId)
-    const inspectedState = this.parseState(state, 'Caddy alias delete state')
-    const existingAlias = this.findAlias(inspectedState, parsedAliasId)
-    if (!existingAlias) {
-      throw new CaddyError(`Caddy alias '${parsedAliasId}' does not exist in the supplied route state.`, {
+  public async delete(routeId: string, state: CaddyRoutesState): Promise<CaddyRoutesState> {
+    const parsedRouteId = this.parseRouteId(routeId)
+    const inspectedState = this.parseState(state, 'Caddy route delete state')
+    const existingRoute = this.findRoute(inspectedState, parsedRouteId)
+    if (!existingRoute) {
+      throw new CaddyError(`Caddy route '${parsedRouteId}' does not exist in the supplied route state.`, {
         code: CaddyErrorCode.NOT_FOUND,
         outcome: CaddyMutationOutcome.NOT_ATTEMPTED,
         details: {
-          aliasId: parsedAliasId,
+          routeId: parsedRouteId,
         },
       })
     }
-    await this.transport.delete(this.routePositionPath(existingAlias.index), inspectedState.etag)
-    const observedState = await this.readAfterMutation('delete', parsedAliasId)
-    const expectedAliases = this.expectedAliasesFromState(inspectedState).filter(alias => alias.id !== parsedAliasId)
+    await this.transport.delete(this.routePositionPath(existingRoute.index), inspectedState.etag)
+    const observedState = await this.readAfterMutation('delete', parsedRouteId)
+    const expectedRoutes = this.expectedRoutesFromState(inspectedState).filter(route => route.id !== parsedRouteId)
 
-    this.assertExpectedAliases(observedState, expectedAliases, 'delete', parsedAliasId)
+    this.assertExpectedRoutes(observedState, expectedRoutes, 'delete', parsedRouteId)
 
     return observedState
   }
 
-  private parseManagedRouteTable(value: unknown, etag: string | undefined): CaddyAliasesState {
+  private parseManagedRouteTable(value: unknown, etag: string | undefined): CaddyRoutesState {
     const parsedEtag = CaddyEtagSchema.safeParse(etag)
     if (!parsedEtag.success) {
       throw new CaddyError('Caddy route-array read did not return a valid ETag.', {
@@ -203,45 +203,45 @@ export class CaddyAliasesClient {
         },
       })
     }
-    const aliases: CaddyAliasRouteEntry[] = []
+    const routes: CaddyManagedRouteEntry[] = []
     const ids = new Set<string>([parsedFallback.data['@id']])
     for (let index = 0; index < fallbackIndex; index++) {
-      const parsedAlias = CaddyAliasRouteSchema.safeParse(routeValues[index])
-      if (!parsedAlias.success) {
-        throw new CaddyError('Caddy managed route table contains an unsupported non-alias route.', {
+      const parsedRoute = CaddyManagedRouteSchema.safeParse(routeValues[index])
+      if (!parsedRoute.success) {
+        throw new CaddyError('Caddy managed route table contains an unsupported non-Qiln route.', {
           code: CaddyErrorCode.UNSUPPORTED_CONFIGURATION,
           outcome: CaddyMutationOutcome.NOT_ATTEMPTED,
           details: {
             routeTablePath: this.routeTablePath,
             index,
-            validation: z.treeifyError(parsedAlias.error),
+            validation: z.treeifyError(parsedRoute.error),
           },
         })
       }
-      const aliasId = parsedAlias.data['@id']
-      if (ids.has(aliasId)) {
+      const routeId = parsedRoute.data['@id']
+      if (ids.has(routeId)) {
         throw new CaddyError('Caddy managed route table contains duplicate route IDs.', {
           code: CaddyErrorCode.UNSUPPORTED_CONFIGURATION,
           outcome: CaddyMutationOutcome.NOT_ATTEMPTED,
           details: {
             routeTablePath: this.routeTablePath,
-            aliasId,
+            routeId,
           },
         })
       }
-      ids.add(aliasId)
-      aliases.push({
-        id: aliasId,
+      ids.add(routeId)
+      routes.push({
+        id: routeId,
         index,
-        route: parsedAlias.data,
+        route: parsedRoute.data,
       })
     }
-    const parsedState = CaddyAliasesStateSchema.safeParse({
+    const parsedState = CaddyRoutesStateSchema.safeParse({
       etag: parsedEtag.data,
-      aliases,
+      routes,
     })
     if (!parsedState.success) {
-      throw new CaddyError('Caddy managed route table could not be represented as a valid Qiln alias state.', {
+      throw new CaddyError('Caddy managed route table could not be represented as valid Qiln route state.', {
         code: CaddyErrorCode.UNSUPPORTED_CONFIGURATION,
         outcome: CaddyMutationOutcome.NOT_ATTEMPTED,
         details: {
@@ -253,73 +253,73 @@ export class CaddyAliasesClient {
     return parsedState.data
   }
 
-  private async readAfterMutation(action: string, aliasId: string): Promise<CaddyAliasesState> {
+  private async readAfterMutation(action: string, routeId: string): Promise<CaddyRoutesState> {
     try {
       return await this.read()
     } catch (error: unknown) {
-      throw new CaddyError(`Caddy alias '${aliasId}' ${action} could not be verified after configuration mutation.`, {
+      throw new CaddyError(`Caddy route '${routeId}' ${action} could not be verified after configuration mutation.`, {
         code: CaddyErrorCode.CONFIGURATION_MISMATCH,
         outcome: CaddyMutationOutcome.UNKNOWN,
         details: {
           action,
-          aliasId,
+          routeId,
           error: caddyErrorDetailsFromUnknown(error),
         },
       })
     }
   }
 
-  private assertExpectedAliases(
-    observedState: CaddyAliasesState,
-    expectedAliases: readonly ExpectedAlias[],
+  private assertExpectedRoutes(
+    observedState: CaddyRoutesState,
+    expectedRoutes: readonly ExpectedRoute[],
     action: string,
-    aliasId: string,
+    routeId: string,
   ): void {
-    if (observedState.aliases.length !== expectedAliases.length) {
-      this.throwConfigurationMismatch(action, aliasId, {
-        expectedAliasCount: expectedAliases.length,
-        actualAliasCount: observedState.aliases.length,
+    if (observedState.routes.length !== expectedRoutes.length) {
+      this.throwConfigurationMismatch(action, routeId, {
+        expectedRouteCount: expectedRoutes.length,
+        actualRouteCount: observedState.routes.length,
       })
     }
-    for (const [index, expectedAlias] of expectedAliases.entries()) {
-      const observedAlias = observedState.aliases[index]
-      if (!observedAlias) {
-        this.throwConfigurationMismatch(action, aliasId, {
+    for (const [index, expectedRoute] of expectedRoutes.entries()) {
+      const observedRoute = observedState.routes[index]
+      if (!observedRoute) {
+        this.throwConfigurationMismatch(action, routeId, {
           index,
-          expectedAliasId: expectedAlias.id,
-          actualAliasId: null,
+          expectedRouteId: expectedRoute.id,
+          actualRouteId: null,
         })
       }
       if (
-        observedAlias.id !== expectedAlias.id ||
-        observedAlias.index !== index ||
-        !areJsonValuesEqual(observedAlias.route, expectedAlias.route)
+        observedRoute.id !== expectedRoute.id ||
+        observedRoute.index !== index ||
+        !areJsonValuesEqual(observedRoute.route, expectedRoute.route)
       ) {
-        this.throwConfigurationMismatch(action, aliasId, {
+        this.throwConfigurationMismatch(action, routeId, {
           index,
-          expectedAliasId: expectedAlias.id,
-          actualAliasId: observedAlias.id,
+          expectedRouteId: expectedRoute.id,
+          actualRouteId: observedRoute.id,
           expectedRouteIndex: index,
-          actualRouteIndex: observedAlias.index,
+          actualRouteIndex: observedRoute.index,
         })
       }
     }
   }
 
-  private throwConfigurationMismatch(action: string, aliasId: string, details: Record<string, unknown>): never {
-    throw new CaddyError(`Caddy alias '${aliasId}' ${action} readback did not match the expected route table.`, {
+  private throwConfigurationMismatch(action: string, routeId: string, details: Record<string, unknown>): never {
+    throw new CaddyError(`Caddy route '${routeId}' ${action} readback did not match the expected route table.`, {
       code: CaddyErrorCode.CONFIGURATION_MISMATCH,
       outcome: CaddyMutationOutcome.UNKNOWN,
       details: {
         action,
-        aliasId,
+        routeId,
         ...details,
       },
     })
   }
 
-  private parseAliasRoute(value: unknown, context: string): CaddyAliasRoute {
-    const parsed = CaddyAliasRouteSchema.safeParse(value)
+  private parseRoute(value: unknown, context: string): CaddyManagedRoute {
+    const parsed = CaddyManagedRouteSchema.safeParse(value)
     if (!parsed.success) {
       throw new CaddyError(`Invalid ${context}.`, {
         code: CaddyErrorCode.VALIDATION_ERROR,
@@ -332,10 +332,10 @@ export class CaddyAliasesClient {
     return parsed.data
   }
 
-  private parseAliasId(value: unknown): string {
-    const parsed = CaddyAliasRouteIdSchema.safeParse(value)
+  private parseRouteId(value: unknown): string {
+    const parsed = CaddyManagedRouteIdSchema.safeParse(value)
     if (!parsed.success) {
-      throw new CaddyError('Invalid Caddy alias route ID.', {
+      throw new CaddyError('Invalid Caddy managed route ID.', {
         code: CaddyErrorCode.VALIDATION_ERROR,
         outcome: CaddyMutationOutcome.NOT_ATTEMPTED,
         details: {
@@ -346,8 +346,8 @@ export class CaddyAliasesClient {
     return parsed.data
   }
 
-  private parseState(value: unknown, context: string): CaddyAliasesState {
-    const parsed = CaddyAliasesStateSchema.safeParse(value)
+  private parseState(value: unknown, context: string): CaddyRoutesState {
+    const parsed = CaddyRoutesStateSchema.safeParse(value)
     if (!parsed.success) {
       throw new CaddyError(`Invalid ${context}.`, {
         code: CaddyErrorCode.VALIDATION_ERROR,
@@ -360,15 +360,15 @@ export class CaddyAliasesClient {
     return parsed.data
   }
 
-  private expectedAliasesFromState(state: CaddyAliasesState): ExpectedAlias[] {
-    return state.aliases.map(alias => ({
-      id: alias.id,
-      route: alias.route,
+  private expectedRoutesFromState(state: CaddyRoutesState): ExpectedRoute[] {
+    return state.routes.map(route => ({
+      id: route.id,
+      route: route.route,
     }))
   }
 
-  private findAlias(state: CaddyAliasesState, aliasId: string): CaddyAliasRouteEntry | undefined {
-    return state.aliases.find(alias => alias.id === aliasId)
+  private findRoute(state: CaddyRoutesState, routeId: string): CaddyManagedRouteEntry | undefined {
+    return state.routes.find(route => route.id === routeId)
   }
 
   private routePositionPath(index: number): string {

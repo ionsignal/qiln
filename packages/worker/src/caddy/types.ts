@@ -1,17 +1,21 @@
 import type { input, output } from 'zod'
 import type {
-  CaddyAliasRouteEntrySchema,
-  CaddyAliasRouteSchema,
-  CaddyAliasesStateSchema,
   CaddyClientOptionsSchema,
+  CaddyExactRouteSchema,
+  CaddyManagedRouteEntrySchema,
+  CaddyManagedRouteSchema,
+  CaddyPreviewRouteSchema,
+  CaddyRoutesStateSchema,
 } from './schema'
 
 export type CaddyClientOptions = input<typeof CaddyClientOptionsSchema>
 export type ResolvedCaddyClientOptions = output<typeof CaddyClientOptionsSchema>
 
-export type CaddyAliasRoute = output<typeof CaddyAliasRouteSchema>
-export type CaddyAliasRouteEntry = output<typeof CaddyAliasRouteEntrySchema>
-export type CaddyAliasesState = output<typeof CaddyAliasesStateSchema>
+export type CaddyExactRoute = output<typeof CaddyExactRouteSchema>
+export type CaddyPreviewRoute = output<typeof CaddyPreviewRouteSchema>
+export type CaddyManagedRoute = output<typeof CaddyManagedRouteSchema>
+export type CaddyManagedRouteEntry = output<typeof CaddyManagedRouteEntrySchema>
+export type CaddyRoutesState = output<typeof CaddyRoutesStateSchema>
 
 export type CaddyConfigMutationMethod = 'PUT' | 'PATCH' | 'DELETE'
 

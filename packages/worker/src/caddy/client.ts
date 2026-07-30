@@ -1,19 +1,19 @@
 import { z } from 'zod'
 import { parseCaddyAdminEndpoint } from '../endpoint'
 import { CaddyError, CaddyErrorCode, CaddyMutationOutcome } from './error'
-import { CaddyAliasesClient } from './aliases'
+import { CaddyRoutesClient } from './routes'
 import { CaddyClientOptionsSchema } from './schema'
 import { CaddyHttp } from './transport'
 import type { CaddyClientOptions, ResolvedCaddyClientOptions } from './types'
 
 /**
- * Worker-only capability for the strictly managed Caddy alias route array.
+ * Worker-only capability for the strictly managed Caddy route array.
  *
- * Promotion, rollback, provider intent, runtime materialization, verification,
- * persistence, and cleanup policy remain outside this client boundary.
+ * Preview reconciliation and future route revisions own Caddy configuration
+ * intent, verification, persistence, and cleanup policy outside this client.
  */
 export class CaddyClient {
-  public readonly aliases: CaddyAliasesClient
+  public readonly routes: CaddyRoutesClient
 
   private readonly transport: CaddyHttp
   private readonly options: ResolvedCaddyClientOptions
@@ -36,7 +36,7 @@ export class CaddyClient {
       endpoint: parseCaddyAdminEndpoint(this.options.endpoint),
       timeoutMs: this.options.timeoutMs,
     })
-    this.aliases = new CaddyAliasesClient(this.transport, {
+    this.routes = new CaddyRoutesClient(this.transport, {
       server: this.options.server,
       fallbackId: this.options.fallbackId,
     })
@@ -47,7 +47,7 @@ export class CaddyClient {
    * infrastructure-owned Caddy configuration.
    */
   public async init(): Promise<void> {
-    await this.aliases.read()
+    await this.routes.read()
   }
 
   public destroy(): void {
