@@ -1,5 +1,6 @@
 import type { PgColumn } from 'drizzle-orm/pg-core'
 import { createCapsuleRouteAliasesTable, createCapsuleRouteHeadsTable } from './alias'
+import { createCapsuleBranchPreviewsTable } from './preview'
 import { createCapsuleRouteOperationsTable } from './operation'
 import { createCapsuleRouteProviderApplicationsTable } from './provider'
 import { createCapsuleRouteRevisionsTable } from './revision'
@@ -11,10 +12,12 @@ import { createCapsuleRouteRevisionsTable } from './revision'
 export function createSchema(
   ownerIdColumn: PgColumn,
   capsuleIdColumn: PgColumn,
+  branchIdColumn: PgColumn,
   operationIdColumn: PgColumn,
   snapshotIdColumn: PgColumn,
 ) {
   const capsuleRouteAliases = createCapsuleRouteAliasesTable(ownerIdColumn, capsuleIdColumn, operationIdColumn)
+  const capsuleBranchPreviews = createCapsuleBranchPreviewsTable(ownerIdColumn, capsuleIdColumn, branchIdColumn)
   const capsuleRouteRevisions = createCapsuleRouteRevisionsTable(
     capsuleRouteAliases.id,
     snapshotIdColumn,
@@ -37,9 +40,9 @@ export function createSchema(
     capsuleRouteRevisions.id,
     capsuleRouteRevisions.operationId,
   )
-
   return {
     capsuleRouteAliases,
+    capsuleBranchPreviews,
     capsuleRouteHeads,
     capsuleRouteRevisions,
     capsuleRouteOperations,

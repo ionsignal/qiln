@@ -173,6 +173,7 @@ export const CapsuleBlueprintGitRepositorySchema = z
 export const CapsuleBlueprintSnapshotCaptureApplicationSupport = {
   ARTIFACT_CAPTURE: 'artifact_capture',
   EVALUATION_ONLY: 'evaluation_only',
+  ROUTE_RUNTIME: 'route_runtime',
 } as const
 
 export type CapsuleBlueprintSnapshotCaptureApplicationSupport =
@@ -181,6 +182,7 @@ export type CapsuleBlueprintSnapshotCaptureApplicationSupport =
 export const CapsuleBlueprintSnapshotCaptureApplicationSupportValues = [
   CapsuleBlueprintSnapshotCaptureApplicationSupport.ARTIFACT_CAPTURE,
   CapsuleBlueprintSnapshotCaptureApplicationSupport.EVALUATION_ONLY,
+  CapsuleBlueprintSnapshotCaptureApplicationSupport.ROUTE_RUNTIME,
 ] as const
 
 export const CapsuleBlueprintSnapshotCaptureApplicationSupportSchema = z.enum(
@@ -192,9 +194,10 @@ export const CapsuleBlueprintSnapshotCaptureApplicationSupportSchema = z.enum(
  * blueprint policy.
  *
  * `artifact_capture` permits canonical filesystem capture only; it does not
- * claim production restoration, promotion, credential handling, or runtime
+ * claim runtime reconstruction, promotion, credential handling, or runtime
  * export/import support. `evaluation_only` further limits capture output to
- * non-production evaluation until an application-specific adapter exists.
+ * non-production evaluation. `route_runtime` permits a future promote or
+ * rollback operation to reconstruct the application into an internal runtime.
  */
 export const CapsuleBlueprintSnapshotCaptureApplicationCapabilitySchema = z
   .object({

@@ -5,9 +5,11 @@ export interface Helpers {
   one: {
     users: RelationFragmentOneFn<'users'>
     capsules: RelationFragmentOneFn<'capsules'>
+    capsuleBranches: RelationFragmentOneFn<'capsuleBranches'>
     capsuleOperations: RelationFragmentOneFn<'capsuleOperations'>
     capsuleSnapshots: RelationFragmentOneFn<'capsuleSnapshots'>
     capsuleRouteAliases: RelationFragmentOneFn<'capsuleRouteAliases'>
+    capsuleBranchPreviews: RelationFragmentOneFn<'capsuleBranchPreviews'>
     capsuleRouteHeads: RelationFragmentOneFn<'capsuleRouteHeads'>
     capsuleRouteRevisions: RelationFragmentOneFn<'capsuleRouteRevisions'>
     capsuleRouteOperations: RelationFragmentOneFn<'capsuleRouteOperations'>
@@ -15,6 +17,7 @@ export interface Helpers {
   }
   many: {
     capsuleRouteAliases: RelationFragmentManyFn<'capsuleRouteAliases'>
+    capsuleBranchPreviews: RelationFragmentManyFn<'capsuleBranchPreviews'>
     capsuleRouteRevisions: RelationFragmentManyFn<'capsuleRouteRevisions'>
     capsuleRouteOperations: RelationFragmentManyFn<'capsuleRouteOperations'>
   }
@@ -23,6 +26,9 @@ export interface Helpers {
   }
   capsules: {
     id: RelationsBuilderColumnBase<'capsules'>
+  }
+  capsuleBranches: {
+    id: RelationsBuilderColumnBase<'capsuleBranches'>
   }
   capsuleOperations: {
     id: RelationsBuilderColumnBase<'capsuleOperations'>
@@ -36,6 +42,12 @@ export interface Helpers {
     capsuleId: RelationsBuilderColumnBase<'capsuleRouteAliases'>
     mutationOperationId: RelationsBuilderColumnBase<'capsuleRouteAliases'>
     lastOperationId: RelationsBuilderColumnBase<'capsuleRouteAliases'>
+  }
+  capsuleBranchPreviews: {
+    id: RelationsBuilderColumnBase<'capsuleBranchPreviews'>
+    ownerId: RelationsBuilderColumnBase<'capsuleBranchPreviews'>
+    capsuleId: RelationsBuilderColumnBase<'capsuleBranchPreviews'>
+    branchId: RelationsBuilderColumnBase<'capsuleBranchPreviews'>
   }
   capsuleRouteHeads: {
     aliasId: RelationsBuilderColumnBase<'capsuleRouteHeads'>
@@ -76,11 +88,25 @@ export function defineRelations(helpers: Helpers) {
         from: helpers.users.id,
         to: helpers.capsuleRouteAliases.ownerId,
       }),
+      branchPreviews: helpers.many.capsuleBranchPreviews({
+        from: helpers.users.id,
+        to: helpers.capsuleBranchPreviews.ownerId,
+      }),
     },
     capsules: {
       routeAliases: helpers.many.capsuleRouteAliases({
         from: helpers.capsules.id,
         to: helpers.capsuleRouteAliases.capsuleId,
+      }),
+      branchPreviews: helpers.many.capsuleBranchPreviews({
+        from: helpers.capsules.id,
+        to: helpers.capsuleBranchPreviews.capsuleId,
+      }),
+    },
+    capsuleBranches: {
+      previews: helpers.many.capsuleBranchPreviews({
+        from: helpers.capsuleBranches.id,
+        to: helpers.capsuleBranchPreviews.branchId,
       }),
     },
     capsuleOperations: {
@@ -139,6 +165,23 @@ export function defineRelations(helpers: Helpers) {
       operations: helpers.many.capsuleRouteOperations({
         from: helpers.capsuleRouteAliases.id,
         to: helpers.capsuleRouteOperations.aliasId,
+      }),
+    },
+    capsuleBranchPreviews: {
+      owner: helpers.one.users({
+        from: helpers.capsuleBranchPreviews.ownerId,
+        to: helpers.users.id,
+        optional: false,
+      }),
+      capsule: helpers.one.capsules({
+        from: helpers.capsuleBranchPreviews.capsuleId,
+        to: helpers.capsules.id,
+        optional: false,
+      }),
+      branch: helpers.one.capsuleBranches({
+        from: helpers.capsuleBranchPreviews.branchId,
+        to: helpers.capsuleBranches.id,
+        optional: false,
       }),
     },
     capsuleRouteHeads: {
