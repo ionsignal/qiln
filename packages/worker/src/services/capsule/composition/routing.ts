@@ -1,12 +1,14 @@
 import { CapsuleBranchProvenance } from '../branch/provenance'
-import { CapsuleRouteService } from '../routing/service'
-import { CapsuleRouteStore } from '../routing/store'
+import { CommittedRouteService } from '../routing/service'
+import { CommittedRouteStore } from '../routing/store'
+import { PreviewRouteController } from '../routing/preview/controller'
 import { PreviewHost } from '../routing/preview/host'
 import { PreviewPlanner } from '../routing/preview/plan'
 import { PreviewProbe } from '../routing/preview/probe'
+import { PreviewReconciliationCoordinator } from '../routing/preview/reconciliation'
 import { PreviewService } from '../routing/preview/service'
-import { PreviewStore } from '../routing/preview/store'
-import { RouteOperationClassification } from '../operations/routing/classification'
+import { PreviewRepository } from '../routing/preview/persistence'
+import { RouteOperationAbandonmentClassifier } from '../operations/routing/classification'
 import { createRouteOperationAbandonmentHandlers } from '../operations/routing/abandonment'
 import type { CapsuleOperationAbandonmentHandler } from '../operations/abandonment'
 import type {
@@ -19,7 +21,6 @@ import type { WorkerRoutingConfig } from '../../../types'
 import type { CapsulePersistence, CapsuleTables } from '@qiln/core/server'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
-const DEFAULT_PREVIEW_RECONCILE_INTERVAL_MS = 15_000
 const DEFAULT_PREVIEW_VERIFICATION_TIMEOUT_MS = 10_000
 
 export interface ComposeRoutingCapabilityOptions<
@@ -29,28 +30,28 @@ export interface ComposeRoutingCapabilityOptions<
   persistence: CapsulePersistence<TDatabase, TTables>
   caddy: CaddyClient
   routing: WorkerRoutingConfig
-  reconcileBranches: () => Promise<void>
   operationEvents: CapsuleOperationEventPublisher
   previewEvents: CapsulePreviewEventPublisher
   routeEvents: CapsuleRouteEventPublisher
 }
 
 export interface ComposedRoutingCapability {
-  service: CapsuleRouteService
+  service: CommittedRouteService
   preview: PreviewService
+  reconciliation: PreviewReconciliationCoordinator
   abandonment: readonly CapsuleOperationAbandonmentHandler[]
 }
 
 export function composeRoutingCapability<TDatabase extends PostgresJsDatabase, TTables extends CapsuleTables>(
   options: ComposeRoutingCapabilityOptions<TDatabase, TTables>,
 ): ComposedRoutingCapability {
-  const routes = new CapsuleRouteStore(options.persistence)
-  const service = new CapsuleRouteService(routes)
-  const previews = new PreviewStore(options.persistence)
+  const committedRoutes = new CommittedRouteStore(options.persistence)
+  const service = new CommittedRouteService(committedRoutes)
+  const repository = new PreviewRepository(options.persistence)
   const provenance = new CapsuleBranchProvenance(options.persistence)
-  const preview = new PreviewService({
-    store: previews,
+  const controller = new PreviewRouteController({
     provenance,
+    repository,
     host: new PreviewHost(options.routing.baseDomain),
     planner: new PreviewPlanner(),
     probe: new PreviewProbe({
@@ -58,19 +59,27 @@ export function composeRoutingCapability<TDatabase extends PostgresJsDatabase, T
       timeoutMs: options.routing.verificationTimeoutMs ?? DEFAULT_PREVIEW_VERIFICATION_TIMEOUT_MS,
     }),
     caddy: options.caddy,
-    reconcileBranches: options.reconcileBranches,
     events: options.previewEvents,
-    intervalMs: options.routing.reconcileIntervalMs ?? DEFAULT_PREVIEW_RECONCILE_INTERVAL_MS,
   })
-  const classification = new RouteOperationClassification(options.persistence)
+  const reconciliation = new PreviewReconciliationCoordinator({
+    repository,
+    controller,
+  })
+  const preview = new PreviewService({
+    repository,
+    reconciliation,
+  })
+  const classifier = new RouteOperationAbandonmentClassifier(options.persistence)
   const abandonment = createRouteOperationAbandonmentHandlers({
-    classification,
+    classifier,
     operationEvents: options.operationEvents,
     routeEvents: options.routeEvents,
   })
+
   return {
     service,
     preview,
+    reconciliation,
     abandonment,
   }
 }

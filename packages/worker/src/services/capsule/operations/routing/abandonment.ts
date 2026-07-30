@@ -8,10 +8,10 @@ import {
 } from '../abandonment'
 import type { CapsuleOperationEventPublisher, CapsuleRouteEventPublisher } from '../../events'
 import type { PersistedCapsuleOperation } from '../shared'
-import type { RouteOperationClassification, RouteOperationType } from './classification'
+import type { RouteOperationAbandonmentClassifier, RouteOperationType } from './classification'
 
 export interface RouteOperationAbandonmentDependencies {
-  classification: RouteOperationClassification
+  classifier: RouteOperationAbandonmentClassifier
   operationEvents: CapsuleOperationEventPublisher
   routeEvents: CapsuleRouteEventPublisher
 }
@@ -30,7 +30,7 @@ export class RouteOperationAbandonment implements CapsuleOperationAbandonmentHan
     operation: PersistedCapsuleOperation,
   ): Promise<CapsuleOperationAbandonmentClassificationResult> {
     assertAbandonedOperationType(operation, this.operationType)
-    const result = await this.dependencies.classification.abandon(operation.id, this.operationType)
+    const result = await this.dependencies.classifier.classify(operation.id, this.operationType)
     if (!result) {
       return {
         classified: false,

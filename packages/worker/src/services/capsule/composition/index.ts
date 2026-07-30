@@ -1,4 +1,5 @@
 import { CapsuleService } from '../facade'
+import { CapsuleRuntimeReconciliationCoordinator } from '../reconciliation'
 import { CapsuleBranchEventPublisher } from '../events/branch'
 import { CapsuleLifecycleEventPublisher } from '../events/lifecycle'
 import { CapsuleOperationEventPublisher } from '../events/operation'
@@ -20,7 +21,6 @@ import { composeForkCapability } from './fork'
 import { composeRoutingCapability } from './routing'
 import { composeSnapshotCapability } from './snapshot'
 import { composeUnarchiveCapability } from './unarchive'
-import type { CapsuleBranchRuntimeService } from '../branch'
 import type { CaddyClient } from '../../../caddy'
 import type { WorkerRoutingConfig } from '../../../types'
 import type { ProjectService } from '../../project'
@@ -28,6 +28,8 @@ import type { IncusClient } from '../../../incus/client/index'
 import type { OperationSupervisor } from '../../../coordination/supervisor'
 import type { CapsuleBlueprintRegistry, CapsuleChannel, CapsulePersistence, CapsuleTables } from '@qiln/core/server'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
+
+const DEFAULT_RUNTIME_RECONCILE_INTERVAL_MS = 15_000
 
 export interface ComposeCapsuleServiceOptions<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
@@ -137,22 +139,15 @@ export function composeCapsuleService<TDatabase extends PostgresJsDatabase, TTab
   const snapshot = composeSnapshotCapability({
     persistence: options.persistence,
   })
-  let branch: CapsuleBranchRuntimeService | null = null
   const route = composeRoutingCapability({
     persistence: options.persistence,
     caddy: options.caddy,
     routing: options.routing,
-    reconcileBranches: async () => {
-      if (!branch) {
-        throw new Error('Preview reconciliation cannot run before branch runtime composition completes.')
-      }
-      await branch.reconcileRuntimeStates()
-    },
     operationEvents,
     previewEvents,
     routeEvents,
   })
-  const composedBranch = composeBranchCapability({
+  const branch = composeBranchCapability({
     persistence: options.persistence,
     incus: options.incus,
     project: options.project,
@@ -160,7 +155,11 @@ export function composeCapsuleService<TDatabase extends PostgresJsDatabase, TTab
     previews: route.preview,
     previewGate,
   })
-  branch = composedBranch
+  const reconciliation = new CapsuleRuntimeReconciliationCoordinator({
+    branch,
+    preview: route.reconciliation,
+    intervalMs: options.routing.reconcileIntervalMs ?? DEFAULT_RUNTIME_RECONCILE_INTERVAL_MS,
+  })
   const abandonmentHandlers = new CapsuleOperationAbandonmentHandlerRegistry([
     create.abandonment,
     fork.abandonment,
@@ -175,6 +174,7 @@ export function composeCapsuleService<TDatabase extends PostgresJsDatabase, TTab
     steps: operationSteps,
     handlers: abandonmentHandlers,
   })
+
   return new CapsuleService({
     create: create.submission,
     fork: fork.submission,
@@ -182,10 +182,11 @@ export function composeCapsuleService<TDatabase extends PostgresJsDatabase, TTab
     unarchive: unarchive.submission,
     destroy: destroy.submission,
     capture: capture.submission,
-    branch: composedBranch,
+    branch,
     snapshot,
     preview: route.preview,
     route: route.service,
-    abandonmentCoordinator,
+    reconciliation,
+    abandonment: abandonmentCoordinator,
   })
 }

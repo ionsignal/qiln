@@ -42,13 +42,13 @@ function actionFor(type: RouteOperationType): 'promote' | 'rollback' {
  *
  * No Caddy configuration or runtime mutation is applied or retried.
  */
-export class RouteOperationClassification<
+export class RouteOperationAbandonmentClassifier<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
   TTables extends CapsuleTables = CapsuleTables,
 > {
   constructor(private readonly persistence: CapsulePersistence<TDatabase, TTables>) {}
 
-  public async abandon(operationId: string, expectedType: RouteOperationType): Promise<RouteAbandonmentResult | null> {
+  public async classify(operationId: string, expectedType: RouteOperationType): Promise<RouteAbandonmentResult | null> {
     return await this.persistence.db.transaction(async tx => {
       const tables = this.persistence.tables
       const [operation] = await tx

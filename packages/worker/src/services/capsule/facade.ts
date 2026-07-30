@@ -1,4 +1,5 @@
 import type { CapsuleBranchRuntimeService } from './branch/service'
+import type { CapsuleRuntimeReconciliationCoordinator } from './reconciliation'
 import type { CapsuleOperationAbandonmentCoordinator } from './operations/abandonment/coordinator'
 import type { CapsuleArchiveSubmissionService } from './operations/archival/archive/submission'
 import type { CapsuleUnarchiveSubmissionService } from './operations/archival/unarchive/submission'
@@ -6,7 +7,7 @@ import type { CaptureSubmission } from './operations/capture/submission'
 import type { CreateCapsuleSubmissionService } from './operations/create/submission'
 import type { DestroyCapsuleSubmissionService } from './operations/destroy/submission'
 import type { ForkSubmission } from './operations/fork/submission'
-import type { CapsuleRouteService } from './routing/service'
+import type { CommittedRouteService } from './routing/service'
 import type { CapsuleSnapshotService } from './snapshot/service'
 import type { PreviewService } from './routing/preview/service'
 
@@ -26,9 +27,10 @@ export interface CapsuleServiceCapabilities {
   capture: CaptureSubmission
   branch: CapsuleBranchRuntimeService
   snapshot: CapsuleSnapshotService
-  route: CapsuleRouteService
+  route: CommittedRouteService
   preview: PreviewService
-  abandonmentCoordinator: CapsuleOperationAbandonmentCoordinator
+  reconciliation: CapsuleRuntimeReconciliationCoordinator
+  abandonment: CapsuleOperationAbandonmentCoordinator
 }
 
 /**
@@ -47,10 +49,11 @@ export class CapsuleService {
   public readonly capture: CaptureSubmission
   public readonly branch: CapsuleBranchRuntimeService
   public readonly snapshot: CapsuleSnapshotService
-  public readonly route: CapsuleRouteService
+  public readonly route: CommittedRouteService
   public readonly preview: PreviewService
+  public readonly reconciliation: CapsuleRuntimeReconciliationCoordinator
 
-  private readonly abandonmentCoordinator: CapsuleOperationAbandonmentCoordinator
+  private readonly abandonment: CapsuleOperationAbandonmentCoordinator
 
   constructor(capabilities: CapsuleServiceCapabilities) {
     this.create = capabilities.create
@@ -63,7 +66,8 @@ export class CapsuleService {
     this.snapshot = capabilities.snapshot
     this.route = capabilities.route
     this.preview = capabilities.preview
-    this.abandonmentCoordinator = capabilities.abandonmentCoordinator
+    this.reconciliation = capabilities.reconciliation
+    this.abandonment = capabilities.abandonment
   }
 
   /**
@@ -76,6 +80,6 @@ export class CapsuleService {
    * aggregate restoration.
    */
   public async classifyAbandonedOperationsAtStartup(): Promise<void> {
-    await this.abandonmentCoordinator.classifyAtStartup()
+    await this.abandonment.classifyAtStartup()
   }
 }

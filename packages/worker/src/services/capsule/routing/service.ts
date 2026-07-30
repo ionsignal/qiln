@@ -12,7 +12,7 @@ import {
 } from '@qiln/core/server'
 import { IncusError } from '../../../errors'
 import { toIsoTimestamp } from '../operations/shared'
-import type { CapsuleRouteStore } from './store'
+import type { CommittedRouteStore } from './store'
 import type { CommittedRouteRecord, HeadedRouteRecord } from './types'
 
 function sameStrings(left: readonly string[], right: readonly string[]): boolean {
@@ -28,8 +28,8 @@ function sameStrings(left: readonly string[], right: readonly string[]): boolean
  * Maps PostgreSQL-authoritative, integrity-checked alias graphs into
  * client-safe committed route state.
  */
-export class CapsuleRouteService {
-  constructor(private readonly routes: CapsuleRouteStore) {}
+export class CommittedRouteService {
+  constructor(private readonly routes: CommittedRouteStore) {}
 
   public async list(ownerId: string, capsuleId: string): Promise<CapsuleRouteAliasListOutput> {
     const records = await this.routes.list(ownerId, capsuleId)

@@ -159,9 +159,7 @@ export class QilnWorkerRuntime<
       await this.booting
       return
     }
-
     this.booting = this.boot()
-
     try {
       await this.booting
     } finally {
@@ -224,17 +222,15 @@ export class QilnWorkerRuntime<
       this.throwIfFailStopped()
 
       /**
-       * Runtime reconciliation remains observation-only and executes while
-       * exclusive Worker authority is still proven.
+       * Runtime reconciliation observes branches before reconciling preview
+       * ingress. Both passes run while exclusive mutation authority remains
+       * proven and before command intake is registered.
        */
-      await this.capsule.branch.reconcileRuntimeStates()
-      this.throwIfFailStopped()
-
-      await this.capsule.preview.reconcile()
+      await this.capsule.reconciliation.reconcile()
       this.throwIfFailStopped()
 
       registerCapsuleChannelHandlers(this)
-      this.capsule.preview.start()
+      this.capsule.reconciliation.start()
 
       this.throwIfFailStopped()
       this.started = true
@@ -280,16 +276,20 @@ export class QilnWorkerRuntime<
    * finish the fail-stop path.
    */
   private async shutdown(): Promise<void> {
-    await this.capsule.preview.stop()
+    await this.capsule.reconciliation.stop()
     this.supervisor.beginShutdown()
+
     let channelShutdownError: unknown
+
     try {
       await this.shutdownChannel()
     } catch (error: unknown) {
       channelShutdownError = error
       console.error(`${WORKER_LOG_PREFIX} Capsule Channel shutdown failed while closing command intake.`, error)
     }
+
     const drain = await this.supervisor.drain(DEFAULT_OPERATION_DRAIN_TIMEOUT_MS)
+
     if (!drain.settled) {
       const drainError = new WorkerRuntimeFailStopError(
         'Supervised capsule operations did not drain before the shutdown deadline. Normal authority release is prohibited.',
@@ -300,7 +300,6 @@ export class QilnWorkerRuntime<
       )
 
       this.markFailStopped(drainError)
-
       this.caddy.destroy()
       this.incus.destroy()
 
@@ -355,16 +354,24 @@ export class QilnWorkerRuntime<
         recordedBackendPid: this.authority.recordedBackendPid,
       },
     )
+
     this.markFailStopped(failStopError)
     this.supervisor.beginShutdown()
-    void this.capsule.preview.stop().catch((previewError: unknown) => {
-      console.error(`${WORKER_LOG_PREFIX} Failed to stop preview reconciliation after authority loss.`, previewError)
+
+    void this.capsule.reconciliation.stop().catch((reconciliationError: unknown) => {
+      console.error(
+        `${WORKER_LOG_PREFIX} Failed to stop runtime reconciliation after authority loss.`,
+        reconciliationError,
+      )
     })
+
     this.caddy.destroy()
     this.incus.destroy()
+
     void this.shutdownChannel().catch((channelError: unknown) => {
       console.error(`${WORKER_LOG_PREFIX} Failed to close Capsule Channel intake after authority loss.`, channelError)
     })
+
     console.error(`${WORKER_LOG_PREFIX} FATAL: Worker entered fail-stop state after authority loss.`, {
       error: detailsFromUnknown(error),
       activeOperationIds: this.supervisor.activeOperationIds(),

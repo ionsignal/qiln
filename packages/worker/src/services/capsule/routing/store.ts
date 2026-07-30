@@ -13,7 +13,7 @@ import type { CommittedRouteRecord, RouteGraphRow } from './types'
  * from the same statement snapshot and validated before it can reach a
  * client-safe projection.
  */
-export class CapsuleRouteStore<
+export class CommittedRouteStore<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
   TTables extends CapsuleTables = CapsuleTables,
 > {
