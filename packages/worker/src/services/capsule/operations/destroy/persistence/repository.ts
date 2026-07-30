@@ -1,6 +1,3 @@
-import type { CapsuleOperationRequestHash, CapsulePersistence, CapsuleTables } from '@qiln/core/server'
-import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
-import type { CapsuleOperationReader, CapsuleOperationTransitionOutput } from '../../shared'
 import { DestroyCapsuleAcceptancePersistence } from './acceptance'
 import { DestroyCapsuleClassificationPersistence } from './classification'
 import { completeDestroyCapsule } from './completion'
@@ -12,6 +9,10 @@ import type {
   DestroyCapsuleTerminalResult,
   SubmitDestroyCapsuleInput,
 } from '../types'
+import type { CapsuleOperationRequestHash, CapsulePersistence, CapsuleTables } from '@qiln/core/server'
+import type { CapsuleOperationReader, CapsuleOperationTransitionOutput } from '../../shared'
+import type { PreviewGate } from '../../../routing/preview/gate'
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
 /**
  * Destroy persistence facade consumed by submission, execution, and abandonment
@@ -32,8 +33,9 @@ export class DestroyCapsuleOperationRepository<
   constructor(
     private readonly persistence: CapsulePersistence<TDatabase, TTables>,
     reader: CapsuleOperationReader<TDatabase, TTables>,
+    previewGate: PreviewGate<TDatabase, TTables>,
   ) {
-    this.acceptance = new DestroyCapsuleAcceptancePersistence(persistence, reader)
+    this.acceptance = new DestroyCapsuleAcceptancePersistence(persistence, reader, previewGate)
     this.execution = new DestroyCapsuleExecutionPersistence(persistence, reader)
     this.classification = new DestroyCapsuleClassificationPersistence(persistence, reader)
   }

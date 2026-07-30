@@ -13,7 +13,7 @@ import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import { readRootfs, sameRootfs, type CapsuleOperationReader } from '../../shared'
 import type { CapsuleBranchResourceInventoryRow } from '../../../resource'
 import type { CapturePlanner } from '../plan'
-import type { CaptureSourcePersistence } from './source'
+import type { CapsuleBranchProvenance } from '../../../branch/provenance'
 import type { CaptureExecutionInput, CaptureResourceRecord, CaptureSourceBranch } from '../types'
 
 /**
@@ -31,7 +31,7 @@ export class CaptureInputPersistence<
     private readonly persistence: CapsulePersistence<TDatabase, TTables>,
     private readonly reader: CapsuleOperationReader<TDatabase, TTables>,
     private readonly planner: CapturePlanner,
-    private readonly sources: CaptureSourcePersistence<TDatabase, TTables>,
+    private readonly provenance: CapsuleBranchProvenance<TDatabase, TTables>,
   ) {}
 
   public async load(operationId: string): Promise<CaptureExecutionInput> {
@@ -140,7 +140,7 @@ export class CaptureInputPersistence<
         isRootBranch: branch.isRootBranch,
       })
     }
-    const source = await this.sources.load(branch)
+    const source = await this.provenance.load(branch)
     if (
       source.blueprint.blueprint.schema_version !== extension.blueprintSchemaVersion ||
       source.blueprint.name !== blueprint.name ||

@@ -2,25 +2,38 @@ import { and, eq } from 'drizzle-orm'
 import {
   CapsuleOperationStatus,
   CapsuleOperationType,
-  CapsuleRootfsImagePin,
   CapsuleSnapshotAssuranceSchema,
   CapsuleSnapshotMode,
   createCapsuleSnapshotCapturePolicyPin,
   verifyCapsuleBlueprintPin,
   verifyCapsuleSnapshotCapturePolicyPin,
   type CapsuleBlueprintPin,
-  type CapsulePersistence,
+  type CapsuleBranchName,
+  type CapsuleBranchResourceInventoryDigest,
+  type CapsuleRootfsImagePin,
   type CapsuleSnapshotCapturePolicyPin,
-  type CapsuleTables,
 } from '@qiln/core/server'
-import { IncusError } from '../../../../../errors'
-import { readRootfs, sameRootfs } from '../../shared'
-import type { CaptureSourceBranch } from '../types'
+import { IncusError } from '../../../errors'
+import { readRootfs, sameRootfs } from '../operations/shared'
+import type { CapsulePersistence, CapsuleTables } from '@qiln/core/server'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
 type Transaction<TDatabase extends PostgresJsDatabase> = Parameters<Parameters<TDatabase['transaction']>[0]>[0]
 
-export interface CaptureSourcePins {
+export interface CapsuleBranchProvenanceBranch {
+  id: string
+  ownerId: string
+  capsuleId: string
+  name: CapsuleBranchName
+  isRootBranch: boolean
+  blueprintName: string
+  blueprintDigest: string
+  cpu: string
+  memory: string
+  resourceInventoryDigest: CapsuleBranchResourceInventoryDigest | null
+}
+
+export interface CapsuleBranchProvenancePins {
   blueprint: CapsuleBlueprintPin
   rootfsImagePin: CapsuleRootfsImagePin
   capturePolicy: CapsuleSnapshotCapturePolicyPin
@@ -46,39 +59,29 @@ function sameStrings(left: readonly string[], right: readonly string[]): boolean
 }
 
 /**
- * Resolves immutable Snapshot Capture input from the completed operation that
- * materialized the source branch.
+ * Resolves immutable Blueprint, rootfs, and capture-policy provenance for an
+ * editable branch without consulting mutable registry or provider state.
  *
- * A root branch derives its historical Blueprint from its completed create
- * operation. A non-root branch derives its Blueprint and capture policy from
- * its completed fork operation.
- *
- * This boundary never consults the mutable Blueprint registry and never
- * discovers provider resources.
+ * Root branches derive provenance from completed create operations. Forked
+ * branches derive it from completed fork operations and their source
+ * snapshots.
  */
-export class CaptureSourcePersistence<
+export class CapsuleBranchProvenance<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
   TTables extends CapsuleTables = CapsuleTables,
 > {
   constructor(private readonly persistence: CapsulePersistence<TDatabase, TTables>) {}
 
-  /**
-   * Resolves provenance in an isolated read transaction.
-   *
-   * Acceptance and failure classification should use `lock()` so provenance is
-   * validated inside their existing aggregate transaction.
-   */
-  public async load(branch: CaptureSourceBranch): Promise<CaptureSourcePins> {
+  public async load(branch: CapsuleBranchProvenanceBranch): Promise<CapsuleBranchProvenancePins> {
     return await this.persistence.db.transaction(async tx => {
       return await this.lock(tx, branch)
     })
   }
 
-  /**
-   * Locks and validates the one operation extension allowed to establish this
-   * branch.
-   */
-  public async lock(tx: Transaction<TDatabase>, branch: CaptureSourceBranch): Promise<CaptureSourcePins> {
+  public async lock(
+    tx: Transaction<TDatabase>,
+    branch: CapsuleBranchProvenanceBranch,
+  ): Promise<CapsuleBranchProvenancePins> {
     const tables = this.persistence.tables
     const createExtensions = await tx
       .select()
@@ -94,41 +97,33 @@ export class CaptureSourcePersistence<
       .for('update')
     if (branch.isRootBranch) {
       if (createExtensions.length !== 1 || forkExtensions.length !== 0) {
-        throw new IncusError(
-          'Snapshot Capture root branch does not have exactly one create provenance record.',
-          'CONFLICT',
-          {
-            ownerId: branch.ownerId,
-            capsuleId: branch.capsuleId,
-            sourceBranchId: branch.id,
-            createOperationCount: createExtensions.length,
-            forkOperationCount: forkExtensions.length,
-          },
-        )
+        throw new IncusError('Capsule root branch does not have exactly one create provenance record.', 'CONFLICT', {
+          ownerId: branch.ownerId,
+          capsuleId: branch.capsuleId,
+          branchId: branch.id,
+          createOperationCount: createExtensions.length,
+          forkOperationCount: forkExtensions.length,
+        })
       }
       return await this.fromCreate(tx, branch, createExtensions[0]!)
     }
     if (createExtensions.length !== 0 || forkExtensions.length !== 1) {
-      throw new IncusError(
-        'Snapshot Capture fork branch does not have exactly one fork provenance record.',
-        'CONFLICT',
-        {
-          ownerId: branch.ownerId,
-          capsuleId: branch.capsuleId,
-          sourceBranchId: branch.id,
-          createOperationCount: createExtensions.length,
-          forkOperationCount: forkExtensions.length,
-        },
-      )
+      throw new IncusError('Capsule fork branch does not have exactly one fork provenance record.', 'CONFLICT', {
+        ownerId: branch.ownerId,
+        capsuleId: branch.capsuleId,
+        branchId: branch.id,
+        createOperationCount: createExtensions.length,
+        forkOperationCount: forkExtensions.length,
+      })
     }
     return await this.fromFork(tx, branch, forkExtensions[0]!)
   }
 
   private async fromCreate(
     tx: Transaction<TDatabase>,
-    branch: CaptureSourceBranch,
+    branch: CapsuleBranchProvenanceBranch,
     extension: TTables['capsuleCreateOperations']['$inferSelect'],
-  ): Promise<CaptureSourcePins> {
+  ): Promise<CapsuleBranchProvenancePins> {
     const operation = await this.operation(tx, extension.operationId)
     if (
       operation.type !== CapsuleOperationType.CREATE ||
@@ -143,18 +138,14 @@ export class CaptureSourcePersistence<
       extension.cpu !== branch.cpu ||
       extension.memory !== branch.memory
     ) {
-      throw new IncusError(
-        'Snapshot Capture source branch does not match its completed create operation.',
-        'CONFLICT',
-        {
-          ownerId: branch.ownerId,
-          capsuleId: branch.capsuleId,
-          sourceBranchId: branch.id,
-          createOperationId: extension.operationId,
-          operationType: operation.type,
-          operationStatus: operation.status,
-        },
-      )
+      throw new IncusError('Capsule branch does not match its completed create operation.', 'CONFLICT', {
+        ownerId: branch.ownerId,
+        capsuleId: branch.capsuleId,
+        branchId: branch.id,
+        createOperationId: extension.operationId,
+        operationType: operation.type,
+        operationStatus: operation.status,
+      })
     }
     const blueprint = verifyCapsuleBlueprintPin({
       name: extension.blueprintName,
@@ -164,22 +155,21 @@ export class CaptureSourcePersistence<
     const rootfsImagePin = readRootfs(extension.rootfsImagePin, blueprint.blueprint.image_alias, {
       ownerId: branch.ownerId,
       capsuleId: branch.capsuleId,
-      sourceBranchId: branch.id,
+      branchId: branch.id,
       createOperationId: extension.operationId,
     })
-    const capturePolicy = createCapsuleSnapshotCapturePolicyPin(blueprint)
     return {
       blueprint,
       rootfsImagePin,
-      capturePolicy,
+      capturePolicy: createCapsuleSnapshotCapturePolicyPin(blueprint),
     }
   }
 
   private async fromFork(
     tx: Transaction<TDatabase>,
-    branch: CaptureSourceBranch,
+    branch: CapsuleBranchProvenanceBranch,
     extension: TTables['capsuleForkOperations']['$inferSelect'],
-  ): Promise<CaptureSourcePins> {
+  ): Promise<CapsuleBranchProvenancePins> {
     const operation = await this.operation(tx, extension.operationId)
     if (
       operation.type !== CapsuleOperationType.FORK ||
@@ -195,10 +185,10 @@ export class CaptureSourcePersistence<
       extension.cpu !== branch.cpu ||
       extension.memory !== branch.memory
     ) {
-      throw new IncusError('Snapshot Capture source branch does not match its completed fork operation.', 'CONFLICT', {
+      throw new IncusError('Capsule branch does not match its completed fork operation.', 'CONFLICT', {
         ownerId: branch.ownerId,
         capsuleId: branch.capsuleId,
-        sourceBranchId: branch.id,
+        branchId: branch.id,
         forkOperationId: extension.operationId,
         sourceSnapshotId: extension.sourceSnapshotId,
         operationType: operation.type,
@@ -209,7 +199,7 @@ export class CaptureSourcePersistence<
     const rootfsImagePin = readRootfs(extension.rootfsImagePin, blueprint.blueprint.image_alias, {
       ownerId: branch.ownerId,
       capsuleId: branch.capsuleId,
-      sourceBranchId: branch.id,
+      branchId: branch.id,
       forkOperationId: extension.operationId,
       sourceSnapshotId: extension.sourceSnapshotId,
     })
@@ -223,10 +213,10 @@ export class CaptureSourcePersistence<
       capturePolicy.blueprintName !== blueprint.name ||
       capturePolicy.blueprintDigest !== blueprint.digest
     ) {
-      throw new IncusError('Snapshot Capture fork provenance contains contradictory immutable pins.', 'CONFLICT', {
+      throw new IncusError('Capsule fork provenance contains contradictory immutable pins.', 'CONFLICT', {
         ownerId: branch.ownerId,
         capsuleId: branch.capsuleId,
-        sourceBranchId: branch.id,
+        branchId: branch.id,
         forkOperationId: extension.operationId,
         sourceSnapshotId: extension.sourceSnapshotId,
       })
@@ -236,10 +226,10 @@ export class CaptureSourcePersistence<
       limitations: extension.sourceSnapshotLimitations,
     })
     if (assurance.mode !== CapsuleSnapshotMode.EXPERIMENTAL) {
-      throw new IncusError('Snapshot Capture fork provenance uses an unsupported source assurance mode.', 'CONFLICT', {
+      throw new IncusError('Capsule branch provenance uses an unsupported source assurance mode.', 'CONFLICT', {
         ownerId: branch.ownerId,
         capsuleId: branch.capsuleId,
-        sourceBranchId: branch.id,
+        branchId: branch.id,
         forkOperationId: extension.operationId,
         sourceSnapshotId: extension.sourceSnapshotId,
         sourceSnapshotMode: assurance.mode,
@@ -250,7 +240,7 @@ export class CaptureSourcePersistence<
     const snapshotRootfsImagePin = readRootfs(snapshot.rootfsImagePin, snapshotBlueprint.blueprint.image_alias, {
       ownerId: branch.ownerId,
       capsuleId: branch.capsuleId,
-      sourceBranchId: branch.id,
+      branchId: branch.id,
       forkOperationId: extension.operationId,
       sourceSnapshotId: extension.sourceSnapshotId,
     })
@@ -274,17 +264,13 @@ export class CaptureSourcePersistence<
       snapshotAssurance.mode !== assurance.mode ||
       !sameStrings(snapshotAssurance.limitations, assurance.limitations)
     ) {
-      throw new IncusError(
-        'Snapshot Capture fork provenance disagrees with its immutable source snapshot.',
-        'CONFLICT',
-        {
-          ownerId: branch.ownerId,
-          capsuleId: branch.capsuleId,
-          sourceBranchId: branch.id,
-          forkOperationId: extension.operationId,
-          sourceSnapshotId: extension.sourceSnapshotId,
-        },
-      )
+      throw new IncusError('Capsule fork provenance disagrees with its immutable source snapshot.', 'CONFLICT', {
+        ownerId: branch.ownerId,
+        capsuleId: branch.capsuleId,
+        branchId: branch.id,
+        forkOperationId: extension.operationId,
+        sourceSnapshotId: extension.sourceSnapshotId,
+      })
     }
     return {
       blueprint,
@@ -297,7 +283,7 @@ export class CaptureSourcePersistence<
     const operations = this.persistence.tables.capsuleOperations
     const [operation] = await tx.select().from(operations).where(eq(operations.id, operationId)).for('update').limit(1)
     if (!operation) {
-      throw new IncusError('Snapshot Capture source operation was not found.', 'NOT_FOUND', {
+      throw new IncusError('Capsule branch source operation was not found.', 'NOT_FOUND', {
         operationId,
       })
     }
@@ -313,7 +299,7 @@ export class CaptureSourcePersistence<
       .for('update')
       .limit(1)
     if (!snapshot) {
-      throw new IncusError('Snapshot Capture fork provenance source snapshot was not found.', 'NOT_FOUND', {
+      throw new IncusError('Capsule branch fork source snapshot was not found.', 'NOT_FOUND', {
         capsuleId,
         snapshotId,
       })

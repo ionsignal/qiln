@@ -4,13 +4,14 @@ import { DestroyCapsuleProvider } from '../operations/destroy/resource/provider'
 import { DestroyCapsuleOperationRepository } from '../operations/destroy/persistence/repository'
 import { DestroyCapsuleSubmissionService } from '../operations/destroy/submission'
 import type { OperationSupervisor } from '../../../coordination/supervisor'
-import type { IncusClient } from '../../../incus/client/index'
+import type { IncusClient } from '../../../incus/client'
 import type { CapsuleBranchEventPublisher } from '../events/branch'
 import type { CapsuleLifecycleEventPublisher } from '../events/lifecycle'
 import type { CapsuleOperationEventPublisher } from '../events/operation'
 import type { CapsuleOperationReader } from '../operations/shared/operationReader'
 import type { CapsuleOperationStepStore } from '../operations/shared/operationStepStore'
 import type { CapsuleBranchResourceStore } from '../resource/store'
+import type { PreviewGate } from '../routing/preview/gate'
 import type { CapsulePersistence, CapsuleTables } from '@qiln/core/server'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
@@ -26,6 +27,7 @@ export interface ComposeDestroyCapabilityOptions<
   operationEvents: CapsuleOperationEventPublisher
   lifecycleEvents: CapsuleLifecycleEventPublisher
   branchEvents: CapsuleBranchEventPublisher
+  previewGate: PreviewGate<TDatabase, TTables>
   persistence: CapsulePersistence<TDatabase, TTables>
 }
 
@@ -44,7 +46,11 @@ export interface ComposedDestroyCapability {
 export function composeDestroyCapability<TDatabase extends PostgresJsDatabase, TTables extends CapsuleTables>(
   options: ComposeDestroyCapabilityOptions<TDatabase, TTables>,
 ): ComposedDestroyCapability {
-  const repository = new DestroyCapsuleOperationRepository(options.persistence, options.operationReader)
+  const repository = new DestroyCapsuleOperationRepository(
+    options.persistence,
+    options.operationReader,
+    options.previewGate,
+  )
   const provider = new DestroyCapsuleProvider({
     incus: options.incus,
     resources: options.resources,

@@ -1,7 +1,4 @@
-import type { CapsuleOperationRequestHash, CapsulePersistence, CapsuleTables } from '@qiln/core/server'
-import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
-import type { CapsuleOperationReader } from '../../shared'
-import type { CapturePlanner } from '../plan'
+import { CapsuleBranchProvenance } from '../../../branch/provenance'
 import { CaptureAcceptancePersistence } from './accept'
 import { CaptureCommitPersistence } from './commit'
 import { CaptureCompensationPersistence } from './compensation'
@@ -9,7 +6,6 @@ import { CaptureExecutionPersistence } from './execution'
 import { CaptureFailurePersistence } from './failure'
 import { CaptureInputPersistence } from './input'
 import { CaptureResourcePersistence } from './resource'
-import { CaptureSourcePersistence } from './source'
 import type {
   CaptureAbandonedClassificationResult,
   CaptureAcceptanceResult,
@@ -20,6 +16,11 @@ import type {
   CommitCaptureInput,
   SubmitCaptureCapsuleInput,
 } from '../types'
+import type { PreviewGate } from '../../../routing/preview/gate'
+import type { CapsuleOperationReader } from '../../shared'
+import type { CapturePlanner } from '../plan'
+import type { CapsuleOperationRequestHash, CapsulePersistence, CapsuleTables } from '@qiln/core/server'
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
 /**
  * Snapshot Capture persistence facade.
@@ -44,14 +45,15 @@ export class CaptureRepository<
     persistence: CapsulePersistence<TDatabase, TTables>,
     reader: CapsuleOperationReader<TDatabase, TTables>,
     planner: CapturePlanner,
+    previewGate: PreviewGate<TDatabase, TTables>,
   ) {
-    const sources = new CaptureSourcePersistence(persistence)
-    this.acceptance = new CaptureAcceptancePersistence(persistence, reader, planner, sources)
-    this.input = new CaptureInputPersistence(persistence, reader, planner, sources)
+    const provenance = new CapsuleBranchProvenance(persistence)
+    this.acceptance = new CaptureAcceptancePersistence(persistence, reader, planner, provenance, previewGate)
+    this.input = new CaptureInputPersistence(persistence, reader, planner, provenance)
     this.execution = new CaptureExecutionPersistence(persistence)
     this.resources = new CaptureResourcePersistence(persistence)
     this.commitPersistence = new CaptureCommitPersistence(persistence)
-    this.failure = new CaptureFailurePersistence(persistence, reader, planner, sources)
+    this.failure = new CaptureFailurePersistence(persistence, reader, planner, provenance)
     this.compensation = new CaptureCompensationPersistence(persistence)
   }
 
@@ -79,13 +81,6 @@ export class CaptureRepository<
     return await this.commitPersistence.commit(input)
   }
 
-  /**
-   * Applies pre-provider failure or fail-closed uncertainty classification.
-   *
-   * Post-provider ordinary failure is available only through `compensated()`,
-   * which independently proves all provider resources reached deleted or
-   * missing outcomes.
-   */
   public async classify(
     operationId: string,
     error: unknown,

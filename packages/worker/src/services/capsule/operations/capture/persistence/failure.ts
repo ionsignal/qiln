@@ -18,9 +18,9 @@ import {
   toCapsuleOperationTransition,
   type CapsuleOperationReader,
 } from '../../shared'
+import type { CapsuleBranchProvenance } from '../../../branch/provenance'
 import type { CapsuleBranchResourceInventoryRow } from '../../../resource'
 import type { CapturePlanner } from '../plan'
-import type { CaptureSourcePersistence } from './source'
 import type {
   CaptureAbandonedClassificationResult,
   CaptureCommittedBranch,
@@ -56,7 +56,7 @@ export class CaptureFailurePersistence<
     private readonly persistence: CapsulePersistence<TDatabase, TTables>,
     private readonly reader: CapsuleOperationReader<TDatabase, TTables>,
     private readonly planner: CapturePlanner,
-    private readonly sources: CaptureSourcePersistence<TDatabase, TTables>,
+    private readonly provenance: CapsuleBranchProvenance<TDatabase, TTables>,
   ) {}
 
   public async classify(
@@ -118,7 +118,7 @@ export class CaptureFailurePersistence<
             sourceBranchId: sourceBranch.id,
           })
           const policy = verifyCapsuleSnapshotCapturePolicyPin(extension.capturePolicyPin)
-          const source = await this.sources.lock(tx, sourceBranch)
+          const source = await this.provenance.lock(tx, sourceBranch)
           if (
             blueprint.blueprint.schema_version !== extension.blueprintSchemaVersion ||
             blueprint.name !== extension.blueprintName ||

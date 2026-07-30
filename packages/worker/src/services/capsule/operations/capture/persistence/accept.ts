@@ -19,8 +19,9 @@ import {
   type PersistedCapsuleOperation,
 } from '../../shared'
 import { CapturePlanner } from '../plan'
+import type { CapsuleBranchProvenance } from '../../../branch/provenance'
 import type { CapsuleBranchResourceInventoryRow } from '../../../resource'
-import type { CaptureSourcePersistence } from './source'
+import type { PreviewGate } from '../../../routing/preview/gate'
 import type { AcceptCaptureCapsuleInput, CaptureAcceptanceResult, CaptureSourceBranch } from '../types'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
@@ -39,7 +40,8 @@ export class CaptureAcceptancePersistence<
     private readonly persistence: CapsulePersistence<TDatabase, TTables>,
     private readonly reader: CapsuleOperationReader<TDatabase, TTables>,
     private readonly planner: CapturePlanner,
-    private readonly sources: CaptureSourcePersistence<TDatabase, TTables>,
+    private readonly provenance: CapsuleBranchProvenance<TDatabase, TTables>,
+    private readonly previews: PreviewGate<TDatabase, TTables>,
   ) {}
 
   public async accept(input: AcceptCaptureCapsuleInput): Promise<CaptureAcceptanceResult> {
@@ -71,6 +73,7 @@ export class CaptureAcceptancePersistence<
             isRootBranch: branch.isRootBranch,
           })
         }
+        this.previews.assertBranchWithdrawn(tx, input.ownerId, input.capsuleId, branch.id)
         if (branch.resourceInventoryDigest === null) {
           throw new IncusError('Snapshot Capture source branch has no durable resource inventory proof.', 'CONFLICT', {
             ownerId: input.ownerId,
@@ -79,7 +82,7 @@ export class CaptureAcceptancePersistence<
           })
         }
         const resources = await this.lockInventory(tx, branch.id)
-        const pins = await this.sources.lock(tx, branch)
+        const pins = await this.provenance.lock(tx, branch)
         const now = new Date()
         const [operation] = await tx
           .insert(capsuleOperations)

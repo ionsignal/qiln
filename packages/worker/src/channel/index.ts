@@ -7,6 +7,7 @@ import { registerCapsuleForkHandler } from './handlers/capsule/fork'
 import { registerCapsuleRouteHandlers } from './handlers/capsule/routing'
 import { registerCapsuleSnapshotHandlers } from './handlers/capsule/snapshot'
 import { registerCapsuleUnarchiveHandler } from './handlers/capsule/unarchive'
+import { registerCapsulePreviewHandlers } from './handlers/capsule/preview'
 import type { QilnWorkerRuntime } from '../runtime'
 
 /**
@@ -23,6 +24,7 @@ export function registerCapsuleChannelHandlers(worker: QilnWorkerRuntime): void 
   registerCapsuleDestroyHandler(worker)
   registerCapsuleBranchHandlers(worker)
   registerCapsuleSnapshotHandlers(worker)
+  registerCapsulePreviewHandlers(worker)
   registerCapsuleRouteHandlers(worker)
   registerCapsuleBlueprintHandlers(worker)
 }

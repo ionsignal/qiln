@@ -6,6 +6,7 @@ import { CaddyClient } from './caddy'
 import { IncusClient } from './incus/client'
 import { ProjectService } from './services/project'
 import { composeCapsuleService, type CapsuleService } from './services/capsule'
+import { validatePreviewConfig } from './services/capsule/routing/preview/config'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import type { WorkerRuntimeConfig, WorkerRuntimeOptions } from './types'
 import type { CapsuleTables } from '@qiln/core/server'
@@ -107,6 +108,9 @@ export class QilnWorkerRuntime<
 
   constructor(options: WorkerRuntimeOptions<TDatabase, TTables>) {
     this.config = resolveWorkerRuntimeConfig(options.config)
+
+    validatePreviewConfig(this.config.routing)
+
     this.supervisor = new OperationSupervisor({
       loggerPrefix: `${WORKER_LOG_PREFIX} OperationSupervisor`,
       onOperationRejected: (operationId, error) => {
@@ -131,10 +135,12 @@ export class QilnWorkerRuntime<
     })
     this.capsule = composeCapsuleService({
       incus: this.incus,
+      caddy: this.caddy,
       channel: this.channel,
       project: this.project,
       blueprints: this.blueprints,
       supervisor: this.supervisor,
+      routing: this.config.routing,
       experimentalSnapshotsEnabled: this.config.features?.experimentalSnapshots ?? false,
       persistence: options.persistence,
     })
@@ -224,7 +230,11 @@ export class QilnWorkerRuntime<
       await this.capsule.branch.reconcileRuntimeStates()
       this.throwIfFailStopped()
 
+      await this.capsule.preview.reconcile()
+      this.throwIfFailStopped()
+
       registerCapsuleChannelHandlers(this)
+      this.capsule.preview.start()
 
       this.throwIfFailStopped()
       this.started = true
@@ -270,6 +280,7 @@ export class QilnWorkerRuntime<
    * finish the fail-stop path.
    */
   private async shutdown(): Promise<void> {
+    await this.capsule.preview.stop()
     this.supervisor.beginShutdown()
     let channelShutdownError: unknown
     try {
@@ -346,6 +357,9 @@ export class QilnWorkerRuntime<
     )
     this.markFailStopped(failStopError)
     this.supervisor.beginShutdown()
+    void this.capsule.preview.stop().catch((previewError: unknown) => {
+      console.error(`${WORKER_LOG_PREFIX} Failed to stop preview reconciliation after authority loss.`, previewError)
+    })
     this.caddy.destroy()
     this.incus.destroy()
     void this.shutdownChannel().catch((channelError: unknown) => {

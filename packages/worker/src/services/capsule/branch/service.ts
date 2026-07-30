@@ -4,6 +4,7 @@ import type { CapsuleBranchEventPublisher } from '../events/branch'
 import type { CapsuleBranchRuntimeObserver } from './observer'
 import type { CapsuleBranchRuntimeReconciler } from './reconciler'
 import type { CapsuleBranchStore } from './store'
+import type { PreviewService } from '../routing/preview'
 import type { IncusClient } from '../../../incus/client/index'
 import type { ProjectService } from '../../project'
 import type { CapsuleCommandAck } from '@qiln/core/server'
@@ -19,6 +20,7 @@ export interface CapsuleBranchRuntimeServiceDependencies {
   events: CapsuleBranchEventPublisher
   observer: CapsuleBranchRuntimeObserver
   reconciler: CapsuleBranchRuntimeReconciler
+  previews: PreviewService
   incus: IncusClient
   project: ProjectService
 }
@@ -31,9 +33,9 @@ export interface CapsuleBranchRuntimeServiceDependencies {
  * and ambiguous outcomes become durable runtime errors instead of optimistic
  * rollbacks.
  *
- * Branch creation and branch-fork policy do not belong here. The capsule create
- * operation owns creation of the initial root branch, while a future
- * branch-fork operation will own creation from a committed snapshot.
+ * Branch stop first requests and verifies preview withdrawal while the branch
+ * is still online. The durable branch transition cannot begin until the preview
+ * gate proves every associated Caddy route is inactive.
  */
 export class CapsuleBranchRuntimeService {
   constructor(private readonly dependencies: CapsuleBranchRuntimeServiceDependencies) {}
@@ -71,24 +73,40 @@ export class CapsuleBranchRuntimeService {
 
   /**
    * Starts one existing offline branch of an active, unarchived capsule.
+   *
+   * An explicit start re-enables previews that were withdrawn before a prior
+   * branch stop. The branch remains `starting`, so no Caddy route may reappear
+   * until Incus later confirms the runtime is online.
    */
   public async start(ownerId: string, capsuleId: string, name: string): Promise<CapsuleCommandAck> {
     const transition = await this.dependencies.branches.beginBranchStart(ownerId, capsuleId, name)
-    return await this.executeRuntimeMutation(transition, {
+    const definition: BranchRuntimeMutationDefinition = {
       mutation: 'start',
       transitionalStatus: 'starting',
       desiredStatus: 'online',
       oppositeStatus: 'offline',
-    })
+    }
+    try {
+      await this.dependencies.previews.resumeBranch(ownerId, capsuleId, transition.branchId)
+    } catch (error: unknown) {
+      return await this.resolveMutationOutcome(transition, definition, error, 'resume_preview_routes_failed')
+    }
+    return await this.executeRuntimeMutation(transition, definition)
   }
 
   /**
    * Stops one existing online branch of an active, unarchived capsule.
    *
-   * A branch that is still starting cannot be stopped. Its existing provider
-   * mutation must first reach a confirmed stable state or durable error state.
+   * Preview withdrawal completes before the branch enters its stop fence or
+   * sends an Incus stop mutation. The store rechecks that condition under the
+   * branch lifecycle transaction, so a concurrent Caddy apply cannot race
+   * provider shutdown.
    */
   public async stop(ownerId: string, capsuleId: string, name: string): Promise<CapsuleCommandAck> {
+    const branch = await this.dependencies.branches.findBranch(ownerId, capsuleId, name)
+    if (branch?.status === 'online') {
+      await this.dependencies.previews.withdrawBranch(ownerId, capsuleId, branch.id)
+    }
     const transition = await this.dependencies.branches.beginBranchStop(ownerId, capsuleId, name)
     return await this.executeRuntimeMutation(transition, {
       mutation: 'stop',

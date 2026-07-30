@@ -20,6 +20,7 @@ import {
 } from '../../shared'
 import { assertOfflineDestroyCapsuleBranchLineage } from '../policy/lineage'
 import { lockDestroyCapsuleBranches, lockOwnedDestroyCapsule } from './locks'
+import type { PreviewGate } from '../../../routing/preview/gate'
 import type { AcceptDestroyCapsuleOperationInput, DestroyCapsuleRepositoryResult } from '../types'
 
 /**
@@ -44,6 +45,7 @@ export class DestroyCapsuleAcceptancePersistence<
   constructor(
     private readonly persistence: CapsulePersistence<TDatabase, TTables>,
     private readonly reader: CapsuleOperationReader<TDatabase, TTables>,
+    private readonly previews: PreviewGate<TDatabase, TTables>,
   ) {}
 
   public async acceptOrReplay(input: AcceptDestroyCapsuleOperationInput): Promise<DestroyCapsuleRepositoryResult> {
@@ -99,6 +101,13 @@ export class DestroyCapsuleAcceptancePersistence<
           tx,
           this.persistence.tables,
           input.capsuleId,
+        )
+
+        await this.previews.assertBranchesWithdrawn(
+          tx,
+          input.ownerId,
+          input.capsuleId,
+          branches.map(branch => branch.id),
         )
 
         assertOfflineDestroyCapsuleBranchLineage(input.ownerId, input.capsuleId, branches)

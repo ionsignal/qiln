@@ -38,6 +38,8 @@ import type {
   ArchiveCapsuleExecutionInput,
   ArchiveCapsuleTerminalResult,
 } from './types'
+
+import type { PreviewGate } from '../../../routing/preview/gate'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
 const NONTERMINAL_ARCHIVE_STATUSES = [CapsuleOperationStatus.ACCEPTED, CapsuleOperationStatus.RUNNING] as const
@@ -65,6 +67,7 @@ export class CapsuleArchiveRepository<
   constructor(
     private readonly persistence: CapsulePersistence<TDatabase, TTables>,
     private readonly operationLedger: ProviderFreeArchivalOperationLedger<TDatabase, TTables>,
+    private readonly previews: PreviewGate<TDatabase, TTables>,
   ) {}
 
   // ---------------------------------------------------------------------------
@@ -104,6 +107,13 @@ export class CapsuleArchiveRepository<
         }
 
         const branches = await lockArchivalCapsuleBranches<TDatabase, TTables>(tx, tables, input.capsuleId)
+
+        await this.previews.assertBranchesWithdrawn(
+          tx,
+          input.ownerId,
+          input.capsuleId,
+          branches.map(branch => branch.id),
+        )
 
         assertValidOfflineBranchLineage(input.ownerId, input.capsuleId, branches)
 

@@ -14,6 +14,7 @@ export interface HttpEndpoint {
 
 export type IncusEndpoint = UnixSocketEndpoint | HttpEndpoint
 export type CaddyAdminEndpoint = UnixSocketEndpoint | HttpEndpoint
+export type RoutingIngressEndpoint = HttpEndpoint
 
 export class EndpointValidationError extends Error {
   constructor(message: string) {
@@ -138,6 +139,23 @@ export function parseCaddyAdminEndpoint(value: string): CaddyAdminEndpoint {
     throw new EndpointValidationError(
       'Caddy admin HTTP endpoints must use a loopback hostname or address. Use a Unix socket for deployed administration.',
     )
+  }
+  return endpoint
+}
+
+/**
+ * Parses the local ingress endpoint used to verify traffic through Caddy.
+ *
+ * Verification connects only to loopback. The desired route hostname is sent
+ * separately through the HTTP Host header.
+ */
+export function parseRoutingIngressEndpoint(value: string): RoutingIngressEndpoint {
+  assertRawEndpoint(value, 'Routing ingress endpoint')
+
+  const endpoint = parseHttpEndpoint(value, 'Routing ingress endpoint', 'http:')
+  const hostname = new URL(endpoint.baseUrl).hostname
+  if (!isLoopbackHostname(hostname)) {
+    throw new EndpointValidationError('Routing ingress verification must use a loopback HTTP endpoint.')
   }
   return endpoint
 }

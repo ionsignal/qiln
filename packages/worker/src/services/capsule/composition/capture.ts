@@ -12,6 +12,7 @@ import type { CapsuleBranchEventPublisher } from '../events/branch'
 import type { CapsuleLifecycleEventPublisher } from '../events/lifecycle'
 import type { CapsuleOperationEventPublisher } from '../events/operation'
 import type { CapsuleOperationReader, CapsuleOperationStepStore } from '../operations/shared'
+import type { PreviewGate } from '../routing/preview/gate'
 import type { CapsulePersistence, CapsuleTables } from '@qiln/core/server'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
@@ -26,6 +27,7 @@ export interface ComposeCaptureCapabilityOptions<
   operationEvents: CapsuleOperationEventPublisher
   lifecycleEvents: CapsuleLifecycleEventPublisher
   branchEvents: CapsuleBranchEventPublisher
+  previewGate: PreviewGate<TDatabase, TTables>
   enabled: boolean
   persistence: CapsulePersistence<TDatabase, TTables>
 }
@@ -45,7 +47,7 @@ export function composeCaptureCapability<TDatabase extends PostgresJsDatabase, T
   options: ComposeCaptureCapabilityOptions<TDatabase, TTables>,
 ): ComposedCaptureCapability {
   const planner = new CapturePlanner()
-  const repository = new CaptureRepository(options.persistence, options.operationReader, planner)
+  const repository = new CaptureRepository(options.persistence, options.operationReader, planner, options.previewGate)
   const provider = new CaptureProvider({
     incus: options.incus,
     resources: repository.resources,

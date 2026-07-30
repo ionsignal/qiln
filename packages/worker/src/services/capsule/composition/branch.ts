@@ -5,6 +5,8 @@ import { CapsuleBranchStore } from '../branch/store'
 import type { IncusClient } from '../../../incus/client/index'
 import type { ProjectService } from '../../project'
 import type { CapsuleBranchEventPublisher } from '../events/branch'
+import type { PreviewGate } from '../routing/preview/gate'
+import type { PreviewService } from '../routing/preview/service'
 import type { CapsulePersistence, CapsuleTables } from '@qiln/core/server'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
@@ -16,29 +18,34 @@ export interface ComposeBranchCapabilityOptions<
   incus: IncusClient
   project: ProjectService
   branchEvents: CapsuleBranchEventPublisher
+  previews: PreviewService
+  previewGate: PreviewGate<TDatabase, TTables>
 }
 
 /**
  * Composes runtime behavior for existing editable capsule branches.
  *
- * This capability owns observation and runtime reconciliation only. Root branch
- * creation and future snapshot-based branch forks remain operation concerns.
+ * Branch runtime observation, reconciliation, and transition policy remain in
+ * the branch capability. Preview Caddy mechanics remain in routing, while the
+ * shared PreviewGate keeps branch shutdown transactionally dependent on proven
+ * preview withdrawal.
  */
 export function composeBranchCapability<TDatabase extends PostgresJsDatabase, TTables extends CapsuleTables>(
   options: ComposeBranchCapabilityOptions<TDatabase, TTables>,
 ): CapsuleBranchRuntimeService {
-  const branches = new CapsuleBranchStore(options.persistence)
+  const branchStore = new CapsuleBranchStore(options.persistence, options.previewGate)
   const observer = new CapsuleBranchRuntimeObserver(options.incus, options.project)
   const reconciler = new CapsuleBranchRuntimeReconciler({
-    branches,
+    branches: branchStore,
     events: options.branchEvents,
     observer,
   })
   return new CapsuleBranchRuntimeService({
-    branches,
+    branches: branchStore,
     events: options.branchEvents,
     observer,
     reconciler,
+    previews: options.previews,
     incus: options.incus,
     project: options.project,
   })

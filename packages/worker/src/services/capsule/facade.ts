@@ -8,6 +8,7 @@ import type { DestroyCapsuleSubmissionService } from './operations/destroy/submi
 import type { ForkSubmission } from './operations/fork/submission'
 import type { CapsuleRouteService } from './routing/service'
 import type { CapsuleSnapshotService } from './snapshot/service'
+import type { PreviewService } from './routing/preview/service'
 
 /**
  * Fully composed capsule capabilities exposed by one Worker runtime.
@@ -26,6 +27,7 @@ export interface CapsuleServiceCapabilities {
   branch: CapsuleBranchRuntimeService
   snapshot: CapsuleSnapshotService
   route: CapsuleRouteService
+  preview: PreviewService
   abandonmentCoordinator: CapsuleOperationAbandonmentCoordinator
 }
 
@@ -46,6 +48,7 @@ export class CapsuleService {
   public readonly branch: CapsuleBranchRuntimeService
   public readonly snapshot: CapsuleSnapshotService
   public readonly route: CapsuleRouteService
+  public readonly preview: PreviewService
 
   private readonly abandonmentCoordinator: CapsuleOperationAbandonmentCoordinator
 
@@ -59,6 +62,7 @@ export class CapsuleService {
     this.branch = capabilities.branch
     this.snapshot = capabilities.snapshot
     this.route = capabilities.route
+    this.preview = capabilities.preview
     this.abandonmentCoordinator = capabilities.abandonmentCoordinator
   }
 

@@ -4,6 +4,7 @@ import type { CapsulePersistence, CapsuleTables } from '@qiln/core/server'
 import { IncusError } from '../../../errors'
 import { createFailureDetails, failureCodeFromUnknown, failureMessageFromUnknown } from '../failures'
 import { toJsonObject } from '../persistence/json'
+import type { PreviewGate } from '../routing/preview/gate'
 import type {
   BranchRuntimeErrorInput,
   BranchRuntimeErrorResult,
@@ -33,12 +34,19 @@ const RUNTIME_RECONCILIATION_STATUSES = ['offline', 'starting', 'online', 'stopp
  * Capsule lifecycle is authoritative over branch runtime mutations.
  * Transitional branch states are durable mutation fences, and every state write
  * revalidates the active, unarchived capsule aggregate.
+ *
+ * Branch shutdown additionally rechecks durable preview withdrawal inside the
+ * same capsule and branch transaction so Caddy ingress cannot race provider
+ * shutdown after an earlier best-effort withdrawal request.
  */
 export class CapsuleBranchStore<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
   TTables extends CapsuleTables = CapsuleTables,
 > {
-  constructor(private readonly persistence: CapsulePersistence<TDatabase, TTables>) {}
+  constructor(
+    private readonly persistence: CapsulePersistence<TDatabase, TTables>,
+    private readonly previews: PreviewGate<TDatabase, TTables>,
+  ) {}
 
   public async listBranches(ownerId: string) {
     const db = this.persistence.db
@@ -358,11 +366,18 @@ export class CapsuleBranchStore<
           },
         )
       }
+      if (transitionalStatus === 'stopping') {
+        await this.previews.assertBranchWithdrawn(tx, ownerId, capsuleId, branch.id)
+      }
       const [transitioned] = await tx
         .update(branches)
         .set({
           status: transitionalStatus,
-          runtimeIp: transitionalStatus === 'stopping' ? null : undefined,
+          ...(transitionalStatus === 'stopping'
+            ? {
+                runtimeIp: null,
+              }
+            : {}),
           runtimeErrorCode: null,
           runtimeErrorMessage: null,
           runtimeErrorDetails: null,

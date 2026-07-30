@@ -2,6 +2,7 @@ import { CapsuleService } from '../facade'
 import { CapsuleBranchEventPublisher } from '../events/branch'
 import { CapsuleLifecycleEventPublisher } from '../events/lifecycle'
 import { CapsuleOperationEventPublisher } from '../events/operation'
+import { CapsulePreviewEventPublisher } from '../events/preview'
 import { CapsuleRouteEventPublisher } from '../events/route'
 import { CapsuleOperationAbandonmentCoordinator } from '../operations/abandonment/coordinator'
 import { CapsuleOperationAbandonmentHandlerRegistry } from '../operations/abandonment/handler'
@@ -9,6 +10,7 @@ import { ProviderFreeArchivalOperationLedger } from '../operations/archival/shar
 import { CapsuleOperationReader } from '../operations/shared/operationReader'
 import { CapsuleOperationStepStore } from '../operations/shared/operationStepStore'
 import { CapsuleBranchResourceStore } from '../resource/store'
+import { PreviewGate } from '../routing/preview/gate'
 import { composeArchiveCapability } from './archive'
 import { composeBranchCapability } from './branch'
 import { composeCaptureCapability } from './capture'
@@ -18,6 +20,9 @@ import { composeForkCapability } from './fork'
 import { composeRoutingCapability } from './routing'
 import { composeSnapshotCapability } from './snapshot'
 import { composeUnarchiveCapability } from './unarchive'
+import type { CapsuleBranchRuntimeService } from '../branch'
+import type { CaddyClient } from '../../../caddy'
+import type { WorkerRoutingConfig } from '../../../types'
 import type { ProjectService } from '../../project'
 import type { IncusClient } from '../../../incus/client/index'
 import type { OperationSupervisor } from '../../../coordination/supervisor'
@@ -32,6 +37,8 @@ export interface ComposeCapsuleServiceOptions<
   incus: IncusClient
   channel: CapsuleChannel
   project: ProjectService
+  caddy: CaddyClient
+  routing: WorkerRoutingConfig
   blueprints: CapsuleBlueprintRegistry
   supervisor: OperationSupervisor
   experimentalSnapshotsEnabled: boolean
@@ -55,9 +62,11 @@ export function composeCapsuleService<TDatabase extends PostgresJsDatabase, TTab
   const operationReader = new CapsuleOperationReader(options.persistence)
   const operationSteps = new CapsuleOperationStepStore(options.persistence)
   const resources = new CapsuleBranchResourceStore(options.persistence)
+  const previewGate = new PreviewGate(options.persistence)
   const operationEvents = new CapsuleOperationEventPublisher(options.channel)
   const lifecycleEvents = new CapsuleLifecycleEventPublisher(options.channel)
   const branchEvents = new CapsuleBranchEventPublisher(options.channel)
+  const previewEvents = new CapsulePreviewEventPublisher(options.channel)
   const routeEvents = new CapsuleRouteEventPublisher(options.channel)
   const archivalOperationLedger = new ProviderFreeArchivalOperationLedger(options.persistence, operationReader)
   const archive = composeArchiveCapability({
@@ -66,6 +75,7 @@ export function composeCapsuleService<TDatabase extends PostgresJsDatabase, TTab
     operationLedger: archivalOperationLedger,
     operationEvents,
     lifecycleEvents,
+    previewGate,
   })
   const unarchive = composeUnarchiveCapability({
     persistence: options.persistence,
@@ -110,6 +120,7 @@ export function composeCapsuleService<TDatabase extends PostgresJsDatabase, TTab
     operationEvents,
     lifecycleEvents,
     branchEvents,
+    previewGate,
   })
   const capture = composeCaptureCapability({
     persistence: options.persistence,
@@ -120,22 +131,36 @@ export function composeCapsuleService<TDatabase extends PostgresJsDatabase, TTab
     operationEvents,
     lifecycleEvents,
     branchEvents,
+    previewGate,
     enabled: options.experimentalSnapshotsEnabled,
-  })
-  const branch = composeBranchCapability({
-    persistence: options.persistence,
-    incus: options.incus,
-    project: options.project,
-    branchEvents,
   })
   const snapshot = composeSnapshotCapability({
     persistence: options.persistence,
   })
+  let branch: CapsuleBranchRuntimeService | null = null
   const route = composeRoutingCapability({
     persistence: options.persistence,
+    caddy: options.caddy,
+    routing: options.routing,
+    reconcileBranches: async () => {
+      if (!branch) {
+        throw new Error('Preview reconciliation cannot run before branch runtime composition completes.')
+      }
+      await branch.reconcileRuntimeStates()
+    },
     operationEvents,
+    previewEvents,
     routeEvents,
   })
+  const composedBranch = composeBranchCapability({
+    persistence: options.persistence,
+    incus: options.incus,
+    project: options.project,
+    branchEvents,
+    previews: route.preview,
+    previewGate,
+  })
+  branch = composedBranch
   const abandonmentHandlers = new CapsuleOperationAbandonmentHandlerRegistry([
     create.abandonment,
     fork.abandonment,
@@ -157,8 +182,9 @@ export function composeCapsuleService<TDatabase extends PostgresJsDatabase, TTab
     unarchive: unarchive.submission,
     destroy: destroy.submission,
     capture: capture.submission,
-    branch,
+    branch: composedBranch,
     snapshot,
+    preview: route.preview,
     route: route.service,
     abandonmentCoordinator,
   })
