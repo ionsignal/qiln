@@ -97,7 +97,7 @@ qiln/
 │           ├── coordination/           # PostgreSQL Worker authority and supervision
 │           ├── incus/                  # Incus and storage capabilities
 │           ├── caddy/                  # Caddy admin and managed route boundary
-│           ├── channel/                # Capsule command handlers listing on NATS
+│           ├── channel/                # Capsule command handlers listening on NATS
 │           └── services/capsule/
 │               ├── operations/         # Durable create, fork, capture, archive, and destroy flows
 │               ├── branch/             # Branch runtime observation and reconciliation
