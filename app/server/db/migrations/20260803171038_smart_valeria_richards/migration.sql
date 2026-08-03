@@ -1,5 +1,6 @@
 CREATE TYPE "capsule_actor_type" AS ENUM('user', 'agent');--> statement-breakpoint
 CREATE TYPE "capsule_artifact_entry_type" AS ENUM('file', 'directory');--> statement-breakpoint
+CREATE TYPE "capsule_branch_preview_status" AS ENUM('inactive', 'applying', 'verifying', 'active', 'degraded', 'removing', 'cleanup_required');--> statement-breakpoint
 CREATE TYPE "capsule_branch_resource_cleanup_policy" AS ENUM('delete_with_branch', 'retain', 'external');--> statement-breakpoint
 CREATE TYPE "capsule_branch_resource_status" AS ENUM('planned', 'creating', 'created', 'deleting', 'deleted', 'adopted', 'missing', 'error');--> statement-breakpoint
 CREATE TYPE "capsule_branch_resource_type" AS ENUM('incus_project', 'incus_instance', 'zfs_volume', 'bind_mount', 'provisioning_file');--> statement-breakpoint
@@ -7,12 +8,19 @@ CREATE TYPE "capsule_branch_status" AS ENUM('provisioning', 'offline', 'capturin
 CREATE TYPE "capsule_lifecycle_status" AS ENUM('provisioning', 'active', 'archiving', 'unarchiving', 'destroying', 'destroyed', 'creation_failed', 'cleanup_required');--> statement-breakpoint
 CREATE TYPE "capsule_operation_status" AS ENUM('accepted', 'running', 'completed', 'failed', 'cleanup_required');--> statement-breakpoint
 CREATE TYPE "capsule_operation_step_status" AS ENUM('pending', 'running', 'completed', 'failed');--> statement-breakpoint
-CREATE TYPE "capsule_operation_type" AS ENUM('create', 'archive', 'unarchive', 'destroy', 'snapshot_capture');--> statement-breakpoint
+CREATE TYPE "capsule_operation_type" AS ENUM('create', 'fork', 'archive', 'unarchive', 'destroy', 'snapshot_capture', 'promote', 'rollback');--> statement-breakpoint
+CREATE TYPE "capsule_route_alias_status" AS ENUM('inactive', 'active', 'mutating', 'cleanup_required', 'retired');--> statement-breakpoint
+CREATE TYPE "capsule_route_exposure" AS ENUM('experimental', 'production');--> statement-breakpoint
+CREATE TYPE "capsule_route_method" AS ENUM('DELETE', 'GET', 'HEAD', 'OPTIONS', 'PATCH', 'POST', 'PUT');--> statement-breakpoint
+CREATE TYPE "capsule_route_provider" AS ENUM('caddy');--> statement-breakpoint
+CREATE TYPE "capsule_route_provider_status" AS ENUM('planned', 'applying', 'applied', 'verifying', 'verified', 'failed', 'cleanup_required');--> statement-breakpoint
+CREATE TYPE "capsule_route_revision_action" AS ENUM('promote', 'rollback');--> statement-breakpoint
+CREATE TYPE "capsule_route_revision_status" AS ENUM('proposed', 'committed', 'failed', 'cleanup_required');--> statement-breakpoint
 CREATE TYPE "capsule_snapshot_capture_resource_status" AS ENUM('planned', 'creating', 'created', 'deleting', 'deleted', 'missing', 'error');--> statement-breakpoint
 CREATE TYPE "capsule_snapshot_dependency_digest_kind" AS ENUM('content', 'catalog');--> statement-breakpoint
 CREATE TYPE "capsule_snapshot_dependency_kind" AS ENUM('model_vault');--> statement-breakpoint
 CREATE TYPE "capsule_snapshot_git_remote_transport" AS ENUM('https', 'ssh');--> statement-breakpoint
-CREATE TYPE "capsule_snapshot_mode" AS ENUM('experimental');--> statement-breakpoint
+CREATE TYPE "capsule_snapshot_mode" AS ENUM('experimental', 'hardened');--> statement-breakpoint
 CREATE TYPE "capsule_snapshot_resource_kind" AS ENUM('custom_volume_snapshot');--> statement-breakpoint
 CREATE TYPE "capsule_snapshot_resource_provider" AS ENUM('incus');--> statement-breakpoint
 CREATE TABLE "capsule_artifact_entries" (
@@ -62,6 +70,215 @@ CREATE TABLE "capsule_artifact_manifests" (
 	"created_at" timestamp(3) with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "capsule_artifact_manifests_schema_version_check" CHECK ("schema_version" = 1),
 	CONSTRAINT "capsule_artifact_manifests_digest_check" CHECK ("digest" ~ '^sha256:[a-f0-9]{64}$')
+);
+--> statement-breakpoint
+CREATE TABLE "capsule_branch_previews" (
+	"id" uuid PRIMARY KEY DEFAULT uuidv7(),
+	"owner_id" uuid NOT NULL,
+	"capsule_id" uuid NOT NULL,
+	"branch_id" uuid NOT NULL,
+	"application_name" text NOT NULL,
+	"application_pin" jsonb NOT NULL,
+	"host" text NOT NULL,
+	"provider_route_id" text NOT NULL,
+	"status" "capsule_branch_preview_status" DEFAULT 'inactive'::"capsule_branch_preview_status" NOT NULL,
+	"withdrawal_requested_at" timestamp(3) with time zone,
+	"current_runtime_ip" text,
+	"current_configuration_key" text,
+	"current_configuration_digest" text,
+	"current_configuration" jsonb,
+	"pending_runtime_ip" text,
+	"pending_configuration_key" text,
+	"pending_configuration_digest" text,
+	"pending_configuration" jsonb,
+	"apply_intent_at" timestamp(3) with time zone,
+	"applied_at" timestamp(3) with time zone,
+	"verification_intent_at" timestamp(3) with time zone,
+	"verification_evidence" jsonb,
+	"verified_at" timestamp(3) with time zone,
+	"remove_intent_at" timestamp(3) with time zone,
+	"failure_code" text,
+	"failure_message" text,
+	"failure_details" jsonb,
+	"failure_at" timestamp(3) with time zone,
+	"created_at" timestamp(3) with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp(3) with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "capsule_branch_previews_host_check" CHECK ((
+          length("host") BETWEEN 3 AND 253
+          AND "host" = lower("host")
+          AND "host" !~ '[*><@/?#]'
+          AND "host" !~ '\.$'
+        )),
+	CONSTRAINT "capsule_branch_previews_provider_route_id_check" CHECK ("provider_route_id" ~ '^qiln-preview-[a-z0-9](?:[a-z0-9-]{0,113}[a-z0-9])?$'),
+	CONSTRAINT "capsule_branch_previews_current_configuration_check" CHECK ((
+          (
+            "current_runtime_ip" IS NULL
+            AND "current_configuration_key" IS NULL
+            AND "current_configuration_digest" IS NULL
+            AND "current_configuration" IS NULL
+            AND "applied_at" IS NULL
+          )
+          OR
+          (
+            "current_runtime_ip" IS NOT NULL
+            AND "current_configuration_key" IS NOT NULL
+            AND "current_configuration_digest" IS NOT NULL
+            AND "current_configuration" IS NOT NULL
+            AND jsonb_typeof("current_configuration") = 'object'
+            AND "applied_at" IS NOT NULL
+          )
+        )),
+	CONSTRAINT "capsule_branch_previews_pending_configuration_check" CHECK ((
+          (
+            "pending_runtime_ip" IS NULL
+            AND "pending_configuration_key" IS NULL
+            AND "pending_configuration_digest" IS NULL
+            AND "pending_configuration" IS NULL
+            AND "apply_intent_at" IS NULL
+          )
+          OR
+          (
+            "pending_runtime_ip" IS NOT NULL
+            AND "pending_configuration_key" IS NOT NULL
+            AND "pending_configuration_digest" IS NOT NULL
+            AND "pending_configuration" IS NOT NULL
+            AND jsonb_typeof("pending_configuration") = 'object'
+            AND "apply_intent_at" IS NOT NULL
+          )
+        )),
+	CONSTRAINT "capsule_branch_previews_current_runtime_ip_check" CHECK ("current_runtime_ip" IS NULL OR length(btrim("current_runtime_ip")) BETWEEN 1 AND 255),
+	CONSTRAINT "capsule_branch_previews_pending_runtime_ip_check" CHECK ("pending_runtime_ip" IS NULL OR length(btrim("pending_runtime_ip")) BETWEEN 1 AND 255),
+	CONSTRAINT "capsule_branch_previews_current_configuration_digest_check" CHECK ((
+          "current_configuration_digest" IS NULL
+          OR "current_configuration_digest" ~ '^sha256:[a-f0-9]{64}$'
+        )),
+	CONSTRAINT "capsule_branch_previews_pending_configuration_digest_check" CHECK ((
+          "pending_configuration_digest" IS NULL
+          OR "pending_configuration_digest" ~ '^sha256:[a-f0-9]{64}$'
+        )),
+	CONSTRAINT "capsule_branch_previews_verification_check" CHECK ((
+          (
+            "verification_intent_at" IS NULL
+            AND "verification_evidence" IS NULL
+            AND "verified_at" IS NULL
+          )
+          OR
+          (
+            "current_runtime_ip" IS NOT NULL
+            AND "verification_intent_at" IS NOT NULL
+            AND "verification_evidence" IS NULL
+            AND "verified_at" IS NULL
+          )
+          OR
+          (
+            "current_runtime_ip" IS NOT NULL
+            AND "verification_intent_at" IS NOT NULL
+            AND "verification_evidence" IS NOT NULL
+            AND "verified_at" IS NOT NULL
+          )
+        )),
+	CONSTRAINT "capsule_branch_previews_remove_intent_check" CHECK ((
+          "remove_intent_at" IS NULL
+          OR (
+            "current_runtime_ip" IS NOT NULL
+            AND "pending_runtime_ip" IS NULL
+          )
+        )),
+	CONSTRAINT "capsule_branch_previews_status_check" CHECK ((
+          (
+            "status" = 'inactive'
+            AND "current_runtime_ip" IS NULL
+            AND "pending_runtime_ip" IS NULL
+            AND "verification_intent_at" IS NULL
+            AND "verification_evidence" IS NULL
+            AND "verified_at" IS NULL
+            AND "remove_intent_at" IS NULL
+          )
+          OR
+          (
+            "status" = 'applying'
+            AND "pending_runtime_ip" IS NOT NULL
+            AND "remove_intent_at" IS NULL
+          )
+          OR
+          (
+            "status" = 'verifying'
+            AND "current_runtime_ip" IS NOT NULL
+            AND "pending_runtime_ip" IS NULL
+            AND "verification_intent_at" IS NOT NULL
+            AND "verification_evidence" IS NULL
+            AND "verified_at" IS NULL
+            AND "remove_intent_at" IS NULL
+          )
+          OR
+          (
+            "status" = 'active'
+            AND "current_runtime_ip" IS NOT NULL
+            AND "pending_runtime_ip" IS NULL
+            AND "verification_intent_at" IS NOT NULL
+            AND "verification_evidence" IS NOT NULL
+            AND "verified_at" IS NOT NULL
+            AND "remove_intent_at" IS NULL
+          )
+          OR
+          (
+            "status" = 'degraded'
+            AND "current_runtime_ip" IS NOT NULL
+            AND "pending_runtime_ip" IS NULL
+            AND "remove_intent_at" IS NULL
+          )
+          OR
+          (
+            "status" = 'removing'
+            AND "current_runtime_ip" IS NOT NULL
+            AND "pending_runtime_ip" IS NULL
+            AND "remove_intent_at" IS NOT NULL
+          )
+          OR
+          "status" = 'cleanup_required'
+        )),
+	CONSTRAINT "capsule_branch_previews_failure_check" CHECK ((
+          (
+            "status" IN ('degraded', 'cleanup_required')
+            AND "failure_code" IS NOT NULL
+            AND "failure_message" IS NOT NULL
+            AND "failure_details" IS NOT NULL
+            AND "failure_at" IS NOT NULL
+          )
+          OR
+          (
+            "status" NOT IN ('degraded', 'cleanup_required')
+            AND "failure_code" IS NULL
+            AND "failure_message" IS NULL
+            AND "failure_details" IS NULL
+            AND "failure_at" IS NULL
+          )
+        )),
+	CONSTRAINT "capsule_branch_previews_timestamp_order_check" CHECK ((
+          (
+            "verification_intent_at" IS NULL
+            OR (
+              "applied_at" IS NOT NULL
+              AND "verification_intent_at" >= "applied_at"
+            )
+          )
+          AND
+          (
+            "verified_at" IS NULL
+            OR (
+              "verification_intent_at" IS NOT NULL
+              AND "verified_at" >= "verification_intent_at"
+            )
+          )
+          AND
+          (
+            "remove_intent_at" IS NULL
+            OR (
+              "applied_at" IS NOT NULL
+              AND "remove_intent_at" >= "applied_at"
+            )
+          )
+        ))
 );
 --> statement-breakpoint
 CREATE TABLE "capsule_branch_resources" (
@@ -137,8 +354,47 @@ CREATE TABLE "capsule_create_operations" (
 	"blueprint_name" text NOT NULL,
 	"blueprint_digest" text NOT NULL,
 	"blueprint_snapshot" jsonb NOT NULL,
+	"rootfs_image_pin" jsonb NOT NULL,
 	"cpu" text NOT NULL,
 	"memory" text NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "capsule_fork_operations" (
+	"operation_id" uuid PRIMARY KEY,
+	"source_snapshot_id" uuid NOT NULL,
+	"target_branch_id" uuid NOT NULL,
+	"target_branch_name" text NOT NULL,
+	"target_branch_resource_inventory_digest" text NOT NULL,
+	"blueprint_schema_version" integer NOT NULL,
+	"blueprint_name" text NOT NULL,
+	"blueprint_digest" text NOT NULL,
+	"blueprint_pin" jsonb NOT NULL,
+	"rootfs_image_pin" jsonb NOT NULL,
+	"capture_policy_schema_version" integer NOT NULL,
+	"capture_policy_digest" text NOT NULL,
+	"capture_policy_pin" jsonb NOT NULL,
+	"source_snapshot_mode" "capsule_snapshot_mode" NOT NULL,
+	"source_snapshot_limitations" jsonb NOT NULL,
+	"cpu" text NOT NULL,
+	"memory" text NOT NULL,
+	CONSTRAINT "capsule_fork_operations_blueprint_schema_check" CHECK ("blueprint_schema_version" = 1),
+	CONSTRAINT "capsule_fork_operations_blueprint_digest_check" CHECK ("blueprint_digest" ~ '^sha256:[a-f0-9]{64}$'),
+	CONSTRAINT "capsule_fork_operations_policy_schema_check" CHECK ("capture_policy_schema_version" = 1),
+	CONSTRAINT "capsule_fork_operations_policy_digest_check" CHECK ("capture_policy_digest" ~ '^sha256:[a-f0-9]{64}$'),
+	CONSTRAINT "capsule_fork_operations_inventory_digest_check" CHECK ("target_branch_resource_inventory_digest" ~ '^sha256:[a-f0-9]{64}$'),
+	CONSTRAINT "capsule_fork_operations_assurance_check" CHECK ((
+          (
+            "source_snapshot_mode" = 'experimental'
+            AND jsonb_typeof("source_snapshot_limitations") = 'array'
+            AND jsonb_array_length("source_snapshot_limitations") > 0
+          )
+          OR
+          (
+            "source_snapshot_mode" = 'hardened'
+            AND jsonb_typeof("source_snapshot_limitations") = 'array'
+            AND jsonb_array_length("source_snapshot_limitations") = 0
+          )
+        ))
 );
 --> statement-breakpoint
 CREATE TABLE "capsule_operation_steps" (
@@ -183,16 +439,284 @@ CREATE TABLE "capsule_operations" (
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
+CREATE TABLE "capsule_route_aliases" (
+	"id" uuid PRIMARY KEY DEFAULT uuidv7(),
+	"owner_id" uuid NOT NULL,
+	"capsule_id" uuid NOT NULL,
+	"name" text NOT NULL,
+	"exposure" "capsule_route_exposure" NOT NULL,
+	"host" text NOT NULL,
+	"path" text NOT NULL,
+	"methods" "capsule_route_method"[] NOT NULL,
+	"matcher_digest" text NOT NULL,
+	"status" "capsule_route_alias_status" DEFAULT 'inactive'::"capsule_route_alias_status" NOT NULL,
+	"mutation_operation_id" uuid,
+	"last_operation_id" uuid,
+	"created_at" timestamp(3) with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp(3) with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "capsule_route_aliases_host_check" CHECK ((
+          length("host") BETWEEN 3 AND 253
+          AND "host" = lower("host")
+          AND "host" !~ '[*><@/?#]'
+          AND "host" !~ '\.$'
+        )),
+	CONSTRAINT "capsule_route_aliases_path_check" CHECK ((
+          "path" LIKE '/%'
+          AND "path" !~ '[?#]'
+          AND ("path" = '/' OR "path" !~ '/$')
+        )),
+	CONSTRAINT "capsule_route_aliases_methods_check" CHECK (cardinality("methods") > 0),
+	CONSTRAINT "capsule_route_aliases_matcher_digest_check" CHECK ("matcher_digest" ~ '^sha256:[a-f0-9]{64}$'),
+	CONSTRAINT "capsule_route_aliases_mutation_fence_check" CHECK ((
+          (
+            "status" = 'mutating'
+            AND "mutation_operation_id" IS NOT NULL
+          )
+          OR
+          (
+            "status" <> 'mutating'
+            AND "mutation_operation_id" IS NULL
+          )
+        ))
+);
+--> statement-breakpoint
+CREATE TABLE "capsule_route_heads" (
+	"alias_id" uuid PRIMARY KEY,
+	"revision_id" uuid NOT NULL,
+	"updated_at" timestamp(3) with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE "capsule_route_operations" (
+	"operation_id" uuid PRIMARY KEY,
+	"alias_id" uuid NOT NULL,
+	"action" "capsule_route_revision_action" NOT NULL,
+	"expected_revision_id" uuid,
+	"proposed_revision_id" uuid NOT NULL,
+	"rollback_source_revision_id" uuid,
+	CONSTRAINT "capsule_route_operations_action_check" CHECK ((
+          (
+            "action" = 'promote'
+            AND "rollback_source_revision_id" IS NULL
+          )
+          OR
+          (
+            "action" = 'rollback'
+            AND "expected_revision_id" IS NOT NULL
+            AND "rollback_source_revision_id" IS NOT NULL
+          )
+        ))
+);
+--> statement-breakpoint
+CREATE TABLE "capsule_route_provider_applications" (
+	"operation_id" uuid PRIMARY KEY,
+	"revision_id" uuid NOT NULL,
+	"provider" "capsule_route_provider" DEFAULT 'caddy'::"capsule_route_provider" NOT NULL,
+	"status" "capsule_route_provider_status" DEFAULT 'planned'::"capsule_route_provider_status" NOT NULL,
+	"configuration_key" text,
+	"configuration_digest" text,
+	"configuration" jsonb,
+	"apply_intent_at" timestamp(3) with time zone,
+	"applied_at" timestamp(3) with time zone,
+	"verification_intent_at" timestamp(3) with time zone,
+	"verification_evidence" jsonb,
+	"verified_at" timestamp(3) with time zone,
+	"failure_code" text,
+	"failure_message" text,
+	"failure_details" jsonb,
+	"failure_at" timestamp(3) with time zone,
+	"created_at" timestamp(3) with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp(3) with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "capsule_route_provider_applications_configuration_check" CHECK ((
+          (
+            "configuration_key" IS NULL
+            AND "configuration_digest" IS NULL
+            AND "configuration" IS NULL
+          )
+          OR
+          (
+            "configuration_key" IS NOT NULL
+            AND "configuration_digest" IS NOT NULL
+            AND "configuration" IS NOT NULL
+          )
+        )),
+	CONSTRAINT "capsule_route_provider_applications_configuration_digest_check" CHECK ((
+          "configuration_digest" IS NULL
+          OR "configuration_digest" ~ '^sha256:[a-f0-9]{64}$'
+        )),
+	CONSTRAINT "capsule_route_provider_applications_mutation_check" CHECK ((
+          "status" IN ('planned', 'failed', 'cleanup_required')
+          OR (
+            "configuration_key" IS NOT NULL
+            AND "configuration_digest" IS NOT NULL
+            AND "configuration" IS NOT NULL
+          )
+        )),
+	CONSTRAINT "capsule_route_provider_applications_timeline_check" CHECK ((
+          (
+            "status" = 'planned'
+            AND "apply_intent_at" IS NULL
+            AND "applied_at" IS NULL
+            AND "verification_intent_at" IS NULL
+            AND "verification_evidence" IS NULL
+            AND "verified_at" IS NULL
+          )
+          OR
+          (
+            "status" = 'applying'
+            AND "apply_intent_at" IS NOT NULL
+            AND "applied_at" IS NULL
+            AND "verification_intent_at" IS NULL
+            AND "verification_evidence" IS NULL
+            AND "verified_at" IS NULL
+          )
+          OR
+          (
+            "status" = 'applied'
+            AND "apply_intent_at" IS NOT NULL
+            AND "applied_at" IS NOT NULL
+            AND "verification_intent_at" IS NULL
+            AND "verification_evidence" IS NULL
+            AND "verified_at" IS NULL
+          )
+          OR
+          (
+            "status" = 'verifying'
+            AND "apply_intent_at" IS NOT NULL
+            AND "applied_at" IS NOT NULL
+            AND "verification_intent_at" IS NOT NULL
+            AND "verification_evidence" IS NULL
+            AND "verified_at" IS NULL
+          )
+          OR
+          (
+            "status" = 'verified'
+            AND "apply_intent_at" IS NOT NULL
+            AND "applied_at" IS NOT NULL
+            AND "verification_intent_at" IS NOT NULL
+            AND "verification_evidence" IS NOT NULL
+            AND "verified_at" IS NOT NULL
+          )
+          OR
+          (
+            "status" IN ('failed', 'cleanup_required')
+            AND "failure_at" IS NOT NULL
+          )
+        )),
+	CONSTRAINT "capsule_route_provider_applications_failure_check" CHECK ((
+          (
+            "status" IN ('failed', 'cleanup_required')
+            AND "failure_code" IS NOT NULL
+            AND "failure_message" IS NOT NULL
+            AND "failure_details" IS NOT NULL
+            AND "failure_at" IS NOT NULL
+          )
+          OR
+          (
+            "status" NOT IN ('failed', 'cleanup_required')
+            AND "failure_code" IS NULL
+            AND "failure_message" IS NULL
+            AND "failure_details" IS NULL
+            AND "failure_at" IS NULL
+          )
+        )),
+	CONSTRAINT "capsule_route_provider_applications_timestamp_order_check" CHECK ((
+          (
+            "applied_at" IS NULL
+            OR (
+              "apply_intent_at" IS NOT NULL
+              AND "applied_at" >= "apply_intent_at"
+            )
+          )
+          AND
+          (
+            "verification_intent_at" IS NULL
+            OR (
+              "applied_at" IS NOT NULL
+              AND "verification_intent_at" >= "applied_at"
+            )
+          )
+          AND
+          (
+            "verified_at" IS NULL
+            OR (
+              "verification_intent_at" IS NOT NULL
+              AND "verified_at" >= "verification_intent_at"
+            )
+          )
+        ))
+);
+--> statement-breakpoint
+CREATE TABLE "capsule_route_revisions" (
+	"id" uuid PRIMARY KEY DEFAULT uuidv7(),
+	"alias_id" uuid NOT NULL,
+	"number" integer NOT NULL,
+	"action" "capsule_route_revision_action" NOT NULL,
+	"previous_revision_id" uuid,
+	"rollback_source_revision_id" uuid,
+	"snapshot_id" uuid NOT NULL,
+	"target_pin" jsonb NOT NULL,
+	"evidence_pin" jsonb NOT NULL,
+	"operation_id" uuid NOT NULL,
+	"status" "capsule_route_revision_status" DEFAULT 'proposed'::"capsule_route_revision_status" NOT NULL,
+	"proposed_at" timestamp(3) with time zone DEFAULT now() NOT NULL,
+	"committed_at" timestamp(3) with time zone,
+	"failed_at" timestamp(3) with time zone,
+	CONSTRAINT "capsule_route_revisions_number_check" CHECK ("number" > 0),
+	CONSTRAINT "capsule_route_revisions_action_check" CHECK ((
+          (
+            "action" = 'promote'
+            AND "rollback_source_revision_id" IS NULL
+          )
+          OR
+          (
+            "action" = 'rollback'
+            AND "previous_revision_id" IS NOT NULL
+            AND "rollback_source_revision_id" IS NOT NULL
+          )
+        )),
+	CONSTRAINT "capsule_route_revisions_terminal_state_check" CHECK ((
+          (
+            "status" = 'proposed'
+            AND "committed_at" IS NULL
+            AND "failed_at" IS NULL
+          )
+          OR
+          (
+            "status" = 'committed'
+            AND "committed_at" IS NOT NULL
+            AND "failed_at" IS NULL
+          )
+          OR
+          (
+            "status" IN ('failed', 'cleanup_required')
+            AND "committed_at" IS NULL
+            AND "failed_at" IS NOT NULL
+          )
+        )),
+	CONSTRAINT "capsule_route_revisions_timestamp_order_check" CHECK ((
+          ("committed_at" IS NULL OR "committed_at" >= "proposed_at")
+          AND
+          ("failed_at" IS NULL OR "failed_at" >= "proposed_at")
+        ))
+);
+--> statement-breakpoint
 CREATE TABLE "capsule_snapshot_capture_operations" (
 	"operation_id" uuid PRIMARY KEY,
 	"source_branch_id" uuid NOT NULL,
 	"source_branch_name" text NOT NULL,
 	"source_branch_resource_inventory_digest" text NOT NULL,
+	"blueprint_schema_version" integer NOT NULL,
+	"blueprint_name" text NOT NULL,
+	"blueprint_digest" text NOT NULL,
+	"blueprint_pin" jsonb NOT NULL,
+	"rootfs_image_pin" jsonb NOT NULL,
 	"capture_policy_schema_version" integer NOT NULL,
 	"capture_policy_digest" text NOT NULL,
 	"capture_policy_pin" jsonb NOT NULL,
 	"requested_mode" "capsule_snapshot_mode" DEFAULT 'experimental'::"capsule_snapshot_mode" NOT NULL,
 	"snapshot_id" uuid,
+	CONSTRAINT "capsule_snapshot_capture_operations_blueprint_schema_check" CHECK ("blueprint_schema_version" = 1),
+	CONSTRAINT "capsule_snapshot_capture_operations_blueprint_digest_check" CHECK ("blueprint_digest" ~ '^sha256:[a-f0-9]{64}$'),
 	CONSTRAINT "capsule_snapshot_capture_operations_policy_schema_check" CHECK ("capture_policy_schema_version" = 1),
 	CONSTRAINT "capsule_snapshot_capture_operations_policy_digest_check" CHECK ("capture_policy_digest" ~ '^sha256:[a-f0-9]{64}$'),
 	CONSTRAINT "capsule_snapshot_capture_operations_inventory_digest_check" CHECK ("source_branch_resource_inventory_digest" ~ '^sha256:[a-f0-9]{64}$')
@@ -385,6 +909,7 @@ CREATE TABLE "capsule_snapshot_resource_references" (
 	"snapshot_id" uuid NOT NULL,
 	"manifest_root_id" uuid NOT NULL,
 	"source_branch_resource_id" uuid NOT NULL,
+	"capture_resource_id" uuid NOT NULL,
 	"provider" "capsule_snapshot_resource_provider" NOT NULL,
 	"kind" "capsule_snapshot_resource_kind" NOT NULL,
 	"blueprint_volume_name" text NOT NULL,
@@ -406,6 +931,11 @@ CREATE TABLE "capsule_snapshots" (
 	"source_branch_id" uuid NOT NULL,
 	"source_branch_name" text NOT NULL,
 	"source_branch_resource_inventory_digest" text NOT NULL,
+	"blueprint_schema_version" integer NOT NULL,
+	"blueprint_name" text NOT NULL,
+	"blueprint_digest" text NOT NULL,
+	"blueprint_pin" jsonb NOT NULL,
+	"rootfs_image_pin" jsonb NOT NULL,
 	"capture_policy_schema_version" integer NOT NULL,
 	"capture_policy_digest" text NOT NULL,
 	"capture_policy_pin" jsonb NOT NULL,
@@ -413,14 +943,22 @@ CREATE TABLE "capsule_snapshots" (
 	"limitations" jsonb NOT NULL,
 	"created_at" timestamp(3) with time zone DEFAULT now() NOT NULL,
 	"archived_at" timestamp(3) with time zone,
+	CONSTRAINT "capsule_snapshots_blueprint_schema_check" CHECK ("blueprint_schema_version" = 1),
+	CONSTRAINT "capsule_snapshots_blueprint_digest_check" CHECK ("blueprint_digest" ~ '^sha256:[a-f0-9]{64}$'),
 	CONSTRAINT "capsule_snapshots_policy_schema_check" CHECK ("capture_policy_schema_version" = 1),
 	CONSTRAINT "capsule_snapshots_policy_digest_check" CHECK ("capture_policy_digest" ~ '^sha256:[a-f0-9]{64}$'),
 	CONSTRAINT "capsule_snapshots_inventory_digest_check" CHECK ("source_branch_resource_inventory_digest" ~ '^sha256:[a-f0-9]{64}$'),
-	CONSTRAINT "capsule_snapshots_experimental_limitations_check" CHECK ((
-          "mode" <> 'experimental'
-          OR (
-            jsonb_typeof("limitations") = 'array'
+	CONSTRAINT "capsule_snapshots_assurance_check" CHECK ((
+          (
+            "mode" = 'experimental'
+            AND jsonb_typeof("limitations") = 'array'
             AND jsonb_array_length("limitations") > 0
+          )
+          OR
+          (
+            "mode" = 'hardened'
+            AND jsonb_typeof("limitations") = 'array'
+            AND jsonb_array_length("limitations") = 0
           )
         )),
 	CONSTRAINT "capsule_snapshots_archive_timestamp_check" CHECK ("archived_at" IS NULL OR "archived_at" >= "created_at")
@@ -468,6 +1006,16 @@ CREATE UNIQUE INDEX "capsule_artifact_manifest_roots_manifest_root_unique_idx" O
 CREATE UNIQUE INDEX "capsule_artifact_manifest_roots_manifest_path_unique_idx" ON "capsule_artifact_manifest_roots" ("manifest_id","logical_path");--> statement-breakpoint
 CREATE UNIQUE INDEX "capsule_artifact_manifests_snapshot_unique_idx" ON "capsule_artifact_manifests" ("snapshot_id");--> statement-breakpoint
 CREATE INDEX "capsule_artifact_manifests_digest_idx" ON "capsule_artifact_manifests" ("digest");--> statement-breakpoint
+CREATE INDEX "capsule_branch_previews_owner_idx" ON "capsule_branch_previews" ("owner_id");--> statement-breakpoint
+CREATE INDEX "capsule_branch_previews_capsule_idx" ON "capsule_branch_previews" ("capsule_id");--> statement-breakpoint
+CREATE INDEX "capsule_branch_previews_branch_idx" ON "capsule_branch_previews" ("branch_id");--> statement-breakpoint
+CREATE INDEX "capsule_branch_previews_status_idx" ON "capsule_branch_previews" ("status");--> statement-breakpoint
+CREATE INDEX "capsule_branch_previews_withdrawal_requested_idx" ON "capsule_branch_previews" ("withdrawal_requested_at");--> statement-breakpoint
+CREATE INDEX "capsule_branch_previews_current_configuration_digest_idx" ON "capsule_branch_previews" ("current_configuration_digest");--> statement-breakpoint
+CREATE INDEX "capsule_branch_previews_pending_configuration_digest_idx" ON "capsule_branch_previews" ("pending_configuration_digest");--> statement-breakpoint
+CREATE UNIQUE INDEX "capsule_branch_previews_branch_application_unique_idx" ON "capsule_branch_previews" ("branch_id","application_name");--> statement-breakpoint
+CREATE UNIQUE INDEX "capsule_branch_previews_host_unique_idx" ON "capsule_branch_previews" ("host");--> statement-breakpoint
+CREATE UNIQUE INDEX "capsule_branch_previews_provider_route_id_unique_idx" ON "capsule_branch_previews" ("provider_route_id");--> statement-breakpoint
 CREATE INDEX "capsule_branch_resources_owner_idx" ON "capsule_branch_resources" ("owner_id");--> statement-breakpoint
 CREATE INDEX "capsule_branch_resources_branch_idx" ON "capsule_branch_resources" ("branch_id");--> statement-breakpoint
 CREATE INDEX "capsule_branch_resources_created_by_operation_idx" ON "capsule_branch_resources" ("created_by_operation_id");--> statement-breakpoint
@@ -481,9 +1029,13 @@ CREATE INDEX "capsule_branches_owner_idx" ON "capsule_branches" ("owner_id");-->
 CREATE INDEX "capsule_branches_capsule_idx" ON "capsule_branches" ("capsule_id");--> statement-breakpoint
 CREATE INDEX "capsule_branches_runtime_status_idx" ON "capsule_branches" ("status");--> statement-breakpoint
 CREATE INDEX "capsule_branches_owner_runtime_status_idx" ON "capsule_branches" ("owner_id","status");--> statement-breakpoint
-CREATE UNIQUE INDEX "capsule_branches_owner_runtime_name_unique_idx" ON "capsule_branches" ("owner_id","name") WHERE "status" <> 'destroyed';--> statement-breakpoint
+CREATE UNIQUE INDEX "capsule_branches_capsule_runtime_name_unique_idx" ON "capsule_branches" ("capsule_id","name") WHERE "status" <> 'destroyed';--> statement-breakpoint
 CREATE UNIQUE INDEX "capsule_branches_capsule_root_unique_idx" ON "capsule_branches" ("capsule_id") WHERE "is_root_branch" = true;--> statement-breakpoint
 CREATE UNIQUE INDEX "capsule_create_operations_root_branch_unique_idx" ON "capsule_create_operations" ("root_branch_id");--> statement-breakpoint
+CREATE INDEX "capsule_fork_operations_source_snapshot_idx" ON "capsule_fork_operations" ("source_snapshot_id");--> statement-breakpoint
+CREATE INDEX "capsule_fork_operations_blueprint_digest_idx" ON "capsule_fork_operations" ("blueprint_digest");--> statement-breakpoint
+CREATE INDEX "capsule_fork_operations_policy_digest_idx" ON "capsule_fork_operations" ("capture_policy_digest");--> statement-breakpoint
+CREATE UNIQUE INDEX "capsule_fork_operations_target_branch_unique_idx" ON "capsule_fork_operations" ("target_branch_id");--> statement-breakpoint
 CREATE INDEX "capsule_operation_steps_operation_idx" ON "capsule_operation_steps" ("operation_id");--> statement-breakpoint
 CREATE INDEX "capsule_operation_steps_capsule_idx" ON "capsule_operation_steps" ("capsule_id");--> statement-breakpoint
 CREATE INDEX "capsule_operation_steps_owner_status_idx" ON "capsule_operation_steps" ("owner_id","status");--> statement-breakpoint
@@ -495,7 +1047,34 @@ CREATE INDEX "capsule_operations_capsule_status_idx" ON "capsule_operations" ("c
 CREATE INDEX "capsule_operations_provider_mutation_started_idx" ON "capsule_operations" ("provider_mutation_started_at");--> statement-breakpoint
 CREATE UNIQUE INDEX "capsule_operations_owner_idempotency_key_unique_idx" ON "capsule_operations" ("owner_id","idempotency_key");--> statement-breakpoint
 CREATE UNIQUE INDEX "capsule_operations_capsule_nonterminal_unique_idx" ON "capsule_operations" ("capsule_id") WHERE "status" IN ('accepted', 'running');--> statement-breakpoint
+CREATE INDEX "capsule_route_aliases_owner_idx" ON "capsule_route_aliases" ("owner_id");--> statement-breakpoint
+CREATE INDEX "capsule_route_aliases_capsule_idx" ON "capsule_route_aliases" ("capsule_id");--> statement-breakpoint
+CREATE INDEX "capsule_route_aliases_status_idx" ON "capsule_route_aliases" ("status");--> statement-breakpoint
+CREATE INDEX "capsule_route_aliases_mutation_operation_idx" ON "capsule_route_aliases" ("mutation_operation_id");--> statement-breakpoint
+CREATE INDEX "capsule_route_aliases_last_operation_idx" ON "capsule_route_aliases" ("last_operation_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "capsule_route_aliases_owner_capsule_name_unique_idx" ON "capsule_route_aliases" ("owner_id","capsule_id","name");--> statement-breakpoint
+CREATE UNIQUE INDEX "capsule_route_aliases_match_unique_idx" ON "capsule_route_aliases" ("host","path");--> statement-breakpoint
+CREATE UNIQUE INDEX "capsule_route_heads_revision_unique_idx" ON "capsule_route_heads" ("revision_id");--> statement-breakpoint
+CREATE INDEX "capsule_route_heads_updated_idx" ON "capsule_route_heads" ("updated_at");--> statement-breakpoint
+CREATE INDEX "capsule_route_operations_alias_idx" ON "capsule_route_operations" ("alias_id");--> statement-breakpoint
+CREATE INDEX "capsule_route_operations_expected_revision_idx" ON "capsule_route_operations" ("expected_revision_id");--> statement-breakpoint
+CREATE INDEX "capsule_route_operations_rollback_source_idx" ON "capsule_route_operations" ("rollback_source_revision_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "capsule_route_operations_proposed_revision_unique_idx" ON "capsule_route_operations" ("proposed_revision_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "capsule_route_provider_applications_revision_unique_idx" ON "capsule_route_provider_applications" ("revision_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "capsule_route_provider_applications_key_unique_idx" ON "capsule_route_provider_applications" ("provider","configuration_key") WHERE "configuration_key" IS NOT NULL;--> statement-breakpoint
+CREATE INDEX "capsule_route_provider_applications_status_idx" ON "capsule_route_provider_applications" ("status");--> statement-breakpoint
+CREATE INDEX "capsule_route_provider_applications_digest_idx" ON "capsule_route_provider_applications" ("configuration_digest");--> statement-breakpoint
+CREATE INDEX "capsule_route_revisions_alias_idx" ON "capsule_route_revisions" ("alias_id");--> statement-breakpoint
+CREATE INDEX "capsule_route_revisions_snapshot_idx" ON "capsule_route_revisions" ("snapshot_id");--> statement-breakpoint
+CREATE INDEX "capsule_route_revisions_previous_idx" ON "capsule_route_revisions" ("previous_revision_id");--> statement-breakpoint
+CREATE INDEX "capsule_route_revisions_rollback_source_idx" ON "capsule_route_revisions" ("rollback_source_revision_id");--> statement-breakpoint
+CREATE INDEX "capsule_route_revisions_status_idx" ON "capsule_route_revisions" ("status");--> statement-breakpoint
+CREATE UNIQUE INDEX "capsule_route_revisions_alias_number_unique_idx" ON "capsule_route_revisions" ("alias_id","number");--> statement-breakpoint
+CREATE UNIQUE INDEX "capsule_route_revisions_operation_unique_idx" ON "capsule_route_revisions" ("operation_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "capsule_route_revisions_alias_id_unique_idx" ON "capsule_route_revisions" ("alias_id","id");--> statement-breakpoint
+CREATE UNIQUE INDEX "capsule_route_revisions_operation_id_unique_idx" ON "capsule_route_revisions" ("operation_id","id");--> statement-breakpoint
 CREATE INDEX "capsule_snapshot_capture_operations_source_branch_idx" ON "capsule_snapshot_capture_operations" ("source_branch_id");--> statement-breakpoint
+CREATE INDEX "capsule_snapshot_capture_operations_blueprint_digest_idx" ON "capsule_snapshot_capture_operations" ("blueprint_digest");--> statement-breakpoint
 CREATE INDEX "capsule_snapshot_capture_operations_policy_digest_idx" ON "capsule_snapshot_capture_operations" ("capture_policy_digest");--> statement-breakpoint
 CREATE INDEX "capsule_snapshot_capture_operations_mode_idx" ON "capsule_snapshot_capture_operations" ("requested_mode");--> statement-breakpoint
 CREATE UNIQUE INDEX "capsule_snapshot_capture_operations_snapshot_unique_idx" ON "capsule_snapshot_capture_operations" ("snapshot_id");--> statement-breakpoint
@@ -520,11 +1099,13 @@ CREATE UNIQUE INDEX "capsule_snapshot_git_repositories_snapshot_location_unique_
 CREATE INDEX "capsule_snap_resource_ref_snapshot_idx" ON "capsule_snapshot_resource_references" ("snapshot_id");--> statement-breakpoint
 CREATE INDEX "capsule_snap_resource_ref_root_idx" ON "capsule_snapshot_resource_references" ("manifest_root_id");--> statement-breakpoint
 CREATE INDEX "capsule_snap_resource_ref_source_resource_idx" ON "capsule_snapshot_resource_references" ("source_branch_resource_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "capsule_snap_resource_ref_capture_resource_unique_idx" ON "capsule_snapshot_resource_references" ("capture_resource_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "capsule_snap_resource_ref_snapshot_root_unique_idx" ON "capsule_snapshot_resource_references" ("snapshot_id","manifest_root_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "capsule_snap_resource_ref_snapshot_volume_unique_idx" ON "capsule_snapshot_resource_references" ("snapshot_id","blueprint_volume_name");--> statement-breakpoint
 CREATE UNIQUE INDEX "capsule_snap_resource_ref_provider_identity_unique_idx" ON "capsule_snapshot_resource_references" ("provider","project","pool","source_volume","snapshot_name");--> statement-breakpoint
 CREATE INDEX "capsule_snapshots_capsule_created_idx" ON "capsule_snapshots" ("capsule_id","created_at");--> statement-breakpoint
 CREATE INDEX "capsule_snapshots_source_branch_idx" ON "capsule_snapshots" ("source_branch_id");--> statement-breakpoint
+CREATE INDEX "capsule_snapshots_blueprint_digest_idx" ON "capsule_snapshots" ("blueprint_digest");--> statement-breakpoint
 CREATE INDEX "capsule_snapshots_policy_digest_idx" ON "capsule_snapshots" ("capture_policy_digest");--> statement-breakpoint
 CREATE INDEX "capsule_snapshots_mode_idx" ON "capsule_snapshots" ("mode");--> statement-breakpoint
 CREATE INDEX "capsules_owner_idx" ON "capsules" ("owner_id");--> statement-breakpoint
@@ -532,6 +1113,9 @@ CREATE INDEX "capsules_owner_lifecycle_status_idx" ON "capsules" ("owner_id","li
 ALTER TABLE "capsule_artifact_entries" ADD CONSTRAINT "capsule_artifact_entries_mrkPSpdKYhcL_fkey" FOREIGN KEY ("manifest_root_id") REFERENCES "capsule_artifact_manifest_roots"("id") ON DELETE CASCADE;--> statement-breakpoint
 ALTER TABLE "capsule_artifact_manifest_roots" ADD CONSTRAINT "capsule_artifact_manifest_roots_26UCvpd2Xqy4_fkey" FOREIGN KEY ("manifest_id") REFERENCES "capsule_artifact_manifests"("id") ON DELETE CASCADE;--> statement-breakpoint
 ALTER TABLE "capsule_artifact_manifests" ADD CONSTRAINT "capsule_artifact_manifests_BI2edSDiAuzg_fkey" FOREIGN KEY ("snapshot_id") REFERENCES "capsule_snapshots"("id") ON DELETE CASCADE;--> statement-breakpoint
+ALTER TABLE "capsule_branch_previews" ADD CONSTRAINT "capsule_branch_previews_owner_id_users_id_fkey" FOREIGN KEY ("owner_id") REFERENCES "users"("id") ON DELETE CASCADE;--> statement-breakpoint
+ALTER TABLE "capsule_branch_previews" ADD CONSTRAINT "capsule_branch_previews_capsule_id_capsules_id_fkey" FOREIGN KEY ("capsule_id") REFERENCES "capsules"("id") ON DELETE CASCADE;--> statement-breakpoint
+ALTER TABLE "capsule_branch_previews" ADD CONSTRAINT "capsule_branch_previews_branch_id_capsule_branches_id_fkey" FOREIGN KEY ("branch_id") REFERENCES "capsule_branches"("id") ON DELETE RESTRICT;--> statement-breakpoint
 ALTER TABLE "capsule_branch_resources" ADD CONSTRAINT "capsule_branch_resources_owner_id_users_id_fkey" FOREIGN KEY ("owner_id") REFERENCES "users"("id") ON DELETE CASCADE;--> statement-breakpoint
 ALTER TABLE "capsule_branch_resources" ADD CONSTRAINT "capsule_branch_resources_branch_id_capsule_branches_id_fkey" FOREIGN KEY ("branch_id") REFERENCES "capsule_branches"("id") ON DELETE SET NULL;--> statement-breakpoint
 ALTER TABLE "capsule_branch_resources" ADD CONSTRAINT "capsule_branch_resources_3Q5TCQ46rOSG_fkey" FOREIGN KEY ("created_by_operation_id") REFERENCES "capsule_operations"("id") ON DELETE SET NULL;--> statement-breakpoint
@@ -540,12 +1124,39 @@ ALTER TABLE "capsule_branches" ADD CONSTRAINT "capsule_branches_owner_id_users_i
 ALTER TABLE "capsule_branches" ADD CONSTRAINT "capsule_branches_capsule_id_capsules_id_fkey" FOREIGN KEY ("capsule_id") REFERENCES "capsules"("id") ON DELETE CASCADE;--> statement-breakpoint
 ALTER TABLE "capsule_create_operations" ADD CONSTRAINT "capsule_create_operations_kBDKOqhsMbzu_fkey" FOREIGN KEY ("operation_id") REFERENCES "capsule_operations"("id") ON DELETE CASCADE;--> statement-breakpoint
 ALTER TABLE "capsule_create_operations" ADD CONSTRAINT "capsule_create_operations_GXQTF2XIoGx4_fkey" FOREIGN KEY ("root_branch_id") REFERENCES "capsule_branches"("id");--> statement-breakpoint
+ALTER TABLE "capsule_fork_operations" ADD CONSTRAINT "capsule_fork_operations_operation_id_capsule_operations_id_fkey" FOREIGN KEY ("operation_id") REFERENCES "capsule_operations"("id") ON DELETE RESTRICT;--> statement-breakpoint
+ALTER TABLE "capsule_fork_operations" ADD CONSTRAINT "capsule_fork_operations_iK4qCJ0SYYhG_fkey" FOREIGN KEY ("source_snapshot_id") REFERENCES "capsule_snapshots"("id") ON DELETE RESTRICT;--> statement-breakpoint
+ALTER TABLE "capsule_fork_operations" ADD CONSTRAINT "capsule_fork_operations_tBkJl4feiIQn_fkey" FOREIGN KEY ("target_branch_id") REFERENCES "capsule_branches"("id") ON DELETE RESTRICT;--> statement-breakpoint
 ALTER TABLE "capsule_operation_steps" ADD CONSTRAINT "capsule_operation_steps_operation_id_capsule_operations_id_fkey" FOREIGN KEY ("operation_id") REFERENCES "capsule_operations"("id") ON DELETE CASCADE;--> statement-breakpoint
 ALTER TABLE "capsule_operation_steps" ADD CONSTRAINT "capsule_operation_steps_capsule_id_capsules_id_fkey" FOREIGN KEY ("capsule_id") REFERENCES "capsules"("id") ON DELETE CASCADE;--> statement-breakpoint
 ALTER TABLE "capsule_operation_steps" ADD CONSTRAINT "capsule_operation_steps_owner_id_users_id_fkey" FOREIGN KEY ("owner_id") REFERENCES "users"("id") ON DELETE CASCADE;--> statement-breakpoint
 ALTER TABLE "capsule_operation_steps" ADD CONSTRAINT "capsule_operation_steps_branch_id_capsule_branches_id_fkey" FOREIGN KEY ("branch_id") REFERENCES "capsule_branches"("id") ON DELETE SET NULL;--> statement-breakpoint
 ALTER TABLE "capsule_operations" ADD CONSTRAINT "capsule_operations_owner_id_users_id_fkey" FOREIGN KEY ("owner_id") REFERENCES "users"("id") ON DELETE CASCADE;--> statement-breakpoint
 ALTER TABLE "capsule_operations" ADD CONSTRAINT "capsule_operations_capsule_id_capsules_id_fkey" FOREIGN KEY ("capsule_id") REFERENCES "capsules"("id") ON DELETE CASCADE;--> statement-breakpoint
+ALTER TABLE "capsule_route_aliases" ADD CONSTRAINT "capsule_route_aliases_owner_id_users_id_fkey" FOREIGN KEY ("owner_id") REFERENCES "users"("id") ON DELETE CASCADE;--> statement-breakpoint
+ALTER TABLE "capsule_route_aliases" ADD CONSTRAINT "capsule_route_aliases_capsule_id_capsules_id_fkey" FOREIGN KEY ("capsule_id") REFERENCES "capsules"("id") ON DELETE CASCADE;--> statement-breakpoint
+ALTER TABLE "capsule_route_aliases" ADD CONSTRAINT "capsule_route_aliases_fyS6hPCSNuOJ_fkey" FOREIGN KEY ("mutation_operation_id") REFERENCES "capsule_operations"("id") ON DELETE RESTRICT;--> statement-breakpoint
+ALTER TABLE "capsule_route_aliases" ADD CONSTRAINT "capsule_route_aliases_7kwKsI1rP4QY_fkey" FOREIGN KEY ("last_operation_id") REFERENCES "capsule_operations"("id") ON DELETE RESTRICT;--> statement-breakpoint
+ALTER TABLE "capsule_route_heads" ADD CONSTRAINT "capsule_route_heads_alias_id_capsule_route_aliases_id_fkey" FOREIGN KEY ("alias_id") REFERENCES "capsule_route_aliases"("id") ON DELETE CASCADE;--> statement-breakpoint
+ALTER TABLE "capsule_route_heads" ADD CONSTRAINT "capsule_route_heads_revision_id_capsule_route_revisions_id_fkey" FOREIGN KEY ("revision_id") REFERENCES "capsule_route_revisions"("id") ON DELETE RESTRICT;--> statement-breakpoint
+ALTER TABLE "capsule_route_heads" ADD CONSTRAINT "capsule_route_heads_alias_revision_fk" FOREIGN KEY ("alias_id","revision_id") REFERENCES "capsule_route_revisions"("alias_id","id") ON DELETE RESTRICT;--> statement-breakpoint
+ALTER TABLE "capsule_route_operations" ADD CONSTRAINT "capsule_route_operations_9Oxsk9xju00z_fkey" FOREIGN KEY ("operation_id") REFERENCES "capsule_operations"("id") ON DELETE RESTRICT;--> statement-breakpoint
+ALTER TABLE "capsule_route_operations" ADD CONSTRAINT "capsule_route_operations_alias_id_capsule_route_aliases_id_fkey" FOREIGN KEY ("alias_id") REFERENCES "capsule_route_aliases"("id") ON DELETE RESTRICT;--> statement-breakpoint
+ALTER TABLE "capsule_route_operations" ADD CONSTRAINT "capsule_route_operations_LcBdpDr392o6_fkey" FOREIGN KEY ("expected_revision_id") REFERENCES "capsule_route_revisions"("id") ON DELETE RESTRICT;--> statement-breakpoint
+ALTER TABLE "capsule_route_operations" ADD CONSTRAINT "capsule_route_operations_Q5HQ6XOxXE6I_fkey" FOREIGN KEY ("proposed_revision_id") REFERENCES "capsule_route_revisions"("id") ON DELETE RESTRICT;--> statement-breakpoint
+ALTER TABLE "capsule_route_operations" ADD CONSTRAINT "capsule_route_operations_azbbMXY95gEm_fkey" FOREIGN KEY ("rollback_source_revision_id") REFERENCES "capsule_route_revisions"("id") ON DELETE RESTRICT;--> statement-breakpoint
+ALTER TABLE "capsule_route_operations" ADD CONSTRAINT "capsule_route_operations_proposed_alias_revision_fk" FOREIGN KEY ("alias_id","proposed_revision_id") REFERENCES "capsule_route_revisions"("alias_id","id") ON DELETE RESTRICT;--> statement-breakpoint
+ALTER TABLE "capsule_route_operations" ADD CONSTRAINT "capsule_route_operations_expected_alias_revision_fk" FOREIGN KEY ("alias_id","expected_revision_id") REFERENCES "capsule_route_revisions"("alias_id","id") ON DELETE RESTRICT;--> statement-breakpoint
+ALTER TABLE "capsule_route_operations" ADD CONSTRAINT "capsule_route_operations_rollback_alias_revision_fk" FOREIGN KEY ("alias_id","rollback_source_revision_id") REFERENCES "capsule_route_revisions"("alias_id","id") ON DELETE RESTRICT;--> statement-breakpoint
+ALTER TABLE "capsule_route_operations" ADD CONSTRAINT "capsule_route_operations_proposed_operation_revision_fk" FOREIGN KEY ("operation_id","proposed_revision_id") REFERENCES "capsule_route_revisions"("operation_id","id") ON DELETE RESTRICT;--> statement-breakpoint
+ALTER TABLE "capsule_route_provider_applications" ADD CONSTRAINT "capsule_route_provider_applications_ZwmLXpFKereA_fkey" FOREIGN KEY ("operation_id") REFERENCES "capsule_operations"("id") ON DELETE RESTRICT;--> statement-breakpoint
+ALTER TABLE "capsule_route_provider_applications" ADD CONSTRAINT "capsule_route_provider_applications_UL4MoqtxiI6y_fkey" FOREIGN KEY ("revision_id") REFERENCES "capsule_route_revisions"("id") ON DELETE RESTRICT;--> statement-breakpoint
+ALTER TABLE "capsule_route_provider_applications" ADD CONSTRAINT "capsule_route_provider_applications_operation_revision_fk" FOREIGN KEY ("operation_id","revision_id") REFERENCES "capsule_route_revisions"("operation_id","id") ON DELETE RESTRICT;--> statement-breakpoint
+ALTER TABLE "capsule_route_revisions" ADD CONSTRAINT "capsule_route_revisions_alias_id_capsule_route_aliases_id_fkey" FOREIGN KEY ("alias_id") REFERENCES "capsule_route_aliases"("id") ON DELETE CASCADE;--> statement-breakpoint
+ALTER TABLE "capsule_route_revisions" ADD CONSTRAINT "capsule_route_revisions_snapshot_id_capsule_snapshots_id_fkey" FOREIGN KEY ("snapshot_id") REFERENCES "capsule_snapshots"("id") ON DELETE RESTRICT;--> statement-breakpoint
+ALTER TABLE "capsule_route_revisions" ADD CONSTRAINT "capsule_route_revisions_operation_id_capsule_operations_id_fkey" FOREIGN KEY ("operation_id") REFERENCES "capsule_operations"("id") ON DELETE RESTRICT;--> statement-breakpoint
+ALTER TABLE "capsule_route_revisions" ADD CONSTRAINT "capsule_route_revisions_previous_fk" FOREIGN KEY ("alias_id","previous_revision_id") REFERENCES "capsule_route_revisions"("alias_id","id") ON DELETE RESTRICT;--> statement-breakpoint
+ALTER TABLE "capsule_route_revisions" ADD CONSTRAINT "capsule_route_revisions_rollback_source_fk" FOREIGN KEY ("alias_id","rollback_source_revision_id") REFERENCES "capsule_route_revisions"("alias_id","id") ON DELETE RESTRICT;--> statement-breakpoint
 ALTER TABLE "capsule_snapshot_capture_operations" ADD CONSTRAINT "capsule_snapshot_capture_operations_ZhOFScnh8rYr_fkey" FOREIGN KEY ("operation_id") REFERENCES "capsule_operations"("id") ON DELETE RESTRICT;--> statement-breakpoint
 ALTER TABLE "capsule_snapshot_capture_operations" ADD CONSTRAINT "capsule_snapshot_capture_operations_TxTm0hyZaclE_fkey" FOREIGN KEY ("source_branch_id") REFERENCES "capsule_branches"("id") ON DELETE RESTRICT;--> statement-breakpoint
 ALTER TABLE "capsule_snapshot_capture_operations" ADD CONSTRAINT "capsule_snapshot_capture_operations_viOaGFWNjtRH_fkey" FOREIGN KEY ("snapshot_id") REFERENCES "capsule_snapshots"("id") ON DELETE RESTRICT;--> statement-breakpoint
@@ -560,6 +1171,7 @@ ALTER TABLE "capsule_snapshot_git_repositories" ADD CONSTRAINT "capsule_snapshot
 ALTER TABLE "capsule_snapshot_resource_references" ADD CONSTRAINT "capsule_snapshot_resource_references_7Dfg2YH3xUvN_fkey" FOREIGN KEY ("snapshot_id") REFERENCES "capsule_snapshots"("id") ON DELETE CASCADE;--> statement-breakpoint
 ALTER TABLE "capsule_snapshot_resource_references" ADD CONSTRAINT "capsule_snapshot_resource_references_MDC6AllcSgX2_fkey" FOREIGN KEY ("manifest_root_id") REFERENCES "capsule_artifact_manifest_roots"("id") ON DELETE RESTRICT;--> statement-breakpoint
 ALTER TABLE "capsule_snapshot_resource_references" ADD CONSTRAINT "capsule_snapshot_resource_references_0qmkREWAnNs9_fkey" FOREIGN KEY ("source_branch_resource_id") REFERENCES "capsule_branch_resources"("id") ON DELETE RESTRICT;--> statement-breakpoint
+ALTER TABLE "capsule_snapshot_resource_references" ADD CONSTRAINT "capsule_snapshot_resource_references_6AL6rcbOW5ak_fkey" FOREIGN KEY ("capture_resource_id") REFERENCES "capsule_snapshot_capture_resources"("id") ON DELETE RESTRICT;--> statement-breakpoint
 ALTER TABLE "capsule_snapshots" ADD CONSTRAINT "capsule_snapshots_capsule_id_capsules_id_fkey" FOREIGN KEY ("capsule_id") REFERENCES "capsules"("id") ON DELETE RESTRICT;--> statement-breakpoint
 ALTER TABLE "capsule_snapshots" ADD CONSTRAINT "capsule_snapshots_source_branch_id_capsule_branches_id_fkey" FOREIGN KEY ("source_branch_id") REFERENCES "capsule_branches"("id") ON DELETE RESTRICT;--> statement-breakpoint
 ALTER TABLE "capsules" ADD CONSTRAINT "capsules_owner_id_users_id_fkey" FOREIGN KEY ("owner_id") REFERENCES "users"("id") ON DELETE CASCADE;--> statement-breakpoint

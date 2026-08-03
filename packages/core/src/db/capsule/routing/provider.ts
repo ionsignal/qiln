@@ -116,7 +116,7 @@ export function createCapsuleRouteProviderApplicationsTable(
     },
     table => [
       uniqueIndex('capsule_route_provider_applications_revision_unique_idx').on(table.revisionId),
-      uniqueIndex('capsule_route_provider_applications_configuration_key_unique_idx')
+      uniqueIndex('capsule_route_provider_applications_key_unique_idx')
         .on(table.provider, table.configurationKey)
         .where(sql`${table.configurationKey} IS NOT NULL`),
       index('capsule_route_provider_applications_status_idx').on(table.status),
@@ -154,7 +154,7 @@ export function createCapsuleRouteProviderApplicationsTable(
         )`,
       ),
       check(
-        'capsule_route_provider_applications_mutation_configuration_check',
+        'capsule_route_provider_applications_mutation_check',
         sql`(
           ${table.status} IN ('planned', 'failed', 'cleanup_required')
           OR (
