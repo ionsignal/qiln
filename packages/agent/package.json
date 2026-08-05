@@ -1,0 +1,33 @@
+{
+  "name": "@qiln/agent",
+  "version": "0.1.2",
+  "type": "module",
+  "bin": {
+    "qiln": "./dist/cli.js"
+  },
+  "files": ["dist", "README.md"],
+  "scripts": {
+    "build": "vite build",
+    "dev": "vite build --watch --mode development",
+    "type:check": "tsc --noEmit"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./client": {
+      "types": "./dist/client.d.ts",
+      "import": "./dist/client.js"
+    }
+  },
+  "dependencies": {
+    "@qiln/core": "*"
+  },
+  "devDependencies": {
+    "@types/node": "26.1.1",
+    "typescript": "6.0.3",
+    "vite": "8.1.5",
+    "vite-plugin-dts": "5.0.3"
+  }
+}

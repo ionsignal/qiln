@@ -3,7 +3,6 @@
     "strict": true,
     "moduleResolution": "bundler",
     "target": "ES2025",
-    "types": ["vite/client", "@types/dom-webcodecs", "@types/node"],
     "skipLibCheck": true,
     "esModuleInterop": true,
     "sourceMap": true,
@@ -11,16 +10,6 @@
     "noImplicitReturns": true,
     "noFallthroughCasesInSwitch": true,
     "noUnusedLocals": true,
-    "noUnusedParameters": true,
-    "paths": {
-      "@/*": ["./app/*"],
-      "@server/*": ["./app/server/*"],
-      "@qiln/core": ["./packages/core/src/server.ts"],
-      "@qiln/core/*": ["./packages/core/src/*"],
-      "@qiln/engine": ["./packages/engine/src/server.ts"],
-      "@qiln/engine/*": ["./packages/engine/src/*"],
-      "@qiln/worker": ["./packages/worker/src/server.ts"],
-      "@qiln/worker/*": ["./packages/worker/src/*"]
-    }
+    "noUnusedParameters": true
   }
 }

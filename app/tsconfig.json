@@ -2,7 +2,12 @@
   "extends": "../tsconfig.base.json",
   "compilerOptions": {
     "module": "ESNext",
-    "lib": ["DOM", "ESNext"]
+    "lib": ["DOM", "ESNext"],
+    "types": ["vite/client", "@types/dom-webcodecs", "@types/node"],
+    "paths": {
+      "@/*": ["./*"],
+      "@server/*": ["./server/*"]
+    }
   },
   "include": [
     "./vite.config.ts",
