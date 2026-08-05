@@ -17,7 +17,6 @@ provisioning:
       mount_path: /workspace
       shifted: true
       readonly: false
-
     - name: shared-models
       type: bind
       host_path: /srv/qiln/shared/models
@@ -200,7 +199,6 @@ applications:
       path: /healthz
       expected_statuses:
         - 200
-
   - name: comfyui
     port: 8188
     protocol: http
