@@ -1,3 +1,4 @@
+export * from './agent'
 export * from './capsule/actor'
 export * from './capsule/branch'
 export * from './capsule/lifecycle'
