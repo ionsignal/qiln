@@ -1,13 +1,17 @@
 import bcrypt from 'bcrypt'
 import { randomBytes } from 'node:crypto'
+import { eq } from 'drizzle-orm'
 import { loadConfig } from 'c12'
+import { createAgentKey } from '@server/agent/key'
 import { createDataLayer } from '@server/db'
-import { users } from '@server/db/schema'
+import { agentCredentials, users } from '@server/db/schema'
 import type { EnvironmentConfig } from '@/types'
 
 // Deterministic IDs for the default users
 const SYSTEM_USER_ID = '0193f123-4567-7000-ab12-34567890abcd'
 const OLIVER_USER_ID = '0193f123-4567-7000-ab12-34567890abcf'
+const SYSTEM_AGENT_ACTOR_ID = '0193f123-4567-7000-ab12-34567890abd1'
+const SYSTEM_AGENT_CREDENTIAL_ID = '0193f123-4567-7000-ab12-34567890abd2'
 
 const rootUserData = [
   {
@@ -38,6 +42,7 @@ async function seed() {
   const { db, close } = createDataLayer(config.database.url)
   const isDev = process.env.NODE_ENV !== 'production'
   const credentialsLog: string[] = []
+  const agentCredentialLog: string[] = []
   try {
     // Seed Users
     console.log('[Seed] Seeding users...')
@@ -66,6 +71,35 @@ async function seed() {
         credentialsLog.push(`[Seed] ${user.username.padEnd(15)} | ${user.email.padEnd(25)} | ${randomPassword}`)
       }
     }
+    const [existingAgentCredential] = await db
+      .select({
+        id: agentCredentials.id,
+      })
+      .from(agentCredentials)
+      .where(eq(agentCredentials.id, SYSTEM_AGENT_CREDENTIAL_ID))
+      .limit(1)
+    if (!existingAgentCredential) {
+      const generatedKey = await createAgentKey(SYSTEM_AGENT_CREDENTIAL_ID)
+      const [createdAgentCredential] = await db
+        .insert(agentCredentials)
+        .values({
+          id: SYSTEM_AGENT_CREDENTIAL_ID,
+          keyHash: generatedKey.keyHash,
+          agentActorId: SYSTEM_AGENT_ACTOR_ID,
+          requestedByUserId: SYSTEM_USER_ID,
+          capsuleId: null,
+          isActive: true,
+        })
+        .onConflictDoNothing()
+        .returning({
+          id: agentCredentials.id,
+        })
+      if (createdAgentCredential && isDev) {
+        agentCredentialLog.push(
+          `[Seed] System agent credential | actor ${SYSTEM_AGENT_ACTOR_ID} | key ${generatedKey.key}`,
+        )
+      }
+    }
     console.log('[Seed] Database hydration complete.')
     if (isDev && credentialsLog.length > 0) {
       console.log('[Seed] Development credentials generated:')
@@ -73,6 +107,11 @@ async function seed() {
       console.log('')
     } else {
       console.log('[Seed] Root users updated.')
+    }
+    if (agentCredentialLog.length > 0) {
+      console.log('[Seed] Agent API key generated once. Store it outside Qiln:')
+      agentCredentialLog.forEach(log => console.log(log))
+      console.log('')
     }
   } catch (err) {
     console.error('[Seed] Error during seeding:', err)
