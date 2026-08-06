@@ -74,7 +74,7 @@ export class IncusHttp {
     }
     this.agent = new Agent({
       connect: {
-        rejectUnauthorized: config.rejectUnauthorized ?? false,
+        rejectUnauthorized: config.rejectUnauthorized ?? true,
         ...(config.cert && config.key
           ? {
               cert: config.cert,
