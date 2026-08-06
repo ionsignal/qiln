@@ -488,6 +488,13 @@ export class CreateCapsuleOperationRepository<
    * The transaction locks and validates the create extension before committing
    * terminal aggregate state. Process-local execution input is not accepted as
    * completion authority.
+   *
+   * TODO(create-completion-inventory-proof): Before terminalization, lock the
+   * root branch resource ledger and prove it exactly matches the pre-provider
+   * `resourceInventoryDigest`. Require type-appropriate terminal accounting:
+   * adopted project and bind-mount rows, plus created managed volumes,
+   * instance, and provisioning files. This must remain a PostgreSQL-only proof
+   * and must not discover or infer resources from live Incus inventory.
    */
   public async completeCreate(operationId: string): Promise<CreateCapsuleTerminalResult> {
     const db = this.persistence.db
