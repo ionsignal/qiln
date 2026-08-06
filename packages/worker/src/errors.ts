@@ -32,17 +32,6 @@ function readCause(value: unknown): unknown {
   return value.cause
 }
 
-export function readIncusErrorDetailCode(error: IncusError): string | number | undefined {
-  if (!isRecord(error.details)) {
-    return undefined
-  }
-  const code = error.details.code
-  if (typeof code === 'string' || typeof code === 'number') {
-    return code
-  }
-  return undefined
-}
-
 /**
  * Safely traverses Drizzle's error wrapping to identify Postgres unique
  * constraint violations.
