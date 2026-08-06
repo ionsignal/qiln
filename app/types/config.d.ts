@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import type { QilnEngineController } from '@qiln/engine/server'
+import type { CapsuleChannel } from '@qiln/core/server'
 import type {
   QilnWorkerRuntime,
   WorkerRuntimeConfig,
@@ -94,6 +95,7 @@ declare module 'fastify' {
     persistence: Persistence
     engine: QilnEngineController
     worker: QilnWorkerRuntime | null
+    agentChannel: CapsuleChannel
     config: EnvironmentConfig
   }
 }
