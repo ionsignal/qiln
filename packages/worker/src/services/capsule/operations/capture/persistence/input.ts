@@ -182,6 +182,7 @@ export class CaptureInputPersistence<
       blueprint,
       rootfsImagePin,
       requestedMode: extension.requestedMode,
+      agentArtifactContentPolicy: extension.agentArtifactContentPolicy,
       capturePolicy,
       plan,
     }

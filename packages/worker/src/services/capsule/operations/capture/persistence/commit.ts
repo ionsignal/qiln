@@ -128,7 +128,7 @@ export class CaptureCommitPersistence<
         extension.sourceBranchId !== input.execution.sourceBranchId ||
         extension.sourceBranchName !== input.execution.sourceBranchName ||
         extension.sourceBranchResourceInventoryDigest !== input.execution.sourceBranchResourceInventoryDigest ||
-        extension.requestedMode !== CapsuleSnapshotMode.EXPERIMENTAL
+        extension.agentArtifactContentPolicy !== input.execution.agentArtifactContentPolicy
       ) {
         throw new IncusError('Snapshot Capture extension does not match immutable execution input.', 'CONFLICT', {
           operationId: operation.id,
@@ -236,6 +236,7 @@ export class CaptureCommitPersistence<
           capturePolicySchemaVersion: extension.capturePolicySchemaVersion,
           capturePolicyDigest: extension.capturePolicyDigest,
           capturePolicyPin: policy,
+          agentArtifactContentPolicy: extension.agentArtifactContentPolicy,
           mode: CapsuleSnapshotMode.EXPERIMENTAL,
           limitations: [...limitations],
           createdAt: now,

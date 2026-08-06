@@ -8,6 +8,7 @@ import {
   TargetType,
   type CapsuleChannel,
   type CapsuleOperationIdempotencyKey,
+  type CapsuleSnapshotAgentArtifactContentPolicyValue,
   type CapsuleSnapshotCaptureOutput,
   type CapsuleSnapshotListOutput,
 } from '@qiln/core/server'
@@ -22,6 +23,7 @@ export interface CapsuleSnapshotCaptureRequest {
   capsuleId: string
   sourceBranchId: string
   idempotencyKey: CapsuleOperationIdempotencyKey
+  agentArtifactContentPolicy: CapsuleSnapshotAgentArtifactContentPolicyValue
 }
 
 /**
@@ -65,9 +67,10 @@ export class CapsuleSnapshotsService {
    * Submits an experimental Snapshot Capture operation using authenticated
    * owner and actor authority.
    *
-   * Browser input supplies only domain identity and idempotency. Capture mode,
-   * owner target, actor provenance, policy evidence, provider identities, and
-   * all mutation fences remain trusted server-side concerns.
+   * Browser input supplies only domain identity, idempotency, and the immutable
+   * agent artifact-content policy. Capture mode, owner target, actor
+   * provenance, provider identities, and all mutation fences remain trusted
+   * server-side concerns.
    */
   public async capture(
     identity: CapsuleMutationIdentity,
@@ -83,6 +86,7 @@ export class CapsuleSnapshotsService {
       capsuleId: input.capsuleId,
       sourceBranchId: input.sourceBranchId,
       idempotencyKey: input.idempotencyKey,
+      agentArtifactContentPolicy: input.agentArtifactContentPolicy,
     })
     return CapsuleSnapshotCaptureOutputSchema.parse(receipt)
   }

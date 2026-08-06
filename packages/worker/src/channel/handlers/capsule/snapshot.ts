@@ -33,6 +33,7 @@ export function registerCapsuleSnapshotHandlers(worker: QilnWorkerRuntime): void
         capsuleId: input.capsuleId,
         sourceBranchId: input.sourceBranchId,
         idempotencyKey: input.idempotencyKey,
+        agentArtifactContentPolicy: input.agentArtifactContentPolicy,
       })
     },
     handlerOptions,

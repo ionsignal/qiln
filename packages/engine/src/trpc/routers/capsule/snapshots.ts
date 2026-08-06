@@ -1,6 +1,8 @@
 import { z } from 'zod'
 import {
   CapsuleOperationIdempotencyKeySchema,
+  CapsuleSnapshotAgentArtifactContentPolicy,
+  CapsuleSnapshotAgentArtifactContentPolicySchema,
   CapsuleSnapshotCaptureOutputSchema,
   CapsuleSnapshotListOutputSchema,
 } from '@qiln/core/server'
@@ -20,6 +22,9 @@ const CapsuleSnapshotCaptureInputSchema = z
     capsuleId: z.uuid(),
     sourceBranchId: z.uuid(),
     idempotencyKey: CapsuleOperationIdempotencyKeySchema,
+    agentArtifactContentPolicy: CapsuleSnapshotAgentArtifactContentPolicySchema.default(
+      CapsuleSnapshotAgentArtifactContentPolicy.DENY,
+    ),
   })
   .strict()
 
@@ -28,9 +33,10 @@ const CapsuleSnapshotCaptureInputSchema = z
  * Snapshot Capture submission.
  *
  * Owner identity and operation actor provenance are derived from authenticated
- * tRPC context. Browser input cannot select a capture mode, provide policy
- * evidence, identify provider resources, or weaken Worker-owned capture
- * fences.
+ * tRPC context. Browser input cannot select a capture mode, provider identity,
+ * policy evidence, or weaken Worker-owned capture fences. A capsule owner may
+ * explicitly choose the immutable agent artifact-content policy for a new
+ * Snapshot Capture operation.
  *
  * Capture returns a durable operation receipt. Clients must refetch
  * authoritative operation, branch, and committed snapshot state after receiving

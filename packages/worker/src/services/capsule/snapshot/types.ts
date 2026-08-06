@@ -6,6 +6,7 @@ import type {
   CapsuleBranchResourceInventoryDigest,
   CapsuleSnapshotCapturePolicyDigest,
   CapsuleSnapshotCapturePolicyPin,
+  CapsuleSnapshotAgentArtifactContentPolicyValue,
   CapsuleSnapshotLimitationValue,
   CapsuleSnapshotModeValue,
 } from '@qiln/core/server'
@@ -31,6 +32,7 @@ export interface CapsuleSnapshotRecord {
   capturePolicyPin: CapsuleSnapshotCapturePolicyPin
   artifactManifestSchemaVersion: number
   artifactManifestDigest: CapsuleArtifactManifestDigest
+  agentArtifactContentPolicy: CapsuleSnapshotAgentArtifactContentPolicyValue
   mode: CapsuleSnapshotModeValue
   limitations: CapsuleSnapshotLimitationValue[]
   createdAt: Date

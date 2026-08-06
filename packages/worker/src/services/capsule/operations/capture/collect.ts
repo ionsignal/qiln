@@ -413,7 +413,7 @@ export class CaptureCollector {
       return {
         manifest,
         digest: digestCapsuleArtifactManifest(manifest),
-        limitations: [CapsuleSnapshotLimitation.SECRET_POLICY_UNVERIFIED],
+        limitations: [CapsuleSnapshotLimitation.ARTIFACT_SECRET_REVIEW_OMITTED],
         entryCount: state.entryCount,
         totalBytes: state.totalBytes,
       }

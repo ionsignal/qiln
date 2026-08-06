@@ -131,6 +131,7 @@ export class CaptureAcceptancePersistence<
             capturePolicySchemaVersion: pins.capturePolicy.schemaVersion,
             capturePolicyDigest: pins.capturePolicy.digest,
             capturePolicyPin: pins.capturePolicy,
+            agentArtifactContentPolicy: input.agentArtifactContentPolicy,
             snapshotId: null,
           })
           .returning({

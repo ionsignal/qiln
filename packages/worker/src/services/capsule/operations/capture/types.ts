@@ -10,6 +10,7 @@ import type {
   CapsuleOperationRequestHash,
   CapsuleSnapshotCapturePolicyPin,
   CapsuleSnapshotCaptureReceipt,
+  CapsuleSnapshotAgentArtifactContentPolicyValue,
   CapsuleSnapshotGitRepository,
   CapsuleSnapshotLimitationValue,
   CapsuleSnapshotModeValue,
@@ -23,6 +24,7 @@ export interface SubmitCaptureCapsuleInput {
   capsuleId: string
   sourceBranchId: string
   idempotencyKey: string
+  agentArtifactContentPolicy: CapsuleSnapshotAgentArtifactContentPolicyValue
 }
 
 export interface AcceptCaptureCapsuleInput extends SubmitCaptureCapsuleInput {
@@ -118,6 +120,7 @@ export interface CaptureExecutionInput {
   blueprint: CapsuleBlueprintPin
   rootfsImagePin: CapsuleRootfsImagePin
   requestedMode: CapsuleSnapshotModeValue
+  agentArtifactContentPolicy: CapsuleSnapshotAgentArtifactContentPolicyValue
   capturePolicy: CapsuleSnapshotCapturePolicyPin
   plan: CapturePlan
 }

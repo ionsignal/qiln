@@ -1,4 +1,9 @@
-import { CapsuleOperationType, type CapsuleSnapshotCaptureReceipt } from '@qiln/core/server'
+import {
+  CapsuleActorType,
+  CapsuleOperationType,
+  CapsuleSnapshotAgentArtifactContentPolicy,
+  type CapsuleSnapshotCaptureReceipt,
+} from '@qiln/core/server'
 import { IncusError } from '../../../../errors'
 import { createOperationRequestHash } from '../shared'
 import type { OperationSupervisor } from '../../../../coordination'
@@ -16,6 +21,7 @@ interface CaptureRequestIdentity {
   actor: SubmitCaptureCapsuleInput['actor']
   capsuleId: string
   sourceBranchId: string
+  agentArtifactContentPolicy: SubmitCaptureCapsuleInput['agentArtifactContentPolicy']
 }
 
 export interface CaptureSubmissionOptions {
@@ -45,12 +51,14 @@ export class CaptureSubmission {
         feature: 'experimental_snapshot_capture',
       })
     }
+    this.assertAgentArtifactContentPolicy(input)
     const requestHash = createOperationRequestHash(
       {
         operationType: CapsuleOperationType.SNAPSHOT_CAPTURE,
         actor: input.actor,
         capsuleId: input.capsuleId,
         sourceBranchId: input.sourceBranchId,
+        agentArtifactContentPolicy: input.agentArtifactContentPolicy,
       } satisfies CaptureRequestIdentity,
       'experimental Snapshot Capture request',
     )
@@ -71,10 +79,28 @@ export class CaptureSubmission {
     )
     const operationId = acceptance.receipt.operationId
     const executor = this.executor
-
-    // A failed process-local schedule leaves the operation durably accepted.
-    // Startup abandonment will classify it without issuing provider mutations.
     this.supervisor.schedule(operationId, () => executor.execute(operationId))
     return acceptance.receipt
+  }
+
+  private assertAgentArtifactContentPolicy(input: SubmitCaptureCapsuleInput): void {
+    if (
+      input.agentArtifactContentPolicy !== CapsuleSnapshotAgentArtifactContentPolicy.DENY &&
+      input.agentArtifactContentPolicy !== CapsuleSnapshotAgentArtifactContentPolicy.OWNER_AUTHORIZED_UNREVIEWED
+    ) {
+      throw new IncusError('Snapshot Capture received an unsupported agent artifact-read mode.', 'VALIDATION_ERROR', {
+        agentArtifactContentPolicy: input.agentArtifactContentPolicy,
+      })
+    }
+    if (input.agentArtifactContentPolicy === CapsuleSnapshotAgentArtifactContentPolicy.DENY) {
+      return
+    }
+    if (input.actor.type === CapsuleActorType.USER && input.actor.id === input.ownerId) {
+      return
+    }
+    throw new IncusError('Unchecked agent artifact reads may be elected only by the capsule owner user.', 'FORBIDDEN', {
+      capsuleId: input.capsuleId,
+      actorType: input.actor.type,
+    })
   }
 }

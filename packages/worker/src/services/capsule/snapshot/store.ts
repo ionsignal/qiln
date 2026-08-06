@@ -64,6 +64,7 @@ export class CapsuleSnapshotStore<
         capturePolicyPin: capsuleSnapshots.capturePolicyPin,
         artifactManifestSchemaVersion: capsuleArtifactManifests.schemaVersion,
         artifactManifestDigest: capsuleArtifactManifests.digest,
+        agentArtifactContentPolicy: capsuleSnapshots.agentArtifactContentPolicy,
         mode: capsuleSnapshots.mode,
         limitations: capsuleSnapshots.limitations,
         createdAt: capsuleSnapshots.createdAt,
@@ -89,6 +90,7 @@ export class CapsuleSnapshotStore<
           eq(capsuleSnapshotCaptureOperations.capturePolicyDigest, capsuleSnapshots.capturePolicyDigest),
           eq(capsuleSnapshotCaptureOperations.capturePolicyPin, capsuleSnapshots.capturePolicyPin),
           eq(capsuleSnapshotCaptureOperations.requestedMode, capsuleSnapshots.mode),
+          eq(capsuleSnapshotCaptureOperations.agentArtifactContentPolicy, capsuleSnapshots.agentArtifactContentPolicy),
         ),
       )
       .innerJoin(
