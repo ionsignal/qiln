@@ -133,6 +133,7 @@ export function parseCaddyAdminEndpoint(value: string): CaddyAdminEndpoint {
   if (value.startsWith('unix:')) {
     return parseUnixSocketEndpoint(value, 'Caddy admin endpoint')
   }
+  if (value.startsWith('https:')) return parseHttpEndpoint(value, 'Caddy admin endpoint', 'https:')
   const endpoint = parseHttpEndpoint(value, 'Caddy admin endpoint', 'http:')
   const hostname = new URL(endpoint.baseUrl).hostname
   if (!isLoopbackHostname(hostname)) {
