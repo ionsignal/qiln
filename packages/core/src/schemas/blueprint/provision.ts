@@ -40,6 +40,7 @@ export const CapsuleBlueprintBaseVolumeSchema = z.object({
   shifted: z.boolean().default(true),
 })
 
+// TODO(capsule-seed-pin): Replace this mutable seed selector with an immutable provider snapshot pin.
 export const CapsuleBlueprintCloneVolumeSchema = CapsuleBlueprintBaseVolumeSchema.extend({
   type: z.literal('clone'),
   pool: z.string().trim().min(1),
