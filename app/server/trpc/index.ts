@@ -1,4 +1,5 @@
 import { router, createCallerFactory, mergeRouters } from '@server/trpc/procedures'
+import { agentRouter } from '@server/trpc/routers/agent'
 import { apiRouter } from '@server/trpc/routers/api'
 import { authRouter } from '@server/trpc/routers/auth'
 import { userRouter } from '@server/trpc/routers/user'
@@ -11,6 +12,7 @@ import { engineRouter } from '@qiln/engine/server'
 export const appRouter = mergeRouters(
   router({
     api: apiRouter,
+    agent: agentRouter,
     auth: authRouter,
     user: userRouter,
     discord: discordRouter,
