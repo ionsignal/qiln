@@ -1,13 +1,20 @@
 import {
   AgentGetContextInputSchema,
   AgentGetContextOutputSchema,
+  AgentSnapshotReadInputSchema,
+  AgentSnapshotReadMode,
+  AgentSnapshotReadOutputSchema,
   type AgentGetContext,
   type AgentGetContextOutput,
+  type AgentSnapshotRead,
+  type AgentSnapshotReadOutput,
 } from '@qiln/core/client'
 import type { QilnAgentConfig } from './config'
 
 const REQUEST_TIMEOUT_MS = 15_000
-const MAX_RESPONSE_BYTES = 1_048_576
+const MAX_CONTEXT_RESPONSE_BYTES = 1_048_576
+const MAX_MANIFEST_RESPONSE_BYTES = 4 * 1_024 * 1_024
+const MAX_CONTENT_RESPONSE_BYTES = 512 * 1_024
 
 export interface QilnAgentClientErrorOptions {
   status?: number
@@ -29,6 +36,11 @@ export class QilnAgentClientError extends Error {
 interface AgentApiError {
   code: string
   message: string
+}
+
+interface AgentApiResponse {
+  response: Response
+  body: unknown
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -61,7 +73,24 @@ function parseError(value: unknown): AgentApiError | null {
   }
 }
 
-async function readJson(response: Response): Promise<unknown> {
+function readLimit(input: AgentSnapshotRead): number {
+  return input.mode === AgentSnapshotReadMode.CONTENT ? MAX_CONTENT_RESPONSE_BYTES : MAX_MANIFEST_RESPONSE_BYTES
+}
+
+function throwRejectedResponse(response: Response, body: unknown): never {
+  const error = parseError(body)
+  if (error) {
+    throw new QilnAgentClientError(error.message, {
+      status: response.status,
+      code: error.code,
+    })
+  }
+  throw new QilnAgentClientError('Qiln host rejected the agent request.', {
+    status: response.status,
+  })
+}
+
+async function readJson(response: Response, maxBytes: number, signal: AbortSignal): Promise<unknown> {
   if (!isJsonContentType(response.headers.get('content-type'))) {
     throw new QilnAgentClientError('Qiln host returned an unexpected response content type.', {
       status: response.status,
@@ -79,14 +108,12 @@ async function readJson(response: Response): Promise<unknown> {
   try {
     while (true) {
       const result = await reader.read()
-
       if (result.done) {
         break
       }
       totalBytes += result.value.byteLength
-      if (totalBytes > MAX_RESPONSE_BYTES) {
+      if (totalBytes > maxBytes) {
         await reader.cancel().catch(() => undefined)
-
         throw new QilnAgentClientError('Qiln host returned an unexpectedly large response.', {
           status: response.status,
         })
@@ -100,9 +127,12 @@ async function readJson(response: Response): Promise<unknown> {
     if (error instanceof QilnAgentClientError) {
       throw error
     }
-    throw new QilnAgentClientError('Qiln host response could not be read.', {
-      status: response.status,
-    })
+    throw new QilnAgentClientError(
+      signal.aborted ? 'Qiln host request timed out.' : 'Qiln host response could not be read.',
+      {
+        status: response.status,
+      },
+    )
   } finally {
     reader.releaseLock()
   }
@@ -128,9 +158,11 @@ async function readJson(response: Response): Promise<unknown> {
  */
 export class QilnAgentClient {
   private readonly contextUrl: string
+  private readonly readUrl: string
 
   constructor(private readonly config: QilnAgentConfig) {
     this.contextUrl = new URL('/api/agent/v1/context', config.url).toString()
+    this.readUrl = new URL('/api/agent/v1/read', config.url).toString()
   }
 
   public async getContext(input: AgentGetContext = {}): Promise<AgentGetContextOutput> {
@@ -138,13 +170,44 @@ export class QilnAgentClient {
     if (!selector.success) {
       throw new QilnAgentClientError('The requested branch selector is invalid.')
     }
+    const result = await this.post(this.contextUrl, selector.data, MAX_CONTEXT_RESPONSE_BYTES)
+    if (!result.response.ok) {
+      throwRejectedResponse(result.response, result.body)
+    }
+    const context = AgentGetContextOutputSchema.safeParse(result.body)
+    if (!context.success) {
+      throw new QilnAgentClientError('Qiln host returned an invalid agent context response.', {
+        status: result.response.status,
+      })
+    }
+    return context.data
+  }
+
+  public async read(input: AgentSnapshotRead): Promise<AgentSnapshotReadOutput> {
+    const request = AgentSnapshotReadInputSchema.safeParse(input)
+    if (!request.success) {
+      throw new QilnAgentClientError('The requested snapshot read is invalid.')
+    }
+    const result = await this.post(this.readUrl, request.data, readLimit(request.data))
+    if (!result.response.ok) {
+      throwRejectedResponse(result.response, result.body)
+    }
+    const output = AgentSnapshotReadOutputSchema.safeParse(result.body)
+    if (!output.success) {
+      throw new QilnAgentClientError('Qiln host returned an invalid snapshot read response.', {
+        status: result.response.status,
+      })
+    }
+    return output.data
+  }
+
+  private async post(url: string, body: unknown, maxResponseBytes: number): Promise<AgentApiResponse> {
     const controller = new AbortController()
     const timeout = setTimeout(() => {
       controller.abort()
     }, REQUEST_TIMEOUT_MS)
-    let response: Response
     try {
-      response = await fetch(this.contextUrl, {
+      const response = await fetch(url, {
         method: 'POST',
         redirect: 'error',
         headers: {
@@ -152,35 +215,22 @@ export class QilnAgentClient {
           Authorization: `Bearer ${this.config.key}`,
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(selector.data),
+        body: JSON.stringify(body),
         signal: controller.signal,
       })
-    } catch {
+      return {
+        response,
+        body: await readJson(response, maxResponseBytes, controller.signal),
+      }
+    } catch (error: unknown) {
+      if (error instanceof QilnAgentClientError) {
+        throw error
+      }
       throw new QilnAgentClientError(
         controller.signal.aborted ? 'Qiln host request timed out.' : 'Could not reach the Qiln host.',
       )
     } finally {
       clearTimeout(timeout)
     }
-    const body = await readJson(response)
-    if (!response.ok) {
-      const error = parseError(body)
-      if (error) {
-        throw new QilnAgentClientError(error.message, {
-          status: response.status,
-          code: error.code,
-        })
-      }
-      throw new QilnAgentClientError('Qiln host rejected the agent request.', {
-        status: response.status,
-      })
-    }
-    const context = AgentGetContextOutputSchema.safeParse(body)
-    if (!context.success) {
-      throw new QilnAgentClientError('Qiln host returned an invalid agent context response.', {
-        status: response.status,
-      })
-    }
-    return context.data
   }
 }

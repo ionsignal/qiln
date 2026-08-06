@@ -1,10 +1,6 @@
 import type { AgentGetContext, AgentGetContextOutput } from '@qiln/core/client'
 import type { QilnAgentClient } from '../client'
-
-export interface QilnAgentTool<TInput, TOutput> {
-  readonly name: string
-  execute(client: QilnAgentClient, input: TInput): Promise<TOutput>
-}
+import type { QilnAgentTool } from './tool'
 
 /**
  * Resolves host-derived agent identity, authorized capsule scope, optional
