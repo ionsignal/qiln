@@ -1,5 +1,10 @@
 import { z } from 'zod'
 import {
+  CapsuleAgentReadCommandDefinitions,
+  CapsuleAgentReadCommandName,
+  CapsuleAgentReadCommandNameValues,
+} from './agent'
+import {
   CapsuleBlueprintCommandDefinitions,
   CapsuleBlueprintCommandName,
   CapsuleBlueprintCommandNameValues,
@@ -60,6 +65,7 @@ import {
 import type { CapsuleCommandDefinition, CapsuleEventDefinition } from './definitions'
 
 export * from './definitions'
+export * from './agent'
 export * from './blueprints'
 export * from './branch'
 export * from './create'
@@ -71,6 +77,7 @@ export * from './routing'
 export * from './snapshot'
 
 export const CapsuleCommandName = {
+  ...CapsuleAgentReadCommandName,
   ...CapsuleCreateCommandName,
   ...CapsuleForkCommandName,
   ...CapsuleBranchCommandName,
@@ -84,6 +91,7 @@ export const CapsuleCommandName = {
 export type CapsuleCommandName = (typeof CapsuleCommandName)[keyof typeof CapsuleCommandName]
 
 export const CapsuleCommandNameValues = [
+  ...CapsuleAgentReadCommandNameValues,
   ...CapsuleCreateCommandNameValues,
   ...CapsuleForkCommandNameValues,
   ...CapsuleBranchCommandNameValues,
@@ -119,6 +127,7 @@ export const CapsuleEventNameValues = [
 export const CapsuleEventNameSchema = z.enum(CapsuleEventNameValues)
 
 export const CapsuleCommandDefinitions = {
+  ...CapsuleAgentReadCommandDefinitions,
   ...CapsuleCreateCommandDefinitions,
   ...CapsuleForkCommandDefinitions,
   ...CapsuleBranchCommandDefinitions,

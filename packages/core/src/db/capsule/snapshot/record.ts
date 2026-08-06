@@ -12,6 +12,7 @@ import {
   type PgColumn,
 } from 'drizzle-orm/pg-core'
 import {
+  CapsuleSnapshotAgentArtifactContentPolicyValues,
   CapsuleSnapshotModeValues,
   type CapsuleBlueprintDigest,
   type CapsuleBlueprintPin,
@@ -24,6 +25,11 @@ import {
 } from '../../../schemas'
 
 export const capsuleSnapshotModeEnum = pgEnum('capsule_snapshot_mode', CapsuleSnapshotModeValues)
+
+export const CapsuleSnapshotAgentArtifactContentPolicyEnum = pgEnum(
+  'capsule_snapshot_agent_artifact_content_policy',
+  CapsuleSnapshotAgentArtifactContentPolicyValues,
+)
 
 function createCapsuleIdColumn(capsuleIdColumn?: PgColumn) {
   return capsuleIdColumn
@@ -87,6 +93,9 @@ export function createCapsuleSnapshotsTable(capsuleIdColumn?: PgColumn, sourceBr
       capturePolicySchemaVersion: integer('capture_policy_schema_version').notNull(),
       capturePolicyDigest: text('capture_policy_digest').$type<CapsuleSnapshotCapturePolicyDigest>().notNull(),
       capturePolicyPin: jsonb('capture_policy_pin').$type<CapsuleSnapshotCapturePolicyPin>().notNull(),
+      agentArtifactContentPolicy: CapsuleSnapshotAgentArtifactContentPolicyEnum('agent_artifact_content_policy')
+        .notNull()
+        .default('deny'),
       mode: capsuleSnapshotModeEnum('mode').notNull().default('experimental'),
       limitations: jsonb('limitations').$type<CapsuleSnapshotLimitationValue[]>().notNull(),
       createdAt: timestamp('created_at', {

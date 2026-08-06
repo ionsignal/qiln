@@ -1,10 +1,14 @@
 import { z } from 'zod'
-import { CapsuleActorReferenceSchema } from '../../../schemas/capsule/actor'
+import { CapsuleActorReferenceSchema, CapsuleActorType } from '../../../schemas/capsule/actor'
 import {
   CapsuleOperationIdempotencyKeySchema,
   CapsuleSnapshotCaptureReceiptSchema,
 } from '../../../schemas/capsule/operations'
 import { CapsuleSnapshotMode } from '../../../schemas/capsule/snapshot/mode'
+import {
+  CapsuleSnapshotAgentArtifactContentPolicy,
+  CapsuleSnapshotAgentArtifactContentPolicySchema,
+} from '../../../schemas/capsule/snapshot/read'
 import { CapsuleSnapshotListOutputSchema } from '../../../schemas/capsule/snapshot/record'
 import { TargetOwnerSchema, TargetType } from '../targets'
 import { defineCapsuleCommand } from './definitions'
@@ -51,8 +55,7 @@ export type CapsuleSnapshotsListOutput = output<typeof CapsuleSnapshotsListOutpu
  * Accepts an experimental Snapshot Capture operation.
  *
  * The actor is supplied by a trusted authenticated publisher rather than
- * browser input. The requested mode is fixed to experimental until the complete
- * capture evidence validator and fork-ready mode exist.
+ * browser input.
  */
 export const CapsuleSnapshotCaptureInputSchema = z
   .object({
@@ -62,8 +65,23 @@ export const CapsuleSnapshotCaptureInputSchema = z
     sourceBranchId: z.uuid(),
     idempotencyKey: CapsuleOperationIdempotencyKeySchema,
     mode: z.literal(CapsuleSnapshotMode.EXPERIMENTAL).default(CapsuleSnapshotMode.EXPERIMENTAL),
+    agentArtifactContentPolicy: CapsuleSnapshotAgentArtifactContentPolicySchema.default(
+      CapsuleSnapshotAgentArtifactContentPolicy.DENY,
+    ),
   })
   .strict()
+  .superRefine((input, context) => {
+    if (
+      input.agentArtifactContentPolicy === CapsuleSnapshotAgentArtifactContentPolicy.OWNER_AUTHORIZED_UNREVIEWED &&
+      (input.actor.type !== CapsuleActorType.USER || input.actor.id !== input.target.id)
+    ) {
+      context.addIssue({
+        code: 'custom',
+        path: ['agentArtifactContentPolicy'],
+        message: 'Unchecked agent artifact reads may be elected only by the capsule owner user.',
+      })
+    }
+  })
 
 export const CapsuleSnapshotCaptureOutputSchema = CapsuleSnapshotCaptureReceiptSchema
 

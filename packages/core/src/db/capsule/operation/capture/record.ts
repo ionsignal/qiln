@@ -9,7 +9,7 @@ import type {
   CapsuleSnapshotCapturePolicyDigest,
   CapsuleSnapshotCapturePolicyPin,
 } from '../../../../schemas'
-import { capsuleSnapshotModeEnum } from '../../snapshot/record'
+import { CapsuleSnapshotAgentArtifactContentPolicyEnum, capsuleSnapshotModeEnum } from '../../snapshot/record'
 
 function createOperationIdColumn(operationIdColumn?: PgColumn) {
   return operationIdColumn
@@ -47,6 +47,10 @@ function createNullableSnapshotIdColumn(snapshotIdColumn?: PgColumn) {
  * accepted capture execution independent of mutable YAML catalog state and
  * allow committed snapshots to retain reproducible reconstruction authority.
  *
+ * `agentArtifactContentPolicy` is immutable acceptance-time evidence. It can
+ * only become committed snapshot policy after the capture transaction proves
+ * every other required committed artifact and provider reference.
+ *
  * PostgreSQL cannot prove that the referenced base operation has the
  * `snapshot_capture` discriminator. Every repository path that uses this
  * extension as mutation or read authority must validate the base operation
@@ -60,7 +64,6 @@ export function createCapsuleSnapshotCaptureOperationsTable(
   const operationId = createOperationIdColumn(operationIdColumn)
   const sourceBranchId = createSourceBranchIdColumn(sourceBranchIdColumn)
   const snapshotId = createNullableSnapshotIdColumn(snapshotIdColumn)
-
   return pgTable(
     'capsule_snapshot_capture_operations',
     {
@@ -79,6 +82,9 @@ export function createCapsuleSnapshotCaptureOperationsTable(
       capturePolicyDigest: text('capture_policy_digest').$type<CapsuleSnapshotCapturePolicyDigest>().notNull(),
       capturePolicyPin: jsonb('capture_policy_pin').$type<CapsuleSnapshotCapturePolicyPin>().notNull(),
       requestedMode: capsuleSnapshotModeEnum('requested_mode').notNull().default('experimental'),
+      agentArtifactContentPolicy: CapsuleSnapshotAgentArtifactContentPolicyEnum('agent_artifact_content_policy')
+        .notNull()
+        .default('deny'),
       snapshotId,
     },
     table => [

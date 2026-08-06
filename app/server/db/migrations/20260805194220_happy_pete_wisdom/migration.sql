@@ -1,3 +1,4 @@
+CREATE TYPE "capsule_snapshot_agent_artifact_content_policy" AS ENUM('deny', 'owner_authorized_unreviewed');--> statement-breakpoint
 CREATE TYPE "capsule_actor_type" AS ENUM('user', 'agent');--> statement-breakpoint
 CREATE TYPE "capsule_artifact_entry_type" AS ENUM('file', 'directory');--> statement-breakpoint
 CREATE TYPE "capsule_branch_preview_status" AS ENUM('inactive', 'applying', 'verifying', 'active', 'degraded', 'removing', 'cleanup_required');--> statement-breakpoint
@@ -23,6 +24,16 @@ CREATE TYPE "capsule_snapshot_git_remote_transport" AS ENUM('https', 'ssh');--> 
 CREATE TYPE "capsule_snapshot_mode" AS ENUM('experimental', 'hardened');--> statement-breakpoint
 CREATE TYPE "capsule_snapshot_resource_kind" AS ENUM('custom_volume_snapshot');--> statement-breakpoint
 CREATE TYPE "capsule_snapshot_resource_provider" AS ENUM('incus');--> statement-breakpoint
+CREATE TABLE "agent_credentials" (
+	"id" uuid PRIMARY KEY,
+	"key_hash" text NOT NULL,
+	"agent_actor_id" uuid NOT NULL,
+	"requested_by_user_id" uuid NOT NULL,
+	"capsule_id" uuid,
+	"is_active" boolean DEFAULT true NOT NULL,
+	"created_at" timestamp with time zone DEFAULT now() NOT NULL
+);
+--> statement-breakpoint
 CREATE TABLE "capsule_artifact_entries" (
 	"id" uuid PRIMARY KEY DEFAULT uuidv7(),
 	"manifest_root_id" uuid NOT NULL,
@@ -714,6 +725,7 @@ CREATE TABLE "capsule_snapshot_capture_operations" (
 	"capture_policy_digest" text NOT NULL,
 	"capture_policy_pin" jsonb NOT NULL,
 	"requested_mode" "capsule_snapshot_mode" DEFAULT 'experimental'::"capsule_snapshot_mode" NOT NULL,
+	"agent_artifact_content_policy" "capsule_snapshot_agent_artifact_content_policy" DEFAULT 'deny'::"capsule_snapshot_agent_artifact_content_policy" NOT NULL,
 	"snapshot_id" uuid,
 	CONSTRAINT "capsule_snapshot_capture_operations_blueprint_schema_check" CHECK ("blueprint_schema_version" = 1),
 	CONSTRAINT "capsule_snapshot_capture_operations_blueprint_digest_check" CHECK ("blueprint_digest" ~ '^sha256:[a-f0-9]{64}$'),
@@ -939,6 +951,7 @@ CREATE TABLE "capsule_snapshots" (
 	"capture_policy_schema_version" integer NOT NULL,
 	"capture_policy_digest" text NOT NULL,
 	"capture_policy_pin" jsonb NOT NULL,
+	"agent_artifact_content_policy" "capsule_snapshot_agent_artifact_content_policy" DEFAULT 'deny'::"capsule_snapshot_agent_artifact_content_policy" NOT NULL,
 	"mode" "capsule_snapshot_mode" DEFAULT 'experimental'::"capsule_snapshot_mode" NOT NULL,
 	"limitations" jsonb NOT NULL,
 	"created_at" timestamp(3) with time zone DEFAULT now() NOT NULL,
@@ -999,6 +1012,9 @@ CREATE TABLE "users" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
+CREATE INDEX "agent_credentials_requested_by_user_idx" ON "agent_credentials" ("requested_by_user_id");--> statement-breakpoint
+CREATE INDEX "agent_credentials_capsule_idx" ON "agent_credentials" ("capsule_id");--> statement-breakpoint
+CREATE INDEX "agent_credentials_active_idx" ON "agent_credentials" ("is_active");--> statement-breakpoint
 CREATE INDEX "capsule_artifact_entries_root_idx" ON "capsule_artifact_entries" ("manifest_root_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "capsule_artifact_entries_root_path_unique_idx" ON "capsule_artifact_entries" ("manifest_root_id","logical_path");--> statement-breakpoint
 CREATE INDEX "capsule_artifact_manifest_roots_manifest_idx" ON "capsule_artifact_manifest_roots" ("manifest_id");--> statement-breakpoint
@@ -1110,6 +1126,8 @@ CREATE INDEX "capsule_snapshots_policy_digest_idx" ON "capsule_snapshots" ("capt
 CREATE INDEX "capsule_snapshots_mode_idx" ON "capsule_snapshots" ("mode");--> statement-breakpoint
 CREATE INDEX "capsules_owner_idx" ON "capsules" ("owner_id");--> statement-breakpoint
 CREATE INDEX "capsules_owner_lifecycle_status_idx" ON "capsules" ("owner_id","lifecycle_status");--> statement-breakpoint
+ALTER TABLE "agent_credentials" ADD CONSTRAINT "agent_credentials_requested_by_user_id_users_id_fkey" FOREIGN KEY ("requested_by_user_id") REFERENCES "users"("id") ON DELETE CASCADE;--> statement-breakpoint
+ALTER TABLE "agent_credentials" ADD CONSTRAINT "agent_credentials_capsule_id_capsules_id_fkey" FOREIGN KEY ("capsule_id") REFERENCES "capsules"("id") ON DELETE RESTRICT;--> statement-breakpoint
 ALTER TABLE "capsule_artifact_entries" ADD CONSTRAINT "capsule_artifact_entries_mrkPSpdKYhcL_fkey" FOREIGN KEY ("manifest_root_id") REFERENCES "capsule_artifact_manifest_roots"("id") ON DELETE CASCADE;--> statement-breakpoint
 ALTER TABLE "capsule_artifact_manifest_roots" ADD CONSTRAINT "capsule_artifact_manifest_roots_26UCvpd2Xqy4_fkey" FOREIGN KEY ("manifest_id") REFERENCES "capsule_artifact_manifests"("id") ON DELETE CASCADE;--> statement-breakpoint
 ALTER TABLE "capsule_artifact_manifests" ADD CONSTRAINT "capsule_artifact_manifests_BI2edSDiAuzg_fkey" FOREIGN KEY ("snapshot_id") REFERENCES "capsule_snapshots"("id") ON DELETE CASCADE;--> statement-breakpoint

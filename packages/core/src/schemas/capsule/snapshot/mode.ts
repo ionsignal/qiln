@@ -23,7 +23,7 @@ export const CapsuleSnapshotModeSchema = z.enum(CapsuleSnapshotModeValues)
 export const CapsuleSnapshotLimitation = {
   GIT_EVIDENCE_OMITTED: 'git_evidence_omitted',
   DEPENDENCY_EVIDENCE_OMITTED: 'dependency_evidence_omitted',
-  SECRET_POLICY_UNVERIFIED: 'secret_policy_unverified',
+  ARTIFACT_SECRET_REVIEW_OMITTED: 'artifact_secret_review_omitted',
   ROOTFS_REBUILD_ONLY: 'rootfs_rebuild_only',
 } as const
 
@@ -32,7 +32,7 @@ export type CapsuleSnapshotLimitationValue = (typeof CapsuleSnapshotLimitation)[
 export const CapsuleSnapshotLimitationValues = [
   CapsuleSnapshotLimitation.GIT_EVIDENCE_OMITTED,
   CapsuleSnapshotLimitation.DEPENDENCY_EVIDENCE_OMITTED,
-  CapsuleSnapshotLimitation.SECRET_POLICY_UNVERIFIED,
+  CapsuleSnapshotLimitation.ARTIFACT_SECRET_REVIEW_OMITTED,
   CapsuleSnapshotLimitation.ROOTFS_REBUILD_ONLY,
 ] as const
 
@@ -90,7 +90,7 @@ export const CapsuleSnapshotAssuranceSchema = z
 export const ExperimentalCapsuleSnapshotLimitations = [
   CapsuleSnapshotLimitation.GIT_EVIDENCE_OMITTED,
   CapsuleSnapshotLimitation.DEPENDENCY_EVIDENCE_OMITTED,
-  CapsuleSnapshotLimitation.SECRET_POLICY_UNVERIFIED,
+  CapsuleSnapshotLimitation.ARTIFACT_SECRET_REVIEW_OMITTED,
   CapsuleSnapshotLimitation.ROOTFS_REBUILD_ONLY,
 ] as const satisfies readonly CapsuleSnapshotLimitationValue[]
 
