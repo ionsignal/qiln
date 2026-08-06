@@ -13,4 +13,17 @@ export const IncusImageSchema = z
   })
   .loose()
 
+/**
+ * Narrow alias identity returned by the Incus image-alias API.
+ *
+ * Alias resolution is allowed only at create acceptance. `target` is the
+ * immutable full fingerprint Qiln persists as rootfs reconstruction authority.
+ */
+export const IncusImageAliasSchema = z
+  .object({
+    target: CapsuleRootfsImageFingerprintSchema,
+  })
+  .loose()
+
 export type IncusImage = z.infer<typeof IncusImageSchema>
+export type IncusImageAlias = z.infer<typeof IncusImageAliasSchema>

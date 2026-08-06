@@ -8,7 +8,8 @@ import {
   type CapsuleRootfsImagePin,
 } from '@qiln/core/server'
 import { IncusError } from '../../errors'
-import { IncusImageSchema, type IncusImage } from './schemas/image'
+import { IncusImageAliasSchema, IncusImageSchema } from './schemas/image'
+import type { IncusImage, IncusImageAlias } from './schemas/image'
 import type { IIncusTransport } from './types'
 
 export const DEFAULT_INCUS_IMAGE_PROJECT = 'default'
@@ -29,7 +30,20 @@ export class IncusImagesClient {
   public async resolve(alias: string, project: string = DEFAULT_INCUS_IMAGE_PROJECT): Promise<CapsuleRootfsImagePin> {
     const sourceAlias = this.parseAlias(alias)
     const sourceProject = this.parseProject(project)
-    const image = await this.read(sourceProject, sourceAlias)
+    const aliasRecord = await this.readAlias(sourceProject, sourceAlias)
+    const image = await this.readImage(sourceProject, aliasRecord.target)
+    if (image.fingerprint !== aliasRecord.target) {
+      throw new IncusError(
+        'Incus alias target does not match the fingerprint returned by the resolved image.',
+        'CONFLICT',
+        {
+          project: sourceProject,
+          alias: sourceAlias,
+          expectedFingerprint: aliasRecord.target,
+          actualFingerprint: image.fingerprint,
+        },
+      )
+    }
     return this.parsePin(
       {
         schemaVersion: CAPSULE_ROOTFS_IMAGE_PIN_SCHEMA_VERSION,
@@ -48,7 +62,7 @@ export class IncusImagesClient {
    */
   public async verify(value: unknown): Promise<CapsuleRootfsImagePin> {
     const pin = this.parsePin(value, 'persisted Incus rootfs image pin')
-    const image = await this.read(pin.project, pin.fingerprint)
+    const image = await this.readImage(pin.project, pin.fingerprint)
     if (image.fingerprint !== pin.fingerprint) {
       throw new IncusError(
         'Incus returned an image whose fingerprint does not match the persisted rootfs pin.',
@@ -63,15 +77,30 @@ export class IncusImagesClient {
     return pin
   }
 
-  private async read(project: string, reference: string): Promise<IncusImage> {
-    const { data } = await this.transport.read(`/images/${encodeURIComponent(reference)}`, 'GET', {
+  private async readAlias(project: string, alias: string): Promise<IncusImageAlias> {
+    const { data } = await this.transport.read(`/images/aliases/${encodeURIComponent(alias)}`, 'GET', {
+      project,
+    })
+    const parsed = IncusImageAliasSchema.safeParse(data)
+    if (!parsed.success) {
+      throw new IncusError('Failed to parse Incus image alias metadata.', 'VALIDATION_ERROR', {
+        project,
+        alias,
+        validation: z.treeifyError(parsed.error),
+      })
+    }
+    return parsed.data
+  }
+
+  private async readImage(project: string, fingerprint: string): Promise<IncusImage> {
+    const { data } = await this.transport.read(`/images/${encodeURIComponent(fingerprint)}`, 'GET', {
       project,
     })
     const parsed = IncusImageSchema.safeParse(data)
     if (!parsed.success) {
       throw new IncusError('Failed to parse Incus image metadata.', 'VALIDATION_ERROR', {
         project,
-        reference,
+        fingerprint,
         validation: z.treeifyError(parsed.error),
       })
     }
