@@ -138,6 +138,7 @@ export function composeCapsuleService<TDatabase extends PostgresJsDatabase, TTab
   })
   const snapshot = composeSnapshotCapability({
     persistence: options.persistence,
+    incus: options.incus,
   })
   const route = composeRoutingCapability({
     persistence: options.persistence,

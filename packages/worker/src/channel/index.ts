@@ -1,4 +1,5 @@
 import { registerCapsuleBlueprintHandlers } from './handlers/blueprints'
+import { registerCapsuleAgentReadHandler } from './handlers/capsule/agent'
 import { registerCapsuleArchiveHandler } from './handlers/capsule/archive'
 import { registerCapsuleBranchHandlers } from './handlers/capsule/branch'
 import { registerCapsuleCreateHandler } from './handlers/capsule/create'
@@ -17,6 +18,7 @@ import type { QilnWorkerRuntime } from '../runtime'
  * operation classification, and branch runtime reconciliation have completed.
  */
 export function registerCapsuleChannelHandlers(worker: QilnWorkerRuntime): void {
+  registerCapsuleAgentReadHandler(worker)
   registerCapsuleCreateHandler(worker)
   registerCapsuleForkHandler(worker)
   registerCapsuleArchiveHandler(worker)

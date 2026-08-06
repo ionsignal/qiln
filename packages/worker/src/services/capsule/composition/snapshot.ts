@@ -1,5 +1,8 @@
+import { CapsuleSnapshotArtifactStore } from '../snapshot/artifact'
+import { CapsuleSnapshotReadService } from '../snapshot/read'
 import { CapsuleSnapshotService } from '../snapshot/service'
 import { CapsuleSnapshotStore } from '../snapshot/store'
+import type { IncusClient } from '../../../incus/client'
 import type { CapsulePersistence, CapsuleTables } from '@qiln/core/server'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
@@ -8,10 +11,11 @@ export interface ComposeSnapshotCapabilityOptions<
   TTables extends CapsuleTables = CapsuleTables,
 > {
   persistence: CapsulePersistence<TDatabase, TTables>
+  incus: IncusClient
 }
 
 /**
- * Composes read-only committed capsule snapshot history.
+ * Composes committed capsule snapshot history and immutable agent inspection.
  *
  * Snapshot Capture remains a separate operation capability. This composition
  * creates no writer and does not infer artifact completeness or physical
@@ -21,5 +25,7 @@ export function composeSnapshotCapability<TDatabase extends PostgresJsDatabase, 
   options: ComposeSnapshotCapabilityOptions<TDatabase, TTables>,
 ): CapsuleSnapshotService {
   const snapshots = new CapsuleSnapshotStore(options.persistence)
-  return new CapsuleSnapshotService(snapshots)
+  const artifacts = new CapsuleSnapshotArtifactStore(options.persistence)
+  const reader = new CapsuleSnapshotReadService(artifacts, options.incus)
+  return new CapsuleSnapshotService(snapshots, reader)
 }

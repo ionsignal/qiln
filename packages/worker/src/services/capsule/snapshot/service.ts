@@ -4,9 +4,12 @@ import {
   createCapsuleBlueprintReference,
   verifyCapsuleBlueprintPin,
   verifyCapsuleSnapshotCapturePolicyPin,
+  type AgentSnapshotRead,
+  type AgentSnapshotReadOutput,
   type CapsuleSnapshotListOutput,
 } from '@qiln/core/server'
 import { IncusError } from '../../../errors'
+import type { CapsuleSnapshotReadService } from './read'
 import type { CapsuleSnapshotListOptions, CapsuleSnapshotRecord } from './types'
 import type { CapsuleSnapshotStore } from './store'
 
@@ -29,11 +32,14 @@ function toIsoTimestamp(value: Date, field: string, snapshotId: string): string 
 }
 
 /**
- * Maps committed persistence rows into the client-safe snapshot history
- * contract.
+ * Maps committed persistence rows into client-safe snapshot history and
+ * immutable agent-read contracts.
  */
 export class CapsuleSnapshotService {
-  constructor(private readonly snapshots: CapsuleSnapshotStore) {}
+  constructor(
+    private readonly snapshots: CapsuleSnapshotStore,
+    private readonly reader: CapsuleSnapshotReadService,
+  ) {}
 
   public async list(
     ownerId: string,
@@ -42,6 +48,10 @@ export class CapsuleSnapshotService {
   ): Promise<CapsuleSnapshotListOutput> {
     const snapshots = await this.snapshots.list(ownerId, capsuleId, options)
     return CapsuleSnapshotListOutputSchema.parse(snapshots.map(snapshot => this.summary(snapshot)))
+  }
+
+  public async read(ownerId: string, capsuleId: string, input: AgentSnapshotRead): Promise<AgentSnapshotReadOutput> {
+    return await this.reader.read(ownerId, capsuleId, input)
   }
 
   private summary(snapshot: CapsuleSnapshotRecord) {
@@ -96,6 +106,7 @@ export class CapsuleSnapshotService {
         schemaVersion: snapshot.artifactManifestSchemaVersion,
         digest: snapshot.artifactManifestDigest,
       },
+      agentArtifactContentPolicy: snapshot.agentArtifactContentPolicy,
       assurance: {
         mode: snapshot.mode,
         limitations,

@@ -5,6 +5,7 @@ import { CapsuleBranchNameSchema } from '../branch'
 import { CapsuleBranchResourceInventoryDigestSchema } from '../resources'
 import { CapsuleSnapshotAssuranceSchema } from './mode'
 import { CapsuleSnapshotCapturePolicyReferenceSchema } from './policy'
+import { CapsuleSnapshotAgentArtifactContentPolicySchema } from './read'
 
 export const CapsuleSnapshotTimestampSchema = z.string().datetime({
   offset: true,
@@ -31,6 +32,7 @@ export const CapsuleSnapshotSummarySchema = z
     blueprint: CapsuleBlueprintReferenceSchema,
     capturePolicy: CapsuleSnapshotCapturePolicyReferenceSchema,
     artifactManifest: CapsuleArtifactManifestReferenceSchema,
+    agentArtifactContentPolicy: CapsuleSnapshotAgentArtifactContentPolicySchema,
     assurance: CapsuleSnapshotAssuranceSchema,
     createdAt: CapsuleSnapshotTimestampSchema,
     archivedAt: CapsuleSnapshotTimestampSchema.nullable(),
