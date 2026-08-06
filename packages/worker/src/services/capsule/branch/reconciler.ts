@@ -32,7 +32,7 @@ export class CapsuleBranchRuntimeReconciler {
     if (candidates.length === 0) {
       return
     }
-    console.log(`[CapsuleBranchRuntimeReconciler] Reconciling ${candidates.length} capsule branch runtime(s).`)
+    // console.log(`[CapsuleBranchRuntimeReconciler] Reconciling ${candidates.length} capsule branch runtime(s).`)
     for (const candidate of candidates) {
       await this.reconcileCandidate(candidate)
     }

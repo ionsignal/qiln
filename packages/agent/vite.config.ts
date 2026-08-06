@@ -18,7 +18,22 @@ function addCliShebang(): Plugin {
   }
 }
 
-export default defineConfig(() => {
+function externalRuntimeDependency(isDevelopment: boolean) {
+  return (source: string): boolean => {
+    if (source.startsWith('node:')) {
+      return true
+    }
+    // The Core development build intentionally omits client.js. Bundle the
+    // client-safe source surface into the development-only Agent CLI instead.
+    if (isDevelopment && source === '@qiln/core/client') {
+      return false
+    }
+    return source.startsWith('@qiln/')
+  }
+}
+
+export default defineConfig(({ mode }) => {
+  const isDevelopment = mode === 'development'
   return {
     plugins: [
       addCliShebang(),
@@ -41,7 +56,7 @@ export default defineConfig(() => {
         checks: {
           pluginTimings: false,
         },
-        external: [/^@qiln\//, /^node:/],
+        external: externalRuntimeDependency(isDevelopment),
         output: {
           preserveModules: false,
           exports: 'named',
@@ -49,6 +64,13 @@ export default defineConfig(() => {
       },
       sourcemap: true,
       minify: false,
+    },
+    resolve: {
+      alias: isDevelopment
+        ? {
+            '@qiln/core/client': resolve(__dirname, '../core/src/client.ts'),
+          }
+        : undefined,
     },
   }
 })

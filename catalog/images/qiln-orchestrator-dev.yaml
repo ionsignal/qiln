@@ -31,6 +31,7 @@ packages:
         - netplan.io
         - iproute2
         - locales
+        - vim
         # Qiln control-plane runtime primitives
         - nodejs
         - caddy
