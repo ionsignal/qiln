@@ -1,15 +1,15 @@
 import dts from 'vite-plugin-dts'
 import vue from '@vitejs/plugin-vue'
 import { defineConfig } from 'vite'
-import { resolve } from 'path'
+import { resolve } from 'node:path'
 import { sentinel } from '@qiln/core/sentinel'
 
 export default defineConfig(({ mode }) => {
   const entry: Record<string, string> = {
-    server: resolve(__dirname, 'src/server.ts'),
+    server: resolve(import.meta.dirname, 'src/server.ts'),
   }
   if (mode !== 'development') {
-    entry.client = resolve(__dirname, 'src/client.ts')
+    entry.client = resolve(import.meta.dirname, 'src/client.ts')
   }
   return {
     plugins: [
@@ -65,7 +65,7 @@ export default defineConfig(({ mode }) => {
     },
     resolve: {
       alias: {
-        '@': resolve(__dirname, 'src'),
+        '@': resolve(import.meta.dirname, 'src'),
       },
     },
   }

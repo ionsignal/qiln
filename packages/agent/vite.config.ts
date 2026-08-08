@@ -45,9 +45,9 @@ export default defineConfig(({ mode }) => {
     build: {
       lib: {
         entry: {
-          index: resolve(__dirname, 'src/index.ts'),
-          client: resolve(__dirname, 'src/client.ts'),
-          cli: resolve(__dirname, 'src/cli.ts'),
+          index: resolve(import.meta.dirname, 'src/index.ts'),
+          client: resolve(import.meta.dirname, 'src/client.ts'),
+          cli: resolve(import.meta.dirname, 'src/cli.ts'),
         },
         formats: ['es'],
         fileName: (_format, entryName) => `${entryName}.js`,
@@ -68,7 +68,7 @@ export default defineConfig(({ mode }) => {
     resolve: {
       alias: isDevelopment
         ? {
-            '@qiln/core/client': resolve(__dirname, '../core/src/client.ts'),
+            '@qiln/core/client': resolve(import.meta.dirname, '../core/src/client.ts'),
           }
         : undefined,
     },

@@ -1,6 +1,6 @@
 import dts from 'vite-plugin-dts'
 import { defineConfig } from 'vite'
-import { resolve } from 'path'
+import { resolve } from 'node:path'
 import { sentinel } from '@qiln/core/sentinel'
 
 export default defineConfig(() => {
@@ -15,7 +15,7 @@ export default defineConfig(() => {
     build: {
       lib: {
         entry: {
-          server: resolve(__dirname, 'src/server.ts'),
+          server: resolve(import.meta.dirname, 'src/server.ts'),
         },
         formats: ['es'],
         fileName: (_format, entryName) => `${entryName}.js`,
@@ -47,7 +47,7 @@ export default defineConfig(() => {
     },
     resolve: {
       alias: {
-        '@': resolve(__dirname, 'src'),
+        '@': resolve(import.meta.dirname, 'src'),
       },
     },
   }

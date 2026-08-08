@@ -106,13 +106,13 @@ export default defineConfig(({ isSsrBuild, command }): UserConfig => {
     },
     resolve: {
       alias: {
-        '@': path.resolve(__dirname, './'),
-        '@server': path.resolve(__dirname, './server'),
+        '@': path.resolve(import.meta.dirname, './'),
+        '@server': path.resolve(import.meta.dirname, './server'),
         // Dev-only aliases for instant HMR and CSS duplication prevention
         ...(isDev
           ? {
-              '@qiln/core/client': path.resolve(__dirname, '../packages/core/src/client.ts'),
-              '@qiln/engine/client': path.resolve(__dirname, '../packages/engine/src/client.ts'),
+              '@qiln/core/client': path.resolve(import.meta.dirname, '../packages/core/src/client.ts'),
+              '@qiln/engine/client': path.resolve(import.meta.dirname, '../packages/engine/src/client.ts'),
             }
           : {}),
       },
