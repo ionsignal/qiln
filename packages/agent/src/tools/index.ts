@@ -1,11 +1,20 @@
 import { qilnGetContextTool } from './context'
-import { qilnReadTool } from './read'
+import { qilnReadArtifactContentTool } from './content'
+import { qilnReadManifestEntriesTool } from './entries'
+import { qilnReadManifestRootsTool } from './roots'
 
 export * from './context'
-export * from './read'
+export * from './content'
+export * from './entries'
+export * from './roots'
 export * from './tool'
 
-export const tools = Object.freeze([qilnGetContextTool, qilnReadTool])
+export const tools = Object.freeze([
+  qilnGetContextTool,
+  qilnReadManifestRootsTool,
+  qilnReadManifestEntriesTool,
+  qilnReadArtifactContentTool,
+] as const)
 
 export type QilnAgentToolName = (typeof tools)[number]['name']
 export type RegisteredQilnAgentTool = (typeof tools)[number]

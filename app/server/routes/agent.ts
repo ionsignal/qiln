@@ -1,13 +1,17 @@
-import {
-  AgentGetContextInputSchema,
-  AgentSnapshotReadInputSchema,
-  CapsuleChannelError,
-  CapsuleChannelErrorCode,
-  MAX_AGENT_SNAPSHOT_READ_REQUEST_BYTES,
-} from '@qiln/core/server'
-import { AgentArtifactContentDeniedError, AgentSnapshotNotFoundError, resolveAgentRead } from '@server/agent/read'
+import { MAX_AGENT_SNAPSHOT_READ_REQUEST_BYTES, CapsuleChannelError, CapsuleChannelErrorCode } from '@qiln/core/server'
 import { AgentBranchNotFoundError, AgentUnauthorizedError, resolveAgentContext } from '@server/agent/context'
 import { readAgentBearerKey } from '@server/agent/key'
+import {
+  AgentArtifactContentDeniedError,
+  AgentSnapshotArtifactContentRequestSchema,
+  AgentSnapshotManifestEntriesInputSchema,
+  AgentSnapshotManifestRootsInputSchema,
+  AgentSnapshotNotFoundError,
+  resolveAgentArtifactContent,
+  resolveAgentManifestEntries,
+  resolveAgentManifestRoots,
+} from '@server/agent/snapshot'
+import { AgentGetContextInputSchema } from '@qiln/core/server'
 import type { FastifyInstance } from 'fastify'
 
 function isJsonContentType(value: string | undefined): boolean {
@@ -26,7 +30,6 @@ function readFailure(error: unknown): {
       message: 'Snapshot not found.',
     }
   }
-
   if (error instanceof AgentArtifactContentDeniedError) {
     return {
       statusCode: 403,
@@ -34,7 +37,6 @@ function readFailure(error: unknown): {
       message: 'Artifact content is not available for this snapshot.',
     }
   }
-
   if (!(error instanceof CapsuleChannelError)) {
     return {
       statusCode: 500,
@@ -42,7 +44,6 @@ function readFailure(error: unknown): {
       message: 'Internal agent API error.',
     }
   }
-
   switch (error.code) {
     case CapsuleChannelErrorCode.NOT_FOUND:
       return {
@@ -150,7 +151,7 @@ export default async function (fastify: FastifyInstance) {
   })
 
   fastify.post(
-    '/api/agent/v1/read',
+    '/api/agent/v1/snapshot/manifest/roots',
     {
       bodyLimit: MAX_AGENT_SNAPSHOT_READ_REQUEST_BYTES,
     },
@@ -164,17 +165,17 @@ export default async function (fastify: FastifyInstance) {
           },
         })
       }
-      const parsedInput = AgentSnapshotReadInputSchema.safeParse(request.body)
+      const parsedInput = AgentSnapshotManifestRootsInputSchema.safeParse(request.body)
       if (!parsedInput.success) {
         return reply.code(400).send({
           error: {
             code: 'bad_request',
-            message: 'Invalid snapshot read request.',
+            message: 'Invalid snapshot manifest root request.',
           },
         })
       }
       try {
-        const result = await resolveAgentRead(
+        const result = await resolveAgentManifestRoots(
           fastify.db,
           fastify.agentChannel,
           readAgentBearerKey(request.headers.authorization),
@@ -192,7 +193,117 @@ export default async function (fastify: FastifyInstance) {
         }
         const failure = readFailure(error)
         if (failure.statusCode >= 500) {
-          fastify.log.error('[Agent] Snapshot read failed unexpectedly.')
+          fastify.log.error('[Agent] Snapshot manifest root read failed unexpectedly.')
+        }
+        return reply.code(failure.statusCode).send({
+          error: {
+            code: failure.code,
+            message: failure.message,
+          },
+        })
+      }
+    },
+  )
+
+  fastify.post(
+    '/api/agent/v1/snapshot/manifest/entries',
+    {
+      bodyLimit: MAX_AGENT_SNAPSHOT_READ_REQUEST_BYTES,
+    },
+    async (request, reply) => {
+      reply.header('Cache-Control', 'no-store')
+      if (!isJsonContentType(request.headers['content-type'])) {
+        return reply.code(415).send({
+          error: {
+            code: 'unsupported_media_type',
+            message: 'Expected application/json.',
+          },
+        })
+      }
+      const parsedInput = AgentSnapshotManifestEntriesInputSchema.safeParse(request.body)
+      if (!parsedInput.success) {
+        return reply.code(400).send({
+          error: {
+            code: 'bad_request',
+            message: 'Invalid snapshot manifest entry request.',
+          },
+        })
+      }
+      try {
+        const result = await resolveAgentManifestEntries(
+          fastify.db,
+          fastify.agentChannel,
+          readAgentBearerKey(request.headers.authorization),
+          parsedInput.data,
+        )
+        return reply.code(200).send(result)
+      } catch (error: unknown) {
+        if (error instanceof AgentUnauthorizedError) {
+          return reply.code(401).send({
+            error: {
+              code: 'unauthorized',
+              message: 'Unauthorized agent credential.',
+            },
+          })
+        }
+        const failure = readFailure(error)
+        if (failure.statusCode >= 500) {
+          fastify.log.error('[Agent] Snapshot manifest entry read failed unexpectedly.')
+        }
+        return reply.code(failure.statusCode).send({
+          error: {
+            code: failure.code,
+            message: failure.message,
+          },
+        })
+      }
+    },
+  )
+
+  fastify.post(
+    '/api/agent/v1/snapshot/artifact/content',
+    {
+      bodyLimit: MAX_AGENT_SNAPSHOT_READ_REQUEST_BYTES,
+    },
+    async (request, reply) => {
+      reply.header('Cache-Control', 'no-store')
+      if (!isJsonContentType(request.headers['content-type'])) {
+        return reply.code(415).send({
+          error: {
+            code: 'unsupported_media_type',
+            message: 'Expected application/json.',
+          },
+        })
+      }
+      const parsedInput = AgentSnapshotArtifactContentRequestSchema.safeParse(request.body)
+      if (!parsedInput.success) {
+        return reply.code(400).send({
+          error: {
+            code: 'bad_request',
+            message: 'Invalid snapshot artifact content request.',
+          },
+        })
+      }
+      try {
+        const result = await resolveAgentArtifactContent(
+          fastify.db,
+          fastify.agentChannel,
+          readAgentBearerKey(request.headers.authorization),
+          parsedInput.data,
+        )
+        return reply.code(200).send(result)
+      } catch (error: unknown) {
+        if (error instanceof AgentUnauthorizedError) {
+          return reply.code(401).send({
+            error: {
+              code: 'unauthorized',
+              message: 'Unauthorized agent credential.',
+            },
+          })
+        }
+        const failure = readFailure(error)
+        if (failure.statusCode >= 500) {
+          fastify.log.error('[Agent] Snapshot artifact content read failed unexpectedly.')
         }
         return reply.code(failure.statusCode).send({
           error: {

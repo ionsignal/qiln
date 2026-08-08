@@ -1,12 +1,19 @@
 import {
-  AgentGetContextInputSchema,
-  AgentSnapshotReadInputSchema,
+  MAX_AGENT_SNAPSHOT_MANIFEST_ITEMS,
   type AgentGetContext,
-  type AgentSnapshotRead,
+  type AgentSnapshotArtifactContentRequest,
+  type AgentSnapshotManifestEntries,
+  type AgentSnapshotManifestRoots,
 } from '@qiln/core/client'
 import { QilnAgentClient, QilnAgentClientError } from './client'
 import { QilnAgentConfigError, readConfig } from './config'
-import { getTool, qilnGetContextTool, qilnReadTool } from './tools'
+import {
+  getTool,
+  qilnGetContextTool,
+  qilnReadArtifactContentTool,
+  qilnReadManifestEntriesTool,
+  qilnReadManifestRootsTool,
+} from './tools'
 
 const MAX_ERROR_MESSAGE_LENGTH = 500
 
@@ -19,8 +26,16 @@ type Command =
       selector: AgentGetContext
     }
   | {
-      kind: 'read'
-      input: AgentSnapshotRead
+      kind: 'manifest-roots'
+      input: AgentSnapshotManifestRoots
+    }
+  | {
+      kind: 'manifest-entries'
+      input: AgentSnapshotManifestEntries
+    }
+  | {
+      kind: 'artifact-content'
+      input: AgentSnapshotArtifactContentRequest
     }
 
 class QilnAgentCliError extends Error {
@@ -34,9 +49,9 @@ function usage(): string {
   return [
     'Usage:',
     '  qiln get-context [--branch-id <uuid> | --branch-name <name>]',
-    '  qiln read manifest --snapshot-id <uuid> [--root-id <root-id>] [--after-root-id <root-id>]',
-    '  qiln read manifest --snapshot-id <uuid> --root-id <root-id> [--after-logical-path <path>] [--limit <1-100>]',
-    '  qiln read content --snapshot-id <uuid> --root-id <root-id> --logical-path <path>',
+    '  qiln read-manifest-roots --snapshot-id <uuid> [--after-root-id <root-id>] [--limit <1-100>]',
+    '  qiln read-manifest-entries --snapshot-id <uuid> --root-id <root-id> [--after-logical-path <path>] [--limit <1-100>]',
+    '  qiln read-artifact-content --snapshot-id <uuid> --root-id <root-id> --logical-path <path>',
     '',
     'Required environment:',
     '  QILN_AGENT_URL   Qiln host origin, such as https://qiln.example.com',
@@ -54,7 +69,7 @@ function optionValue(argumentsList: readonly string[], index: number, option: st
   return value
 }
 
-function parseReadOptions(argumentsList: readonly string[], allowed: readonly string[]): Map<string, string> | null {
+function parseOptions(argumentsList: readonly string[], allowed: readonly string[]): Map<string, string> | null {
   const options = new Map<string, string>()
   for (let index = 0; index < argumentsList.length; index++) {
     const argument = argumentsList[index]
@@ -62,7 +77,7 @@ function parseReadOptions(argumentsList: readonly string[], allowed: readonly st
       return null
     }
     if (!allowed.includes(argument)) {
-      throw new QilnAgentCliError(`Unknown read argument '${argument}'.`)
+      throw new QilnAgentCliError(`Unknown argument '${argument}'.`)
     }
     if (options.has(argument)) {
       throw new QilnAgentCliError(`${argument} may be supplied only once.`)
@@ -82,113 +97,94 @@ function requiredOption(options: ReadonlyMap<string, string>, name: string): str
 }
 
 function parseLimit(value: string): number {
-  if (!/^(?:0|[1-9][0-9]*)$/.test(value)) {
+  if (!/^[1-9][0-9]*$/.test(value)) {
     throw new QilnAgentCliError('--limit must be a positive integer.')
   }
   const limit = Number(value)
-  if (!Number.isSafeInteger(limit)) {
-    throw new QilnAgentCliError('--limit must be a safe integer.')
+  if (!Number.isSafeInteger(limit) || limit > MAX_AGENT_SNAPSHOT_MANIFEST_ITEMS) {
+    throw new QilnAgentCliError(`--limit must be an integer from 1 to ${MAX_AGENT_SNAPSHOT_MANIFEST_ITEMS}.`)
   }
   return limit
 }
 
-function parseSnapshotRead(input: unknown, message: string): AgentSnapshotRead {
-  const parsed = AgentSnapshotReadInputSchema.safeParse(input)
+function parseRootsInput(value: unknown): AgentSnapshotManifestRoots {
+  const parsed = qilnReadManifestRootsTool.inputSchema.safeParse(value)
   if (!parsed.success) {
-    throw new QilnAgentCliError(message)
+    throw new QilnAgentCliError('Invalid snapshot manifest root request.')
   }
   return parsed.data
 }
 
-function parseManifest(argumentsList: readonly string[]): Command {
-  const options = parseReadOptions(argumentsList, [
-    '--snapshot-id',
-    '--root-id',
-    '--after-root-id',
-    '--after-logical-path',
-    '--limit',
-  ])
+function parseEntriesInput(value: unknown): AgentSnapshotManifestEntries {
+  const parsed = qilnReadManifestEntriesTool.inputSchema.safeParse(value)
+  if (!parsed.success) {
+    throw new QilnAgentCliError('Invalid snapshot manifest entry request.')
+  }
+  return parsed.data
+}
+
+function parseContentInput(value: unknown): AgentSnapshotArtifactContentRequest {
+  const parsed = qilnReadArtifactContentTool.inputSchema.safeParse(value)
+  if (!parsed.success) {
+    throw new QilnAgentCliError('Invalid snapshot artifact content request.')
+  }
+  return parsed.data
+}
+
+function parseManifestRoots(argumentsList: readonly string[]): Command {
+  const options = parseOptions(argumentsList, ['--snapshot-id', '--after-root-id', '--limit'])
   if (options === null) {
     return {
       kind: 'help',
     }
   }
-  const snapshotId = requiredOption(options, '--snapshot-id')
-  const rootId = options.get('--root-id')
+  const afterRootId = options.get('--after-root-id')
   const limit = options.get('--limit')
-  if (rootId === undefined) {
-    if (options.has('--after-logical-path')) {
-      throw new QilnAgentCliError('--after-logical-path requires --root-id.')
-    }
-    return {
-      kind: 'read',
-      input: parseSnapshotRead(
-        {
-          mode: 'manifest',
-          snapshotId,
-          ...(options.has('--after-root-id') ? { afterRootId: options.get('--after-root-id') } : {}),
-          ...(limit === undefined ? {} : { limit: parseLimit(limit) }),
-        },
-        'Invalid snapshot manifest root request.',
-      ),
-    }
-  }
-  if (options.has('--after-root-id')) {
-    throw new QilnAgentCliError('--after-root-id cannot be used with --root-id.')
-  }
   return {
-    kind: 'read',
-    input: parseSnapshotRead(
-      {
-        mode: 'manifest',
-        snapshotId,
-        rootId,
-        ...(options.has('--after-logical-path') ? { afterLogicalPath: options.get('--after-logical-path') } : {}),
-        ...(limit === undefined ? {} : { limit: parseLimit(limit) }),
-      },
-      'Invalid snapshot manifest entry request.',
-    ),
+    kind: 'manifest-roots',
+    input: parseRootsInput({
+      snapshotId: requiredOption(options, '--snapshot-id'),
+      ...(afterRootId === undefined ? {} : { afterRootId }),
+      ...(limit === undefined ? {} : { limit: parseLimit(limit) }),
+    }),
   }
 }
 
-function parseContent(argumentsList: readonly string[]): Command {
-  const options = parseReadOptions(argumentsList, ['--snapshot-id', '--root-id', '--logical-path'])
+function parseManifestEntries(argumentsList: readonly string[]): Command {
+  const options = parseOptions(argumentsList, ['--snapshot-id', '--root-id', '--after-logical-path', '--limit'])
+  if (options === null) {
+    return {
+      kind: 'help',
+    }
+  }
+  const afterLogicalPath = options.get('--after-logical-path')
+  const limit = options.get('--limit')
+  return {
+    kind: 'manifest-entries',
+    input: parseEntriesInput({
+      snapshotId: requiredOption(options, '--snapshot-id'),
+      rootId: requiredOption(options, '--root-id'),
+      ...(afterLogicalPath === undefined ? {} : { afterLogicalPath }),
+      ...(limit === undefined ? {} : { limit: parseLimit(limit) }),
+    }),
+  }
+}
+
+function parseArtifactContent(argumentsList: readonly string[]): Command {
+  const options = parseOptions(argumentsList, ['--snapshot-id', '--root-id', '--logical-path'])
   if (options === null) {
     return {
       kind: 'help',
     }
   }
   return {
-    kind: 'read',
-    input: parseSnapshotRead(
-      {
-        mode: 'content',
-        snapshotId: requiredOption(options, '--snapshot-id'),
-        rootId: requiredOption(options, '--root-id'),
-        logicalPath: requiredOption(options, '--logical-path'),
-      },
-      'Invalid snapshot artifact content request.',
-    ),
+    kind: 'artifact-content',
+    input: parseContentInput({
+      snapshotId: requiredOption(options, '--snapshot-id'),
+      rootId: requiredOption(options, '--root-id'),
+      logicalPath: requiredOption(options, '--logical-path'),
+    }),
   }
-}
-
-function parseRead(argumentsList: readonly string[]): Command {
-  const mode = argumentsList[0]
-  if (mode === undefined) {
-    throw new QilnAgentCliError('read requires either manifest or content.')
-  }
-  if (mode === '--help' || mode === '-h') {
-    return {
-      kind: 'help',
-    }
-  }
-  if (mode === 'manifest') {
-    return parseManifest(argumentsList.slice(1))
-  }
-  if (mode === 'content') {
-    return parseContent(argumentsList.slice(1))
-  }
-  throw new QilnAgentCliError(`Unknown read mode '${mode}'.`)
 }
 
 function parseContext(argumentsList: readonly string[]): Command {
@@ -219,7 +215,7 @@ function parseContext(argumentsList: readonly string[]): Command {
     }
     throw new QilnAgentCliError(`Unknown get-context argument '${argument}'.`)
   }
-  const selector = AgentGetContextInputSchema.safeParse({
+  const selector = qilnGetContextTool.inputSchema.safeParse({
     ...(branchId === undefined ? {} : { branchId }),
     ...(branchName === undefined ? {} : { branchName }),
   })
@@ -238,13 +234,18 @@ function parse(argumentsList: readonly string[]): Command {
       kind: 'help',
     }
   }
-  if (argumentsList[0] === 'get-context') {
-    return parseContext(argumentsList.slice(1))
+  switch (argumentsList[0]) {
+    case 'get-context':
+      return parseContext(argumentsList.slice(1))
+    case 'read-manifest-roots':
+      return parseManifestRoots(argumentsList.slice(1))
+    case 'read-manifest-entries':
+      return parseManifestEntries(argumentsList.slice(1))
+    case 'read-artifact-content':
+      return parseArtifactContent(argumentsList.slice(1))
+    default:
+      throw new QilnAgentCliError(`Unknown command '${argumentsList[0]}'.`)
   }
-  if (argumentsList[0] === 'read') {
-    return parseRead(argumentsList.slice(1))
-  }
-  throw new QilnAgentCliError(`Unknown command '${argumentsList[0]}'.`)
 }
 
 function formatError(error: unknown): string {
@@ -259,6 +260,10 @@ function formatError(error: unknown): string {
   return normalized.slice(0, MAX_ERROR_MESSAGE_LENGTH) || 'Unexpected Qiln agent CLI failure.'
 }
 
+function writeResult(value: unknown): void {
+  process.stdout.write(`${JSON.stringify(value, null, 2)}\n`)
+}
+
 export async function run(argumentsList: readonly string[]): Promise<number> {
   try {
     const command = parse(argumentsList)
@@ -266,23 +271,36 @@ export async function run(argumentsList: readonly string[]): Promise<number> {
       process.stdout.write(`${usage()}\n`)
       return 0
     }
-    const config = readConfig()
-    const client = new QilnAgentClient(config)
+    const client = new QilnAgentClient(readConfig())
     if (command.kind === 'get-context') {
       const tool = getTool(qilnGetContextTool.name)
       if (!tool) {
         throw new QilnAgentCliError('qiln_get_context is not enabled.')
       }
-      const context = await tool.execute(client, command.selector)
-      process.stdout.write(`${JSON.stringify(context, null, 2)}\n`)
+      writeResult(await tool.execute(client, command.selector))
       return 0
     }
-    const tool = getTool(qilnReadTool.name)
-    if (!tool) {
-      throw new QilnAgentCliError('qiln_read is not enabled.')
+    if (command.kind === 'manifest-roots') {
+      const tool = getTool(qilnReadManifestRootsTool.name)
+      if (!tool) {
+        throw new QilnAgentCliError('qiln_read_manifest_roots is not enabled.')
+      }
+      writeResult(await tool.execute(client, command.input))
+      return 0
     }
-    const result = await tool.execute(client, command.input)
-    process.stdout.write(`${JSON.stringify(result, null, 2)}\n`)
+    if (command.kind === 'manifest-entries') {
+      const tool = getTool(qilnReadManifestEntriesTool.name)
+      if (!tool) {
+        throw new QilnAgentCliError('qiln_read_manifest_entries is not enabled.')
+      }
+      writeResult(await tool.execute(client, command.input))
+      return 0
+    }
+    const tool = getTool(qilnReadArtifactContentTool.name)
+    if (!tool) {
+      throw new QilnAgentCliError('qiln_read_artifact_content is not enabled.')
+    }
+    writeResult(await tool.execute(client, command.input))
     return 0
   } catch (error: unknown) {
     process.stderr.write(`qiln: ${formatError(error)}\n`)

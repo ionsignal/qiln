@@ -1,16 +1,19 @@
 import { createHash } from 'node:crypto'
 import {
-  AgentSnapshotContentOutputSchema,
+  AgentSnapshotArtifactContentOutputSchema,
   AgentSnapshotManifestEntriesOutputSchema,
   AgentSnapshotManifestRootsOutputSchema,
-  AgentSnapshotReadMode,
   CapsuleArtifactEntryType,
   CapsuleSnapshotAgentArtifactContentPolicy,
   MAX_AGENT_SNAPSHOT_ARTIFACT_CONTENT_BYTES,
+  type AgentSnapshotArtifactContentRequest,
+  type AgentSnapshotArtifactContentOutput,
   type AgentSnapshotArtifactEntry,
   type AgentSnapshotArtifactRoot,
-  type AgentSnapshotRead,
-  type AgentSnapshotReadOutput,
+  type AgentSnapshotManifestEntries,
+  type AgentSnapshotManifestEntriesOutput,
+  type AgentSnapshotManifestRoots,
+  type AgentSnapshotManifestRootsOutput,
 } from '@qiln/core/server'
 import { IncusError } from '../../../errors'
 import type { IncusClient } from '../../../incus/client'
@@ -41,11 +44,30 @@ export class CapsuleSnapshotReadService {
     private readonly incus: IncusClient,
   ) {}
 
-  public async read(ownerId: string, capsuleId: string, input: AgentSnapshotRead): Promise<AgentSnapshotReadOutput> {
+  public async manifestRoots(
+    ownerId: string,
+    capsuleId: string,
+    input: AgentSnapshotManifestRoots,
+  ): Promise<AgentSnapshotManifestRootsOutput> {
     const artifacts = await this.artifacts.load(ownerId, capsuleId, input.snapshotId)
-    if (input.mode === AgentSnapshotReadMode.MANIFEST) {
-      return this.manifest(artifacts, input)
-    }
+    return this.roots(artifacts, input)
+  }
+
+  public async manifestEntries(
+    ownerId: string,
+    capsuleId: string,
+    input: AgentSnapshotManifestEntries,
+  ): Promise<AgentSnapshotManifestEntriesOutput> {
+    const artifacts = await this.artifacts.load(ownerId, capsuleId, input.snapshotId)
+    return this.entries(artifacts, input)
+  }
+
+  public async artifactContent(
+    ownerId: string,
+    capsuleId: string,
+    input: AgentSnapshotArtifactContentRequest,
+  ): Promise<AgentSnapshotArtifactContentOutput> {
+    const artifacts = await this.artifacts.load(ownerId, capsuleId, input.snapshotId)
     if (
       artifacts.agentArtifactContentPolicy !== CapsuleSnapshotAgentArtifactContentPolicy.OWNER_AUTHORIZED_UNREVIEWED
     ) {
@@ -54,22 +76,26 @@ export class CapsuleSnapshotReadService {
     return await this.content(artifacts, input.rootId, input.logicalPath)
   }
 
-  private manifest(artifacts: CommittedSnapshotArtifacts, input: Extract<AgentSnapshotRead, { mode: 'manifest' }>) {
-    if (input.rootId === undefined) {
-      const roots = artifacts.manifest.roots.filter(
-        root => input.afterRootId === undefined || root.id > input.afterRootId,
-      )
-      const page = roots.slice(0, input.limit)
-      const hasNext = roots.length > page.length
+  private roots(
+    artifacts: CommittedSnapshotArtifacts,
+    input: AgentSnapshotManifestRoots,
+  ): AgentSnapshotManifestRootsOutput {
+    const roots = artifacts.manifest.roots.filter(
+      root => input.afterRootId === undefined || root.id > input.afterRootId,
+    )
+    const page = roots.slice(0, input.limit)
+    const hasNext = roots.length > page.length
+    return AgentSnapshotManifestRootsOutputSchema.parse({
+      snapshotId: artifacts.snapshotId,
+      roots: page,
+      nextAfterRootId: hasNext ? (page.at(-1)?.id ?? null) : null,
+    })
+  }
 
-      return AgentSnapshotManifestRootsOutputSchema.parse({
-        mode: AgentSnapshotReadMode.MANIFEST,
-        view: 'roots',
-        snapshotId: artifacts.snapshotId,
-        roots: page,
-        nextAfterRootId: hasNext ? (page.at(-1)?.id ?? null) : null,
-      })
-    }
+  private entries(
+    artifacts: CommittedSnapshotArtifacts,
+    input: AgentSnapshotManifestEntries,
+  ): AgentSnapshotManifestEntriesOutput {
     const root = artifacts.manifest.roots.find(candidate => candidate.id === input.rootId)
     if (!root) {
       throw new IncusError('Committed artifact root was not found.', 'NOT_FOUND')
@@ -82,8 +108,6 @@ export class CapsuleSnapshotReadService {
     const page = entries.slice(0, input.limit)
     const hasNext = entries.length > page.length
     return AgentSnapshotManifestEntriesOutputSchema.parse({
-      mode: AgentSnapshotReadMode.MANIFEST,
-      view: 'entries',
       snapshotId: artifacts.snapshotId,
       root,
       entries: page,
@@ -95,7 +119,7 @@ export class CapsuleSnapshotReadService {
     artifacts: CommittedSnapshotArtifacts,
     rootId: string,
     logicalPath: string,
-  ): Promise<AgentSnapshotReadOutput> {
+  ): Promise<AgentSnapshotArtifactContentOutput> {
     const root = artifacts.manifest.roots.find(candidate => candidate.id === rootId)
     if (!root) {
       throw new IncusError('Committed artifact root was not found.', 'NOT_FOUND')
@@ -122,9 +146,8 @@ export class CapsuleSnapshotReadService {
         if (providerEntry.type !== 'file') {
           throw new IncusError('Committed artifact storage no longer contains the expected regular file.', 'CONFLICT')
         }
-        const content = await this.text(providerEntry.stream, controller.signal, entry.size, entry.contentDigest)
-        return AgentSnapshotContentOutputSchema.parse({
-          mode: AgentSnapshotReadMode.CONTENT,
+        const content = await this.readText(providerEntry.stream, controller.signal, entry.size, entry.contentDigest)
+        return AgentSnapshotArtifactContentOutputSchema.parse({
           snapshotId: artifacts.snapshotId,
           rootId: root.id,
           logicalPath: entry.logicalPath,
@@ -145,7 +168,7 @@ export class CapsuleSnapshotReadService {
     }
   }
 
-  private async text(
+  private async readText(
     stream: ReadableStream<Uint8Array>,
     signal: AbortSignal,
     expectedSize: number,

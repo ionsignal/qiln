@@ -1,13 +1,20 @@
 import {
   AgentGetContextInputSchema,
   AgentGetContextOutputSchema,
-  AgentSnapshotReadInputSchema,
-  AgentSnapshotReadMode,
-  AgentSnapshotReadOutputSchema,
+  AgentSnapshotArtifactContentRequestSchema,
+  AgentSnapshotArtifactContentOutputSchema,
+  AgentSnapshotManifestEntriesInputSchema,
+  AgentSnapshotManifestEntriesOutputSchema,
+  AgentSnapshotManifestRootsInputSchema,
+  AgentSnapshotManifestRootsOutputSchema,
   type AgentGetContext,
   type AgentGetContextOutput,
-  type AgentSnapshotRead,
-  type AgentSnapshotReadOutput,
+  type AgentSnapshotArtifactContentRequest,
+  type AgentSnapshotArtifactContentOutput,
+  type AgentSnapshotManifestEntries,
+  type AgentSnapshotManifestEntriesOutput,
+  type AgentSnapshotManifestRoots,
+  type AgentSnapshotManifestRootsOutput,
 } from '@qiln/core/client'
 import type { QilnAgentConfig } from './config'
 
@@ -71,10 +78,6 @@ function parseError(value: unknown): AgentApiError | null {
     code,
     message,
   }
-}
-
-function readLimit(input: AgentSnapshotRead): number {
-  return input.mode === AgentSnapshotReadMode.CONTENT ? MAX_CONTENT_RESPONSE_BYTES : MAX_MANIFEST_RESPONSE_BYTES
 }
 
 function throwRejectedResponse(response: Response, body: unknown): never {
@@ -158,11 +161,15 @@ async function readJson(response: Response, maxBytes: number, signal: AbortSigna
  */
 export class QilnAgentClient {
   private readonly contextUrl: string
-  private readonly readUrl: string
+  private readonly manifestRootsUrl: string
+  private readonly manifestEntriesUrl: string
+  private readonly artifactContentUrl: string
 
   constructor(private readonly config: QilnAgentConfig) {
     this.contextUrl = new URL('/api/agent/v1/context', config.url).toString()
-    this.readUrl = new URL('/api/agent/v1/read', config.url).toString()
+    this.manifestRootsUrl = new URL('/api/agent/v1/snapshot/manifest/roots', config.url).toString()
+    this.manifestEntriesUrl = new URL('/api/agent/v1/snapshot/manifest/entries', config.url).toString()
+    this.artifactContentUrl = new URL('/api/agent/v1/snapshot/artifact/content', config.url).toString()
   }
 
   public async getContext(input: AgentGetContext = {}): Promise<AgentGetContextOutput> {
@@ -183,18 +190,56 @@ export class QilnAgentClient {
     return context.data
   }
 
-  public async read(input: AgentSnapshotRead): Promise<AgentSnapshotReadOutput> {
-    const request = AgentSnapshotReadInputSchema.safeParse(input)
+  public async manifestRoots(input: AgentSnapshotManifestRoots): Promise<AgentSnapshotManifestRootsOutput> {
+    const request = AgentSnapshotManifestRootsInputSchema.safeParse(input)
     if (!request.success) {
-      throw new QilnAgentClientError('The requested snapshot read is invalid.')
+      throw new QilnAgentClientError('The requested snapshot manifest root read is invalid.')
     }
-    const result = await this.post(this.readUrl, request.data, readLimit(request.data))
+    const result = await this.post(this.manifestRootsUrl, request.data, MAX_MANIFEST_RESPONSE_BYTES)
     if (!result.response.ok) {
       throwRejectedResponse(result.response, result.body)
     }
-    const output = AgentSnapshotReadOutputSchema.safeParse(result.body)
+    const output = AgentSnapshotManifestRootsOutputSchema.safeParse(result.body)
     if (!output.success) {
-      throw new QilnAgentClientError('Qiln host returned an invalid snapshot read response.', {
+      throw new QilnAgentClientError('Qiln host returned an invalid snapshot manifest root response.', {
+        status: result.response.status,
+      })
+    }
+    return output.data
+  }
+
+  public async manifestEntries(input: AgentSnapshotManifestEntries): Promise<AgentSnapshotManifestEntriesOutput> {
+    const request = AgentSnapshotManifestEntriesInputSchema.safeParse(input)
+    if (!request.success) {
+      throw new QilnAgentClientError('The requested snapshot manifest entry read is invalid.')
+    }
+    const result = await this.post(this.manifestEntriesUrl, request.data, MAX_MANIFEST_RESPONSE_BYTES)
+    if (!result.response.ok) {
+      throwRejectedResponse(result.response, result.body)
+    }
+    const output = AgentSnapshotManifestEntriesOutputSchema.safeParse(result.body)
+    if (!output.success) {
+      throw new QilnAgentClientError('Qiln host returned an invalid snapshot manifest entry response.', {
+        status: result.response.status,
+      })
+    }
+    return output.data
+  }
+
+  public async artifactContent(
+    input: AgentSnapshotArtifactContentRequest,
+  ): Promise<AgentSnapshotArtifactContentOutput> {
+    const request = AgentSnapshotArtifactContentRequestSchema.safeParse(input)
+    if (!request.success) {
+      throw new QilnAgentClientError('The requested snapshot artifact content read is invalid.')
+    }
+    const result = await this.post(this.artifactContentUrl, request.data, MAX_CONTENT_RESPONSE_BYTES)
+    if (!result.response.ok) {
+      throwRejectedResponse(result.response, result.body)
+    }
+    const output = AgentSnapshotArtifactContentOutputSchema.safeParse(result.body)
+    if (!output.success) {
+      throw new QilnAgentClientError('Qiln host returned an invalid snapshot artifact content response.', {
         status: result.response.status,
       })
     }

@@ -4,8 +4,12 @@ import {
   createCapsuleBlueprintReference,
   verifyCapsuleBlueprintPin,
   verifyCapsuleSnapshotCapturePolicyPin,
-  type AgentSnapshotRead,
-  type AgentSnapshotReadOutput,
+  type AgentSnapshotArtifactContentRequest,
+  type AgentSnapshotArtifactContentOutput,
+  type AgentSnapshotManifestEntries,
+  type AgentSnapshotManifestEntriesOutput,
+  type AgentSnapshotManifestRoots,
+  type AgentSnapshotManifestRootsOutput,
   type CapsuleSnapshotListOutput,
 } from '@qiln/core/server'
 import { IncusError } from '../../../errors'
@@ -50,8 +54,28 @@ export class CapsuleSnapshotService {
     return CapsuleSnapshotListOutputSchema.parse(snapshots.map(snapshot => this.summary(snapshot)))
   }
 
-  public async read(ownerId: string, capsuleId: string, input: AgentSnapshotRead): Promise<AgentSnapshotReadOutput> {
-    return await this.reader.read(ownerId, capsuleId, input)
+  public async manifestRoots(
+    ownerId: string,
+    capsuleId: string,
+    input: AgentSnapshotManifestRoots,
+  ): Promise<AgentSnapshotManifestRootsOutput> {
+    return await this.reader.manifestRoots(ownerId, capsuleId, input)
+  }
+
+  public async manifestEntries(
+    ownerId: string,
+    capsuleId: string,
+    input: AgentSnapshotManifestEntries,
+  ): Promise<AgentSnapshotManifestEntriesOutput> {
+    return await this.reader.manifestEntries(ownerId, capsuleId, input)
+  }
+
+  public async artifactContent(
+    ownerId: string,
+    capsuleId: string,
+    input: AgentSnapshotArtifactContentRequest,
+  ): Promise<AgentSnapshotArtifactContentOutput> {
+    return await this.reader.artifactContent(ownerId, capsuleId, input)
   }
 
   private summary(snapshot: CapsuleSnapshotRecord) {

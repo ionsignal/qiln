@@ -1,51 +1,112 @@
 import { z } from 'zod'
-import { AgentActorSchema, AgentSnapshotReadInputSchema, AgentSnapshotReadOutputSchema } from '../../../schemas/agent'
+import {
+  AgentActorSchema,
+  AgentSnapshotArtifactContentRequestSchema,
+  AgentSnapshotArtifactContentOutputSchema,
+  AgentSnapshotManifestEntriesInputSchema,
+  AgentSnapshotManifestEntriesOutputSchema,
+  AgentSnapshotManifestRootsInputSchema,
+  AgentSnapshotManifestRootsOutputSchema,
+} from '../../../schemas/agent'
 import { TargetOwnerSchema, TargetType } from '../targets'
 import { defineCapsuleCommand } from './definitions'
 import type { input, output } from 'zod'
 import type { CapsuleCommandDefinition } from './definitions'
 
-const CAPSULE_AGENT_READ_TIMEOUT_MS = 30_000
+const CAPSULE_AGENT_SNAPSHOT_READ_TIMEOUT_MS = 30_000
 
 /**
- * The host publishes this command only after API-key authentication derives the
- * requester, agent actor, capsule scope, and exact snapshot selector. The
+ * The host publishes these commands only after API-key authentication derives
+ * the requester, agent actor, capsule scope, and exact snapshot selectors. The
  * Worker must still prove committed snapshot lineage before returning metadata
  * or artifact content.
  */
 export const CapsuleAgentReadCommandName = {
-  AGENT_READ: 'capsule.agent.read',
+  MANIFEST_ROOTS: 'capsule.agent.read.manifestRoots',
+  MANIFEST_ENTRIES: 'capsule.agent.read.manifestEntries',
+  ARTIFACT_CONTENT: 'capsule.agent.read.artifactContent',
 } as const
 
 export type CapsuleAgentReadCommandName = (typeof CapsuleAgentReadCommandName)[keyof typeof CapsuleAgentReadCommandName]
 
-export const CapsuleAgentReadCommandNameValues = [CapsuleAgentReadCommandName.AGENT_READ] as const
+export const CapsuleAgentReadCommandNameValues = [
+  CapsuleAgentReadCommandName.MANIFEST_ROOTS,
+  CapsuleAgentReadCommandName.MANIFEST_ENTRIES,
+  CapsuleAgentReadCommandName.ARTIFACT_CONTENT,
+] as const
 
-export const CapsuleAgentReadInputSchema = z
+const CapsuleAgentReadBaseSchema = z
   .object({
     target: TargetOwnerSchema,
     actor: AgentActorSchema,
     capsuleId: z.uuid(),
-    read: AgentSnapshotReadInputSchema,
   })
   .strict()
 
-export const CapsuleAgentReadOutputSchema = AgentSnapshotReadOutputSchema
+export const CapsuleAgentManifestRootsInputSchema = CapsuleAgentReadBaseSchema.extend(
+  AgentSnapshotManifestRootsInputSchema.shape,
+).strict()
 
-export type CapsuleAgentReadInput = input<typeof CapsuleAgentReadInputSchema>
-export type CapsuleAgentRead = output<typeof CapsuleAgentReadInputSchema>
-export type CapsuleAgentReadOutput = output<typeof CapsuleAgentReadOutputSchema>
+export const CapsuleAgentManifestEntriesInputSchema = CapsuleAgentReadBaseSchema.extend(
+  AgentSnapshotManifestEntriesInputSchema.shape,
+).strict()
+
+export const CapsuleAgentArtifactContentInputSchema = CapsuleAgentReadBaseSchema.extend(
+  AgentSnapshotArtifactContentRequestSchema.shape,
+).strict()
+
+export const CapsuleAgentManifestRootsOutputSchema = AgentSnapshotManifestRootsOutputSchema
+export const CapsuleAgentManifestEntriesOutputSchema = AgentSnapshotManifestEntriesOutputSchema
+export const CapsuleAgentArtifactContentOutputSchema = AgentSnapshotArtifactContentOutputSchema
+
+export type CapsuleAgentManifestRootsInput = input<typeof CapsuleAgentManifestRootsInputSchema>
+export type CapsuleAgentManifestRoots = output<typeof CapsuleAgentManifestRootsInputSchema>
+export type CapsuleAgentManifestRootsOutput = output<typeof CapsuleAgentManifestRootsOutputSchema>
+
+export type CapsuleAgentManifestEntriesInput = input<typeof CapsuleAgentManifestEntriesInputSchema>
+export type CapsuleAgentManifestEntries = output<typeof CapsuleAgentManifestEntriesInputSchema>
+export type CapsuleAgentManifestEntriesOutput = output<typeof CapsuleAgentManifestEntriesOutputSchema>
+
+export type CapsuleAgentArtifactContentInput = input<typeof CapsuleAgentArtifactContentInputSchema>
+export type CapsuleAgentArtifactContent = output<typeof CapsuleAgentArtifactContentInputSchema>
+export type CapsuleAgentArtifactContentOutput = output<typeof CapsuleAgentArtifactContentOutputSchema>
 
 export const CapsuleAgentReadCommandDefinitions = {
-  [CapsuleAgentReadCommandName.AGENT_READ]: defineCapsuleCommand({
+  [CapsuleAgentReadCommandName.MANIFEST_ROOTS]: defineCapsuleCommand({
     kind: 'capsule.command',
-    name: CapsuleAgentReadCommandName.AGENT_READ,
-    inputSchema: CapsuleAgentReadInputSchema,
-    outputSchema: CapsuleAgentReadOutputSchema,
-    timeoutMs: CAPSULE_AGENT_READ_TIMEOUT_MS,
+    name: CapsuleAgentReadCommandName.MANIFEST_ROOTS,
+    inputSchema: CapsuleAgentManifestRootsInputSchema,
+    outputSchema: CapsuleAgentManifestRootsOutputSchema,
+    timeoutMs: CAPSULE_AGENT_SNAPSHOT_READ_TIMEOUT_MS,
     target: {
       type: TargetType.OWNER,
-      resolve(payload: CapsuleAgentRead) {
+      resolve(payload: CapsuleAgentManifestRoots) {
+        return payload.target
+      },
+    },
+  }),
+  [CapsuleAgentReadCommandName.MANIFEST_ENTRIES]: defineCapsuleCommand({
+    kind: 'capsule.command',
+    name: CapsuleAgentReadCommandName.MANIFEST_ENTRIES,
+    inputSchema: CapsuleAgentManifestEntriesInputSchema,
+    outputSchema: CapsuleAgentManifestEntriesOutputSchema,
+    timeoutMs: CAPSULE_AGENT_SNAPSHOT_READ_TIMEOUT_MS,
+    target: {
+      type: TargetType.OWNER,
+      resolve(payload: CapsuleAgentManifestEntries) {
+        return payload.target
+      },
+    },
+  }),
+  [CapsuleAgentReadCommandName.ARTIFACT_CONTENT]: defineCapsuleCommand({
+    kind: 'capsule.command',
+    name: CapsuleAgentReadCommandName.ARTIFACT_CONTENT,
+    inputSchema: CapsuleAgentArtifactContentInputSchema,
+    outputSchema: CapsuleAgentArtifactContentOutputSchema,
+    timeoutMs: CAPSULE_AGENT_SNAPSHOT_READ_TIMEOUT_MS,
+    target: {
+      type: TargetType.OWNER,
+      resolve(payload: CapsuleAgentArtifactContent) {
         return payload.target
       },
     },
