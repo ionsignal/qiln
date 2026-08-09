@@ -9,14 +9,16 @@
   "scripts": {
     "build": "vite build",
     "dev": "vite build --watch --mode development",
-    "type:check": "tsc --noEmit"
+    "type:check": "tsc --project tsconfig.source.json"
   },
   "exports": {
     ".": {
+      "source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
     "./server": {
+      "source": "./src/server.ts",
       "types": "./dist/server.d.ts",
       "import": "./dist/server.js"
     }

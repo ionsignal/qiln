@@ -16,6 +16,7 @@ import {
   type AgentSnapshotManifestRootsOutput,
 } from '@qiln/core/server'
 import { IncusError } from '../../../errors'
+import type { ReadableStream } from 'node:stream/web'
 import type { IncusClient } from '../../../incus/client'
 import type { CommittedSnapshotArtifacts, CapsuleSnapshotArtifactStore } from './artifact'
 

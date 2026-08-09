@@ -5,10 +5,11 @@
   "scripts": {
     "build": "vite build",
     "dev": "vite build --watch --mode development",
-    "type:check": "tsc --noEmit"
+    "type:check": "tsc --project tsconfig.source.json"
   },
   "exports": {
     "./server": {
+      "source": "./src/server.ts",
       "types": "./dist/server.d.ts",
       "import": "./dist/server.js"
     }

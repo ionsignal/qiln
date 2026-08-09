@@ -34,9 +34,10 @@
     "db:rebuild": "npm run db:reset && rimraf app/server/db/migrations && npm run db:generate && npm run db:migrate && npm run db:seed",
     "db:studio": "drizzle-kit studio",
     "test": "vitest",
+    "type:verify": "npm run build && npm run type:check",
+    "type:check:app": "vue-tsc --noEmit -p app/tsconfig.source.json && tsc --noEmit --project ./app/server/tsconfig.source.json",
     "type:check:packages": "npm run type:check -w @qiln/core && npm run type:check -w @qiln/agent && npm run type:check -w @qiln/mcp && npm run type:check -w @qiln/engine && npm run type:check -w @qiln/worker",
-    "type:check:app": "vue-tsc --noEmit -p app/tsconfig.json && tsc --noEmit --project ./app/server/tsconfig.json",
-    "type:check": "npm run build:lib && npm run type:check:packages && npm run type:check:app",
+    "type:check": "npm run type:check:packages && npm run type:check:app",
     "format:check": "prettier --check .",
     "format:write": "prettier --check --write ."
   },

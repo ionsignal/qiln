@@ -4,10 +4,12 @@
   "type": "module",
   "exports": {
     "./client": {
+      "source": "./src/client.ts",
       "import": "./dist/client.js",
       "types": "./dist/client.d.ts"
     },
     "./server": {
+      "source": "./src/server.ts",
       "import": "./dist/server.js",
       "types": "./dist/server.d.ts"
     }
@@ -15,7 +17,7 @@
   "scripts": {
     "build": "vite build",
     "dev": "vite build --watch --mode development",
-    "type:check": "vue-tsc --noEmit"
+    "type:check": "vue-tsc --project tsconfig.source.json"
   },
   "peerDependencies": {
     "@nats-io/transport-node": "3.4.0",
