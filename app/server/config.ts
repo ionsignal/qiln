@@ -1,4 +1,5 @@
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import type { EnvironmentConfig, MultipartConfig } from '@/types'
 
 const mode = process.env.NODE_ENV
@@ -28,7 +29,10 @@ const defaultRouteBaseDomain = 'edge.ionsignal.com'
 const defaultRoutingIngressEndpoint = 'http://127.0.0.1:8080'
 
 // Helper to get the application path
-const appPath = process.env.FASTIFY_APP_PATH ?? process.cwd()
+const defaultAppPath = path.resolve(fileURLToPath(new URL('../..', import.meta.url)))
+const configuredAppPath = process.env.FASTIFY_APP_PATH?.trim()
+const appPath = path.resolve(configuredAppPath || defaultAppPath)
+
 // Helper to safely decode Base64 strings for mTLS certificates
 const decodeBase64 = (value?: string) => (value ? Buffer.from(value, 'base64').toString('utf-8') : undefined)
 export default {
