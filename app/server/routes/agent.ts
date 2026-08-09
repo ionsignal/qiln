@@ -18,6 +18,67 @@ function isJsonContentType(value: string | undefined): boolean {
   return value?.split(';', 1)[0]?.trim().toLowerCase() === 'application/json'
 }
 
+function contextChannelFailure(error: unknown): {
+  statusCode: number
+  code: string
+  message: string
+} | null {
+  if (!(error instanceof CapsuleChannelError)) {
+    return null
+  }
+  switch (error.code) {
+    case CapsuleChannelErrorCode.BAD_REQUEST:
+      return {
+        statusCode: 400,
+        code: 'bad_request',
+        message: 'Could not resolve the requested agent context.',
+      }
+    case CapsuleChannelErrorCode.UNAUTHORIZED:
+      return {
+        statusCode: 401,
+        code: 'unauthorized',
+        message: 'Unauthorized agent credential.',
+      }
+    case CapsuleChannelErrorCode.FORBIDDEN:
+      return {
+        statusCode: 403,
+        code: 'forbidden',
+        message: 'The requested capsule context is not available.',
+      }
+    case CapsuleChannelErrorCode.NOT_FOUND:
+      return {
+        statusCode: 404,
+        code: 'not_found',
+        message: 'The requested capsule context was not found.',
+      }
+    case CapsuleChannelErrorCode.CONFLICT:
+      return {
+        statusCode: 409,
+        code: 'snapshot_unavailable',
+        message: 'Committed snapshot context evidence is unavailable.',
+      }
+    case CapsuleChannelErrorCode.TIMEOUT:
+      return {
+        statusCode: 504,
+        code: 'upstream_timeout',
+        message: 'Committed snapshot context selection timed out.',
+      }
+    case CapsuleChannelErrorCode.TRANSPORT_ERROR:
+      return {
+        statusCode: 503,
+        code: 'upstream_unavailable',
+        message: 'Committed snapshot context selection is temporarily unavailable.',
+      }
+    case CapsuleChannelErrorCode.INTERNAL_ERROR:
+    default:
+      return {
+        statusCode: 500,
+        code: 'internal_error',
+        message: 'Internal agent API error.',
+      }
+  }
+}
+
 function readFailure(error: unknown): {
   statusCode: number
   code: string
@@ -119,6 +180,7 @@ export default async function (fastify: FastifyInstance) {
     try {
       const context = await resolveAgentContext(
         fastify.db,
+        fastify.agentChannel,
         readAgentBearerKey(request.headers.authorization),
         parsedInput.data,
       )
@@ -140,7 +202,19 @@ export default async function (fastify: FastifyInstance) {
           },
         })
       }
-      fastify.log.error('[Agent] Context resolution failed unexpectedly.')
+      const failure = contextChannelFailure(error)
+      if (failure) {
+        if (failure.statusCode >= 500) {
+          fastify.log.error({ err: error }, '[Agent] Context snapshot selection failed unexpectedly.')
+        }
+        return reply.code(failure.statusCode).send({
+          error: {
+            code: failure.code,
+            message: failure.message,
+          },
+        })
+      }
+      fastify.log.error({ err: error }, '[Agent] Context resolution failed unexpectedly.')
       return reply.code(500).send({
         error: {
           code: 'internal_error',
