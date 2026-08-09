@@ -1,0 +1,23 @@
+{
+  "mcpServers": {
+    "qiln": {
+      "command": "node",
+      "args": [
+        "packages/mcp/dist/cli.js"
+      ],
+      "cwd": "${QILN_WORKING_DIRECTORY}",
+      "env": {
+        "QILN_AGENT_URL": "${QILN_AGENT_URL}",
+        "QILN_AGENT_KEY": "${QILN_AGENT_KEY}"
+      },
+      "protocolVersion": "2026-07-28",
+      "lifecycle": "eager",
+      "directTools": [
+        "qiln_get_context",
+        "qiln_read_manifest_roots",
+        "qiln_read_manifest_entries",
+        "qiln_read_artifact_content"
+      ]
+    }
+  }
+}
