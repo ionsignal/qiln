@@ -13,6 +13,14 @@ export function registerCapsuleAgentReadHandler(worker: QilnWorkerRuntime): void
   }
 
   worker.channel.handle(
+    CapsuleAgentReadCommandName.SNAPSHOT,
+    async input => {
+      return await worker.capsule.snapshot.select(input.target.id, input.capsuleId, input.branchId)
+    },
+    handlerOptions,
+  )
+
+  worker.channel.handle(
     CapsuleAgentReadCommandName.MANIFEST_ROOTS,
     async input => {
       return await worker.capsule.snapshot.manifestRoots(input.target.id, input.capsuleId, {

@@ -1,12 +1,13 @@
-import { and, asc, eq, isNotNull, or } from 'drizzle-orm'
+import { and, asc, desc, eq, isNotNull, isNull, ne, or } from 'drizzle-orm'
 import {
+  CapsuleOperationStatus,
   CapsuleOperationType,
   CapsuleSnapshotMode,
   type CapsulePersistence,
   type CapsuleTables,
 } from '@qiln/core/server'
 import { IncusError } from '../../../errors'
-import type { CapsuleSnapshotListOptions, CapsuleSnapshotRecord } from './types'
+import type { CapsuleSnapshotListOptions, CapsuleSnapshotRecord, CapsuleSnapshotSelectionCandidate } from './types'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
 /**
@@ -115,5 +116,111 @@ export class CapsuleSnapshotStore<
         ),
       )
       .orderBy(asc(capsuleSnapshots.createdAt), asc(capsuleSnapshots.id))
+  }
+
+  /**
+   * Returns newest-first non-archived candidates backed by completed capture
+   * operations. Passing a branch ID limits results to exact captures from that
+   * branch; the selector independently verifies each candidate's immutable
+   * manifest evidence before returning it to an agent.
+   */
+  public async candidates(
+    ownerId: string,
+    capsuleId: string,
+    branchId?: string,
+  ): Promise<CapsuleSnapshotSelectionCandidate[]> {
+    const { capsules, capsuleOperations, capsuleSnapshots, capsuleSnapshotCaptureOperations } = this.persistence.tables
+    const branchCondition = branchId === undefined ? undefined : eq(capsuleSnapshots.sourceBranchId, branchId)
+    return await this.persistence.db
+      .select({
+        id: capsuleSnapshots.id,
+        sourceBranchId: capsuleSnapshots.sourceBranchId,
+        sourceBranchName: capsuleSnapshots.sourceBranchName,
+        createdAt: capsuleSnapshots.createdAt,
+        agentArtifactContentPolicy: capsuleSnapshots.agentArtifactContentPolicy,
+      })
+      .from(capsuleSnapshots)
+      .innerJoin(capsules, and(eq(capsules.id, capsuleSnapshots.capsuleId), eq(capsules.ownerId, ownerId)))
+      .innerJoin(
+        capsuleSnapshotCaptureOperations,
+        and(
+          eq(capsuleSnapshotCaptureOperations.snapshotId, capsuleSnapshots.id),
+          eq(capsuleSnapshotCaptureOperations.sourceBranchId, capsuleSnapshots.sourceBranchId),
+          eq(capsuleSnapshotCaptureOperations.sourceBranchName, capsuleSnapshots.sourceBranchName),
+        ),
+      )
+      .innerJoin(
+        capsuleOperations,
+        and(
+          eq(capsuleOperations.id, capsuleSnapshotCaptureOperations.operationId),
+          eq(capsuleOperations.ownerId, ownerId),
+          eq(capsuleOperations.capsuleId, capsuleSnapshots.capsuleId),
+          eq(capsuleOperations.type, CapsuleOperationType.SNAPSHOT_CAPTURE),
+          eq(capsuleOperations.status, CapsuleOperationStatus.COMPLETED),
+          isNotNull(capsuleOperations.completedAt),
+        ),
+      )
+      .where(and(eq(capsuleSnapshots.capsuleId, capsuleId), branchCondition, isNull(capsuleSnapshots.archivedAt)))
+      .orderBy(desc(capsuleSnapshots.createdAt), desc(capsuleSnapshots.id))
+  }
+
+  /**
+   * Resolves the source snapshot of one completed fork only when its target
+   * branch remains owned by the scoped capsule and is not destroyed.
+   */
+  public async forkBase(
+    ownerId: string,
+    capsuleId: string,
+    branchId: string,
+  ): Promise<CapsuleSnapshotSelectionCandidate | null> {
+    const { capsuleBranches, capsuleForkOperations, capsuleOperations, capsuleSnapshots } = this.persistence.tables
+    const candidates = await this.persistence.db
+      .select({
+        id: capsuleSnapshots.id,
+        sourceBranchId: capsuleSnapshots.sourceBranchId,
+        sourceBranchName: capsuleSnapshots.sourceBranchName,
+        createdAt: capsuleSnapshots.createdAt,
+        agentArtifactContentPolicy: capsuleSnapshots.agentArtifactContentPolicy,
+      })
+      .from(capsuleBranches)
+      .innerJoin(capsuleForkOperations, eq(capsuleForkOperations.targetBranchId, capsuleBranches.id))
+      .innerJoin(
+        capsuleOperations,
+        and(
+          eq(capsuleOperations.id, capsuleForkOperations.operationId),
+          eq(capsuleOperations.ownerId, ownerId),
+          eq(capsuleOperations.capsuleId, capsuleId),
+          eq(capsuleOperations.type, CapsuleOperationType.FORK),
+          eq(capsuleOperations.status, CapsuleOperationStatus.COMPLETED),
+          isNotNull(capsuleOperations.completedAt),
+        ),
+      )
+      .innerJoin(
+        capsuleSnapshots,
+        and(
+          eq(capsuleSnapshots.id, capsuleForkOperations.sourceSnapshotId),
+          eq(capsuleSnapshots.capsuleId, capsuleId),
+          isNull(capsuleSnapshots.archivedAt),
+        ),
+      )
+      .where(
+        and(
+          eq(capsuleBranches.id, branchId),
+          eq(capsuleBranches.ownerId, ownerId),
+          eq(capsuleBranches.capsuleId, capsuleId),
+          ne(capsuleBranches.status, 'destroyed'),
+        ),
+      )
+      .orderBy(desc(capsuleSnapshots.createdAt), desc(capsuleSnapshots.id))
+      .limit(2)
+    if (candidates.length > 1) {
+      throw new IncusError('Selected capsule branch has contradictory completed fork provenance.', 'CONFLICT', {
+        ownerId,
+        capsuleId,
+        branchId,
+        candidateSnapshotIds: candidates.map(candidate => candidate.id),
+      })
+    }
+    return candidates[0] ?? null
   }
 }

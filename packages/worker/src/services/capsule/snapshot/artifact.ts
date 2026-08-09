@@ -11,6 +11,7 @@ import {
   type AgentSnapshotArtifactEntry,
   type AgentSnapshotArtifactRoot,
   type CapsuleArtifactManifest,
+  type CapsuleArtifactManifestDigest,
   type CapsuleSnapshotAgentArtifactContentPolicyValue,
   type CapsuleSnapshotResourceReference,
   type CapsulePersistence,
@@ -25,6 +26,8 @@ const MAX_COMMITTED_MANIFEST_ENTRIES = 25_000
 export interface CommittedSnapshotArtifacts {
   snapshotId: string
   agentArtifactContentPolicy: CapsuleSnapshotAgentArtifactContentPolicyValue
+  manifestSchemaVersion: CapsuleArtifactManifest['schemaVersion']
+  manifestDigest: CapsuleArtifactManifestDigest
   manifest: CapsuleArtifactManifest
   rootsById: ReadonlyMap<string, string>
 }
@@ -39,50 +42,64 @@ export class CapsuleSnapshotArtifactStore<
     const header = await this.header(ownerId, capsuleId, snapshotId)
     const roots = await this.roots(header.manifestId)
     const entries = await this.entries(header.manifestId)
-    const rootsByDatabaseId = new Map(roots.map(root => [root.id, root.rootId] as const))
-    const manifestRoots = roots.map(root =>
-      AgentSnapshotArtifactRootSchema.parse({
-        id: root.rootId,
-        logicalPath: root.logicalPath,
-      }),
-    )
-    const manifestEntries = entries.map(entry => {
-      const rootId = rootsByDatabaseId.get(entry.manifestRootId)
-      if (!rootId) {
-        throw new IncusError('Committed artifact manifest entry references an unknown root.', 'CONFLICT', {
+    let manifest: CapsuleArtifactManifest
+    let manifestDigest: CapsuleArtifactManifestDigest
+    try {
+      const rootsByDatabaseId = new Map(roots.map(root => [root.id, root.rootId] as const))
+      const manifestRoots = roots.map(root =>
+        AgentSnapshotArtifactRootSchema.parse({
+          id: root.rootId,
+          logicalPath: root.logicalPath,
+        }),
+      )
+      const manifestEntries = entries.map(entry => {
+        const rootId = rootsByDatabaseId.get(entry.manifestRootId)
+        if (!rootId) {
+          throw new IncusError('Committed artifact manifest entry references an unknown root.', 'CONFLICT', {
+            snapshotId,
+          })
+        }
+        return AgentSnapshotArtifactEntrySchema.parse({
+          rootId,
+          logicalPath: entry.logicalPath,
+          type: entry.type,
+          mode: entry.mode,
+          uid: entry.uid,
+          gid: entry.gid,
+          modifiedAt: toCanonicalCapsuleArtifactTimestamp(entry.modifiedAt),
+          ...(entry.type === 'file'
+            ? {
+                size: entry.size,
+                contentDigest: entry.contentDigest,
+              }
+            : {}),
+        })
+      })
+      manifest = normalizeCapsuleArtifactManifest({
+        schemaVersion: header.manifestSchemaVersion,
+        roots: manifestRoots,
+        entries: manifestEntries,
+      })
+      manifestDigest = digestCapsuleArtifactManifest(manifest)
+      if (manifestDigest !== header.manifestDigest) {
+        throw new IncusError('Committed artifact manifest evidence is inconsistent.', 'CONFLICT', {
           snapshotId,
         })
       }
-      return AgentSnapshotArtifactEntrySchema.parse({
-        rootId,
-        logicalPath: entry.logicalPath,
-        type: entry.type,
-        mode: entry.mode,
-        uid: entry.uid,
-        gid: entry.gid,
-        modifiedAt: toCanonicalCapsuleArtifactTimestamp(entry.modifiedAt),
-        ...(entry.type === 'file'
-          ? {
-              size: entry.size,
-              contentDigest: entry.contentDigest,
-            }
-          : {}),
-      })
-    })
-    const manifest = normalizeCapsuleArtifactManifest({
-      schemaVersion: header.manifestSchemaVersion,
-      roots: manifestRoots,
-      entries: manifestEntries,
-    })
-    const digest = digestCapsuleArtifactManifest(manifest)
-    if (digest !== header.manifestDigest) {
-      throw new IncusError('Committed artifact manifest evidence is inconsistent.', 'CONFLICT', {
+    } catch (error: unknown) {
+      if (error instanceof IncusError) {
+        throw error
+      }
+      throw new IncusError('Committed artifact manifest evidence is invalid.', 'CONFLICT', {
         snapshotId,
+        reason: error instanceof Error ? error.message : 'Unknown manifest validation failure.',
       })
     }
     return {
       snapshotId,
       agentArtifactContentPolicy: header.agentArtifactContentPolicy,
+      manifestSchemaVersion: manifest.schemaVersion,
+      manifestDigest,
       manifest,
       rootsById: new Map(roots.map(root => [root.rootId, root.id] as const)),
     }

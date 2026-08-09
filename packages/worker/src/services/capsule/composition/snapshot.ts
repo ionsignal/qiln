@@ -1,5 +1,6 @@
 import { CapsuleSnapshotArtifactStore } from '../snapshot/artifact'
 import { CapsuleSnapshotReadService } from '../snapshot/read'
+import { CapsuleSnapshotSelector } from '../snapshot/select'
 import { CapsuleSnapshotService } from '../snapshot/service'
 import { CapsuleSnapshotStore } from '../snapshot/store'
 import type { IncusClient } from '../../../incus/client'
@@ -26,6 +27,7 @@ export function composeSnapshotCapability<TDatabase extends PostgresJsDatabase, 
 ): CapsuleSnapshotService {
   const snapshots = new CapsuleSnapshotStore(options.persistence)
   const artifacts = new CapsuleSnapshotArtifactStore(options.persistence)
+  const selector = new CapsuleSnapshotSelector(snapshots, artifacts)
   const reader = new CapsuleSnapshotReadService(artifacts, options.incus)
-  return new CapsuleSnapshotService(snapshots, reader)
+  return new CapsuleSnapshotService(snapshots, reader, selector)
 }

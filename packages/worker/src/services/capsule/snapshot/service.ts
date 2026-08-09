@@ -4,6 +4,7 @@ import {
   createCapsuleBlueprintReference,
   verifyCapsuleBlueprintPin,
   verifyCapsuleSnapshotCapturePolicyPin,
+  type AgentContextSnapshot,
   type AgentSnapshotArtifactContentRequest,
   type AgentSnapshotArtifactContentOutput,
   type AgentSnapshotManifestEntries,
@@ -14,6 +15,7 @@ import {
 } from '@qiln/core/server'
 import { IncusError } from '../../../errors'
 import type { CapsuleSnapshotReadService } from './read'
+import type { CapsuleSnapshotSelector } from './select'
 import type { CapsuleSnapshotListOptions, CapsuleSnapshotRecord } from './types'
 import type { CapsuleSnapshotStore } from './store'
 
@@ -43,6 +45,7 @@ export class CapsuleSnapshotService {
   constructor(
     private readonly snapshots: CapsuleSnapshotStore,
     private readonly reader: CapsuleSnapshotReadService,
+    private readonly selector: CapsuleSnapshotSelector,
   ) {}
 
   public async list(
@@ -52,6 +55,10 @@ export class CapsuleSnapshotService {
   ): Promise<CapsuleSnapshotListOutput> {
     const snapshots = await this.snapshots.list(ownerId, capsuleId, options)
     return CapsuleSnapshotListOutputSchema.parse(snapshots.map(snapshot => this.summary(snapshot)))
+  }
+
+  public async select(ownerId: string, capsuleId: string, branchId?: string): Promise<AgentContextSnapshot | null> {
+    return await this.selector.select(ownerId, capsuleId, branchId)
   }
 
   public async manifestRoots(

@@ -39,6 +39,19 @@ export interface CapsuleSnapshotRecord {
   archivedAt: Date | null
 }
 
+/**
+ * Minimal immutable snapshot projection used by agent-context selection before
+ * the artifact store proves that the candidate's complete manifest remains
+ * readable.
+ */
+export interface CapsuleSnapshotSelectionCandidate {
+  id: string
+  sourceBranchId: string
+  sourceBranchName: CapsuleBranchName
+  createdAt: Date
+  agentArtifactContentPolicy: CapsuleSnapshotAgentArtifactContentPolicyValue
+}
+
 export interface CapsuleSnapshotListOptions {
   includeExperimental?: boolean
 }
