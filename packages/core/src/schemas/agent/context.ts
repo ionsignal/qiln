@@ -1,12 +1,15 @@
 import { z } from 'zod'
+import { CapsuleArtifactManifestReferenceSchema } from '../capsule/artifact/reference'
 import { CapsuleActorType } from '../capsule/actor'
 import { CapsuleBranchNameSchema, CapsuleBranchStatusSchema } from '../capsule/branch'
 import { CapsuleLifecycleStateSchema } from '../capsule/lifecycle'
+import { CapsuleSnapshotTimestampSchema } from '../capsule/snapshot/record'
+import { CapsuleSnapshotAgentArtifactContentPolicySchema } from '../capsule/snapshot/read'
 
 export const AgentBranchSelectorSchema = z
   .object({
-    branchId: z.uuid().optional(),
-    branchName: CapsuleBranchNameSchema.optional(),
+    branchId: z.uuid().optional().describe('Optional exact editable branch ID to inspect.'),
+    branchName: CapsuleBranchNameSchema.optional().describe('Optional editable branch name to inspect.'),
   })
   .strict()
   .superRefine((selector, context) => {
@@ -20,7 +23,8 @@ export const AgentBranchSelectorSchema = z
 
 /**
  * The external agent may supply only a branch selector. The host derives every
- * identity, capsule scope, and eligibility decision from its API credential.
+ * identity, capsule scope, and snapshot selection decision from its API
+ * credential and committed capsule evidence.
  */
 export const AgentGetContextInputSchema = AgentBranchSelectorSchema
 
@@ -47,75 +51,49 @@ export const AgentBranchContextSchema = z
   })
   .strict()
 
-export const AgentDevelopmentIneligibilityReason = {
-  CREDENTIAL_UNSCOPED: 'credential_unscoped',
-  BRANCH_NOT_SELECTED: 'branch_not_selected',
-  CAPSULE_NOT_ACTIVE: 'capsule_not_active',
-  CAPSULE_ARCHIVED: 'capsule_archived',
-  BRANCH_NOT_OFFLINE: 'branch_not_offline',
+export const AgentSnapshotSelection = {
+  CAPSULE_LATEST: 'capsule_latest',
+  BRANCH_LATEST: 'branch_latest',
+  FORK_BASE: 'fork_base',
 } as const
 
-export type AgentDevelopmentIneligibilityReason =
-  (typeof AgentDevelopmentIneligibilityReason)[keyof typeof AgentDevelopmentIneligibilityReason]
-
-export const AgentDevelopmentIneligibilityReasonValues = [
-  AgentDevelopmentIneligibilityReason.CREDENTIAL_UNSCOPED,
-  AgentDevelopmentIneligibilityReason.BRANCH_NOT_SELECTED,
-  AgentDevelopmentIneligibilityReason.CAPSULE_NOT_ACTIVE,
-  AgentDevelopmentIneligibilityReason.CAPSULE_ARCHIVED,
-  AgentDevelopmentIneligibilityReason.BRANCH_NOT_OFFLINE,
+export const AgentSnapshotSelectionValues = [
+  AgentSnapshotSelection.CAPSULE_LATEST,
+  AgentSnapshotSelection.BRANCH_LATEST,
+  AgentSnapshotSelection.FORK_BASE,
 ] as const
 
-export const AgentDevelopmentIneligibilityReasonSchema = z.enum(AgentDevelopmentIneligibilityReasonValues)
-
-export interface AgentDevelopmentEligibility {
-  developmentEligible: boolean
-  developmentIneligibilityReason: AgentDevelopmentIneligibilityReason | null
-}
+export const AgentSnapshotSelectionSchema = z
+  .enum(AgentSnapshotSelectionValues)
+  .describe(
+    'Why Qiln selected this snapshot: capsule_latest is the newest readable capsule snapshot, branch_latest is the newest readable capture from the selected branch, and fork_base is the readable snapshot used to fork the selected branch.',
+  )
 
 /**
- * Derives one canonical development decision from host-authoritative capsule
- * and branch state so clients never receive competing ineligibility reasons.
+ * Exact immutable committed snapshot context selected by the Worker.
+ *
+ * This reference is not a mutable latest pointer and does not reserve the
+ * snapshot. Later manifest and artifact reads must use its exact ID, and may
+ * reject it if the snapshot is archived after this context response.
  */
-export function getAgentDevelopmentEligibility(
-  capsule: z.infer<typeof CapsuleLifecycleStateSchema> | null,
-  branch: z.infer<typeof AgentBranchContextSchema> | null,
-): AgentDevelopmentEligibility {
-  if (capsule === null) {
-    return {
-      developmentEligible: false,
-      developmentIneligibilityReason: AgentDevelopmentIneligibilityReason.CREDENTIAL_UNSCOPED,
-    }
-  }
-  if (branch === null) {
-    return {
-      developmentEligible: false,
-      developmentIneligibilityReason: AgentDevelopmentIneligibilityReason.BRANCH_NOT_SELECTED,
-    }
-  }
-  if (capsule.lifecycleStatus !== 'active') {
-    return {
-      developmentEligible: false,
-      developmentIneligibilityReason: AgentDevelopmentIneligibilityReason.CAPSULE_NOT_ACTIVE,
-    }
-  }
-  if (capsule.archivedAt !== null) {
-    return {
-      developmentEligible: false,
-      developmentIneligibilityReason: AgentDevelopmentIneligibilityReason.CAPSULE_ARCHIVED,
-    }
-  }
-  if (branch.status !== 'offline') {
-    return {
-      developmentEligible: false,
-      developmentIneligibilityReason: AgentDevelopmentIneligibilityReason.BRANCH_NOT_OFFLINE,
-    }
-  }
-  return {
-    developmentEligible: true,
-    developmentIneligibilityReason: null,
-  }
-}
+export const AgentContextSnapshotSchema = z
+  .object({
+    id: z.uuid().describe('Exact immutable committed snapshot ID for later explicit snapshot reads.'),
+    sourceBranchId: z.uuid().describe('Exact branch ID from which this snapshot was captured.'),
+    sourceBranchName: CapsuleBranchNameSchema.describe('Branch name recorded when this snapshot was captured.'),
+    createdAt: CapsuleSnapshotTimestampSchema.describe('Timestamp when this immutable committed snapshot was created.'),
+    selection: AgentSnapshotSelectionSchema,
+    artifactManifest: CapsuleArtifactManifestReferenceSchema.describe(
+      'Verified immutable artifact-manifest reference for the selected snapshot.',
+    ),
+    agentArtifactContentPolicy: CapsuleSnapshotAgentArtifactContentPolicySchema.describe(
+      'Whether later exact artifact-content reads are denied or owner-authorized without secret review.',
+    ),
+  })
+  .strict()
+  .describe(
+    'One exact readable committed snapshot selected for later explicit manifest and artifact reads. The snapshot is immutable but is not reserved against later archival.',
+  )
 
 /**
  * Authoritative external-agent context returned by the host control plane.
@@ -127,12 +105,20 @@ export const AgentGetContextOutputSchema = z
   .object({
     requester: AgentRequesterSchema,
     agent: AgentActorSchema,
-    capsule: CapsuleLifecycleStateSchema.nullable(),
-    branch: AgentBranchContextSchema.nullable(),
-    developmentEligible: z.boolean(),
-    developmentIneligibilityReason: AgentDevelopmentIneligibilityReasonSchema.nullable(),
+    capsule: CapsuleLifecycleStateSchema.nullable().describe(
+      'Capsule lifecycle state derived from the API credential scope, or null for an unscoped credential.',
+    ),
+    branch: AgentBranchContextSchema.nullable().describe(
+      'Selected branch proven to belong to the scoped capsule, or null when no branch was selected.',
+    ),
+    snapshot: AgentContextSnapshotSchema.nullable().describe(
+      'Exact immutable readable snapshot selected from committed capsule history, or null when none is eligible.',
+    ),
   })
   .strict()
+  .describe(
+    'Host-derived agent authority and inspection context. Snapshot IDs are immutable references, not mutable latest pointers.',
+  )
   .superRefine((value, issue) => {
     if (value.capsule === null && value.branch !== null) {
       issue.addIssue({
@@ -141,19 +127,11 @@ export const AgentGetContextOutputSchema = z
         message: 'An unscoped agent credential cannot resolve a branch.',
       })
     }
-    const expected = getAgentDevelopmentEligibility(value.capsule, value.branch)
-    if (value.developmentEligible !== expected.developmentEligible) {
+    if (value.capsule === null && value.snapshot !== null) {
       issue.addIssue({
         code: 'custom',
-        path: ['developmentEligible'],
-        message: 'Development eligibility must match the authoritative capsule and branch state.',
-      })
-    }
-    if (value.developmentIneligibilityReason !== expected.developmentIneligibilityReason) {
-      issue.addIssue({
-        code: 'custom',
-        path: ['developmentIneligibilityReason'],
-        message: 'Development ineligibility reason must match the authoritative capsule and branch state.',
+        path: ['snapshot'],
+        message: 'An unscoped agent credential cannot resolve a snapshot.',
       })
     }
   })
@@ -164,4 +142,6 @@ export type AgentGetContext = z.output<typeof AgentGetContextInputSchema>
 export type AgentRequester = z.infer<typeof AgentRequesterSchema>
 export type AgentActor = z.infer<typeof AgentActorSchema>
 export type AgentBranchContext = z.infer<typeof AgentBranchContextSchema>
+export type AgentSnapshotSelection = z.infer<typeof AgentSnapshotSelectionSchema>
+export type AgentContextSnapshot = z.infer<typeof AgentContextSnapshotSchema>
 export type AgentGetContextOutput = z.infer<typeof AgentGetContextOutputSchema>
