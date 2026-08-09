@@ -11,7 +11,7 @@
     "build:server": "tsc --project ./app/server/tsconfig.json",
     "build:alias": "tsc-alias -p ./app/server/tsconfig.json",
     "build:lib": "npm run build:mcp && npm run build -w @qiln/engine && npm run build -w @qiln/worker",
-    "server:dev": "npm run build:clean && concurrently --prefix-colors 'magenta,red,blue,green,cyan,yellow,white' --names 'CORE,AGENT,MCP,ENGINE,WORKER,SERVER,TYPES' \"npm:server:dev:core:watch\" \"npm:server:dev:agent:watch\" \"npm:server:dev:mcp:watch\" \"npm:server:dev:engine:watch\" \"npm:server:dev:worker:watch\" \"npm:server:dev:compile\" \"npm:server:dev:types\"",
+    "server:dev": "npm run build:clean && concurrently --kill-others-on-fail --prefix-colors 'magenta,red,blue,green,cyan,yellow,white' --names 'CORE,AGENT,MCP,ENGINE,WORKER,SERVER,TYPES' \"npm:server:dev:core:watch\" \"npm:server:dev:agent:watch\" \"npm:server:dev:mcp:watch\" \"npm:server:dev:engine:watch\" \"npm:server:dev:worker:watch\" \"npm:server:dev:compile\" \"npm:server:dev:types\"",
     "server:dev:core:watch": "npm run dev --workspace=@qiln/core",
     "server:dev:agent:watch": "node scripts/wait-for.js packages/core/dist/client.d.ts && npm run dev --workspace=@qiln/agent",
     "server:dev:mcp:watch": "node scripts/wait-for.js packages/agent/dist/index.d.ts && npm run dev --workspace=@qiln/mcp",
@@ -47,7 +47,7 @@
   "workspaces": [
     "packages/*"
   ],
-  "packageManager": "npm@10.9.8",
+  "packageManager": "npm@12.0.2",
   "overrides": {
     "fast-uri": "3.1.5",
     "shell-quote": "1.10.0",
