@@ -6,6 +6,7 @@ import { CaddyClient } from './caddy'
 import { IncusClient } from './incus/client'
 import { ProjectService } from './services/project'
 import { composeCapsuleService, type CapsuleService } from './services/capsule'
+import { SshAuthorizedKeysSyncService } from './services/ssh/keys'
 import { validatePreviewConfig } from './services/capsule/routing/preview/config'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import type { WorkerRuntimeConfig, WorkerRuntimeOptions } from './types'
@@ -97,6 +98,7 @@ export class QilnWorkerRuntime<
   public readonly blueprints: CapsuleBlueprintRegistry
   public readonly supervisor: OperationSupervisor
   public readonly authority: WorkerAuthority
+  public readonly sshAuthorizedKeys: SshAuthorizedKeysSyncService<TDatabase, TTables>
 
   private readonly config: ResolvedWorkerRuntimeConfig
 
@@ -120,6 +122,7 @@ export class QilnWorkerRuntime<
     this.incus = new IncusClient(this.config.incus)
     this.caddy = new CaddyClient(this.config.caddy)
     this.project = new ProjectService(this.incus)
+    this.sshAuthorizedKeys = new SshAuthorizedKeysSyncService(options.persistence, this.incus, this.project)
     this.channel = new CapsuleNatsChannel(this.config.nats, {
       loggerPrefix: CHANNEL_LOG_PREFIX,
     })
