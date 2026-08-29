@@ -1,8 +1,8 @@
 description: Development SSH access for the Qiln orchestrator
 config:
-  limits.cpu: '4'
-  limits.memory: 8GiB
-  limits.processes: '1024'
+  limits.cpu: '8'
+  limits.memory: 16GiB
+  limits.processes: '8192'
   security.idmap.isolated: 'true'
   security.nesting: 'false'
   security.privileged: 'false'
@@ -16,12 +16,6 @@ config:
     ssh_pwauth: false
     bootcmd:
       - [install, -d, -o, qiln, -g, qiln, -m, '0700', /home/qiln/.ssh]
-    write_files:
-      - path: /home/qiln/.ssh/authorized_keys
-        owner: qiln:qiln
-        permissions: '0600'
-        content: |
-          ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPRm9EtYFmO1Q0lN+ifu6jLcAMgTbuxKpKIUgK5Az7yI neutrino84@gmail.com
 
     # Clone after first-boot setup rather than during image construction so
     # every new development instance begins from the latest main available at bootstrap.

@@ -1,10 +1,11 @@
 .env
 .DS_Store
+package-lock.json
 node_modules
 dist
 lib
 data
-package-lock.json
+credentials
 server/db/migrations
 
 # AI Helpers
