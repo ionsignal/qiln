@@ -11,13 +11,13 @@
         "QILN_AGENT_KEY": "${QILN_AGENT_KEY}"
       },
       "protocolVersion": "2026-07-28",
-      "lifecycle": "eager",
-      "directTools": [
-        "qiln_get_context",
-        "qiln_read_manifest_roots",
-        "qiln_read_manifest_entries",
-        "qiln_read_artifact_content"
-      ]
+      "lifecycle": "eager"
+    },
+    "githits": {
+      "url": "https://mcp.githits.com",
+      "auth": "bearer",
+      "bearerTokenEnv": "GITHITS_API_TOKEN",
+      "lifecycle": "eager"
     }
   }
 }
