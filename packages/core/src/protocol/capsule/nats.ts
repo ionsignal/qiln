@@ -10,6 +10,16 @@ import {
   respondJson as respondNatsJson,
 } from '../../transport'
 import {
+  SSH_AUTHORIZED_KEYS_SYNC_QUEUE,
+  SSH_AUTHORIZED_KEYS_SYNC_SUBJECT,
+  SSH_AUTHORIZED_KEYS_SYNC_TIMEOUT_MS,
+  SshAuthorizedKeysSyncAckSchema,
+  SshAuthorizedKeysSyncRequestSchema,
+  type SshAuthorizedKeysSyncAck,
+  type SshAuthorizedKeysSyncHandler,
+  type SshAuthorizedKeysSyncRequestInput,
+} from '../ssh/sync'
+import {
   CapsuleEventSchema,
   getCapsuleCommandDefinition,
   getCapsuleEventDefinition,
@@ -214,6 +224,68 @@ export class CapsuleNatsChannel implements CapsuleChannel {
     return parsedOutput.data
   }
 
+  /**
+   * Sends one private Host-to-Worker branch authorized-key synchronization
+   * request.
+   *
+   * This method intentionally exists only on the server-side concrete channel.
+   * It is not part of CapsuleChannel or the public capsule command registry.
+   */
+  async syncSshAuthorizedKeys(inputValue: SshAuthorizedKeysSyncRequestInput): Promise<SshAuthorizedKeysSyncAck> {
+    const parsedInput = SshAuthorizedKeysSyncRequestSchema.safeParse(inputValue)
+    if (!parsedInput.success) {
+      throw new CapsuleChannelError('Invalid SSH authorized-key synchronization request.', {
+        code: CapsuleChannelErrorCode.BAD_REQUEST,
+        details: validationDetails(parsedInput.error),
+      })
+    }
+    let rawEnvelope: unknown
+    try {
+      rawEnvelope = await requestJson(this.connection, SSH_AUTHORIZED_KEYS_SYNC_SUBJECT, parsedInput.data, {
+        timeoutMs: SSH_AUTHORIZED_KEYS_SYNC_TIMEOUT_MS,
+        context: 'SSH authorized-key synchronization',
+        responseEmptyFallback: {},
+      })
+    } catch (error: unknown) {
+      throw this.toCapsuleCommandTransportError('SSH authorized-key synchronization', error)
+    }
+    const parsedEnvelope = this.safeParseRpcEnvelope(rawEnvelope)
+    if (!parsedEnvelope.ok) {
+      throw new CapsuleChannelError('Malformed SSH authorized-key synchronization response envelope.', {
+        code: CapsuleChannelErrorCode.INTERNAL_ERROR,
+        details: parsedEnvelope.details,
+      })
+    }
+    if (!parsedEnvelope.data.success) {
+      throw new CapsuleChannelError(parsedEnvelope.data.message, {
+        code: parsedEnvelope.data.code,
+        details: parsedEnvelope.data.details,
+      })
+    }
+    const acknowledgement = SshAuthorizedKeysSyncAckSchema.safeParse(parsedEnvelope.data.data)
+    if (!acknowledgement.success) {
+      throw new CapsuleChannelError('Invalid SSH authorized-key synchronization acknowledgement.', {
+        code: CapsuleChannelErrorCode.INTERNAL_ERROR,
+        details: validationDetails(acknowledgement.error),
+      })
+    }
+    return acknowledgement.data
+  }
+
+  /**
+   * Registers the one narrowly scoped private Worker responder used to
+   * synchronize branch authorized keys.
+   */
+  handleSshAuthorizedKeysSync(
+    handler: SshAuthorizedKeysSyncHandler,
+    options: Pick<CapsuleCommandHandlerOptions, 'mapError'> = {},
+  ): void {
+    const sub = this.connection.subscribe(SSH_AUTHORIZED_KEYS_SYNC_SUBJECT, {
+      queue: SSH_AUTHORIZED_KEYS_SYNC_QUEUE,
+    })
+    void this.runSshAuthorizedKeysSyncResponder(sub, handler, options)
+  }
+
   async publish<TName extends CapsuleEventName>(name: TName, eventValue: CapsuleEventInput<TName>): Promise<void> {
     const definition = getCapsuleEventDefinition(name)
     const parsedEvent = this.safeParseEventInput(definition, eventValue)
@@ -307,6 +379,77 @@ export class CapsuleNatsChannel implements CapsuleChannel {
     } finally {
       this.connection.untrack(sub)
       this.connection.unsubscribeSafely(sub)
+    }
+  }
+
+  private async runSshAuthorizedKeysSyncResponder(
+    sub: Subscription,
+    handler: SshAuthorizedKeysSyncHandler,
+    options: Pick<CapsuleCommandHandlerOptions, 'mapError'>,
+  ): Promise<void> {
+    const shutdownSignal = this.connection.signal
+    try {
+      for await (const msg of sub) {
+        if (shutdownSignal.aborted) {
+          break
+        }
+        if (!msg.reply) {
+          continue
+        }
+        const envelope = await this.processSshAuthorizedKeysSyncMessage(msg, handler, options)
+        this.respondJson(msg, envelope)
+      }
+    } catch (error: unknown) {
+      if (!shutdownSignal.aborted) {
+        console.error(`${this.loggerPrefix} SSH authorized-key synchronization responder terminated.`, error)
+      }
+    } finally {
+      this.connection.untrack(sub)
+      this.connection.unsubscribeSafely(sub)
+    }
+  }
+
+  private async processSshAuthorizedKeysSyncMessage(
+    msg: Msg,
+    handler: SshAuthorizedKeysSyncHandler,
+    options: Pick<CapsuleCommandHandlerOptions, 'mapError'>,
+  ): Promise<CapsuleRpcEnvelope> {
+    if (msg.subject !== SSH_AUTHORIZED_KEYS_SYNC_SUBJECT) {
+      return this.failureEnvelope(
+        CapsuleChannelErrorCode.BAD_REQUEST,
+        'Malformed SSH authorized-key synchronization subject.',
+      )
+    }
+    const decoded = decodeMessageJson(msg, {
+      context: 'SSH authorized-key synchronization request',
+      emptyFallback: {},
+    })
+    if (!decoded.ok) {
+      return this.failureEnvelope(
+        CapsuleChannelErrorCode.BAD_REQUEST,
+        'Malformed SSH authorized-key synchronization JSON payload.',
+      )
+    }
+    const parsedInput = SshAuthorizedKeysSyncRequestSchema.safeParse(decoded.data)
+    if (!parsedInput.success) {
+      return this.failureEnvelope(
+        CapsuleChannelErrorCode.BAD_REQUEST,
+        'Invalid SSH authorized-key synchronization payload.',
+      )
+    }
+    try {
+      const result = await handler(parsedInput.data)
+      const acknowledgement = SshAuthorizedKeysSyncAckSchema.safeParse(result)
+      if (!acknowledgement.success) {
+        console.error(`${this.loggerPrefix} SSH authorized-key synchronization returned an invalid acknowledgement.`)
+        return this.failureEnvelope(
+          CapsuleChannelErrorCode.INTERNAL_ERROR,
+          'Invalid SSH authorized-key synchronization acknowledgement.',
+        )
+      }
+      return createCapsuleRpcSuccessEnvelope(acknowledgement.data)
+    } catch (error: unknown) {
+      return this.mapCommandError(error, options)
     }
   }
 

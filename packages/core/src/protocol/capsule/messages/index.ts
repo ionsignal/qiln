@@ -62,6 +62,11 @@ import {
   CapsuleSnapshotEventNameValues,
   CapsuleSnapshotEventSchemas,
 } from './snapshot'
+import {
+  CapsuleSshAccessCommandDefinitions,
+  CapsuleSshAccessCommandName,
+  CapsuleSshAccessCommandNameValues,
+} from './ssh'
 import type { CapsuleCommandDefinition, CapsuleEventDefinition } from './definitions'
 
 export * from './definitions'
@@ -75,6 +80,7 @@ export * from './operations'
 export * from './preview'
 export * from './routing'
 export * from './snapshot'
+export * from './ssh'
 
 export const CapsuleCommandName = {
   ...CapsuleAgentReadCommandName,
@@ -85,6 +91,7 @@ export const CapsuleCommandName = {
   ...CapsulePreviewCommandName,
   ...CapsuleRouteCommandName,
   ...CapsuleSnapshotCommandName,
+  ...CapsuleSshAccessCommandName,
   ...CapsuleBlueprintCommandName,
 } as const
 
@@ -99,6 +106,7 @@ export const CapsuleCommandNameValues = [
   ...CapsulePreviewCommandNameValues,
   ...CapsuleRouteCommandNameValues,
   ...CapsuleSnapshotCommandNameValues,
+  ...CapsuleSshAccessCommandNameValues,
   ...CapsuleBlueprintCommandNameValues,
 ] as const
 
@@ -135,6 +143,7 @@ export const CapsuleCommandDefinitions = {
   ...CapsulePreviewCommandDefinitions,
   ...CapsuleRouteCommandDefinitions,
   ...CapsuleSnapshotCommandDefinitions,
+  ...CapsuleSshAccessCommandDefinitions,
   ...CapsuleBlueprintCommandDefinitions,
 } as const satisfies Record<CapsuleCommandName, CapsuleCommandDefinition>
 

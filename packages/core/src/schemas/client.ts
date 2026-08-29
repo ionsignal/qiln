@@ -7,6 +7,9 @@ export * from './capsule/snapshot/mode'
 export * from './capsule/snapshot/read'
 export * from './capsule/snapshot/record'
 export * from './capsule/routing'
+export * from './ssh/key'
+export * from './ssh/access'
+export * from './ssh/grant'
 
 export {
   CapsuleArtifactManifestDigestSchema,
