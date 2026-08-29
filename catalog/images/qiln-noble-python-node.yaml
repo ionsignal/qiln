@@ -37,6 +37,7 @@ packages:
         - curl
         - rsync
         - cloud-init
+        - openssh-server
         # Toolchains & Compilers
         - build-essential
         - g++
@@ -111,12 +112,22 @@ actions:
       mkdir -p /opt/qiln
       mkdir -p /opt/qiln/bin
 
+      # Branch host keys are instance identity and must never be cloned from
+      # the image build environment.
+      rm -f /etc/ssh/ssh_host_*
+
+      # This fixed root-owned substrate is defense in depth only. Host grants,
+      # access fences, tickets, redemption, and relay closure remain the
+      # authorization authority.
+      install -d -o root -g root -m 0700 /etc/ssh/qiln
+      install -o root -g root -m 0600 /dev/null /etc/ssh/qiln/authorized_keys
+
       # Bootstrap and isolate the Python 3.13 Global Virtual Environment
       python3.13 -m venv /opt/qiln/venv
       /opt/qiln/venv/bin/pip install --no-cache-dir --upgrade pip setuptools wheel
 
-      # Bootstrap Node.js PM defaults
-      npm install -g pnpm
+      # Bootstrap Node NPM
+      npm install --global npm@latest
 
       # Apply recursive ownership limits to the qiln unprivileged user
       chown -R qiln:qiln /opt/qiln
@@ -159,3 +170,117 @@ files:
       Package: nodejs
       Pin: origin deb.nodesource.com
       Pin-Priority: 600
+
+  # The branch-local authorized-key file is a defense-in-depth availability
+  # substrate. Host authorization does not depend on synchronization status.
+  - path: /etc/ssh/qiln
+    generator: dump
+    uid: 0
+    gid: 0
+    mode: '0700'
+
+  - path: /etc/ssh/qiln/authorized_keys
+    generator: dump
+    uid: 0
+    gid: 0
+    mode: '0600'
+    content: ''
+
+  - path: /etc/ssh/sshd_config.d/60-qiln.conf
+    generator: dump
+    uid: 0
+    gid: 0
+    mode: '0644'
+    content: |-
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      ChallengeResponseAuthentication no
+      PermitEmptyPasswords no
+      PermitRootLogin no
+      PubkeyAuthentication yes
+      AuthenticationMethods publickey
+      AuthorizedKeysFile /etc/ssh/qiln/authorized_keys
+      StrictModes yes
+
+      HostbasedAuthentication no
+      IgnoreRhosts yes
+      PermitUserEnvironment no
+      AllowAgentForwarding no
+      AllowTcpForwarding no
+      GatewayPorts no
+      PermitTunnel no
+      X11Forwarding no
+      UseDNS no
+      MaxAuthTries 3
+
+      # TODO(ssh-ingress-acl): 10.0.0.0/8 is development-only. 
+      # Production must enforce gateway-only branch SSH ingress with a 
+      # Host-managed Incus ACL limited to the gateway private /32 before 
+      # relying on eventual authorized-key synchronization.
+      AllowUsers qiln@10.0.0.0/8
+
+  # Generates only absent branch host keys, preserves the synchronized
+  # authorized-key file, and validates the complete sshd configuration before
+  # the stock SSH service may start.
+  - path: /usr/local/sbin/qiln-sshd-bootstrap
+    generator: dump
+    uid: 0
+    gid: 0
+    mode: '0755'
+    content: |-
+      #!/bin/sh
+      set -eu
+
+      if [ -L /etc/ssh/qiln ] || { [ -e /etc/ssh/qiln ] && [ ! -d /etc/ssh/qiln ]; }; then
+        echo "Invalid Qiln SSH authorized-key directory substrate." >&2
+        exit 1
+      fi
+
+      install -d -o root -g root -m 0700 /etc/ssh/qiln
+
+      if [ -L /etc/ssh/qiln/authorized_keys ]; then
+        echo "Qiln SSH authorized-key file must not be a symbolic link." >&2
+        exit 1
+      fi
+
+      if [ ! -e /etc/ssh/qiln/authorized_keys ]; then
+        install -o root -g root -m 0600 /dev/null /etc/ssh/qiln/authorized_keys
+      fi
+
+      if [ ! -f /etc/ssh/qiln/authorized_keys ]; then
+        echo "Qiln SSH authorized-key path must be a regular file." >&2
+        exit 1
+      fi
+
+      chown root:root /etc/ssh/qiln/authorized_keys
+      chmod 0600 /etc/ssh/qiln/authorized_keys
+
+      # ssh-keygen -A preserves existing host keys and generates only missing
+      # host-key types.
+      ssh-keygen -A
+      /usr/sbin/sshd -t -f /etc/ssh/sshd_config
+
+  - path: /etc/systemd/system/qiln-sshd-bootstrap.service
+    generator: dump
+    uid: 0
+    gid: 0
+    mode: '0644'
+    content: |-
+      [Unit]
+      Description=Prepare and validate Qiln branch SSH substrate
+      Before=ssh.service
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/sbin/qiln-sshd-bootstrap
+      RemainAfterExit=yes
+
+  - path: /etc/systemd/system/ssh.service.d/qiln-bootstrap.conf
+    generator: dump
+    uid: 0
+    gid: 0
+    mode: '0644'
+    content: |-
+      [Unit]
+      Requires=qiln-sshd-bootstrap.service
+      After=qiln-sshd-bootstrap.service
