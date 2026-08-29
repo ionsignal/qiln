@@ -13,13 +13,14 @@ import type { CapsuleOperationReader } from '../operations/shared/operationReade
 import type { CapsuleOperationStepStore } from '../operations/shared/operationStepStore'
 import type { CapsuleBranchResourceStore } from '../resource/store'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
-import type { CapsuleBlueprintRegistry, CapsulePersistence, CapsuleTables } from '@qiln/core/server'
+import type { CapsuleBlueprintRegistry, CapsuleChannel, CapsulePersistence, CapsuleTables } from '@qiln/core/server'
 
 export interface ComposeCreateCapabilityOptions<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
   TTables extends CapsuleTables = CapsuleTables,
 > {
   incus: IncusClient
+  channel: CapsuleChannel
   project: ProjectService
   blueprints: CapsuleBlueprintRegistry
   supervisor: OperationSupervisor
@@ -54,6 +55,7 @@ export function composeCreateCapability<TDatabase extends PostgresJsDatabase, TT
     resources: options.resources,
     driver: resourceDriver,
     project: options.project,
+    channel: options.channel,
     operationEvents: options.operationEvents,
     lifecycleEvents: options.lifecycleEvents,
     branchEvents: options.branchEvents,

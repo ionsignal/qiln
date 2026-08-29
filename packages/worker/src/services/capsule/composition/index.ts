@@ -89,6 +89,7 @@ export function composeCapsuleService<TDatabase extends PostgresJsDatabase, TTab
   const create = composeCreateCapability({
     persistence: options.persistence,
     incus: options.incus,
+    channel: options.channel,
     project: options.project,
     blueprints: options.blueprints,
     supervisor: options.supervisor,

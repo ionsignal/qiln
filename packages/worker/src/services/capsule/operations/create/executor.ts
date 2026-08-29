@@ -1,4 +1,10 @@
-import { CapsuleOperationType } from '@qiln/core/server'
+import {
+  CapsuleOperationType,
+  CapsuleSshAccessCommandName,
+  SshBranchAccessBlockReason,
+  TargetType,
+  type CapsuleChannel,
+} from '@qiln/core/server'
 import { CapsuleOperationStepRunner } from '../shared'
 import { CreateCapsuleFailurePhase, createCreateCapsuleFailureContext } from './failureContext'
 import { CreateCapsuleExecutionState } from './executionState'
@@ -30,6 +36,7 @@ export interface CreateCapsuleExecutorDependencies {
   resources: CapsuleBranchResourceStore
   driver: CapsuleResourceDriver
   project: ProjectService
+  channel: CapsuleChannel
   operationEvents: CapsuleOperationEventPublisher
   lifecycleEvents: CapsuleLifecycleEventPublisher
   branchEvents: CapsuleBranchEventPublisher
@@ -69,7 +76,6 @@ export class CreateCapsuleExecutor {
 
     try {
       state.beginTerminalPhase(CreateCapsuleFailurePhase.LOAD_EXECUTION_INPUT)
-
       const input = await this.dependencies.repository.loadAcceptedExecutionInput(operationId)
       const executionContext: CreateCapsuleOperationContext = {
         operationId: input.operationId,
@@ -79,14 +85,31 @@ export class CreateCapsuleExecutor {
         rootBranchName: input.rootBranchName,
         namespace: this.dependencies.project.getNamespace(input.ownerId),
       }
-
       context = executionContext
 
       state.beginTerminalPhase(CreateCapsuleFailurePhase.CLAIM_OPERATION)
 
       const runningOperation = await this.dependencies.repository.claimForExecution(operationId)
       this.dependencies.operationEvents.publishChanged(runningOperation)
-
+      await this.runStep(
+        executionContext,
+        state,
+        CreateCapsuleStepKey.INITIALIZE_SSH_ACCESS_FENCE,
+        {
+          reason: SshBranchAccessBlockReason.BRANCH_CREATED,
+        },
+        async () => {
+          await this.dependencies.channel.command(CapsuleSshAccessCommandName.BRANCH_ACCESS_INITIALIZE, {
+            target: {
+              type: TargetType.OWNER,
+              id: executionContext.ownerId,
+            },
+            capsuleId: executionContext.capsuleId,
+            branchId: executionContext.rootBranchId,
+            reason: SshBranchAccessBlockReason.BRANCH_CREATED,
+          })
+        },
+      )
       const resourcePlan = await this.runStep(
         executionContext,
         state,
@@ -225,7 +248,6 @@ export class CreateCapsuleExecutor {
         )
         return
       }
-
       await this.resolveFailure(operationId, context, state, error)
       throw error
     }
@@ -239,7 +261,6 @@ export class CreateCapsuleExecutor {
       createResourceInventoryEntries(plan),
       'capsule create planned resource inventory',
     )
-
     await this.dependencies.repository.recordResourceInventoryProof(
       context.ownerId,
       context.operationId,
@@ -256,12 +277,10 @@ export class CreateCapsuleExecutor {
   ): Promise<void> {
     const failedPhase = state.currentFailurePhase
     const failedStepKey = state.currentStepKey
-
     if (!state.providerIntentCommitted) {
       await this.failBeforeProviderMutation(operationId, context, state, error, failedPhase, failedStepKey)
       return
     }
-
     if (!context) {
       await this.markCleanupRequired(
         operationId,
@@ -276,7 +295,6 @@ export class CreateCapsuleExecutor {
       )
       return
     }
-
     if (failedPhase === CreateCapsuleFailurePhase.COMPLETE_CREATE) {
       await this.markCleanupRequired(
         operationId,
@@ -291,7 +309,6 @@ export class CreateCapsuleExecutor {
       )
       return
     }
-
     const compensation = await this.compensation.compensateCreatedResources(
       {
         operationId: context.operationId,
@@ -300,7 +317,6 @@ export class CreateCapsuleExecutor {
       },
       state.compensation,
     )
-
     if (state.providerOwnershipUncertain || !compensation.fullyCompensated) {
       await this.markCleanupRequired(
         operationId,
@@ -315,7 +331,6 @@ export class CreateCapsuleExecutor {
       )
       return
     }
-
     await this.failAfterSuccessfulCompensation(context, state, error, failedPhase, failedStepKey)
   }
 
@@ -328,7 +343,6 @@ export class CreateCapsuleExecutor {
     failedStepKey: CreateCapsuleStepKey | null,
   ): Promise<void> {
     state.beginTerminalPhase(CreateCapsuleFailurePhase.FAIL_BEFORE_PROVIDER_MUTATION)
-
     const terminal = await this.dependencies.repository.failBeforeProviderMutation(
       operationId,
       error,
@@ -348,7 +362,6 @@ export class CreateCapsuleExecutor {
         compensationCompleted: false,
       }),
     )
-
     this.publishTerminalResult(terminal)
   }
 
@@ -360,7 +373,6 @@ export class CreateCapsuleExecutor {
     failedStepKey: CreateCapsuleStepKey | null,
   ): Promise<void> {
     state.beginTerminalPhase(CreateCapsuleFailurePhase.FAIL_AFTER_SUCCESSFUL_COMPENSATION)
-
     const failureContext = createCreateCapsuleFailureContext({
       operationId: context.operationId,
       capsuleId: context.capsuleId,
@@ -376,7 +388,6 @@ export class CreateCapsuleExecutor {
       compensationAttempted: true,
       compensationCompleted: true,
     })
-
     try {
       const failed = await this.dependencies.repository.failAfterSuccessfulCompensation(
         context.operationId,
@@ -392,7 +403,6 @@ export class CreateCapsuleExecutor {
           terminalizationError,
         },
       )
-
       await this.markCleanupRequired(
         context.operationId,
         context,
@@ -419,7 +429,6 @@ export class CreateCapsuleExecutor {
     failedStepKey: CreateCapsuleStepKey | null,
   ): Promise<void> {
     state.beginTerminalPhase(CreateCapsuleFailurePhase.MARK_CLEANUP_REQUIRED)
-
     const failureContext = createCreateCapsuleFailureContext({
       operationId,
       capsuleId: context?.capsuleId,
@@ -436,7 +445,6 @@ export class CreateCapsuleExecutor {
       compensationCompleted: compensationAttempted && compensationFailures.length === 0,
       compensationFailures,
     })
-
     try {
       const cleanup = await this.dependencies.repository.markCleanupRequired(operationId, error, failureContext)
       this.publishTerminalResult(cleanup)
@@ -457,7 +465,6 @@ export class CreateCapsuleExecutor {
     action: () => Promise<TResult> | TResult,
   ): Promise<TResult> {
     state.beginStep(stepKey)
-
     return await this.stepRunner.run(
       {
         operationId: context.operationId,
@@ -479,7 +486,6 @@ export class CreateCapsuleExecutor {
   private publishTerminalResult(result: CreateCapsuleTerminalResult): void {
     this.dependencies.operationEvents.publishChanged(result.operation)
     this.dependencies.lifecycleEvents.publishChanged(result.operation.ownerId, result.capsule)
-
     if (result.branch) {
       this.dependencies.branchEvents.publishStateChanged(
         result.operation.ownerId,

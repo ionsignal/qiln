@@ -1,4 +1,5 @@
 export const CreateCapsuleStepKey = {
+  INITIALIZE_SSH_ACCESS_FENCE: 'initialize_ssh_access_fence',
   PLAN_RESOURCES: 'plan_resources',
   RECORD_RESOURCE_INVENTORY: 'record_resource_inventory',
   VERIFY_ROOTFS_IMAGE: 'verify_rootfs_image',
@@ -17,6 +18,7 @@ export type CreateCapsuleStepKey = (typeof CreateCapsuleStepKey)[keyof typeof Cr
  * checkpoints and never authorize an abandoned create operation to continue.
  */
 export const CreateCapsuleStepKeys = [
+  CreateCapsuleStepKey.INITIALIZE_SSH_ACCESS_FENCE,
   CreateCapsuleStepKey.PLAN_RESOURCES,
   CreateCapsuleStepKey.RECORD_RESOURCE_INVENTORY,
   CreateCapsuleStepKey.VERIFY_ROOTFS_IMAGE,

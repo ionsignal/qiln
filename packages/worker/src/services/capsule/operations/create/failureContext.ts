@@ -8,6 +8,7 @@ import { CreateCapsuleStepKey } from './stepKeys'
 export const CreateCapsuleFailurePhase = {
   LOAD_EXECUTION_INPUT: 'load_execution_input',
   CLAIM_OPERATION: 'claim_operation',
+  INITIALIZE_SSH_ACCESS_FENCE: CreateCapsuleStepKey.INITIALIZE_SSH_ACCESS_FENCE,
   PLAN_RESOURCES: CreateCapsuleStepKey.PLAN_RESOURCES,
   RECORD_RESOURCE_INVENTORY: CreateCapsuleStepKey.RECORD_RESOURCE_INVENTORY,
   VERIFY_ROOTFS_IMAGE: CreateCapsuleStepKey.VERIFY_ROOTFS_IMAGE,
@@ -84,7 +85,6 @@ export function createCreateCapsuleFailureContext(input: CreateCapsuleFailureCon
   if (input.compensationFailures && input.compensationFailures.length > 0) {
     context.compensationFailures = input.compensationFailures
   }
-
   return context
 }
 
@@ -102,12 +102,9 @@ export function createCreateCapsuleCompensationFailure(input: {
     resourceId: input.resourceId,
     resourceKey: input.resourceKey,
   }
-
   const details = operationFailureDetailsFromUnknown(input.error)
-
   if (details !== undefined) {
     failure.details = details
   }
-
   return failure
 }
