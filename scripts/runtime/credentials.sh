@@ -13,6 +13,7 @@ readonly orchestratorAuthorizedKeysPath="${credentialDirectory}/authorized_keys"
 readonly remoteRuntimeEnvironmentPath='/etc/qiln/runtime.env'
 readonly remoteManualDotenvPath='/opt/qiln/.env'
 readonly remoteOrchestratorAuthorizedKeysPath='/home/qiln/.ssh/authorized_keys'
+readonly remoteOrchestratorSshDirectory="${remoteOrchestratorAuthorizedKeysPath%/*}"
 
 project=''
 instance=''
@@ -41,30 +42,59 @@ validateOrchestratorAuthorizedKeysRoster() {
   local lineNumber=0
   local publicKeyCount=0
   local validationPath="${temporaryDirectory}/qiln-orchestrator-authorized-key"
-
   while IFS= read -r line || [[ -n "$line" ]]; do
     lineNumber=$((lineNumber + 1))
-
     if [[ "$line" == *$'\r'* ]]; then
       fail "Orchestrator SSH authorized-key roster contains a carriage return at line ${lineNumber}."
     fi
-
     if [[ -z "${line//[[:space:]]/}" || "$line" =~ ^[[:space:]]*# ]]; then
       continue
     fi
-
     printf '%s\n' "$line" > "${validationPath}"
-
     if ! ssh-keygen -l -f "${validationPath}" >/dev/null 2>&1; then
       fail "Orchestrator SSH authorized-key roster contains an invalid public key at line ${lineNumber}."
     fi
-
     publicKeyCount=$((publicKeyCount + 1))
   done < "${rosterPath}"
-
   if ((publicKeyCount == 0)); then
     fail 'Orchestrator SSH authorized-key roster must contain at least one valid public key.'
   fi
+}
+
+ensureRemoteOrchestratorSshDirectory() {
+  local targetDirectory="$1"
+  incus --project "${project}" exec "${instance}" -- /bin/sh -eu -c '
+    target_directory=$1
+
+    if [ -L /home/qiln ] || [ ! -d /home/qiln ]; then
+      echo "Orchestrator home directory must be a non-symlink directory." >&2
+      exit 1
+    fi
+
+    if [ "$(stat --format="%u:%g" /home/qiln)" != "1000:1000" ]; then
+      echo "Orchestrator home directory must be owned by qiln:qiln." >&2
+      exit 1
+    fi
+
+    if [ -L "${target_directory}" ]; then
+      echo "Orchestrator SSH directory must not be a symbolic link." >&2
+      exit 1
+    fi
+
+    if [ ! -e "${target_directory}" ]; then
+      install -d -o qiln -g qiln -m 0700 -- "${target_directory}"
+    fi
+
+    if [ -L "${target_directory}" ] || [ ! -d "${target_directory}" ]; then
+      echo "Orchestrator SSH directory must be a non-symlink directory." >&2
+      exit 1
+    fi
+
+    if [ "$(stat --format="%u:%g:%a" "${target_directory}")" != "1000:1000:700" ]; then
+      echo "Orchestrator SSH directory must be owned by qiln:qiln with mode 0700." >&2
+      exit 1
+    fi
+  ' qiln-orchestrator-ssh-directory "${targetDirectory}"
 }
 
 while (($# > 0)); do
@@ -202,6 +232,7 @@ fi
 
 chmod 0600 "${stagedOrchestratorAuthorizedKeysPath}"
 validateOrchestratorAuthorizedKeysRoster "${stagedOrchestratorAuthorizedKeysPath}"
+ensureRemoteOrchestratorSshDirectory "${remoteOrchestratorSshDirectory}"
 
 readonly runtimeEnvironmentPath="${temporaryDirectory}/runtime.env"
 readonly manualDotenvPath="${temporaryDirectory}/qiln-manual.env"
@@ -268,6 +299,11 @@ incus --project "${project}" exec "${instance}" -- /bin/sh -eu -c '
 
   if [ -L "${target_directory}" ] || [ ! -d "${target_directory}" ]; then
     echo "Orchestrator SSH directory must be a non-symlink directory." >&2
+    exit 1
+  fi
+ 
+  if [ "$(stat --format="%u:%g:%a" "${target_directory}")" != "1000:1000:700" ]; then
+    echo "Orchestrator SSH directory must be owned by qiln:qiln with mode 0700." >&2
     exit 1
   fi
 
