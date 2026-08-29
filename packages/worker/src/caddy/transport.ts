@@ -220,6 +220,9 @@ export class CaddyHttp {
     const headers = new Headers({
       Accept: 'application/json',
     })
+    if (this.options.endpoint.transport === 'http') {
+      headers.set('Origin', this.options.endpoint.baseUrl)
+    }
     if (request.body !== undefined) {
       headers.set('Content-Type', 'application/json')
     }
