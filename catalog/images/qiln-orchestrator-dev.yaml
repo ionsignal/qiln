@@ -167,6 +167,26 @@ files:
   - path: /var/lib/dbus/machine-id
     generator: remove
 
+  # Cloud-init remains available for Incus NoCloud metadata, but SSH identity
+  # and user provisioning belong to the image bootstrap rather than cloud-init.
+  - path: /etc/cloud/cloud.cfg.d/99-qiln-orchestrator.cfg
+    generator: dump
+    uid: 0
+    gid: 0
+    mode: '0644'
+    content: |-
+      users: []
+      ssh_pwauth: false
+      ssh_deletekeys: false
+      ssh_genkeytypes: []
+      ssh_quiet_keygen: true
+
+      ssh_publish_hostkeys:
+        enabled: false
+
+      ssh:
+        emit_keys_to_console: false
+
   # Basic DHCP networking for the control-plane container.
   - path: /etc/netplan/10-incus.yaml
     generator: dump
@@ -410,9 +430,9 @@ files:
       [Install]
       WantedBy=multi-user.target
 
-  # One idempotent bootstrap owns SSH host keys identifying this concrete
-  # orchestrator instance. ssh.service owns /run/sshd and validates its
-  # configuration after this prerequisite succeeds.
+  # One root-owned prerequisite owns this concrete orchestrator's SSH host
+  # identity and materializes the two development credentials required by
+  # ssh.service and qiln-dev.service.
   - path: /usr/local/sbin/qiln-instance-bootstrap
     generator: dump
     uid: 0
@@ -422,7 +442,254 @@ files:
       #!/bin/sh
       set -eu
 
-      /usr/bin/ssh-keygen -A
+      umask 077
+
+      readonly application_directory='/opt/qiln'
+      readonly application_environment_path='/opt/qiln/.env'
+      readonly home_directory='/home/qiln'
+      readonly ssh_directory='/home/qiln/.ssh'
+      readonly authorized_keys_path='/home/qiln/.ssh/authorized_keys'
+      readonly runtime_environment_path='/etc/qiln/runtime.env'
+
+      credential_directory="${CREDENTIALS_DIRECTORY:-}"
+      environment_temporary_path=''
+      authorized_keys_temporary_path=''
+      roster_validation_path=''
+      host_nats_token=''
+      host_cookie_secret=''
+      carriage_return="$(printf '\r')"
+      ssh_keygen_output=''
+
+      fail() {
+        echo "$1" >&2
+        exit 1
+      }
+
+      cleanup() {
+        if [ -n "${environment_temporary_path}" ]; then
+          rm -f -- "${environment_temporary_path}" || true
+        fi
+        if [ -n "${authorized_keys_temporary_path}" ]; then
+          rm -f -- "${authorized_keys_temporary_path}" || true
+        fi
+        if [ -n "${roster_validation_path}" ]; then
+          rm -f -- "${roster_validation_path}" || true
+        fi
+      }
+
+      trap cleanup 0
+      trap 'exit 1' HUP INT TERM
+
+      validate_regular_file() {
+        file_path=$1
+        file_description=$2
+
+        if [ -L "${file_path}" ] || [ ! -f "${file_path}" ] || [ ! -r "${file_path}" ]; then
+          fail "${file_description} must be a readable regular non-symlink file."
+        fi
+      }
+
+      validate_owned_directory() {
+        directory_path=$1
+        expected_owner=$2
+        directory_description=$3
+
+        if [ -L "${directory_path}" ] || [ ! -d "${directory_path}" ]; then
+          fail "${directory_description} must be a non-symlink directory."
+        fi
+
+        if [ "$(stat --format='%u:%g' "${directory_path}")" != "${expected_owner}" ]; then
+          fail "${directory_description} must be owned by ${expected_owner}."
+        fi
+      }
+
+      validate_materialized_destination() {
+        destination_path=$1
+        destination_description=$2
+
+        if [ -L "${destination_path}" ] || { [ -e "${destination_path}" ] && [ ! -f "${destination_path}" ]; }; then
+          fail "${destination_description} must be absent or a regular non-symlink file."
+        fi
+      }
+
+      validate_credential_directory() {
+        if [ -z "${credential_directory}" ] || [ -L "${credential_directory}" ] || [ ! -d "${credential_directory}" ]; then
+          fail 'Systemd credential directory is unavailable or invalid.'
+        fi
+      }
+
+      validate_trusted_runtime_environment() {
+        validate_regular_file "${runtime_environment_path}" 'Trusted Qiln runtime environment'
+
+        if [ "$(stat --format='%u:%g:%a' "${runtime_environment_path}")" != '0:0:644' ]; then
+          fail 'Trusted Qiln runtime environment must be owned by root:root with mode 0644.'
+        fi
+      }
+
+      validate_safe_dotenv_value() {
+        dotenv_value=$1
+        credential_name=$2
+
+        case "${dotenv_value}" in
+          ''|*[!A-Za-z0-9._+/@:=%-]*)
+            fail "Host credential ${credential_name} contains unsupported dotenv characters."
+            ;;
+        esac
+      }
+
+      validate_host_environment() {
+        host_environment_path=$1
+        host_environment_line=''
+
+        while IFS= read -r host_environment_line || [ -n "${host_environment_line}" ]; do
+          case "${host_environment_line}" in
+            *"${carriage_return}"*)
+              fail 'Host credential dotenv must not contain carriage returns.'
+              ;;
+          esac
+
+          case "${host_environment_line}" in
+            ''|'#'*)
+              continue
+              ;;
+            NATS_TOKEN=*)
+              if [ -n "${host_nats_token}" ]; then
+                fail 'Host credential dotenv must not define NATS_TOKEN more than once.'
+              fi
+              host_nats_token=${host_environment_line#NATS_TOKEN=}
+              validate_safe_dotenv_value "${host_nats_token}" 'NATS_TOKEN'
+              ;;
+            FASTIFY_COOKIE_SECRET=*)
+              if [ -n "${host_cookie_secret}" ]; then
+                fail 'Host credential dotenv must not define FASTIFY_COOKIE_SECRET more than once.'
+              fi
+              host_cookie_secret=${host_environment_line#FASTIFY_COOKIE_SECRET=}
+              validate_safe_dotenv_value "${host_cookie_secret}" 'FASTIFY_COOKIE_SECRET'
+              ;;
+            *)
+              fail 'Host credential dotenv may contain only NATS_TOKEN and FASTIFY_COOKIE_SECRET assignments.'
+              ;;
+          esac
+        done < "${host_environment_path}"
+
+        if [ -z "${host_nats_token}" ] || [ -z "${host_cookie_secret}" ]; then
+          fail 'Host credential dotenv must contain non-empty NATS_TOKEN and FASTIFY_COOKIE_SECRET values.'
+        fi
+      }
+
+      validate_authorized_keys_roster() {
+        roster_path=$1
+        roster_line=''
+        trimmed_roster_line=''
+        roster_line_number=0
+        public_key_count=0
+
+        roster_validation_path="$(mktemp /tmp/qiln-orchestrator-authorized-key.XXXXXX)"
+
+        while IFS= read -r roster_line || [ -n "${roster_line}" ]; do
+          roster_line_number=$((roster_line_number + 1))
+
+          case "${roster_line}" in
+            *"${carriage_return}"*)
+              fail "Orchestrator SSH authorized-key roster contains a carriage return at line ${roster_line_number}."
+              ;;
+          esac
+
+          trimmed_roster_line="$(printf '%s' "${roster_line}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          case "${trimmed_roster_line}" in
+            ''|'#'*)
+              continue
+              ;;
+          esac
+
+          printf '%s\n' "${roster_line}" > "${roster_validation_path}"
+          if ! ssh-keygen -l -f "${roster_validation_path}" >/dev/null 2>&1; then
+            fail "Orchestrator SSH authorized-key roster contains an invalid public key at line ${roster_line_number}."
+          fi
+
+          public_key_count=$((public_key_count + 1))
+        done < "${roster_path}"
+
+        if [ "${public_key_count}" -eq 0 ]; then
+          fail 'Orchestrator SSH authorized-key roster must contain at least one valid public key.'
+        fi
+
+        rm -f -- "${roster_validation_path}"
+        roster_validation_path=''
+      }
+
+      ensure_ssh_directory() {
+        validate_owned_directory "${home_directory}" '1000:1000' 'Qiln home directory'
+
+        if [ -L "${ssh_directory}" ]; then
+          fail 'Qiln SSH directory must not be a symbolic link.'
+        fi
+
+        if [ ! -e "${ssh_directory}" ]; then
+          install -d -o qiln -g qiln -m 0700 -- "${ssh_directory}"
+        fi
+
+        if [ -L "${ssh_directory}" ] || [ ! -d "${ssh_directory}" ]; then
+          fail 'Qiln SSH directory must be a non-symlink directory.'
+        fi
+
+        chown qiln:qiln "${ssh_directory}"
+        chmod 0700 "${ssh_directory}"
+
+        if [ "$(stat --format='%u:%g:%a' "${ssh_directory}")" != '1000:1000:700' ]; then
+          fail 'Qiln SSH directory must be owned by qiln:qiln with mode 0700.'
+        fi
+      }
+
+      write_materialized_environment() {
+        validate_materialized_destination "${application_environment_path}" 'Materialized Qiln dotenv'
+
+        environment_temporary_path="$(mktemp "${application_directory}/.env.qiln.XXXXXX")"
+        {
+          cat "${runtime_environment_path}"
+          printf '\nNATS_TOKEN=%s\nFASTIFY_COOKIE_SECRET=%s\n' "${host_nats_token}" "${host_cookie_secret}"
+        } > "${environment_temporary_path}"
+
+        chown qiln:qiln "${environment_temporary_path}"
+        chmod 0600 "${environment_temporary_path}"
+        mv -f -- "${environment_temporary_path}" "${application_environment_path}"
+        environment_temporary_path=''
+      }
+
+      write_authorized_keys() {
+        validate_materialized_destination "${authorized_keys_path}" 'Materialized orchestrator authorized-key roster'
+
+        authorized_keys_temporary_path="$(mktemp "${ssh_directory}/.authorized_keys.qiln.XXXXXX")"
+        cat "${orchestrator_authorized_keys_credential_path}" > "${authorized_keys_temporary_path}"
+
+        chown qiln:qiln "${authorized_keys_temporary_path}"
+        chmod 0600 "${authorized_keys_temporary_path}"
+        mv -f -- "${authorized_keys_temporary_path}" "${authorized_keys_path}"
+        authorized_keys_temporary_path=''
+      }
+
+      # Suppress normal generation output, but retain diagnostics on failure.
+      if ! ssh_keygen_output="$(/usr/bin/ssh-keygen -A 2>&1)"; then
+        if [ -n "${ssh_keygen_output}" ]; then
+          printf '%s\n' "${ssh_keygen_output}" >&2
+        fi
+        fail 'Failed to generate missing SSH host keys.'
+      fi
+
+      validate_credential_directory
+
+      readonly host_environment_credential_path="${credential_directory}/qiln-host.env"
+      readonly orchestrator_authorized_keys_credential_path="${credential_directory}/qiln-orchestrator-authorized-keys"
+
+      validate_regular_file "${host_environment_credential_path}" 'Qiln Host credential dotenv'
+      validate_regular_file "${orchestrator_authorized_keys_credential_path}" 'Orchestrator SSH authorized-key credential'
+      validate_trusted_runtime_environment
+      validate_owned_directory "${application_directory}" '1000:1000' 'Qiln application directory'
+      validate_host_environment "${host_environment_credential_path}"
+      validate_authorized_keys_roster "${orchestrator_authorized_keys_credential_path}"
+      ensure_ssh_directory
+      write_materialized_environment
+      write_authorized_keys
 
   - path: /etc/systemd/system/qiln-instance-bootstrap.service
     generator: dump
@@ -431,44 +698,187 @@ files:
     mode: '0644'
     content: |-
       [Unit]
-      Description=Initialize Qiln instance SSH identity
+      Description=Initialize Qiln instance identity and development credentials
       After=local-fs.target
-      Before=ssh.service nats-server.service qiln-dev.service
+      Before=ssh.service qiln-dev.service
 
       [Service]
       Type=oneshot
+      ImportCredential=qiln-host.env
+      ImportCredential=qiln-orchestrator-authorized-keys
+      ExecStartPre=/usr/bin/test -r %d/qiln-host.env
+      ExecStartPre=/usr/bin/test -r %d/qiln-orchestrator-authorized-keys
       ExecStart=/usr/local/sbin/qiln-instance-bootstrap
       RemainAfterExit=yes
 
       [Install]
       WantedBy=multi-user.target
 
-  # The Capsule NATS channel treats connected publishers as trusted
-  # control-plane peers. Development mode keeps that bus private to processes
-  # running inside this one orchestrator container.
-  #
+  # Non-secret image-local configuration for first-start source bootstrap.
+  # Revision changes remain explicit development deployment actions.
+  - path: /etc/qiln/development-source.env
+    generator: dump
+    uid: 0
+    gid: 0
+    mode: '0644'
+    content: |-
+      QILN_DEVELOPMENT_SOURCE_REPOSITORY=https://github.com/ionsignal/qiln.git
+      QILN_DEVELOPMENT_SOURCE_BRANCH=main
+
   # The complete secret-bearing NATS configuration is delivered as a direct
   # per-instance Incus system credential and imported only by this service.
+  - path: /usr/local/sbin/qiln-source-bootstrap
+    generator: dump
+    uid: 0
+    gid: 0
+    mode: '0755'
+    content: |-
+      #!/bin/sh
+      set -eu
+
+      readonly source_directory='/opt/qiln'
+      readonly materialized_environment_path='/opt/qiln/.env'
+      readonly source_configuration_path='/etc/qiln/development-source.env'
+
+      source_repository=''
+      source_branch=''
+      staging_directory=''
+
+      fail() {
+        echo "$1" >&2
+        exit 1
+      }
+
+      cleanup() {
+        if [ -n "${staging_directory}" ]; then
+          rm -rf -- "${staging_directory}" || true
+        fi
+      }
+
+      trap cleanup 0
+      trap 'exit 1' HUP INT TERM
+
+      validate_source_directory() {
+        if [ -L "${source_directory}" ] || [ ! -d "${source_directory}" ]; then
+          fail 'Qiln source directory must be a real non-symlink directory.'
+        fi
+
+        if [ "$(stat --format='%u:%g' "${source_directory}")" != '1000:1000' ]; then
+          fail 'Qiln source directory must be owned by qiln:qiln.'
+        fi
+      }
+
+      validate_source_configuration() {
+        if [ -L "${source_configuration_path}" ] || [ ! -f "${source_configuration_path}" ] || [ ! -r "${source_configuration_path}" ]; then
+          fail 'Qiln development source configuration must be a readable regular non-symlink file.'
+        fi
+
+        if [ "$(stat --format='%u:%g:%a' "${source_configuration_path}")" != '0:0:644' ]; then
+          fail 'Qiln development source configuration must be owned by root:root with mode 0644.'
+        fi
+
+        source_configuration_line=''
+        while IFS= read -r source_configuration_line || [ -n "${source_configuration_line}" ]; do
+          case "${source_configuration_line}" in
+            ''|'#'*)
+              continue
+              ;;
+            QILN_DEVELOPMENT_SOURCE_REPOSITORY=*)
+              if [ -n "${source_repository}" ]; then
+                fail 'Qiln development source configuration must not define the repository more than once.'
+              fi
+              source_repository=${source_configuration_line#QILN_DEVELOPMENT_SOURCE_REPOSITORY=}
+              ;;
+            QILN_DEVELOPMENT_SOURCE_BRANCH=*)
+              if [ -n "${source_branch}" ]; then
+                fail 'Qiln development source configuration must not define the branch more than once.'
+              fi
+              source_branch=${source_configuration_line#QILN_DEVELOPMENT_SOURCE_BRANCH=}
+              ;;
+            *)
+              fail 'Qiln development source configuration contains an unsupported entry.'
+              ;;
+          esac
+        done < "${source_configuration_path}"
+
+        if [ "${source_repository}" != 'https://github.com/ionsignal/qiln.git' ]; then
+          fail 'Qiln development source configuration has an unexpected repository.'
+        fi
+
+        if [ "${source_branch}" != 'main' ]; then
+          fail 'Qiln development source configuration has an unexpected branch.'
+        fi
+      }
+
+      validate_materialized_environment() {
+        if [ -L "${materialized_environment_path}" ] || [ ! -f "${materialized_environment_path}" ]; then
+          fail 'Materialized Qiln dotenv must be a regular non-symlink file before source initialization.'
+        fi
+
+        if [ "$(stat --format='%u:%g:%a' "${materialized_environment_path}")" != '1000:1000:600' ]; then
+          fail 'Materialized Qiln dotenv must be owned by qiln:qiln with mode 0600.'
+        fi
+      }
+
+      validate_existing_checkout() {
+        worktree_state="$(git -C "${source_directory}" rev-parse --is-inside-work-tree 2>/dev/null || true)"
+        if [ "${worktree_state}" != 'true' ]; then
+          fail 'Existing Qiln source directory is not a valid Git worktree.'
+        fi
+
+        if [ -L "${source_directory}/package.json" ] || [ ! -f "${source_directory}/package.json" ]; then
+          fail 'Existing Qiln source checkout must contain a regular package.json file.'
+        fi
+      }
+
+      clone_initial_checkout() {
+        staging_directory="$(mktemp -d "${source_directory}/.qiln-source.XXXXXX")"
+        staged_checkout="${staging_directory}/checkout"
+
+        if ! git clone --branch "${source_branch}" --single-branch -- "${source_repository}" "${staged_checkout}"; then
+          fail 'Failed to clone the configured Qiln development source branch.'
+        fi
+
+        if [ -e "${staged_checkout}/.env" ] || [ -L "${staged_checkout}/.env" ]; then
+          fail 'The configured Qiln source checkout must not contain a .env file.'
+        fi
+
+        find "${staged_checkout}" -mindepth 1 -maxdepth 1 -exec mv -- {} "${source_directory}" \;
+        rmdir "${staged_checkout}"
+        rmdir "${staging_directory}"
+        staging_directory=''
+      }
+
+      validate_source_directory
+      validate_source_configuration
+      validate_materialized_environment
+
+      source_entry="$(find "${source_directory}" -mindepth 1 -maxdepth 1 ! -name '.env' -print -quit)"
+      if [ -z "${source_entry}" ]; then
+        clone_initial_checkout
+      fi
+
+      validate_existing_checkout
+
   - path: /etc/systemd/system/nats-server.service.d/qiln-credentials.conf
     generator: dump
     uid: 0
     gid: 0
     mode: '0644'
     content: |-
-      [Unit]
-      Requires=qiln-instance-bootstrap.service
-      After=qiln-instance-bootstrap.service
-      AssertCredential=nats-server.conf
+      #[Unit]
+      #AssertCredential=nats-server.conf
 
       [Service]
       ImportCredential=nats-server.conf
+      ExecStartPre=/usr/bin/test -r %d/nats-server.conf
       ExecStart=
       ExecStart=/usr/sbin/nats-server -c ${CREDENTIALS_DIRECTORY}/nats-server.conf
       NoNewPrivileges=true
       PrivateTmp=true
 
-  # The reusable image contains no administrator key. The dedicated Incus
-  # profile injects the authorized public key through cloud-init.
+  # The reusable image contains no administrator key. The root-owned instance
+  # bootstrap validates and atomically materializes the injected key roster.
   - path: /etc/ssh/sshd_config.d/60-qiln-orchestrator.conf
     generator: dump
     uid: 0
@@ -496,7 +906,8 @@ files:
       UseDNS no
       MaxAuthTries 3
 
-  # SSH must not start until the concrete instance has generated host keys.
+  # SSH must not start until the root prerequisite has generated host keys,
+  # validated the developer SSH roster, and atomically materialized it.
   # Ubuntu's ssh.service then owns /run/sshd and runs sshd -t in ExecStartPre.
   - path: /etc/systemd/system/ssh.service.d/qiln-instance-bootstrap.conf
     generator: dump
@@ -581,8 +992,6 @@ files:
       Requires=postgresql@18-main.service qiln-postgres-bootstrap.service nats-server.service qiln-instance-bootstrap.service
       After=network-online.target postgresql@18-main.service qiln-postgres-bootstrap.service nats-server.service qiln-instance-bootstrap.service
       Wants=network-online.target
-      ConditionPathExists=/opt/qiln/package.json
-      AssertCredential=qiln-host.env
 
       [Service]
       Type=simple
@@ -590,11 +999,9 @@ files:
       Group=qiln
       WorkingDirectory=/opt/qiln
       EnvironmentFile=/etc/qiln/runtime.env
-      Environment=QILN_LOAD_DOTENV=false
-      ImportCredential=qiln-host.env
       ImportCredential=qiln-ssh-gateway-host-key
-      Environment=QILN_HOST_CREDENTIAL_PATH=%d/qiln-host.env
       Environment=QILN_SSH_GATEWAY_HOST_KEY_PATH=%d/qiln-ssh-gateway-host-key
+      ExecStartPre=/usr/local/sbin/qiln-source-bootstrap
       ExecStartPre=/bin/sh -ec 'if [ "$${QILN_SSH_GATEWAY_ENABLED:-false}" = "true" ]; then test -r "$${CREDENTIALS_DIRECTORY}/qiln-ssh-gateway-host-key"; fi'
       ExecStart=/usr/bin/npm run server:dev
       TimeoutStopSec=30s

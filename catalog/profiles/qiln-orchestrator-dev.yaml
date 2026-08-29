@@ -6,38 +6,6 @@ config:
   security.idmap.isolated: 'true'
   security.nesting: 'false'
   security.privileged: 'false'
-  cloud-init.user-data: |-
-    #cloud-config
-    users: []
-    ssh_publish_hostkeys:
-      enabled: false
-    ssh:
-      emit_keys_to_console: false
-    ssh_pwauth: false
-    bootcmd:
-      - [install, -d, -o, qiln, -g, qiln, -m, '0700', /home/qiln/.ssh]
-
-    # Clone after first-boot setup rather than during image construction so
-    # every new development instance begins from the latest main available at bootstrap.
-    runcmd:
-      - |
-        set -eu
-
-        runuser -u qiln -- env HOME=/home/qiln USER=qiln LOGNAME=qiln \
-          git -C /opt/qiln init --initial-branch=main
-
-        runuser -u qiln -- env HOME=/home/qiln USER=qiln LOGNAME=qiln \
-          git -C /opt/qiln remote add origin https://github.com/ionsignal/qiln.git
-
-        runuser -u qiln -- env HOME=/home/qiln USER=qiln LOGNAME=qiln \
-          git -C /opt/qiln fetch --tags origin '+refs/heads/main:refs/remotes/origin/main'
-
-        runuser -u qiln -- env HOME=/home/qiln USER=qiln LOGNAME=qiln \
-          git -C /opt/qiln checkout --track -B main origin/main
-
-        runuser -u qiln -- env HOME=/home/qiln USER=qiln LOGNAME=qiln \
-          git -C /opt/qiln rev-parse HEAD
-
 devices:
   eth0:
     name: eth0
