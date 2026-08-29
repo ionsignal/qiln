@@ -1,0 +1,61 @@
+description: Development SSH access for the Qiln orchestrator
+config:
+  limits.cpu: '4'
+  limits.memory: 8GiB
+  limits.processes: '1024'
+  security.idmap.isolated: 'true'
+  security.nesting: 'false'
+  security.privileged: 'false'
+  cloud-init.user-data: |-
+    #cloud-config
+    users: []
+    ssh_publish_hostkeys:
+      enabled: false
+    ssh:
+      emit_keys_to_console: false
+    ssh_pwauth: false
+    bootcmd:
+      - [install, -d, -o, qiln, -g, qiln, -m, '0700', /home/qiln/.ssh]
+    write_files:
+      - path: /home/qiln/.ssh/authorized_keys
+        owner: qiln:qiln
+        permissions: '0600'
+        content: |
+          ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIPRm9EtYFmO1Q0lN+ifu6jLcAMgTbuxKpKIUgK5Az7yI neutrino84@gmail.com
+
+    # Clone after first-boot setup rather than during image construction so
+    # every new development instance begins from the latest main available at bootstrap.
+    runcmd:
+      - |
+        set -eu
+
+        runuser -u qiln -- env HOME=/home/qiln USER=qiln LOGNAME=qiln \
+          git -C /opt/qiln init --initial-branch=main
+
+        runuser -u qiln -- env HOME=/home/qiln USER=qiln LOGNAME=qiln \
+          git -C /opt/qiln remote add origin https://github.com/ionsignal/qiln.git
+
+        runuser -u qiln -- env HOME=/home/qiln USER=qiln LOGNAME=qiln \
+          git -C /opt/qiln fetch --tags origin '+refs/heads/main:refs/remotes/origin/main'
+
+        runuser -u qiln -- env HOME=/home/qiln USER=qiln LOGNAME=qiln \
+          git -C /opt/qiln checkout --track -B main origin/main
+
+        runuser -u qiln -- env HOME=/home/qiln USER=qiln LOGNAME=qiln \
+          git -C /opt/qiln rev-parse HEAD
+
+devices:
+  eth0:
+    name: eth0
+    network: incusbr0
+    type: nic
+    security.ipv4_filtering: 'true'
+    security.mac_filtering: 'true'
+  incus:
+    type: proxy
+    bind: instance
+    listen: unix:/run/qiln-incus.sock
+    connect: unix:/var/lib/incus/unix.socket
+    uid: '1000'
+    gid: '1000'
+    mode: '0600'

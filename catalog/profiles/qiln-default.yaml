@@ -1,0 +1,13 @@
+# Host baseline profile. Apply intentionally because every default-profile
+# consumer receives these network and root-storage settings.
+description: Default Incus profile
+config: {}
+devices:
+  eth0:
+    name: eth0
+    network: incusbr0
+    type: nic
+  root:
+    path: /
+    pool: is-nvme-pool
+    type: disk
