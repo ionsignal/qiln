@@ -1,0 +1,8 @@
+# Attach this alongside the default profile. Incus profile composition is
+# instance-level; this file intentionally contains no inherited devices.
+description: Privileged Qiln builder capabilities for Distrobuilder image construction
+config:
+  linux.kernel_modules: loop,squashfs
+  security.nesting: 'true'
+  security.privileged: 'true'
+devices: {}

@@ -1,0 +1,112 @@
+image:
+  distribution: ubuntu
+  release: noble
+  architecture: amd64
+  description: 'Qiln Builder Image (Distrobuilder / Seed Volume Maintenance)'
+
+source:
+  downloader: debootstrap
+  url: http://archive.ubuntu.com/ubuntu
+  keyserver: keyserver.ubuntu.com
+  keys:
+    - 0xF6ECB3762474EDA9D21B7022871920D1991BC93C # Ubuntu Archive Automatic Signing Key (2018)
+
+packages:
+  manager: apt
+  update: true
+  cleanup: true
+  sets:
+    - packages:
+        # Bootstrap tools needed before the full package set is available.
+        - ca-certificates
+        - curl
+        - gnupg
+      action: install
+      early: true
+
+    - packages:
+        # Container and cloud-init runtime.
+        - systemd
+        - systemd-sysv
+        - netplan.io
+        - iproute2
+        - locales
+        - cloud-init
+        # General builder and seed-maintenance tools.
+        - vim
+        - git
+        - rsync
+        - tar
+        - gzip
+        - bzip2
+        - unzip
+        - zstd
+        - xz-utils
+        # Rootfs and image-construction dependencies.
+        - debootstrap
+        - squashfs-tools
+        - squashfuse
+        # Distrobuilder is installed from Snap on first boot.
+        - snapd
+      action: install
+
+  repositories:
+    - name: sources.list
+      url: |-
+        deb http://archive.ubuntu.com/ubuntu {{ image.release }} main restricted universe multiverse
+        deb http://archive.ubuntu.com/ubuntu {{ image.release }}-updates main restricted universe multiverse
+        deb http://security.ubuntu.com/ubuntu {{ image.release }}-security main restricted universe multiverse
+
+actions:
+  - trigger: post-packages
+    action: |-
+      #!/bin/sh
+      set -eux
+
+      locale-gen en_US.UTF-8
+      update-locale LANG=en_US.UTF-8
+
+      # This is general builder output, distinct from the instance-local
+      # seed-workspace mount used to edit future capsule branch baselines.
+      mkdir -p /workspace
+
+files:
+  # Incus/cloud-init image templates.
+  - name: meta-data
+    generator: cloud-init
+  - name: network-config
+    generator: cloud-init
+  - name: user-data
+    generator: cloud-init
+  - name: vendor-data
+    generator: cloud-init
+
+  # Prevent derived builder instances from sharing machine identity.
+  - path: /etc/machine-id
+    generator: dump
+    content: ''
+
+  - path: /var/lib/dbus/machine-id
+    generator: remove
+
+  # Builder networking remains profile-independent and uses the Incus NIC.
+  - path: /etc/netplan/10-incus.yaml
+    generator: dump
+    content: |-
+      network:
+        version: 2
+        ethernets:
+          eth0:
+            dhcp4: true
+            dhcp-identifier: mac
+
+  # Distrobuilder remains a first-boot installation because it is distributed
+  # as a classic Snap rather than an APT package.
+  - path: /var/lib/cloud/scripts/per-instance/qiln-install-distrobuilder
+    generator: dump
+    mode: '0755'
+    content: |-
+      #!/bin/sh
+      set -eu
+
+      snap install distrobuilder --classic
