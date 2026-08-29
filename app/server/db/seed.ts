@@ -1,11 +1,10 @@
 import bcrypt from 'bcrypt'
 import { randomBytes } from 'node:crypto'
 import { eq } from 'drizzle-orm'
-import { loadConfig } from 'c12'
 import { createAgentKey } from '@server/agent/key'
+import { loadEnvironmentConfig } from '@server/env'
 import { createDataLayer } from '@server/db'
 import { agentCredentials, users } from '@server/db/schema'
-import type { EnvironmentConfig } from '@/types'
 
 // Deterministic IDs for the default users
 const SYSTEM_USER_ID = '0193f123-4567-7000-ab12-34567890abcd'
@@ -30,11 +29,8 @@ const rootUserData = [
 
 async function seed() {
   console.log('[Seed] Loading configuration...')
-  const { config } = await loadConfig<EnvironmentConfig>({
-    configFile: 'app/dist/server/config',
-    dotenv: true,
-  })
-  if (!config || !config.database?.url) {
+  const config = await loadEnvironmentConfig()
+  if (!config.database?.url) {
     throw new Error('Database configuration missing. Check your .env file.')
   }
   // Initialize Data Layer (DB + Broker)

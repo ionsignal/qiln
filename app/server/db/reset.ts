@@ -1,17 +1,13 @@
-import { loadConfig } from 'c12'
 import postgres from 'postgres'
-import type { EnvironmentConfig } from '@/types'
+import { loadEnvironmentConfig } from '@server/env'
 
 /**
  * Database Reset Script.
  */
 async function reset() {
   console.log('[Reset] Loading configuration...')
-  const { config } = await loadConfig<EnvironmentConfig>({
-    configFile: 'app/dist/server/config',
-    dotenv: true,
-  })
-  if (!config || !config.database?.url) {
+  const config = await loadEnvironmentConfig()
+  if (!config.database?.url) {
     throw new Error('Database configuration missing. Check your .env file.')
   }
   console.log('[Reset] Connecting to database...')

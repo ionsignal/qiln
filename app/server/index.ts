@@ -1,7 +1,7 @@
 import grace from 'close-with-grace'
-import { loadConfig } from 'c12'
 import { logger } from '@server/utils/logger'
 import { createFastifyServer } from '@server/start'
+import { loadEnvironmentConfig } from '@server/env'
 import type { Server, EnvironmentConfig } from '@/types/config'
 
 const graceOptions = { delay: 500 }
@@ -17,12 +17,8 @@ const closeListeners = grace(graceOptions, async (callback: any) => {
 
 let fastifyServer: Server
 let config: EnvironmentConfig
-let options = { configFile: 'app/dist/server/config', dotenv: true }
-loadConfig<EnvironmentConfig>(options).then(async resolved => {
-  if (!resolved.config) {
-    throw Error('application environment configuration missing')
-  }
-  config = resolved.config
+loadEnvironmentConfig().then(async resolvedConfig => {
+  config = resolvedConfig
 
   // create and start fastify server
   fastifyServer = await createFastifyServer(config)

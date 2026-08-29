@@ -21,12 +21,23 @@ const defaultRateLimitConfig = {
   timeWindow: 250,
 }
 
-const defaultIncusEndpoint = 'unix:///var/snap/incus/common/incus/unix.socket'
+const defaultIncusEndpoint = 'unix:///run/qiln-incus.sock'
 const defaultCaddyEndpoint = 'unix:///run/qiln-caddy/admin.sock'
 const defaultCaddyServer = 'qiln'
 const defaultCaddyFallbackId = 'qiln-route-fallback-experimental'
 const defaultRouteBaseDomain = 'edge.ionsignal.com'
 const defaultRoutingIngressEndpoint = 'http://127.0.0.1:8080'
+const defaultSshPublicHost = 'ssh.qiln.example'
+const defaultSshPublicPort = 2222
+const defaultSshTicketTtlMs = 30_000
+const defaultSshRelayClosureTimeoutMs = 15_000
+const defaultSshGatewayBindHost = '0.0.0.0'
+const defaultSshGatewayBindPort = 2222
+const defaultSshGatewayMaxConnections = 256
+const defaultSshGatewayMaxRelays = 128
+const defaultSshGatewayAuthenticationTimeoutMs = 15_000
+const defaultSshGatewayChannelOpenTimeoutMs = 10_000
+const defaultSshGatewayBranchDialTimeoutMs = 10_000
 
 // Helper to get the application path
 const defaultAppPath = path.resolve(fileURLToPath(new URL('../..', import.meta.url)))
@@ -48,11 +59,49 @@ export default {
   worker: {
     embedded: process.env.QILN_EMBEDDED_WORKER_ENABLED === 'true',
   },
+  ssh: {
+    enabled: process.env.QILN_SSH_ENABLED === 'true',
+    ticketTtlMs: parseInt(process.env.QILN_SSH_TICKET_TTL_MS ?? String(defaultSshTicketTtlMs), 10),
+    relayClosureTimeoutMs: parseInt(
+      process.env.QILN_SSH_RELAY_CLOSURE_TIMEOUT_MS ?? String(defaultSshRelayClosureTimeoutMs),
+      10,
+    ),
+    publicHost: process.env.QILN_SSH_PUBLIC_HOST || defaultSshPublicHost,
+    publicPort: parseInt(process.env.QILN_SSH_PUBLIC_PORT ?? String(defaultSshPublicPort), 10),
+    gatewayHostAlias: process.env.QILN_SSH_GATEWAY_HOST_ALIAS || 'qiln-gateway',
+    branchHostAliasPrefix: process.env.QILN_SSH_BRANCH_HOST_ALIAS_PREFIX || 'qiln',
+    defaultIdentityFile: process.env.QILN_SSH_DEFAULT_IDENTITY_FILE || '~/.ssh/id_ed25519_qiln',
+    gateway: {
+      enabled: process.env.QILN_SSH_GATEWAY_ENABLED === 'true',
+      bindHost: process.env.QILN_SSH_GATEWAY_BIND_HOST || defaultSshGatewayBindHost,
+      bindPort: parseInt(process.env.QILN_SSH_GATEWAY_BIND_PORT ?? String(defaultSshGatewayBindPort), 10),
+      instanceId: process.env.QILN_SSH_GATEWAY_INSTANCE_ID || '',
+      hostKeyPath: process.env.QILN_SSH_GATEWAY_HOST_KEY_PATH || '',
+      maxConnections: parseInt(
+        process.env.QILN_SSH_GATEWAY_MAX_CONNECTIONS ?? String(defaultSshGatewayMaxConnections),
+        10,
+      ),
+      maxRelays: parseInt(process.env.QILN_SSH_GATEWAY_MAX_RELAYS ?? String(defaultSshGatewayMaxRelays), 10),
+      authenticationTimeoutMs: parseInt(
+        process.env.QILN_SSH_GATEWAY_AUTHENTICATION_TIMEOUT_MS ?? String(defaultSshGatewayAuthenticationTimeoutMs),
+        10,
+      ),
+      channelOpenTimeoutMs: parseInt(
+        process.env.QILN_SSH_GATEWAY_CHANNEL_OPEN_TIMEOUT_MS ?? String(defaultSshGatewayChannelOpenTimeoutMs),
+        10,
+      ),
+      branchDialTimeoutMs: parseInt(
+        process.env.QILN_SSH_GATEWAY_BRANCH_DIAL_TIMEOUT_MS ?? String(defaultSshGatewayBranchDialTimeoutMs),
+        10,
+      ),
+    },
+  },
   features: {
     experimentalSnapshots: process.env.QILN_EXPERIMENTAL_SNAPSHOTS_ENABLED === 'true',
   },
   cookies: {
     name: process.env.COOKIE_NAME ?? 'runemind_session',
+    secret: process.env.FASTIFY_COOKIE_SECRET,
     path: '/',
     domain: host === 'localhost' ? undefined : host,
     sameSite: 'lax',

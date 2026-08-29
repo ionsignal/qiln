@@ -6,4 +6,5 @@ export interface User {
 
 export interface AuthenticatedUser extends User {
   session: null
+  isAdmin: boolean
 }

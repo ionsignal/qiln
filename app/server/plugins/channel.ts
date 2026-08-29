@@ -4,16 +4,18 @@ import { CapsuleNatsChannel } from '@qiln/core/server'
 export default fp(
   async fastify => {
     const channel = new CapsuleNatsChannel(fastify.config.nats, {
-      loggerPrefix: '[Agent CapsuleChannel]',
+      loggerPrefix: '[QilnHost CapsuleChannel]',
     })
-    fastify.decorate('agentChannel', channel)
     await channel.start()
+    fastify.decorate('channel', channel)
     fastify.addHook('onClose', async () => {
+      fastify.log.info('[CapsuleChannel] Shutting down Host Capsule Channel...')
       await channel.shutdown()
     })
+    fastify.log.info('[CapsuleChannel] Host Capsule Channel initialized')
   },
   {
-    name: 'agent',
-    dependencies: ['db'],
+    name: 'capsule-channel',
+    dependencies: [],
   },
 )

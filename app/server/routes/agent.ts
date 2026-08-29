@@ -180,7 +180,7 @@ export default async function (fastify: FastifyInstance) {
     try {
       const context = await resolveAgentContext(
         fastify.db,
-        fastify.agentChannel,
+        fastify.channel,
         readAgentBearerKey(request.headers.authorization),
         parsedInput.data,
       )
@@ -251,7 +251,7 @@ export default async function (fastify: FastifyInstance) {
       try {
         const result = await resolveAgentManifestRoots(
           fastify.db,
-          fastify.agentChannel,
+          fastify.channel,
           readAgentBearerKey(request.headers.authorization),
           parsedInput.data,
         )
@@ -306,7 +306,7 @@ export default async function (fastify: FastifyInstance) {
       try {
         const result = await resolveAgentManifestEntries(
           fastify.db,
-          fastify.agentChannel,
+          fastify.channel,
           readAgentBearerKey(request.headers.authorization),
           parsedInput.data,
         )
@@ -361,7 +361,7 @@ export default async function (fastify: FastifyInstance) {
       try {
         const result = await resolveAgentArtifactContent(
           fastify.db,
-          fastify.agentChannel,
+          fastify.channel,
           readAgentBearerKey(request.headers.authorization),
           parsedInput.data,
         )

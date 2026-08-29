@@ -13,7 +13,7 @@ export default fp(
     }
     await fastify.register(cookie, {
       hook: 'onRequest',
-      secret: process.env.FASTIFY_COOKIE_SECRET,
+      secret: fastify.config.cookies.secret,
     })
   },
   {

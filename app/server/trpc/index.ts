@@ -5,6 +5,7 @@ import { authRouter } from '@server/trpc/routers/auth'
 import { userRouter } from '@server/trpc/routers/user'
 import { discordRouter } from '@server/trpc/routers/discord'
 import { subscriptionRouter } from '@server/trpc/routers/subscription'
+import { sshRouter } from '@server/trpc/routers/ssh'
 import { engineRouter } from '@qiln/engine/server'
 
 // We merge the Host routers with the Library router.
@@ -17,6 +18,7 @@ export const appRouter = mergeRouters(
     user: userRouter,
     discord: discordRouter,
     stream: subscriptionRouter,
+    ssh: sshRouter,
     engine: engineRouter,
   }),
 )

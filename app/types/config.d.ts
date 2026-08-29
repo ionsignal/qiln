@@ -1,6 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import type { QilnEngineController } from '@qiln/engine/server'
-import type { CapsuleChannel } from '@qiln/core/server'
+import type { CapsuleNatsChannel } from '@qiln/core/server'
 import type {
   QilnWorkerRuntime,
   WorkerRuntimeConfig,
@@ -10,6 +10,7 @@ import type {
 } from '@qiln/worker/server'
 import type { Session } from '@server/plugins/session'
 import type { Database, Persistence } from '@server/db'
+import type { SshHostPolicy } from '@server/ssh/policy'
 
 type MultipartConfig = {
   directory: string
@@ -28,6 +29,7 @@ type LimitConfig = {
 
 type CookiesConfig = {
   name: string
+  secret: string | undefined
   path: string
   domain: string | undefined
   sameSite: boolean | 'lax' | 'strict' | 'none'
@@ -43,6 +45,31 @@ type MailgunConfig = {
 
 type WorkerConfig = {
   embedded: boolean
+}
+
+type SshGatewayConfig = {
+  enabled: boolean
+  bindHost: string
+  bindPort: number
+  instanceId: string
+  hostKeyPath: string
+  maxConnections: number
+  maxRelays: number
+  authenticationTimeoutMs: number
+  channelOpenTimeoutMs: number
+  branchDialTimeoutMs: number
+}
+
+type SshConfig = {
+  enabled: boolean
+  ticketTtlMs: number
+  relayClosureTimeoutMs: number
+  publicHost: string
+  publicPort: number
+  gatewayHostAlias: string
+  branchHostAliasPrefix: string
+  defaultIdentityFile: string
+  gateway: SshGatewayConfig
 }
 
 type DatabaseConfig = NonNullable<WorkerRuntimeConfig['database']>
@@ -71,6 +98,7 @@ type Config = WorkerHostConfig & {
   path: string
   ssl: string
   worker: WorkerConfig
+  ssh: SshConfig
   cookies: CookiesConfig
   multipart: MultipartConfig
   limit: LimitConfig
@@ -95,7 +123,8 @@ declare module 'fastify' {
     persistence: Persistence
     engine: QilnEngineController
     worker: QilnWorkerRuntime | null
-    agentChannel: CapsuleChannel
+    channel: CapsuleNatsChannel
+    sshPolicy: SshHostPolicy
     config: EnvironmentConfig
   }
 }
@@ -114,5 +143,7 @@ export type {
   CaddyConfig,
   RoutingConfig,
   WorkerConfig,
+  SshConfig,
+  SshGatewayConfig,
   FeatureConfig,
 }

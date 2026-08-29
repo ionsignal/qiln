@@ -34,6 +34,7 @@ export class Session {
         id: data.user.id,
         username: data.user.username,
         avatar: data.user.avatar,
+        isAdmin: data.user.isAdmin,
       }
     }
   }

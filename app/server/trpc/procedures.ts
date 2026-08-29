@@ -32,8 +32,26 @@ const isAuthed = t.middleware(({ next, ctx }) => {
   })
 })
 
+/**
+ * Restricts Host administration procedures to authenticated administrators.
+ */
+const isAdmin = t.middleware(({ next, ctx }) => {
+  if (!ctx.user) {
+    throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Not authenticated' })
+  }
+  if (!ctx.user.isAdmin) {
+    throw new TRPCError({ code: 'FORBIDDEN', message: 'Administrator access required' })
+  }
+  return next({
+    ctx: {
+      user: ctx.user,
+    },
+  })
+})
+
 export const publicProcedure = t.procedure
 export const protectedProcedure = t.procedure.use(isAuthed)
+export const adminProcedure = t.procedure.use(isAdmin)
 export const router = t.router
 export const middleware = t.middleware
 export const createCallerFactory = t.createCallerFactory

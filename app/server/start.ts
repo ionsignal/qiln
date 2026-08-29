@@ -52,6 +52,7 @@ async function createFastifyServer(config: EnvironmentConfig) {
   server.get('*', async (request: FastifyRequest, reply: FastifyReply) => {
     const db = server.db
     const engine = server.engine
+    const ssh = server.sshPolicy
     const user = request.session?.user ?? null
     const trpc = createTRPCClient<typeof appRouter>({
       links: [
@@ -63,6 +64,7 @@ async function createFastifyServer(config: EnvironmentConfig) {
               res: reply,
               db,
               engine,
+              ssh,
               user,
             }),
           transformer: superjson,
