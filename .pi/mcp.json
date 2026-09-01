@@ -2,9 +2,7 @@
   "mcpServers": {
     "qiln": {
       "command": "node",
-      "args": [
-        "packages/mcp/dist/cli.js"
-      ],
+      "args": ["packages/mcp/dist/cli.js"],
       "cwd": "${QILN_WORKING_DIRECTORY}",
       "env": {
         "QILN_AGENT_URL": "${QILN_AGENT_URL}",

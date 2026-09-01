@@ -3,9 +3,12 @@
   "version": "0.1.2",
   "type": "module",
   "bin": {
-    "qiln": "./dist/cli.js"
+    "qiln-agent": "./dist/cli.js"
   },
-  "files": ["dist", "README.md"],
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
     "build": "vite build",
     "dev": "vite build --watch --mode development",
@@ -28,7 +31,7 @@
     "zod": "4.4.3"
   },
   "devDependencies": {
-    "@types/node": "26.2.0",
+    "@types/node": "26.4.0",
     "typescript": "6.0.3",
     "vite": "8.2.2",
     "vite-plugin-dts": "5.0.3"

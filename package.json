@@ -5,12 +5,13 @@
   "scripts": {
     "alias": "tsc-alias --debug -p ./app/server/tsconfig.json",
     "build": "npm run build:clean && npm run build:lib && npm run build:vike && npm run build:server && npm run build:alias",
-    "build:clean": "rimraf app/dist packages/core/dist packages/agent/dist packages/mcp/dist packages/engine/dist packages/ssh/dist packages/worker/dist",
+    "build:clean": "rimraf app/dist packages/core/dist packages/agent/dist packages/cli/dist packages/mcp/dist packages/engine/dist packages/ssh/dist packages/worker/dist",
     "build:mcp": "npm run build -w @qiln/core && npm run build -w @qiln/agent && npm run build -w @qiln/mcp",
+    "build:cli": "npm run build -w @qiln/cli",
     "build:vike": "cd app && vike build",
     "build:server": "tsc --project ./app/server/tsconfig.json",
     "build:alias": "tsc-alias -p ./app/server/tsconfig.json",
-    "build:lib": "npm run build:mcp && npm run build -w @qiln/ssh && npm run build -w @qiln/engine && npm run build -w @qiln/worker",
+    "build:lib": "npm run build:mcp && npm run build -w @qiln/ssh && npm run build -w @qiln/engine && npm run build -w @qiln/worker && npm run build:cli",
     "server:dev": "npm run build:clean && concurrently --kill-others-on-fail --prefix-colors 'magenta,gray,red,blue,green,cyan,yellow,white' --names 'CORE,SSH,AGENT,MCP,ENGINE,WORKER,SERVER,TYPES' \"npm:server:dev:core:watch\" \"npm:server:dev:ssh:watch\" \"npm:server:dev:agent:watch\" \"npm:server:dev:mcp:watch\" \"npm:server:dev:engine:watch\" \"npm:server:dev:worker:watch\" \"npm:server:dev:compile\" \"npm:server:dev:types\"",
     "server:dev:core:watch": "npm run dev --workspace=@qiln/core",
     "server:dev:ssh:watch": "node scripts/wait-for.js packages/core/dist/server.d.ts packages/core/dist/sentinel.js && npm run dev --workspace=@qiln/ssh",
@@ -37,7 +38,7 @@
     "test": "vitest",
     "type:verify": "npm run build && npm run type:check",
     "type:check:app": "vue-tsc --noEmit -p app/tsconfig.source.json && tsc --noEmit --project ./app/server/tsconfig.source.json",
-    "type:check:packages": "npm run type:check -w @qiln/core && npm run type:check -w @qiln/ssh && npm run type:check -w @qiln/agent && npm run type:check -w @qiln/mcp && npm run type:check -w @qiln/engine && npm run type:check -w @qiln/worker",
+    "type:check:packages": "npm run type:check -w @qiln/core && npm run type:check -w @qiln/ssh && npm run type:check -w @qiln/agent && npm run type:check -w @qiln/cli && npm run type:check -w @qiln/mcp && npm run type:check -w @qiln/engine && npm run type:check -w @qiln/worker",
     "type:check": "npm run type:check:packages && npm run type:check:app",
     "format:check": "prettier --check .",
     "format:write": "prettier --check --write ."
@@ -99,7 +100,7 @@
   "devDependencies": {
     "@types/bcrypt": "6.0.0",
     "@types/dom-webcodecs": "0.1.19",
-    "@types/node": "26.2.0",
+    "@types/node": "26.4.0",
     "@vitejs/plugin-vue": "6.0.8",
     "@vue/language-core": "3.3.10",
     "concurrently": "10.0.5",

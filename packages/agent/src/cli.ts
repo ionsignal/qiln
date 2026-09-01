@@ -48,10 +48,10 @@ class QilnAgentCliError extends Error {
 function usage(): string {
   return [
     'Usage:',
-    '  qiln get-context [--branch-id <uuid> | --branch-name <name>]',
-    '  qiln read-manifest-roots --snapshot-id <uuid> [--after-root-id <root-id>] [--limit <1-100>]',
-    '  qiln read-manifest-entries --snapshot-id <uuid> --root-id <root-id> [--after-logical-path <path>] [--limit <1-100>]',
-    '  qiln read-artifact-content --snapshot-id <uuid> --root-id <root-id> --logical-path <path>',
+    '  qiln-agent get-context [--branch-id <uuid> | --branch-name <name>]',
+    '  qiln-agent read-manifest-roots --snapshot-id <uuid> [--after-root-id <root-id>] [--limit <1-100>]',
+    '  qiln-agent read-manifest-entries --snapshot-id <uuid> --root-id <root-id> [--after-logical-path <path>] [--limit <1-100>]',
+    '  qiln-agent read-artifact-content --snapshot-id <uuid> --root-id <root-id> --logical-path <path>',
     '',
     'Required environment:',
     '  QILN_AGENT_URL   Qiln host origin, such as https://qiln.example.com',
@@ -303,7 +303,7 @@ export async function run(argumentsList: readonly string[]): Promise<number> {
     writeResult(await tool.execute(client, command.input))
     return 0
   } catch (error: unknown) {
-    process.stderr.write(`qiln: ${formatError(error)}\n`)
+    process.stderr.write(`qiln-agent: ${formatError(error)}\n`)
     return 1
   }
 }
