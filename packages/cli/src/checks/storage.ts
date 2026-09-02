@@ -1,5 +1,6 @@
 import { QilnInstallerError } from '../error'
 import { INSTALLER_SPEC } from '../install/spec'
+import { assertVolume } from '../install/storage'
 import { runProcess } from '../process'
 import { toInstallerError } from '../incus/errors'
 import type { LocalIncusClient } from '../incus/client'
@@ -10,46 +11,6 @@ export interface StoragePreflight {
   hostPoolHealth: string
   incusPool: IncusStoragePool
   existingPostgresVolume: IncusStorageVolume | null
-}
-
-function parseBinarySize(value: string): bigint | null {
-  const match = /^([0-9]+)(B|KiB|MiB|GiB|TiB)?$/.exec(value)
-  if (!match) {
-    return null
-  }
-  const amount = BigInt(match[1]!)
-  const unit = match[2] ?? 'B'
-  const multipliers: Record<string, bigint> = {
-    B: 1n,
-    KiB: 1_024n,
-    MiB: 1_024n ** 2n,
-    GiB: 1_024n ** 3n,
-    TiB: 1_024n ** 4n,
-  }
-  return amount * multipliers[unit]!
-}
-
-function assertCompatiblePostgresVolume(volume: IncusStorageVolume): void {
-  const expectedSize = parseBinarySize(INSTALLER_SPEC.storage.volumeSize)
-  const actualSize = parseBinarySize(volume.config.size ?? '')
-  const compatible =
-    volume.name === INSTALLER_SPEC.storage.volumeName &&
-    volume.type === INSTALLER_SPEC.storage.volumeType &&
-    volume.contentType === INSTALLER_SPEC.storage.volumeContentType &&
-    volume.description === INSTALLER_SPEC.storage.volumeDescription &&
-    expectedSize !== null &&
-    actualSize === expectedSize
-  if (!compatible) {
-    throw new QilnInstallerError({
-      code: 'INCOMPATIBLE_POSTGRES_VOLUME',
-      check: 'existing Qiln PostgreSQL storage volume',
-      summary: 'The existing Qiln PostgreSQL volume conflicts with the installer specification.',
-      observed: `Volume '${volume.name}' reports type='${volume.type}', content_type='${volume.contentType}', size='${volume.config.size ?? 'unset'}', and description='${volume.description}'.`,
-      reason: 'Qiln never replaces or modifies an incompatible persistent data volume automatically.',
-      operatorAction: `Inspect '${INSTALLER_SPEC.storage.volumeName}' in pool '${INSTALLER_SPEC.storage.poolName}' manually. Preserve its data and resolve the naming conflict outside Qiln.`,
-      rerun: 'qiln doctor',
-    })
-  }
 }
 
 export async function validateStoragePreflight(
@@ -159,7 +120,7 @@ export async function validateStoragePreflight(
     })
   }
   if (existingPostgresVolume) {
-    assertCompatiblePostgresVolume(existingPostgresVolume)
+    assertVolume(existingPostgresVolume)
   }
   return {
     hostPoolHealth,

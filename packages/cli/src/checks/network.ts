@@ -1,5 +1,6 @@
 import { QilnInstallerError } from '../error'
 import { INSTALLER_SPEC } from '../install/spec'
+import { assertNetwork } from '../install/network'
 import { runProcess } from '../process'
 import { toInstallerError } from '../incus/errors'
 import type { LocalIncusClient } from '../incus/client'
@@ -78,36 +79,6 @@ function cidrsOverlap(left: IPv4Cidr, right: IPv4Cidr): boolean {
   return left.network <= rightEnd && right.network <= leftEnd
 }
 
-function assertCompatibleNetwork(network: IncusNetwork): void {
-  const expectedConfig = INSTALLER_SPEC.network.config
-  const unexpectedConfigKeys = Object.keys(network.config).filter(
-    key => !Object.hasOwn(expectedConfig, key) && !key.startsWith('volatile.'),
-  )
-  const mismatchedConfig = Object.entries(expectedConfig)
-    .filter(([key, expectedValue]) => network.config[key] !== expectedValue)
-    .map(([key, expectedValue]) => `${key} expected '${expectedValue}' but was '${network.config[key] ?? 'unset'}'`)
-  const compatible =
-    network.name === INSTALLER_SPEC.network.name &&
-    network.type === INSTALLER_SPEC.network.type &&
-    network.description === INSTALLER_SPEC.network.description &&
-    network.managed &&
-    network.status === 'Created' &&
-    mismatchedConfig.length === 0 &&
-    unexpectedConfigKeys.length === 0
-  if (!compatible) {
-    throw new QilnInstallerError({
-      code: 'INCOMPATIBLE_INCUS_NETWORK',
-      check: 'existing incusbr0 compatibility',
-      summary: `The existing network '${INSTALLER_SPEC.network.name}' conflicts with the Qiln installer specification.`,
-      observed: `Incus reports type='${network.type}', managed=${network.managed}, status='${network.status || 'unknown'}', description='${network.description}', ipv4.address='${network.config['ipv4.address'] ?? 'unset'}', ipv4.dhcp='${network.config['ipv4.dhcp'] ?? 'unset'}', ipv4.dhcp.ranges='${network.config['ipv4.dhcp.ranges'] ?? 'unset'}', ipv4.nat='${network.config['ipv4.nat'] ?? 'unset'}', ipv6.address='${network.config['ipv6.address'] ?? 'unset'}', and ipv6.nat='${network.config['ipv6.nat'] ?? 'unset'}'; missing or mismatched expected configuration: ${mismatchedConfig.join('; ') || 'none'}; unexpected non-volatile configuration keys: ${unexpectedConfigKeys.join(', ') || 'none'}.`,
-      reason:
-        'Qiln does not overwrite or partially repair an existing network with conflicting ownership or configuration.',
-      operatorAction: `Inspect '${INSTALLER_SPEC.network.name}' manually. Preserve unrelated workloads and resolve the naming or address conflict outside Qiln.`,
-      rerun: 'qiln doctor',
-    })
-  }
-}
-
 function parseJsonArray(value: string, source: string): unknown[] {
   let parsed: unknown
   try {
@@ -118,7 +89,7 @@ function parseJsonArray(value: string, source: string): unknown[] {
       check: 'host network routes and addresses',
       summary: 'The host IP configuration could not be decoded.',
       observed: `${source} returned invalid JSON.`,
-      reason: 'Qiln cannot prove that 10.77.0.0/24 is free of host routing and address conflicts.',
+      reason: `Qiln cannot prove that ${INSTALLER_SPEC.network.ipv4Subnet} is free of host routing and address conflicts.`,
       operatorAction: 'Inspect and repair the local iproute2 installation manually.',
       rerun: 'qiln doctor',
     })
@@ -137,10 +108,10 @@ function parseJsonArray(value: string, source: string): unknown[] {
   return parsed
 }
 
-async function assertNoIncusNetworkConflict(
+function assertNoIncusNetworkConflict(
   networks: readonly IncusNetwork[],
   existingTargetNetwork: IncusNetwork | null,
-): Promise<void> {
+): void {
   const target = parseIpv4Cidr(INSTALLER_SPEC.network.ipv4Subnet)!
   for (const network of networks) {
     if (network.name === INSTALLER_SPEC.network.name && existingTargetNetwork !== null) {
@@ -178,7 +149,7 @@ async function assertNoHostRouteConflict(
       check: 'host IPv4 routes',
       summary: 'The host IPv4 routing table could not be inspected.',
       observed: `ip returned exit code ${routeResult.exitCode ?? 'unknown'}.`,
-      reason: 'Qiln cannot prove that the planned 10.77.0.0/24 bridge range is conflict-free.',
+      reason: `Qiln cannot prove that the planned ${INSTALLER_SPEC.network.ipv4Subnet} bridge range is conflict-free.`,
       operatorAction: 'Inspect the host networking and iproute2 installation manually.',
       rerun: 'qiln doctor',
     })
@@ -282,15 +253,15 @@ export async function validateNetworkPreflight(
       (await client.getNetworkOrNull(INSTALLER_SPEC.network.name))
   } catch (error: unknown) {
     throw toInstallerError(error, {
-      check: 'existing incusbr0 inspection',
+      check: `existing ${INSTALLER_SPEC.network.name} inspection`,
       operation: `inspect the '${INSTALLER_SPEC.network.name}' network`,
       rerun: 'qiln doctor',
     })
   }
   if (existingTargetNetwork) {
-    assertCompatibleNetwork(existingTargetNetwork)
+    assertNetwork(existingTargetNetwork)
   }
-  await assertNoIncusNetworkConflict(networks, existingTargetNetwork)
+  assertNoIncusNetworkConflict(networks, existingTargetNetwork)
   await assertNoHostRouteConflict(host, existingTargetNetwork)
   return {
     network: existingTargetNetwork,
