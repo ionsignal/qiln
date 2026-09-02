@@ -1,8 +1,18 @@
 import { basename, dirname, join, resolve } from 'node:path'
-import { TextDecoder } from 'node:util'
+import { TextDecoder, TextEncoder } from 'node:util'
 import { QilnInstallerError } from '../error'
 import { runProcess } from '../process'
-import { Dir, FileValidationError, inspectChild, openDir, readChild, withTemp, type FileSnapshot } from './files'
+import {
+  Dir,
+  FileValidationError,
+  createDir,
+  inspectChild,
+  openDir,
+  readChild,
+  withTemp,
+  writeChild,
+  type FileSnapshot,
+} from './files'
 import { INSTALLER_SPEC } from './spec'
 
 const MAX_INSTALLATION_STATE_BYTES = 65_536
@@ -56,7 +66,7 @@ function currentUserId(): number {
   return process.geteuid()
 }
 
-function stateDirectoryPath(environment: NodeJS.ProcessEnv): string {
+export function installerStatePath(environment: NodeJS.ProcessEnv = process.env): string {
   const configuredStateHome = environment.XDG_STATE_HOME?.trim()
   if (configuredStateHome) {
     if (!configuredStateHome.startsWith('/')) {
@@ -180,7 +190,7 @@ function parseInstallationState(value: unknown): InstallationState {
       check: 'installer state format',
       summary: 'The existing Qiln installation state is invalid or incompatible.',
       observed:
-        'installation.json does not contain the expected version, project, instance, and full image fingerprint.',
+        'installation.json does not contain the expected version, project, instance, and full lowercase image fingerprint.',
       reason: 'Qiln cannot use malformed state as the deterministic installation pin.',
       operatorAction: 'Move the state file aside for manual inspection. Do not discard credentials or persistent data.',
       rerun: 'qiln doctor',
@@ -193,7 +203,7 @@ function parseInstallationState(value: unknown): InstallationState {
       code: 'INVALID_INSTALLATION_STATE',
       check: 'installer state format',
       summary: 'The existing Qiln installation state has unsupported fields.',
-      observed: 'installation.json does not match the Batch 1 state schema.',
+      observed: 'installation.json does not match the installer state schema.',
       reason: 'Qiln must not silently reinterpret state produced by an incompatible installer revision.',
       operatorAction: 'Review the installed Qiln CLI version and the existing state file before proceeding.',
       rerun: 'qiln doctor',
@@ -203,22 +213,11 @@ function parseInstallationState(value: unknown): InstallationState {
     version: 1,
     projectName: value.projectName,
     instanceName: value.instanceName,
-    imageFingerprint: value.imageFingerprint.toLowerCase(),
+    imageFingerprint: value.imageFingerprint,
   }
 }
 
 function readInstallationState(snapshot: FileSnapshot): InstallationState {
-  if (snapshot.size > MAX_INSTALLATION_STATE_BYTES) {
-    throw new QilnInstallerError({
-      code: 'INVALID_INSTALLATION_STATE',
-      check: 'installer state size',
-      summary: 'The existing Qiln installation state is unexpectedly large.',
-      observed: `installation.json is ${snapshot.size} bytes; the maximum is ${MAX_INSTALLATION_STATE_BYTES} bytes.`,
-      reason: 'The installer state is expected to be a small bounded JSON document.',
-      operatorAction: 'Move the state file aside and inspect it manually before rerunning Qiln.',
-      rerun: 'qiln doctor',
-    })
-  }
   let parsed: unknown
   try {
     const content = new TextDecoder('utf-8', {
@@ -258,64 +257,69 @@ function rosterReadError(error: unknown, path: string): QilnInstallerError {
       check: 'orchestrator authorized-key roster',
       summary: 'The orchestrator authorized-key roster could not be read.',
       observed: `No readable roster was found at ${path}.`,
-      reason: 'The future stopped installation must inject at least one validated developer SSH key.',
+      reason: 'A supplied roster must resolve to one stable developer-owned regular file.',
       operatorAction: 'Create a normal OpenSSH public-key roster and pass it with --authorized-keys.',
-      rerun: 'qiln up --source <checkout> --image <alias-or-fingerprint> --authorized-keys <roster>',
+      rerun: 'qiln up --source <checkout> --image <alias-or-fingerprint> [--authorized-keys <roster>]',
       cause: error,
     })
   }
-  if (error instanceof FileValidationError) {
-    if (error.kind === 'owner') {
-      return new QilnInstallerError({
-        code: 'INVALID_AUTHORIZED_KEYS_OWNER',
-        check: 'orchestrator authorized-key roster ownership',
-        summary: 'The orchestrator authorized-key roster is not owned by the invoking developer.',
-        observed: `${path} does not have the expected UID ${currentUserId()} ownership.`,
-        reason:
-          'The unprivileged invoking developer must control the non-secret SSH roster supplied to the installation.',
-        operatorAction: 'Copy the intended public keys into a developer-owned regular file.',
-        rerun: 'qiln up --source <checkout> --image <alias-or-fingerprint> --authorized-keys <roster>',
-      })
-    }
-    if (error.kind === 'size') {
-      return new QilnInstallerError({
-        code: 'INVALID_AUTHORIZED_KEYS_SIZE',
-        check: 'orchestrator authorized-key roster size',
-        summary: 'The orchestrator authorized-key roster has an unsupported size.',
-        observed: `${path} must be between 1 and ${MAX_AUTHORIZED_KEYS_BYTES} bytes.`,
-        reason: 'The installer accepts only a bounded, non-empty public-key roster.',
-        operatorAction: 'Provide a bounded roster containing at least one normal OpenSSH public key.',
-        rerun: 'qiln up --source <checkout> --image <alias-or-fingerprint> --authorized-keys <roster>',
-      })
-    }
+  if (error instanceof FileValidationError && error.kind === 'owner') {
     return new QilnInstallerError({
-      code: 'INVALID_AUTHORIZED_KEYS_FILE',
-      check: 'orchestrator authorized-key roster',
-      summary: 'The orchestrator authorized-key roster must be a stable regular non-symbolic-link file.',
-      observed: `${path} could not be safely read as one validated file snapshot.`,
-      reason: 'Qiln must validate one stable roster file without following a redirected credential input.',
-      operatorAction:
-        'Copy the intended public keys into a regular developer-owned file and pass that path explicitly.',
-      rerun: 'qiln up --source <checkout> --image <alias-or-fingerprint> --authorized-keys <roster>',
-      cause: error,
+      code: 'INVALID_AUTHORIZED_KEYS_OWNER',
+      check: 'orchestrator authorized-key roster ownership',
+      summary: 'The orchestrator authorized-key roster is not owned by the invoking developer.',
+      observed: `${path} does not have the expected UID ${currentUserId()} ownership.`,
+      reason: 'The unprivileged invoking developer must control the public-key roster supplied to the installation.',
+      operatorAction: 'Copy the intended public keys into a developer-owned regular file.',
+      rerun: 'qiln up --source <checkout> --image <alias-or-fingerprint> [--authorized-keys <roster>]',
     })
   }
   return new QilnInstallerError({
     code: 'INVALID_AUTHORIZED_KEYS_FILE',
     check: 'orchestrator authorized-key roster',
     summary: 'The orchestrator authorized-key roster could not be safely read.',
-    observed: `${path} could not be opened as a stable regular roster file.`,
-    reason: 'Qiln must validate one stable roster file without following a redirected credential input.',
+    observed: `${path} could not be opened as a stable bounded regular file.`,
+    reason: 'Qiln must validate one stable roster without following redirected credential input.',
     operatorAction: 'Copy the intended public keys into a regular developer-owned file and pass that path explicitly.',
-    rerun: 'qiln up --source <checkout> --image <alias-or-fingerprint> --authorized-keys <roster>',
+    rerun: 'qiln up --source <checkout> --image <alias-or-fingerprint> [--authorized-keys <roster>]',
     cause: error,
   })
+}
+
+async function inspectOpenState(directory: Dir): Promise<InstallerStateInspection> {
+  let installationSnapshot: FileSnapshot | null = null
+  let roster: FileSnapshot | null = null
+  for (const name of await directory.list()) {
+    if (name === INSTALLER_SPEC.state.installationFileName) {
+      installationSnapshot = await readStateChild(directory, name, MAX_INSTALLATION_STATE_BYTES)
+      continue
+    }
+    if (name === INSTALLER_SPEC.state.authorizedKeysFileName) {
+      roster = await readStateChild(directory, name, MAX_AUTHORIZED_KEYS_BYTES)
+      continue
+    }
+    try {
+      await inspectChild(directory, name, {
+        owner: currentUserId(),
+        fileMode: 0o600,
+        directoryMode: 0o700,
+      })
+    } catch (error: unknown) {
+      throw stateError(error, join(directory.path, name))
+    }
+  }
+  return {
+    directoryPath: directory.path,
+    exists: true,
+    installation: installationSnapshot === null ? null : readInstallationState(installationSnapshot),
+    roster,
+  }
 }
 
 export async function inspectInstallerState(
   environment: NodeJS.ProcessEnv = process.env,
 ): Promise<InstallerStateInspection> {
-  const directoryPath = stateDirectoryPath(environment)
+  const directoryPath = installerStatePath(environment)
   let directory: Dir
   try {
     directory = await openDir(directoryPath, {
@@ -334,36 +338,66 @@ export async function inspectInstallerState(
     throw stateError(error, directoryPath, true)
   }
   try {
-    let installationSnapshot: FileSnapshot | null = null
-    let roster: FileSnapshot | null = null
-    for (const name of await directory.list()) {
-      if (name === INSTALLER_SPEC.state.installationFileName) {
-        installationSnapshot = await readStateChild(directory, name, MAX_INSTALLATION_STATE_BYTES)
-        continue
-      }
-      if (name === INSTALLER_SPEC.state.authorizedKeysFileName) {
-        roster = await readStateChild(directory, name, MAX_AUTHORIZED_KEYS_BYTES)
-        continue
-      }
-      try {
-        await inspectChild(directory, name, {
-          owner: currentUserId(),
-          fileMode: 0o600,
-          directoryMode: 0o700,
-        })
-      } catch (error: unknown) {
-        throw stateError(error, join(directory.path, name))
-      }
-    }
-    return {
-      directoryPath,
-      exists: true,
-      installation: installationSnapshot === null ? null : readInstallationState(installationSnapshot),
-      roster,
-    }
+    return await inspectOpenState(directory)
   } finally {
     await directory.close()
   }
+}
+
+export async function openInstallerState(environment: NodeJS.ProcessEnv = process.env): Promise<Dir> {
+  const directoryPath = installerStatePath(environment)
+  try {
+    return await openDir(directoryPath, {
+      owner: currentUserId(),
+      mode: 0o700,
+    })
+  } catch (error: unknown) {
+    if (!isErrorCode(error, 'ENOENT')) {
+      throw stateError(error, directoryPath, true)
+    }
+  }
+  try {
+    return await createDir(directoryPath, {
+      owner: currentUserId(),
+      mode: 0o700,
+    })
+  } catch (error: unknown) {
+    throw stateError(error, directoryPath, true)
+  }
+}
+
+export async function inspectOpenInstallerState(directory: Dir): Promise<InstallerStateInspection> {
+  try {
+    return await inspectOpenState(directory)
+  } catch (error: unknown) {
+    if (error instanceof QilnInstallerError) {
+      throw error
+    }
+    throw stateError(error, directory.path, true)
+  }
+}
+
+export async function writeInstallationState(directory: Dir, imageFingerprint: string): Promise<InstallationState> {
+  if (!FULL_FINGERPRINT_PATTERN.test(imageFingerprint)) {
+    throw new QilnInstallerError({
+      code: 'INVALID_IMAGE_FINGERPRINT',
+      check: 'installation image pin',
+      summary: 'The selected image fingerprint is not a full lowercase SHA-256 value.',
+      observed: 'The proposed installation state fingerprint is malformed.',
+      reason: 'Qiln persists only immutable full provider image identities.',
+      operatorAction: 'Reconcile the selected Incus image and rerun qiln up.',
+      rerun: 'qiln up --source <checkout> --image <alias-or-fingerprint> [--authorized-keys <roster>]',
+    })
+  }
+  const state: InstallationState = {
+    version: 1,
+    projectName: INSTALLER_SPEC.projectName,
+    instanceName: INSTALLER_SPEC.orchestrator.name,
+    imageFingerprint,
+  }
+  const content = `${JSON.stringify(state, null, 2)}\n`
+  await writeChild(directory, INSTALLER_SPEC.state.installationFileName, new TextEncoder().encode(content), 0o600)
+  return state
 }
 
 /**
@@ -463,7 +497,6 @@ export async function validateRoster(roster: FileSnapshot, sshKeygenExecutable: 
         rerun: 'qiln up --source <checkout> --image <alias-or-fingerprint> --authorized-keys <roster>',
       })
     }
-
     publicKeyCount++
   }
   if (publicKeyCount === 0) {
@@ -472,7 +505,7 @@ export async function validateRoster(roster: FileSnapshot, sshKeygenExecutable: 
       check: 'orchestrator authorized-key roster content',
       summary: 'The orchestrator authorized-key roster contains no public keys.',
       observed: 'The selected roster snapshot contains only blank lines or comments.',
-      reason: 'The development orchestrator requires at least one explicitly supplied developer SSH key.',
+      reason: 'A supplied development roster must contain at least one explicitly selected public key.',
       operatorAction: 'Add at least one normal OpenSSH public key to the roster.',
       rerun: 'qiln up --source <checkout> --image <alias-or-fingerprint> --authorized-keys <roster>',
     })

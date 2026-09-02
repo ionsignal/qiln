@@ -52,7 +52,10 @@ export async function validateLocalIncus(): Promise<IncusPreflight> {
   }
   const client = new LocalIncusClient({
     socketPath,
+    projectName: INSTALLER_SPEC.projectName,
     requestTimeoutMs: INSTALLER_SPEC.incus.requestTimeoutMs,
+    uploadTimeoutMs: INSTALLER_SPEC.incus.uploadTimeoutMs,
+    operationWaitTimeoutMs: INSTALLER_SPEC.incus.operationWaitTimeoutMs,
     maximumResponseBytes: INSTALLER_SPEC.incus.maximumResponseBytes,
   })
   let server: IncusServer

@@ -1,5 +1,6 @@
+import { randomBytes } from 'node:crypto'
 import { constants, type Stats } from 'node:fs'
-import { chmod, mkdtemp, open, readdir, rm, type FileHandle } from 'node:fs/promises'
+import { chmod, mkdir, mkdtemp, open, readdir, rename, rm, type FileHandle } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 
@@ -7,6 +8,7 @@ const FILE_FLAGS = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBL
 const DIRECTORY_FLAGS = constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW | constants.O_NONBLOCK
 const INSPECT_FLAGS = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
 const TEMP_FLAGS = constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW
+const COPY_BUFFER_SIZE = 1_024 * 1_024
 
 export type FileKind = 'file' | 'directory'
 export type FileValidationKind = 'type' | 'owner' | 'mode' | 'size' | 'changed'
@@ -30,6 +32,20 @@ export interface InspectOptions {
   owner?: number
   fileMode?: number
   directoryMode?: number
+}
+
+export interface StageInput {
+  sourcePath: string
+  name: string
+  minSize?: number
+  maxSize: number
+}
+
+export interface StagedFile {
+  sourcePath: string
+  path: string
+  name: string
+  size: number
 }
 
 export class FileValidationError extends Error {
@@ -67,6 +83,11 @@ export class Dir {
   public async list(): Promise<string[]> {
     this.assertOpen()
     return (await readdir(this.root)).sort()
+  }
+
+  public async sync(): Promise<void> {
+    this.assertOpen()
+    await this.handle.sync()
   }
 
   public async close(): Promise<void> {
@@ -156,12 +177,9 @@ async function openNoFollow(path: string, flags: number, expectedType?: FileKind
 
 async function snapshot(handle: FileHandle, path: string, options: ReadOptions): Promise<FileSnapshot> {
   assertSizeOptions(options)
-
   const before = await handle.stat()
-
   validate(before, 'file', path, options)
   validateSize(before, path, options)
-
   const bytes = new Uint8Array(before.size)
   let offset = 0
   while (offset < bytes.length) {
@@ -175,10 +193,8 @@ async function snapshot(handle: FileHandle, path: string, options: ReadOptions):
     throw new FileValidationError('changed', path, 'file')
   }
   const after = await handle.stat()
-
   validate(after, 'file', path, options)
   validateSize(after, path, options)
-
   if (!isUnchanged(before, after)) {
     throw new FileValidationError('changed', path, 'file')
   }
@@ -194,6 +210,49 @@ async function readAt(path: string, options: ReadOptions): Promise<FileSnapshot>
     return await snapshot(handle, path, options)
   } finally {
     await handle.close()
+  }
+}
+
+async function copyStable(sourcePath: string, destinationPath: string, options: ReadOptions): Promise<number> {
+  assertSizeOptions(options)
+  const source = await openNoFollow(sourcePath, FILE_FLAGS, 'file')
+  const destination = await open(destinationPath, TEMP_FLAGS, 0o600)
+  try {
+    const before = await source.stat()
+    validate(before, 'file', sourcePath, options)
+    validateSize(before, sourcePath, options)
+    const buffer = Buffer.allocUnsafe(COPY_BUFFER_SIZE)
+    let offset = 0
+    while (offset < before.size) {
+      const length = Math.min(buffer.byteLength, before.size - offset)
+      const result = await source.read(buffer, 0, length, offset)
+      if (result.bytesRead === 0) {
+        throw new FileValidationError('changed', sourcePath, 'file')
+      }
+      await destination.write(buffer, 0, result.bytesRead, offset)
+      offset += result.bytesRead
+    }
+    const extra = Buffer.allocUnsafe(1)
+    const trailing = await source.read(extra, 0, 1, offset)
+    if (trailing.bytesRead !== 0) {
+      throw new FileValidationError('changed', sourcePath, 'file')
+    }
+    const after = await source.stat()
+    if (!isUnchanged(before, after)) {
+      throw new FileValidationError('changed', sourcePath, 'file')
+    }
+    await destination.sync()
+    await destination.chmod(0o600)
+    const staged = await destination.stat()
+    validate(staged, 'file', destinationPath, {
+      mode: 0o600,
+    })
+    if (staged.size !== before.size) {
+      throw new FileValidationError('changed', destinationPath, 'file')
+    }
+    return before.size
+  } finally {
+    await Promise.allSettled([source.close(), destination.close()])
   }
 }
 
@@ -225,6 +284,18 @@ export async function openDir(path: string, options: EntryOptions = {}): Promise
 }
 
 /**
+ * Creates a directory tree and validates the final directory without following
+ * its final path component.
+ */
+export async function createDir(path: string, options: Required<EntryOptions>): Promise<Dir> {
+  await mkdir(path, {
+    recursive: true,
+    mode: options.mode,
+  })
+  return await openDir(path, options)
+}
+
+/**
  * Reads one regular child through a stable opened directory descriptor.
  */
 export async function readChild(directory: Dir, name: string, options: ReadOptions): Promise<FileSnapshot> {
@@ -233,9 +304,6 @@ export async function readChild(directory: Dir, name: string, options: ReadOptio
 
 /**
  * Validates one direct state-directory entry without following a symlink.
- *
- * The caller must not use this inspection result to reopen the same path for
- * data. Known files should instead be read once through `readChild()`.
  */
 export async function inspectChild(directory: Dir, name: string, options: InspectOptions = {}): Promise<FileKind> {
   const path = directory.child(name)
@@ -263,6 +331,44 @@ export async function inspectChild(directory: Dir, name: string, options: Inspec
 }
 
 /**
+ * Atomically writes exact bytes into an opened, validated directory.
+ */
+export async function writeChild(directory: Dir, name: string, bytes: Uint8Array, mode = 0o600): Promise<void> {
+  assertChildName(name)
+  const temporaryName = `.${name}.${randomBytes(16).toString('hex')}`
+  const temporaryPath = directory.child(temporaryName)
+  const destinationPath = directory.child(name)
+  let created = false
+  try {
+    const handle = await open(temporaryPath, TEMP_FLAGS, mode)
+    created = true
+    try {
+      await handle.writeFile(bytes)
+      await handle.sync()
+      await handle.chmod(mode)
+      const metadata = await handle.stat()
+      validate(metadata, 'file', temporaryPath, {
+        mode,
+      })
+      if (metadata.size !== bytes.byteLength) {
+        throw new FileValidationError('changed', temporaryPath, 'file')
+      }
+    } finally {
+      await handle.close()
+    }
+    await rename(temporaryPath, destinationPath)
+    created = false
+    await directory.sync()
+  } finally {
+    if (created) {
+      await rm(temporaryPath, {
+        force: true,
+      })
+    }
+  }
+}
+
+/**
  * Materializes exact snapshot bytes into a private temporary file and removes
  * the containing directory after the callback completes or fails.
  */
@@ -280,11 +386,9 @@ export async function withTemp<T>(snapshot: FileSnapshot, run: (path: string) =>
       await handle.sync()
       await handle.chmod(0o600)
       const metadata = await handle.stat()
-
       validate(metadata, 'file', path, {
         mode: 0o600,
       })
-
       if (metadata.size !== snapshot.size) {
         throw new FileValidationError('changed', path, 'file')
       }
@@ -294,6 +398,76 @@ export async function withTemp<T>(snapshot: FileSnapshot, run: (path: string) =>
     return await run(path)
   } finally {
     await rm(directory, {
+      recursive: true,
+      force: true,
+    })
+  }
+}
+
+/**
+ * Provides a private temporary directory for tools that must create multiple
+ * related files. The directory is removed after success or failure.
+ */
+export async function withDir<T>(run: (directory: string) => Promise<T>): Promise<T> {
+  const directory = await mkdtemp(join(tmpdir(), 'qiln-private-'))
+  try {
+    await chmod(directory, 0o700)
+    const opened = await openDir(directory, {
+      mode: 0o700,
+    })
+    await opened.close()
+    return await run(directory)
+  } finally {
+    await rm(directory, {
+      recursive: true,
+      force: true,
+    })
+  }
+}
+
+/**
+ * Copies stable bounded regular files into a private staging directory. The
+ * callback receives only staged paths and the complete directory is removed
+ * after success or failure.
+ */
+export async function withStage<T>(
+  inputs: readonly StageInput[],
+  run: (files: readonly StagedFile[]) => Promise<T>,
+): Promise<T> {
+  const names = new Set<string>()
+  for (const input of inputs) {
+    assertChildName(input.name)
+    if (names.has(input.name)) {
+      throw new RangeError('Staged installer filenames must be unique.')
+    }
+    names.add(input.name)
+  }
+  const stageDirectory = await mkdtemp(join(tmpdir(), 'qiln-image-'))
+  try {
+    await chmod(stageDirectory, 0o700)
+    const files: StagedFile[] = []
+    for (const input of inputs) {
+      const sourceDirectory = await openDir(dirname(input.sourcePath))
+      try {
+        const sourcePath = sourceDirectory.child(basename(input.sourcePath))
+        const destinationPath = join(stageDirectory, input.name)
+        const size = await copyStable(sourcePath, destinationPath, {
+          minSize: input.minSize ?? 1,
+          maxSize: input.maxSize,
+        })
+        files.push({
+          sourcePath: input.sourcePath,
+          path: destinationPath,
+          name: input.name,
+          size,
+        })
+      } finally {
+        await sourceDirectory.close()
+      }
+    }
+    return await run(Object.freeze(files))
+  } finally {
+    await rm(stageDirectory, {
       recursive: true,
       force: true,
     })

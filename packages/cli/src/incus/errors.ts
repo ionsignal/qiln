@@ -1,6 +1,12 @@
 import { QilnInstallerError } from '../error'
 import { INSTALLER_SPEC } from '../install/spec'
-import { IncusApiError, IncusProtocolError, IncusTransportError } from './client'
+import {
+  IncusApiError,
+  IncusOperationError,
+  IncusOperationWaitTimeoutError,
+  IncusProtocolError,
+  IncusTransportError,
+} from './client'
 
 export interface IncusErrorContext {
   check: string
@@ -17,7 +23,7 @@ function apiFailureObserved(error: IncusApiError, operation: string): string {
 
 /**
  * Identifies an expected Incus API status so callers can retain ownership of
- * optional-resource behavior, particularly explicit 404 handling.
+ * optional-resource and guarded-update behavior.
  */
 export function isIncusApiStatus(error: unknown, statusCode: number): error is IncusApiError {
   return error instanceof IncusApiError && error.statusCode === statusCode
@@ -25,11 +31,39 @@ export function isIncusApiStatus(error: unknown, statusCode: number): error is I
 
 /**
  * Converts unhandled local Incus client failures into non-secret installer
- * diagnostics. Expected resource absence remains a caller-owned decision.
+ * diagnostics. Expected resource absence and guarded update conflicts remain
+ * caller-owned decisions.
  */
 export function toInstallerError(error: unknown, context: IncusErrorContext): QilnInstallerError {
   if (error instanceof QilnInstallerError) {
     return error
+  }
+  if (error instanceof IncusOperationWaitTimeoutError) {
+    return new QilnInstallerError({
+      code: 'INCUS_OPERATION_INDETERMINATE',
+      check: context.check,
+      summary: 'The Incus operation did not reach a verified result before the local wait deadline.',
+      observed: `The local wait for operation '${error.operationPath}' exceeded ${INSTALLER_SPEC.incus.operationWaitTimeoutMs}ms.`,
+      reason:
+        'The operation may still be running or may already have completed. Qiln must not infer success or failure and will not cancel it automatically.',
+      operatorAction:
+        'Inspect the Incus operation if needed, then rerun qiln up to reconcile from the actual local Incus state.',
+      rerun: context.rerun,
+      cause: error,
+    })
+  }
+  if (error instanceof IncusOperationError) {
+    return new QilnInstallerError({
+      code: 'INCUS_OPERATION_FAILED',
+      check: context.check,
+      summary: 'The Incus background operation completed unsuccessfully.',
+      observed: `Operation '${error.operationId}' completed with status code ${error.statusCode}.`,
+      reason: 'The requested Incus mutation did not reach the required success state.',
+      operatorAction:
+        'Inspect the local Incus daemon and managed resource state manually, then rerun qiln up to reconcile without assuming rollback occurred.',
+      rerun: context.rerun,
+      cause: error,
+    })
   }
   if (error instanceof IncusTransportError) {
     return new QilnInstallerError({
@@ -79,9 +113,22 @@ export function toInstallerError(error: unknown, context: IncusErrorContext): Qi
         summary: 'The local Incus API returned an unexpected not-found response.',
         observed: apiFailureObserved(error, context.operation),
         reason:
-          'This request was required to inspect the local installation state and was not an optional resource lookup that Qiln may treat as absent.',
+          'This request was required to inspect or mutate verified local installation state and was not an optional lookup.',
         operatorAction:
-          'Inspect the local Incus daemon and its managed resources manually. Do not ask Qiln to repair or recreate unverified resources automatically.',
+          'Inspect the local Incus resources and operation state manually, then rerun qiln up to reconcile from the actual provider state.',
+        rerun: context.rerun,
+        cause: error,
+      })
+    }
+    if (error.statusCode === 412) {
+      return new QilnInstallerError({
+        code: 'INCUS_ETAG_CONFLICT',
+        check: context.check,
+        summary: 'The Incus resource changed during a guarded update.',
+        observed: apiFailureObserved(error, context.operation),
+        reason: 'Qiln must not replay a complete mutation body computed from stale provider state.',
+        operatorAction:
+          'Rerun qiln up so the resource can be re-read and revalidated. No stale update was replayed automatically.',
         rerun: context.rerun,
         cause: error,
       })
@@ -90,12 +137,12 @@ export function toInstallerError(error: unknown, context: IncusErrorContext): Qi
       return new QilnInstallerError({
         code: 'INCUS_API_UNAVAILABLE',
         check: context.check,
-        summary: 'The local Incus API could not complete a required inspection request.',
+        summary: 'The local Incus API could not complete a required request.',
         observed: apiFailureObserved(error, context.operation),
         reason:
           'Qiln cannot safely continue after an unavailable or failed local API response because the resulting installation view may be incomplete.',
         operatorAction:
-          'Inspect the local Incus daemon health, logs, and Unix-socket availability manually. Confirm the daemon is healthy before retrying.',
+          'Inspect the local Incus daemon health, logs, Unix-socket availability, and managed resources before retrying.',
         rerun: context.rerun,
         cause: error,
       })
@@ -103,12 +150,10 @@ export function toInstallerError(error: unknown, context: IncusErrorContext): Qi
     return new QilnInstallerError({
       code: 'INCUS_API_REQUEST_REJECTED',
       check: context.check,
-      summary: 'The local Incus API rejected a required inspection request.',
+      summary: 'The local Incus API rejected a required request.',
       observed: apiFailureObserved(error, context.operation),
-      reason:
-        'Qiln cannot safely infer installer state after the authorized local Incus API rejects a required read-only preflight request.',
-      operatorAction:
-        'Inspect the local Incus daemon configuration, project access, and managed resource state manually. Resolve the reported condition without asking Qiln to overwrite existing resources.',
+      reason: 'Qiln cannot safely infer installer state after the authorized local Incus API rejects the request.',
+      operatorAction: 'Inspect the local Incus daemon, project access, and managed resources manually before retrying.',
       rerun: context.rerun,
       cause: error,
     })
@@ -116,12 +161,12 @@ export function toInstallerError(error: unknown, context: IncusErrorContext): Qi
   return new QilnInstallerError({
     code: 'INCUS_INSPECTION_FAILED',
     check: context.check,
-    summary: 'A required local Incus inspection failed unexpectedly.',
+    summary: 'A required local Incus operation failed unexpectedly.',
     observed: `Qiln could not complete the request to ${context.operation}.`,
     reason:
-      'Qiln cannot safely continue after an unclassified local Incus inspection failure because installation state may be incomplete or inconsistent.',
+      'Qiln cannot safely continue after an unclassified local Incus failure because installation state may be incomplete or inconsistent.',
     operatorAction:
-      'Inspect the local Incus daemon, Unix-socket access, and Qiln installer version manually before retrying. Do not infer that any installation action completed.',
+      'Inspect the local Incus daemon, Unix-socket access, managed resources, and Qiln installer version manually before retrying.',
     rerun: context.rerun,
     cause: error,
   })
