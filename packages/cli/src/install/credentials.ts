@@ -14,7 +14,6 @@ import { INSTALLER_SPEC } from './spec'
 import { inspectOpenInstallerState, validateRoster } from './state'
 import { assertVolume } from './storage'
 import type { FileSnapshot } from './files'
-import type { InstallationState } from './state'
 import type { LocalIncusClient } from '../incus/client'
 import type { IncusConfigMap, IncusDevicesMap, IncusInstance, IncusInstancePut, IncusRead } from '../incus/types'
 
@@ -32,13 +31,10 @@ interface LocalFiles {
 }
 
 interface Credentials extends LocalFiles {
-  natsToken: string
-  cookieSecret: string
   values: IncusConfigMap
 }
 
 interface CurrentInstance {
-  installation: InstallationState
   read: IncusRead<IncusInstance>
 }
 
@@ -287,8 +283,6 @@ async function validate(local: LocalFiles, sshKeygen: string): Promise<Credentia
   const keys = INSTALLER_SPEC.credentials.keys
   return {
     ...local,
-    natsToken,
-    cookieSecret: host.cookieSecret,
     values: {
       [keys.nats]: natsText,
       [keys.host]: hostText,
@@ -335,7 +329,7 @@ function hasManagedCredentials(config: Readonly<IncusConfigMap>): boolean {
   )
 }
 
-async function current(directory: Dir, client: LocalIncusClient): Promise<CurrentInstance> {
+async function current(directory: Dir, client: LocalIncusClient, sourceRoot: string): Promise<CurrentInstance> {
   const state = await inspectOpenInstallerState(directory)
   if (!state.installation) {
     throw new QilnInstallerError({
@@ -373,7 +367,7 @@ async function current(directory: Dir, client: LocalIncusClient): Promise<Curren
     })
   }
   collision(instance.value.config)
-  assertInstance(instance.value, state.installation.imageFingerprint)
+  assertInstance(instance.value, state.installation.imageFingerprint, sourceRoot)
   const signature = instance.value.config['volatile.base_image']
   if (
     typeof signature !== 'string' ||
@@ -393,7 +387,6 @@ async function current(directory: Dir, client: LocalIncusClient): Promise<Curren
     })
   }
   return {
-    installation: state.installation,
     read: instance,
   }
 }
@@ -448,8 +441,14 @@ async function gatewayKey(sshKeygen: string): Promise<FileSnapshot> {
   })
 }
 
-async function generate(directory: Dir, roster: FileSnapshot, sshKeygen: string): Promise<Credentials> {
-  const target = await current(directory, argumentsClient)
+async function generate(
+  directory: Dir,
+  roster: FileSnapshot,
+  sshKeygen: string,
+  client: LocalIncusClient,
+  sourceRoot: string,
+): Promise<Credentials> {
+  const target = await current(directory, client, sourceRoot)
   if (hasManagedCredentials(target.read.value.config)) {
     throw new QilnInstallerError({
       code: 'LOCAL_CREDENTIAL_RECOVERY_REQUIRED',
@@ -496,8 +495,6 @@ async function generate(directory: Dir, roster: FileSnapshot, sshKeygen: string)
   }
   return persisted
 }
-
-let argumentsClient: LocalIncusClient
 
 function put(instance: IncusInstance, values: Readonly<IncusConfigMap>): IncusInstancePut {
   const config: IncusConfigMap = {
@@ -568,9 +565,14 @@ function matches(config: Readonly<IncusConfigMap>, values: Readonly<IncusConfigM
   return Object.entries(values).every(([key, value]) => config[key] === value)
 }
 
-async function deliver(directory: Dir, client: LocalIncusClient, sshKeygen: string): Promise<Delivery> {
+async function deliver(
+  directory: Dir,
+  client: LocalIncusClient,
+  sshKeygen: string,
+  sourceRoot: string,
+): Promise<Delivery> {
   for (let attempt = 0; attempt < 2; attempt++) {
-    const target = await current(directory, client)
+    const target = await current(directory, client, sourceRoot)
     const local = await load(directory, sshKeygen)
     if (local === 'absent') {
       throw new QilnInstallerError({
@@ -644,6 +646,7 @@ async function verify(
   sshKeygen: string,
   expected: IncusInstancePut,
   verifyAlias: boolean,
+  sourceRoot: string,
 ): Promise<string> {
   const state = await inspectOpenInstallerState(directory)
   if (!state.installation) {
@@ -684,7 +687,7 @@ async function verify(
   assertNetwork(network)
   assertVolume(volume)
   collision(instance.config)
-  assertInstance(instance, installation.imageFingerprint)
+  assertInstance(instance, installation.imageFingerprint, sourceRoot)
   const local = await load(directory, sshKeygen)
   if (local === 'absent') {
     throw new QilnInstallerError({
@@ -757,8 +760,8 @@ export async function convergeCredentials(options: {
   sshKeygen: string
   roster: FileSnapshot | null
   verifyAlias: boolean
+  sourceRoot: string
 }): Promise<CredentialConvergence> {
-  argumentsClient = options.client
   let local = await load(options.directory, options.sshKeygen)
   let localOutcome: LocalOutcome
   if (local === 'absent') {
@@ -774,7 +777,7 @@ export async function convergeCredentials(options: {
           'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
       })
     }
-    local = await generate(options.directory, options.roster, options.sshKeygen)
+    local = await generate(options.directory, options.roster, options.sshKeygen, options.client, options.sourceRoot)
     localOutcome = 'generated'
   } else if (options.roster) {
     await writeChild(options.directory, INSTALLER_SPEC.credentials.files.authorizedKeys, options.roster.bytes, 0o600)
@@ -787,13 +790,14 @@ export async function convergeCredentials(options: {
   } else {
     localOutcome = 'reused'
   }
-  const delivery = await deliver(options.directory, options.client, options.sshKeygen)
+  const delivery = await deliver(options.directory, options.client, options.sshKeygen, options.sourceRoot)
   const imageFingerprint = await verify(
     options.directory,
     options.client,
     options.sshKeygen,
     delivery.expected,
     options.verifyAlias,
+    options.sourceRoot,
   )
   return {
     localOutcome,

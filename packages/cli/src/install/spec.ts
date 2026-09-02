@@ -179,6 +179,8 @@ export const INSTALLER_SPEC = Object.freeze({
     devices: ORCHESTRATOR_DEVICES,
     credentialKeys: INSTANCE_CREDENTIAL_KEY_LIST,
     ipv4Address: ORCHESTRATOR_DEVICES.eth0['ipv4.address'],
+    sourceDeviceName: 'source',
+    sourceMountPath: '/opt/qiln',
   },
   credentials: {
     files: CREDENTIAL_FILES,
@@ -210,7 +212,7 @@ export const INSTALLER_SPEC = Object.freeze({
     uploadTimeoutMs: 30 * 60 * 1_000,
     operationWaitTimeoutMs: 60 * 60 * 1_000,
     maximumResponseBytes: 4 * 1_024 * 1_024,
-    requiredExtensions: ['operation_wait', 'instance_systemd_credentials'] as const,
+    requiredExtensions: ['operation_wait', 'instance_systemd_credentials', 'container_disk_shift'] as const,
   },
   state: {
     installationFileName: 'installation.json',

@@ -35,7 +35,7 @@ function requireIncusExtensions(extensions: readonly string[]): void {
     summary: 'The running Incus daemon is missing a required installer capability.',
     observed: `Missing API extensions: ${missing.join(', ')}.`,
     reason:
-      'Qiln requires guarded systemd credential delivery and verified terminal operation results before performing installer mutations.',
+      'Qiln requires shifted container source disks, guarded systemd credential delivery, and verified terminal operation results before performing installer mutations.',
     operatorAction: 'Install and run a supported Incus 7.x daemon that exposes the required API extensions.',
     rerun: 'qiln doctor',
   })
@@ -92,11 +92,16 @@ export async function up(options: UpCommandOptions, reporter: Reporter): Promise
       'PostgreSQL volume',
       `${storage.volume.name} · ${storage.volume.config.size} · persistent custom volume`,
     )
-    const instance = await convergeInstance(preflight.incus.client, installation)
+    const instance = await convergeInstance(preflight.incus.client, installation, source.sourceRoot)
     reporter.row(
       instance.outcome,
       'Orchestrator',
       `${instance.instance.name} · ${instance.instance.architecture} container · ${instance.instance.status}`,
+    )
+    reporter.row(
+      'verified',
+      'Source device',
+      `${source.sourceRoot} → ${INSTALLER_SPEC.orchestrator.sourceMountPath} · writable shifted disk`,
     )
     const credentials = await convergeCredentials({
       directory: stateDirectory,
@@ -104,6 +109,7 @@ export async function up(options: UpCommandOptions, reporter: Reporter): Promise
       sshKeygen: preflight.host.commandPaths['ssh-keygen'],
       roster,
       verifyAlias: options.image.kind === 'split',
+      sourceRoot: source.sourceRoot,
     })
     reporter.row(
       credentials.localOutcome === 'generated'

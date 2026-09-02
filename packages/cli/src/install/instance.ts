@@ -1,16 +1,57 @@
+import { isAbsolute } from 'node:path'
 import { QilnInstallerError } from '../error'
 import { isIncusApiStatus, toInstallerError } from '../incus/errors'
 import { INSTALLER_SPEC } from './spec'
 import type { InstallationState } from './state'
 import type { LocalIncusClient } from '../incus/client'
-import type { IncusConfigMap, IncusDevicesMap, IncusInstance, IncusInstanceCreate } from '../incus/types'
+import type { IncusDevicesMap, IncusInstance, IncusInstanceCreate } from '../incus/types'
 
 const FULL_FINGERPRINT_PATTERN = /^[a-f0-9]{64}$/
 const STOPPED_STATUS_CODE = 102
+const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/
 
 export interface InstanceConvergence {
   instance: IncusInstance
   outcome: 'created' | 'reused'
+}
+
+function validateSourceRoot(sourceRoot: string): void {
+  if (
+    !isAbsolute(sourceRoot) ||
+    sourceRoot.trim() !== sourceRoot ||
+    sourceRoot === '/' ||
+    CONTROL_CHARACTER_PATTERN.test(sourceRoot)
+  ) {
+    throw new QilnInstallerError({
+      code: 'INVALID_SOURCE_ROOT',
+      check: 'orchestrator source-device path',
+      summary: 'The validated Qiln source root cannot be used as an Incus source device.',
+      observed: 'The source root is not a canonical absolute non-root path.',
+      reason: 'The installer must bind exactly one validated host checkout into the development orchestrator.',
+      operatorAction: 'Rerun with the canonical Qiln Git checkout root through --source.',
+      rerun:
+        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+    })
+  }
+}
+
+function expectedDevices(sourceRoot: string): IncusDevicesMap {
+  validateSourceRoot(sourceRoot)
+  const devices: IncusDevicesMap = {}
+  for (const [name, device] of Object.entries(INSTALLER_SPEC.orchestrator.devices)) {
+    devices[name] = {
+      ...device,
+    }
+  }
+  devices[INSTALLER_SPEC.orchestrator.sourceDeviceName] = {
+    type: 'disk',
+    source: sourceRoot,
+    path: INSTALLER_SPEC.orchestrator.sourceMountPath,
+    readonly: 'false',
+    shift: 'true',
+    required: 'true',
+  }
+  return devices
 }
 
 function sameStrings(actual: readonly string[], expected: readonly string[]): boolean {
@@ -53,12 +94,15 @@ function sameDevice(actual: Readonly<Record<string, string>>, expected: Readonly
   return sameStrings(actualKeys, expectedKeys) && expectedKeys.every(key => actual[key] === expected[key])
 }
 
-function deviceDifferences(actual: IncusDevicesMap): {
+function deviceDifferences(
+  actual: IncusDevicesMap,
+  sourceRoot: string,
+): {
   missing: string[]
   mismatched: string[]
   unexpected: string[]
 } {
-  const expected: Readonly<Record<string, Readonly<Record<string, string>>>> = INSTALLER_SPEC.orchestrator.devices
+  const expected = expectedDevices(sourceRoot)
   const expectedNames = Object.keys(expected)
   const actualNames = Object.keys(actual)
   const missing = expectedNames.filter(name => actual[name] === undefined)
@@ -75,9 +119,9 @@ function deviceDifferences(actual: IncusDevicesMap): {
   }
 }
 
-export function assertInstance(instance: IncusInstance, imageFingerprint: string): void {
+export function assertInstance(instance: IncusInstance, imageFingerprint: string, sourceRoot: string): void {
   const config = configDifferences(instance.config, INSTALLER_SPEC.orchestrator.config, imageFingerprint)
-  const devices = deviceDifferences(instance.devices)
+  const devices = deviceDifferences(instance.devices, sourceRoot)
   const compatible =
     instance.name === INSTALLER_SPEC.orchestrator.name &&
     instance.architecture === INSTALLER_SPEC.orchestrator.architecture &&
@@ -104,9 +148,10 @@ export function assertInstance(instance: IncusInstance, imageFingerprint: string
     summary: 'The existing development orchestrator conflicts with the installer-owned definition.',
     observed: `Instance '${instance.name}' reports architecture='${instance.architecture}', type='${instance.type}', status='${instance.status}', status_code=${instance.statusCode}, project='${instance.project || INSTALLER_SPEC.projectName}', ephemeral=${instance.ephemeral}, stateful=${instance.stateful}, and profiles='${instance.profiles.join(',') || 'none'}'; volatile.base_image expected '${imageFingerprint}' but was '${config.baseImage || 'unset'}'; missing or mismatched config keys: ${config.missing.join(', ') || 'none'}; unexpected non-volatile, non-image config keys: ${config.unexpected.join(', ') || 'none'}; missing devices: ${devices.missing.join(', ') || 'none'}; mismatched devices: ${devices.mismatched.join(', ') || 'none'}; unexpected devices: ${devices.unexpected.join(', ') || 'none'}.`,
     reason:
-      'Qiln will not retain an instance created from a different image pin, or start, stop, rebuild, delete, or partially repair an incompatible retained orchestrator instance.',
-    operatorAction: `Delete the stopped '${INSTALLER_SPEC.orchestrator.name}' instance manually while preserving '${INSTALLER_SPEC.storage.volumeName}', then rerun with the managed '${INSTALLER_SPEC.orchestrator.imageAlias}' image alias.`,
-    rerun: `qiln up --source <checkout> --image ${INSTALLER_SPEC.orchestrator.imageAlias} [--authorized-keys <roster>]`,
+      'Qiln will not retain an instance created from a different image pin or source checkout, or start, stop, rebuild, delete, or partially repair an incompatible retained orchestrator instance.',
+    operatorAction: `Delete only the stopped '${INSTALLER_SPEC.orchestrator.name}' instance manually while preserving '${INSTALLER_SPEC.storage.volumeName}', then rerun qiln up with the intended canonical --source checkout and selected image.`,
+    rerun:
+      'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
   })
 }
 
@@ -131,17 +176,8 @@ function validateState(state: InstallationState): void {
   }
 }
 
-function createInput(state: InstallationState): IncusInstanceCreate {
+function createInput(state: InstallationState, sourceRoot: string): IncusInstanceCreate {
   validateState(state)
-  const config: IncusConfigMap = {
-    ...INSTALLER_SPEC.orchestrator.config,
-  }
-  const devices: IncusDevicesMap = {}
-  for (const [name, device] of Object.entries(INSTALLER_SPEC.orchestrator.devices)) {
-    devices[name] = {
-      ...device,
-    }
-  }
   return {
     name: INSTALLER_SPEC.orchestrator.name,
     architecture: INSTALLER_SPEC.orchestrator.architecture,
@@ -151,8 +187,10 @@ function createInput(state: InstallationState): IncusInstanceCreate {
     ephemeral: INSTALLER_SPEC.orchestrator.ephemeral,
     stateful: INSTALLER_SPEC.orchestrator.stateful,
     profiles: [...INSTALLER_SPEC.orchestrator.profileNames],
-    config,
-    devices,
+    config: {
+      ...INSTALLER_SPEC.orchestrator.config,
+    },
+    devices: expectedDevices(sourceRoot),
     source: {
       type: 'image',
       fingerprint: state.imageFingerprint,
@@ -176,11 +214,13 @@ async function getInstance(client: LocalIncusClient): Promise<IncusInstance | nu
 export async function convergeInstance(
   client: LocalIncusClient,
   state: InstallationState,
+  sourceRoot: string,
 ): Promise<InstanceConvergence> {
   validateState(state)
+  validateSourceRoot(sourceRoot)
   const existing = await getInstance(client)
   if (existing) {
-    assertInstance(existing, state.imageFingerprint)
+    assertInstance(existing, state.imageFingerprint, sourceRoot)
     return {
       instance: existing,
       outcome: 'reused',
@@ -189,7 +229,7 @@ export async function convergeInstance(
   let created = false
   let conflict: unknown
   try {
-    const operation = await client.createInstance(createInput(state))
+    const operation = await client.createInstance(createInput(state, sourceRoot))
     await client.waitOperation(operation)
     created = true
   } catch (error: unknown) {
@@ -224,7 +264,7 @@ export async function convergeInstance(
         'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
     })
   }
-  assertInstance(instance, state.imageFingerprint)
+  assertInstance(instance, state.imageFingerprint, sourceRoot)
   return {
     instance,
     outcome: created ? 'created' : 'reused',
