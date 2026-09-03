@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto'
 import { Buffer } from 'node:buffer'
-import { utils as ssh2Utils } from 'ssh2'
 import {
   MAX_SSH_PUBLIC_KEY_BLOB_LENGTH,
   MAX_SSH_PUBLIC_KEY_LINE_LENGTH,
@@ -12,6 +11,7 @@ import {
   type SshPublicKeyBlob,
   type SshPublicKeyFingerprint,
 } from '@qiln/core/server'
+import { ssh2Utils } from './ssh2'
 
 const OPENSSH_PUBLIC_KEY_LINE_PATTERN = /^(\S+)[\t ]+(\S+)(?:[\t ]+.*)?$/
 const PUBLIC_KEY_LINE_CONTROL_CHARACTER_PATTERN = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/

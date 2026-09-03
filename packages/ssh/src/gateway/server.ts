@@ -1,11 +1,11 @@
 import { createConnection, createServer, isIP, type Server as NetServer, type Socket } from 'node:net'
 import { monitorEventLoopDelay, type IntervalHistogram } from 'node:perf_hooks'
-import { Server as SshServer, utils as ssh2Utils } from 'ssh2'
 import {
   SshGatewayInstanceIdSchema,
   type SshCanonicalPublicKey,
   type SshRelayActivationOutput,
 } from '@qiln/core/server'
+import { ssh2Utils, SshServer } from '../ssh2'
 import { authenticateGatewayPublicKey } from './auth'
 import { SshRelayRegistry } from './relay'
 import type { AuthContext, Connection, PublicKeyAuthContext, ServerChannel, ServerConfig, Session } from 'ssh2'
@@ -111,7 +111,7 @@ function validateGatewayConfig(config: SshGatewayConfig): void {
 export class QilnSshGateway {
   private readonly registry: SshRelayRegistry
   private readonly incomingSockets = new Set<Socket>()
-  private readonly protocolServers = new Set<SshServer>()
+  private readonly protocolServers = new Set<InstanceType<typeof SshServer>>()
   private readonly durableClosureTasks = new Set<Promise<void>>()
   private readonly eventLoopDelay: IntervalHistogram
 
