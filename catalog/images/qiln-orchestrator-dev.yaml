@@ -811,7 +811,8 @@ files:
     mode: '0644'
     content: |-
       NODE_ENV=development
-      FASTIFY_APP_PATH=/opt/qiln
+      FASTIFY_APP_PATH=/opt/qiln/app
+      APP_DEFINITIONS_PATH=/opt/qiln/catalog/blueprints
       VITE_HOST_DEV=localhost
       QILN_LOAD_DOTENV=false
       QILN_HOST_CREDENTIAL_PATH=/run/qiln/qiln-host.env
