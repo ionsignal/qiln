@@ -816,6 +816,7 @@ files:
       VITE_HOST_DEV=localhost
       QILN_LOAD_DOTENV=false
       QILN_HOST_CREDENTIAL_PATH=/run/qiln/qiln-host.env
+      QILN_DEV_PUBLIC_ORIGIN=https://qiln.edge.ionsignal.com
 
       PGHOST=/var/run/postgresql
       PGPORT=5432
