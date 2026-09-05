@@ -7,8 +7,8 @@ type Target = () => Server | undefined
 /**
  * Partitions WebSocket upgrades before tRPC or Vite can observe the socket.
  *
- * The attachment servers never listen directly. Fastify remains the only
- * public HTTP server.
+ * The attachment servers never listen directly. Fastify remains the only public
+ * HTTP server.
  */
 export class UpgradeRouter {
   public readonly trpc = createServer()

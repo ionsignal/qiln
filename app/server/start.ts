@@ -22,7 +22,7 @@ async function createFastifyServer(config: EnvironmentConfig) {
     disableRequestLogging: true,
   })
 
-  server.decorate('config', config) 
+  server.decorate('config', config)
 
   const upgrades = new UpgradeRouter(server.server, config.dev)
   server.decorate('upgrades', upgrades)
