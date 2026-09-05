@@ -11,6 +11,7 @@ import type {
 import type { Session } from '@server/plugins/session'
 import type { Database, Persistence } from '@server/db'
 import type { SshHostPolicy } from '@server/ssh/policy'
+import type { UpgradeRouter } from '@server/websocket/router'
 
 type MultipartConfig = {
   directory: string
@@ -34,6 +35,10 @@ type CookiesConfig = {
   domain: string | undefined
   sameSite: boolean | 'lax' | 'strict' | 'none'
   maxAge: number
+}
+
+type DevelopmentConfig = {
+  publicOrigin: string
 }
 
 type MailgunConfig = {
@@ -97,6 +102,7 @@ type Config = WorkerHostConfig & {
   port: number
   path: string
   ssl: string
+  development: DevelopmentConfig
   worker: WorkerConfig
   ssh: SshConfig
   cookies: CookiesConfig
@@ -125,6 +131,7 @@ declare module 'fastify' {
     worker: QilnWorkerRuntime | null
     channel: CapsuleNatsChannel
     sshPolicy: SshHostPolicy
+    upgrades: UpgradeRouter
     config: EnvironmentConfig
   }
 }
@@ -134,6 +141,7 @@ export type {
   Config,
   Server,
   CookiesConfig,
+  DevelopmentConfig,
   MultipartConfig,
   MailgunConfig,
   NatsConfig,

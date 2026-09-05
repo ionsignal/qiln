@@ -4,43 +4,28 @@ import type { TRPCLink } from '@trpc/client'
 import type { AppRouter } from '@server/trpc'
 
 const transformer = superjson
+const trpcPath = '/trpc'
 
-/**
- * Robustly determines the HTTP URL based on environment.
- *
- * - Dev: Points to the separate backend port (3002).
- * - Prod: Uses relative path (served by Fastify).
- */
-const getHttpUrl = () => {
-  return import.meta.env.DEV ? 'http://localhost:3002/trpc' : '/trpc'
-}
+let wsClient: ReturnType<typeof createWSClient> | undefined
 
-/**
- * Factory function to construct the tRPC link chain. Isolates browser-specific
- * logic (WebSockets) from server-side logic (SSR).
- */
 function getLinks(): TRPCLink<AppRouter>[] {
-  // Server-Side: HTTP Only (No WebSocket support needed/possible)
-  if (typeof window === 'undefined') {
+  if (import.meta.env.SSR) {
     return [
       httpBatchLink({
-        url: getHttpUrl(),
+        url: trpcPath,
         transformer,
         fetch: () => {
           throw new Error(
-            '[api/trpc.ts] You are using the client-side tRPC instance on the server. ' +
-              'Please use `pageContext.trpc` instead to avoid network overhead and relative URL errors.',
+            '[api/trpc.ts] The browser tRPC client was used during SSR. ' +
+              'Use pageContext.trpc for in-process server queries.',
           )
         },
       }),
     ]
   }
-  // Client-Side: Split Link (WebSocket + HTTP)
-  // Dynamic protocol detection handles both HTTP/HTTPS environments automatically
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-  const host = import.meta.env.DEV ? 'localhost:3002' : window.location.host
-  const wsClient = createWSClient({
-    url: `${protocol}//${host}/trpc`,
+  wsClient = createWSClient({
+    url: `${protocol}//${window.location.host}${trpcPath}`,
     lazy: {
       enabled: true,
       closeMs: 5000,
@@ -53,14 +38,13 @@ function getLinks(): TRPCLink<AppRouter>[] {
   })
   return [
     splitLink({
-      // Route subscriptions to WebSocket, everything else to HTTP
-      condition: op => op.type === 'subscription',
+      condition: operation => operation.type === 'subscription',
       true: wsLink({
         client: wsClient,
         transformer,
       }),
       false: httpBatchLink({
-        url: getHttpUrl(),
+        url: trpcPath,
         transformer,
       }),
     }),
@@ -70,3 +54,10 @@ function getLinks(): TRPCLink<AppRouter>[] {
 export const trpc = createTRPCProxyClient<AppRouter>({
   links: getLinks(),
 })
+
+if (!import.meta.env.SSR && import.meta.hot) {
+  import.meta.hot.dispose(() => {
+    wsClient?.close()
+    wsClient = undefined
+  })
+}

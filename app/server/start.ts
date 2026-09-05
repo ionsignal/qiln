@@ -3,23 +3,37 @@ import fastify from 'fastify'
 import autoload from '@fastify/autoload'
 import serve from '@fastify/static'
 import superjson from 'superjson'
-import { renderPage, createDevMiddleware } from 'vike/server'
+import { renderPage } from 'vike/server'
 import { createTRPCClient, unstable_localLink } from '@trpc/client'
 import { appRouter } from '@server/trpc'
 import { createContextInner } from '@server/trpc/context'
+import { UpgradeRouter } from '@server/websocket/router'
 import { logger } from '@server/utils/logger'
 import type { FastifyRequest, FastifyReply } from 'fastify'
 import type { EnvironmentConfig } from '@/types'
 
+interface DevelopmentTransport {
+  close(): Promise<void>
+}
+
 async function createFastifyServer(config: EnvironmentConfig) {
-  // Initialize Fastify Server
   const server = fastify({
     loggerInstance: logger,
     disableRequestLogging: true,
   })
-  // Decorate Server Instance
-  server.decorate('config', config)
-  // Register Plugins & Routes
+
+  server.decorate('config', config) 
+
+  const upgrades = new UpgradeRouter(server.server, config.dev)
+  server.decorate('upgrades', upgrades)
+
+  let development: DevelopmentTransport | undefined
+  // Stop upgrade admission before either WebSocket integration begins closing.
+  server.addHook('preClose', async () => {
+    upgrades.stop()
+    await development?.close()
+  })
+
   const distPath = path.resolve(config.path, 'dist/server')
   await server.register(autoload, {
     forceESM: true,
@@ -31,7 +45,6 @@ async function createFastifyServer(config: EnvironmentConfig) {
     dir: path.join(distPath, 'routes'),
     options: {},
   })
-  // Configure Static Assets / Dev Middleware
   if (!server.config.dev) {
     await server.register(serve, {
       prefix: '/',
@@ -40,15 +53,14 @@ async function createFastifyServer(config: EnvironmentConfig) {
       root: path.join(config.path, 'dist/client'),
     })
   } else {
-    const vike = await createDevMiddleware({
-      root: config.path,
-      viteConfig: {
-        optimizeDeps: { force: false },
-      },
-    })
-    await server.use(vike.devMiddleware)
+    const { ViteTransport } = await import('@server/websocket/vite')
+    const transport = new ViteTransport(config.development.publicOrigin)
+    development = transport
+    upgrades.setHmr(() => transport.target())
+    const middleware = await transport.open(config.path)
+    await server.use(middleware)
   }
-  // Vike (SSR) Handler
+
   server.get('*', async (request: FastifyRequest, reply: FastifyReply) => {
     const db = server.db
     const engine = server.engine
@@ -94,10 +106,15 @@ async function createFastifyServer(config: EnvironmentConfig) {
   }
 
   async function stop() {
+    upgrades.stop()
     await server.close()
   }
 
-  return { server, start, stop }
+  return {
+    server,
+    start,
+    stop,
+  }
 }
 
 export { createFastifyServer }

@@ -7,7 +7,7 @@ import type { FastifyTRPCPluginOptions } from '@trpc/server/adapters/fastify'
 
 export default fp(
   async fastify => {
-    fastify.register(fastifyTRPCPlugin, {
+    await fastify.register(fastifyTRPCPlugin, {
       prefix: '/trpc',
       useWSS: true,
       trpcOptions: {
@@ -30,7 +30,6 @@ export default fp(
               `[tRPC] Critical error in ${type} operation on path '${path}'`,
             )
           } else {
-            // Single-line warning for expected business logic violations
             fastify.log.warn(`[tRPC] ${error.code} in ${type} on '${path}': ${error.message}`)
           }
         },

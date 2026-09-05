@@ -7,6 +7,40 @@ import type { EnvironmentConfig } from '@/types'
 
 const CONFIG_FILE = 'app/dist/server/config'
 
+const DevelopmentOriginSchema = z.string().transform((value, context) => {
+  let url: URL
+  try {
+    url = new URL(value)
+  } catch {
+    context.addIssue({
+      code: 'custom',
+      message:
+        'QILN_DEV_PUBLIC_ORIGIN must be an HTTP(S) origin with one explicit hostname and no credentials, non-root path, query, or fragment.',
+    })
+    return z.NEVER
+  }
+  const invalid =
+    value.trim() !== value ||
+    (url.protocol !== 'http:' && url.protocol !== 'https:') ||
+    url.username !== '' ||
+    url.password !== '' ||
+    url.hostname === '' ||
+    url.hostname.includes('*') ||
+    url.port === '0' ||
+    url.pathname !== '/' ||
+    url.search !== '' ||
+    url.hash !== ''
+  if (invalid) {
+    context.addIssue({
+      code: 'custom',
+      message:
+        'QILN_DEV_PUBLIC_ORIGIN must be an HTTP(S) origin with one explicit hostname and no credentials, non-root path, query, or fragment.',
+    })
+    return z.NEVER
+  }
+  return url.origin
+})
+
 const HostCredentialSchema = z
   .object({
     NATS_TOKEN: z.string().min(1),
@@ -106,6 +140,11 @@ export async function loadEnvironmentConfig(): Promise<EnvironmentConfig> {
   })
   if (!config) {
     throw new Error('Application environment configuration is missing.')
+  }
+  if (config.dev) {
+    config.development = {
+      publicOrigin: DevelopmentOriginSchema.parse(config.development?.publicOrigin),
+    }
   }
   return config
 }

@@ -15,12 +15,14 @@ function silenceVikeManualChunksWarning(): Plugin {
     configResolved(config) {
       const rolldownOutput = config.build?.rolldownOptions?.output
       const rollupOutput = config.build?.rollupOptions?.output
-      const stripManualChunks = (output: any) => {
+      const isOutput = (value: unknown): value is Record<string, unknown> =>
+        typeof value === 'object' && value !== null && !Array.isArray(value)
+      const stripManualChunks = (output: unknown) => {
         if (!output) return
-        const outputs = Array.isArray(output) ? output : [output]
-        for (const opts of outputs) {
-          if (opts.codeSplitting && opts.manualChunks) {
-            delete opts.manualChunks
+        const outputs: unknown[] = Array.isArray(output) ? output : [output]
+        for (const options of outputs) {
+          if (isOutput(options) && options.codeSplitting && options.manualChunks) {
+            delete options.manualChunks
           }
         }
       }
@@ -99,9 +101,8 @@ export default defineConfig(({ isSsrBuild, command }): UserConfig => {
       noExternal: ['naive-ui', 'vueuc', 'date-fns', 'vfonts'], // Naive UI dependencies
     },
     server: {
-      hmr: {
+      ws: {
         path: '/hmr',
-        protocol: 'ws',
       },
     },
     resolve: {

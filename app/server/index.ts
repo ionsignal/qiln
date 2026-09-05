@@ -5,29 +5,33 @@ import { loadEnvironmentConfig } from '@server/env'
 import type { Server, EnvironmentConfig } from '@/types/config'
 
 const graceOptions = { delay: 500 }
-const closeListeners = grace(graceOptions, async (callback: any) => {
-  if (callback.err) {
-    logger.error(callback.err)
+let fastifyServer: Server | undefined
+let config: EnvironmentConfig
+
+const closeListeners = grace(graceOptions, async ({ err }) => {
+  if (err) {
+    logger.error(err)
   }
-  // Check if server has been initialized before attempting to close
-  if (fastifyServer?.server) {
-    await fastifyServer.server.close()
-  }
+  await fastifyServer?.stop()
 })
 
-let fastifyServer: Server
-let config: EnvironmentConfig
-loadEnvironmentConfig().then(async resolvedConfig => {
-  config = resolvedConfig
-
-  // create and start fastify server
+async function initialize(): Promise<void> {
+  config = await loadEnvironmentConfig()
   fastifyServer = await createFastifyServer(config)
-  fastifyServer.start()
+
   fastifyServer.server.addHook('onClose', (_, done) => {
     logger.warn('shutting down')
     closeListeners.uninstall()
     done()
   })
+
+  await fastifyServer.start()
+}
+
+void initialize().catch((error: unknown) => {
+  logger.error({ err: error }, '[Web] Application startup failed')
+  process.exitCode = 1
+  closeListeners.uninstall()
 })
 
 export { config }

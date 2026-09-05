@@ -53,6 +53,11 @@ export default {
   port: 3002,
   ssl: process.env.VITE_ENABLE_SSL ?? 'false',
   path: appPath,
+  development: {
+    // One public browser entrypoint is selected per development process.
+    // This origin is independent from the internal Fastify listening address.
+    publicOrigin: process.env.QILN_DEV_PUBLIC_ORIGIN ?? 'https://qiln.edge.ionsignal.com',
+  },
   definitions: {
     path: process.env.APP_DEFINITIONS_PATH ?? path.join(appPath, 'catalog/blueprints'),
   },
