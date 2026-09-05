@@ -24,6 +24,13 @@ CREATE TYPE "capsule_snapshot_git_remote_transport" AS ENUM('https', 'ssh');--> 
 CREATE TYPE "capsule_snapshot_mode" AS ENUM('experimental', 'hardened');--> statement-breakpoint
 CREATE TYPE "capsule_snapshot_resource_kind" AS ENUM('custom_volume_snapshot');--> statement-breakpoint
 CREATE TYPE "capsule_snapshot_resource_provider" AS ENUM('incus');--> statement-breakpoint
+CREATE TYPE "ssh_branch_access_block_reason" AS ENUM('branch_created', 'branch_forked', 'branch_stop', 'snapshot_capture', 'capsule_archive', 'capsule_destroy', 'admin_revoked', 'policy_failure');--> statement-breakpoint
+CREATE TYPE "ssh_branch_access_state" AS ENUM('blocked', 'enabled');--> statement-breakpoint
+CREATE TYPE "ssh_branch_grant_status" AS ENUM('active', 'revoked');--> statement-breakpoint
+CREATE TYPE "ssh_public_key_algorithm" AS ENUM('ssh-ed25519', 'ssh-rsa', 'ecdsa-sha2-nistp256', 'ecdsa-sha2-nistp384', 'ecdsa-sha2-nistp521');--> statement-breakpoint
+CREATE TYPE "ssh_public_key_status" AS ENUM('active', 'revoked');--> statement-breakpoint
+CREATE TYPE "ssh_relay_status" AS ENUM('opening', 'active', 'closing', 'closed');--> statement-breakpoint
+CREATE TYPE "ssh_ticket_status" AS ENUM('issued', 'redeemed', 'revoked');--> statement-breakpoint
 CREATE TABLE "agent_credentials" (
 	"id" uuid PRIMARY KEY,
 	"key_hash" text NOT NULL,
@@ -1003,12 +1010,232 @@ CREATE TABLE "sessions" (
 	"expires_at" timestamp with time zone NOT NULL
 );
 --> statement-breakpoint
+CREATE TABLE "ssh_branch_access" (
+	"branch_id" uuid PRIMARY KEY,
+	"state" "ssh_branch_access_state" DEFAULT 'blocked'::"ssh_branch_access_state" NOT NULL,
+	"block_reason" "ssh_branch_access_block_reason",
+	"enabled_at" timestamp(3) with time zone,
+	"blocked_at" timestamp(3) with time zone,
+	"created_at" timestamp(3) with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp(3) with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "ssh_branch_access_state_check" CHECK ((
+        (
+          "state" = 'enabled'
+          AND "block_reason" IS NULL
+          AND "enabled_at" IS NOT NULL
+        )
+        OR
+        (
+          "state" = 'blocked'
+          AND "block_reason" IS NOT NULL
+          AND "blocked_at" IS NOT NULL
+        )
+      )),
+	CONSTRAINT "ssh_branch_access_timestamp_check" CHECK ((
+        "enabled_at" IS NULL
+        OR "enabled_at" >= "created_at"
+      )
+      AND
+      (
+        "blocked_at" IS NULL
+        OR "blocked_at" >= "created_at"
+      ))
+);
+--> statement-breakpoint
+CREATE TABLE "ssh_branch_grants" (
+	"id" uuid PRIMARY KEY DEFAULT uuidv7(),
+	"public_key_id" uuid NOT NULL,
+	"key_owner_user_id" uuid NOT NULL,
+	"capsule_owner_user_id" uuid NOT NULL,
+	"capsule_id" uuid NOT NULL,
+	"branch_id" uuid NOT NULL,
+	"bound_by_admin_user_id" uuid NOT NULL,
+	"revoked_by_user_id" uuid,
+	"status" "ssh_branch_grant_status" DEFAULT 'active'::"ssh_branch_grant_status" NOT NULL,
+	"created_at" timestamp(3) with time zone DEFAULT now() NOT NULL,
+	"revoked_at" timestamp(3) with time zone,
+	CONSTRAINT "ssh_branch_grants_state_check" CHECK ((
+        (
+          "status" = 'active'
+          AND "revoked_at" IS NULL
+          AND "revoked_by_user_id" IS NULL
+        )
+        OR
+        (
+          "status" = 'revoked'
+          AND "revoked_at" IS NOT NULL
+        )
+      )),
+	CONSTRAINT "ssh_branch_grants_timestamp_check" CHECK ("revoked_at" IS NULL OR "revoked_at" >= "created_at")
+);
+--> statement-breakpoint
+CREATE TABLE "ssh_public_keys" (
+	"id" uuid PRIMARY KEY DEFAULT uuidv7(),
+	"owner_user_id" uuid NOT NULL,
+	"algorithm" "ssh_public_key_algorithm" NOT NULL,
+	"public_key_blob" text NOT NULL,
+	"fingerprint" text NOT NULL,
+	"label" text,
+	"status" "ssh_public_key_status" DEFAULT 'active'::"ssh_public_key_status" NOT NULL,
+	"created_at" timestamp(3) with time zone DEFAULT now() NOT NULL,
+	"revoked_at" timestamp(3) with time zone,
+	CONSTRAINT "ssh_public_keys_state_check" CHECK ((
+        (
+          "status" = 'active'
+          AND "revoked_at" IS NULL
+        )
+        OR
+        (
+          "status" = 'revoked'
+          AND "revoked_at" IS NOT NULL
+        )
+      )),
+	CONSTRAINT "ssh_public_keys_fingerprint_check" CHECK ("fingerprint" ~ '^SHA256:[A-Za-z0-9+/]{43}$'),
+	CONSTRAINT "ssh_public_keys_blob_check" CHECK (length("public_key_blob") BETWEEN 1 AND 16384),
+	CONSTRAINT "ssh_public_keys_label_check" CHECK ((
+        "label" IS NULL
+        OR (
+          length(btrim("label")) BETWEEN 1 AND 128
+          AND "label" = btrim("label")
+          AND "label" !~ '[[:cntrl:]]'
+        )
+      ))
+);
+--> statement-breakpoint
+CREATE TABLE "ssh_relays" (
+	"id" uuid PRIMARY KEY DEFAULT uuidv7(),
+	"ticket_id" uuid NOT NULL,
+	"public_key_id" uuid NOT NULL,
+	"user_id" uuid NOT NULL,
+	"capsule_id" uuid NOT NULL,
+	"branch_id" uuid NOT NULL,
+	"gateway_instance_id" text NOT NULL,
+	"status" "ssh_relay_status" DEFAULT 'opening'::"ssh_relay_status" NOT NULL,
+	"opened_at" timestamp(3) with time zone DEFAULT now() NOT NULL,
+	"activated_at" timestamp(3) with time zone,
+	"closing_at" timestamp(3) with time zone,
+	"closed_at" timestamp(3) with time zone,
+	"closure_reason" text,
+	CONSTRAINT "ssh_relays_gateway_instance_check" CHECK ((
+        length(btrim("gateway_instance_id")) BETWEEN 1 AND 128
+        AND "gateway_instance_id" = btrim("gateway_instance_id")
+        AND "gateway_instance_id" !~ '[[:cntrl:]]'
+      )),
+	CONSTRAINT "ssh_relays_closure_reason_check" CHECK ((
+        "closure_reason" IS NULL
+        OR (
+          length(btrim("closure_reason")) BETWEEN 1 AND 128
+          AND "closure_reason" = btrim("closure_reason")
+          AND "closure_reason" !~ '[[:cntrl:]]'
+        )
+      )),
+	CONSTRAINT "ssh_relays_state_check" CHECK ((
+        (
+          "status" = 'opening'
+          AND "activated_at" IS NULL
+          AND "closing_at" IS NULL
+          AND "closed_at" IS NULL
+          AND "closure_reason" IS NULL
+        )
+        OR
+        (
+          "status" = 'active'
+          AND "activated_at" IS NOT NULL
+          AND "closing_at" IS NULL
+          AND "closed_at" IS NULL
+          AND "closure_reason" IS NULL
+        )
+        OR
+        (
+          "status" = 'closing'
+          AND "closing_at" IS NOT NULL
+          AND "closed_at" IS NULL
+          AND "closure_reason" IS NOT NULL
+        )
+        OR
+        (
+          "status" = 'closed'
+          AND "closing_at" IS NOT NULL
+          AND "closed_at" IS NOT NULL
+          AND "closure_reason" IS NOT NULL
+        )
+      )),
+	CONSTRAINT "ssh_relays_timestamp_check" CHECK ((
+        "activated_at" IS NULL
+        OR "activated_at" >= "opened_at"
+      )
+      AND
+      (
+        "closing_at" IS NULL
+        OR "closing_at" >= "opened_at"
+      )
+      AND
+      (
+        "closed_at" IS NULL
+        OR (
+          "closing_at" IS NOT NULL
+          AND "closed_at" >= "closing_at"
+        )
+      ))
+);
+--> statement-breakpoint
+CREATE TABLE "ssh_tickets" (
+	"id" uuid PRIMARY KEY DEFAULT uuidv7(),
+	"ticket_hash" text NOT NULL,
+	"public_key_id" uuid NOT NULL,
+	"grant_id" uuid NOT NULL,
+	"user_id" uuid NOT NULL,
+	"capsule_id" uuid NOT NULL,
+	"branch_id" uuid NOT NULL,
+	"status" "ssh_ticket_status" DEFAULT 'issued'::"ssh_ticket_status" NOT NULL,
+	"expires_at" timestamp(3) with time zone NOT NULL,
+	"issued_at" timestamp(3) with time zone DEFAULT now() NOT NULL,
+	"redeemed_at" timestamp(3) with time zone,
+	"revoked_at" timestamp(3) with time zone,
+	CONSTRAINT "ssh_tickets_hash_check" CHECK ("ticket_hash" ~ '^sha256:[a-f0-9]{64}$'),
+	CONSTRAINT "ssh_tickets_expiry_check" CHECK ("expires_at" > "issued_at"),
+	CONSTRAINT "ssh_tickets_state_check" CHECK ((
+        (
+          "status" = 'issued'
+          AND "redeemed_at" IS NULL
+          AND "revoked_at" IS NULL
+        )
+        OR
+        (
+          "status" = 'redeemed'
+          AND "redeemed_at" IS NOT NULL
+          AND "revoked_at" IS NULL
+        )
+        OR
+        (
+          "status" = 'revoked'
+          AND "revoked_at" IS NOT NULL
+        )
+      )),
+	CONSTRAINT "ssh_tickets_timestamp_check" CHECK ((
+        "redeemed_at" IS NULL
+        OR "redeemed_at" >= "issued_at"
+      )
+      AND
+      (
+        "revoked_at" IS NULL
+        OR "revoked_at" >= "issued_at"
+      )
+      AND
+      (
+        "redeemed_at" IS NULL
+        OR "revoked_at" IS NULL
+        OR "revoked_at" >= "redeemed_at"
+      ))
+);
+--> statement-breakpoint
 CREATE TABLE "users" (
 	"id" uuid PRIMARY KEY DEFAULT uuidv7(),
 	"username" text NOT NULL UNIQUE,
 	"email" text NOT NULL UNIQUE,
 	"password" text NOT NULL,
 	"avatar" text DEFAULT 'default' NOT NULL,
+	"is_admin" boolean DEFAULT false NOT NULL,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
@@ -1126,6 +1353,31 @@ CREATE INDEX "capsule_snapshots_policy_digest_idx" ON "capsule_snapshots" ("capt
 CREATE INDEX "capsule_snapshots_mode_idx" ON "capsule_snapshots" ("mode");--> statement-breakpoint
 CREATE INDEX "capsules_owner_idx" ON "capsules" ("owner_id");--> statement-breakpoint
 CREATE INDEX "capsules_owner_lifecycle_status_idx" ON "capsules" ("owner_id","lifecycle_status");--> statement-breakpoint
+CREATE INDEX "ssh_branch_access_state_idx" ON "ssh_branch_access" ("state");--> statement-breakpoint
+CREATE INDEX "ssh_branch_grants_key_owner_idx" ON "ssh_branch_grants" ("key_owner_user_id");--> statement-breakpoint
+CREATE INDEX "ssh_branch_grants_capsule_owner_idx" ON "ssh_branch_grants" ("capsule_owner_user_id");--> statement-breakpoint
+CREATE INDEX "ssh_branch_grants_capsule_idx" ON "ssh_branch_grants" ("capsule_id");--> statement-breakpoint
+CREATE INDEX "ssh_branch_grants_branch_idx" ON "ssh_branch_grants" ("branch_id");--> statement-breakpoint
+CREATE INDEX "ssh_branch_grants_admin_idx" ON "ssh_branch_grants" ("bound_by_admin_user_id");--> statement-breakpoint
+CREATE INDEX "ssh_branch_grants_status_idx" ON "ssh_branch_grants" ("status");--> statement-breakpoint
+CREATE UNIQUE INDEX "ssh_branch_grants_active_key_unique_idx" ON "ssh_branch_grants" ("public_key_id") WHERE "status" = 'active';--> statement-breakpoint
+CREATE UNIQUE INDEX "ssh_branch_grants_active_key_branch_unique_idx" ON "ssh_branch_grants" ("public_key_id","branch_id") WHERE "status" = 'active';--> statement-breakpoint
+CREATE UNIQUE INDEX "ssh_public_keys_blob_unique_idx" ON "ssh_public_keys" ("public_key_blob");--> statement-breakpoint
+CREATE INDEX "ssh_public_keys_owner_status_idx" ON "ssh_public_keys" ("owner_user_id","status");--> statement-breakpoint
+CREATE INDEX "ssh_public_keys_fingerprint_idx" ON "ssh_public_keys" ("fingerprint");--> statement-breakpoint
+CREATE UNIQUE INDEX "ssh_relays_ticket_unique_idx" ON "ssh_relays" ("ticket_id");--> statement-breakpoint
+CREATE INDEX "ssh_relays_key_idx" ON "ssh_relays" ("public_key_id");--> statement-breakpoint
+CREATE INDEX "ssh_relays_user_idx" ON "ssh_relays" ("user_id");--> statement-breakpoint
+CREATE INDEX "ssh_relays_capsule_idx" ON "ssh_relays" ("capsule_id");--> statement-breakpoint
+CREATE INDEX "ssh_relays_branch_status_idx" ON "ssh_relays" ("branch_id","status");--> statement-breakpoint
+CREATE INDEX "ssh_relays_gateway_status_idx" ON "ssh_relays" ("gateway_instance_id","status");--> statement-breakpoint
+CREATE UNIQUE INDEX "ssh_tickets_hash_unique_idx" ON "ssh_tickets" ("ticket_hash");--> statement-breakpoint
+CREATE INDEX "ssh_tickets_key_idx" ON "ssh_tickets" ("public_key_id");--> statement-breakpoint
+CREATE INDEX "ssh_tickets_grant_idx" ON "ssh_tickets" ("grant_id");--> statement-breakpoint
+CREATE INDEX "ssh_tickets_user_idx" ON "ssh_tickets" ("user_id");--> statement-breakpoint
+CREATE INDEX "ssh_tickets_capsule_idx" ON "ssh_tickets" ("capsule_id");--> statement-breakpoint
+CREATE INDEX "ssh_tickets_branch_status_idx" ON "ssh_tickets" ("branch_id","status");--> statement-breakpoint
+CREATE INDEX "ssh_tickets_status_expiry_idx" ON "ssh_tickets" ("status","expires_at");--> statement-breakpoint
 ALTER TABLE "agent_credentials" ADD CONSTRAINT "agent_credentials_requested_by_user_id_users_id_fkey" FOREIGN KEY ("requested_by_user_id") REFERENCES "users"("id") ON DELETE CASCADE;--> statement-breakpoint
 ALTER TABLE "agent_credentials" ADD CONSTRAINT "agent_credentials_capsule_id_capsules_id_fkey" FOREIGN KEY ("capsule_id") REFERENCES "capsules"("id") ON DELETE RESTRICT;--> statement-breakpoint
 ALTER TABLE "capsule_artifact_entries" ADD CONSTRAINT "capsule_artifact_entries_mrkPSpdKYhcL_fkey" FOREIGN KEY ("manifest_root_id") REFERENCES "capsule_artifact_manifest_roots"("id") ON DELETE CASCADE;--> statement-breakpoint
@@ -1193,4 +1445,23 @@ ALTER TABLE "capsule_snapshot_resource_references" ADD CONSTRAINT "capsule_snaps
 ALTER TABLE "capsule_snapshots" ADD CONSTRAINT "capsule_snapshots_capsule_id_capsules_id_fkey" FOREIGN KEY ("capsule_id") REFERENCES "capsules"("id") ON DELETE RESTRICT;--> statement-breakpoint
 ALTER TABLE "capsule_snapshots" ADD CONSTRAINT "capsule_snapshots_source_branch_id_capsule_branches_id_fkey" FOREIGN KEY ("source_branch_id") REFERENCES "capsule_branches"("id") ON DELETE RESTRICT;--> statement-breakpoint
 ALTER TABLE "capsules" ADD CONSTRAINT "capsules_owner_id_users_id_fkey" FOREIGN KEY ("owner_id") REFERENCES "users"("id") ON DELETE CASCADE;--> statement-breakpoint
-ALTER TABLE "sessions" ADD CONSTRAINT "sessions_user_id_users_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE;
+ALTER TABLE "sessions" ADD CONSTRAINT "sessions_user_id_users_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE CASCADE;--> statement-breakpoint
+ALTER TABLE "ssh_branch_access" ADD CONSTRAINT "ssh_branch_access_branch_id_capsule_branches_id_fkey" FOREIGN KEY ("branch_id") REFERENCES "capsule_branches"("id") ON DELETE RESTRICT;--> statement-breakpoint
+ALTER TABLE "ssh_branch_grants" ADD CONSTRAINT "ssh_branch_grants_public_key_id_ssh_public_keys_id_fkey" FOREIGN KEY ("public_key_id") REFERENCES "ssh_public_keys"("id") ON DELETE RESTRICT;--> statement-breakpoint
+ALTER TABLE "ssh_branch_grants" ADD CONSTRAINT "ssh_branch_grants_key_owner_user_id_users_id_fkey" FOREIGN KEY ("key_owner_user_id") REFERENCES "users"("id") ON DELETE RESTRICT;--> statement-breakpoint
+ALTER TABLE "ssh_branch_grants" ADD CONSTRAINT "ssh_branch_grants_capsule_owner_user_id_users_id_fkey" FOREIGN KEY ("capsule_owner_user_id") REFERENCES "users"("id") ON DELETE RESTRICT;--> statement-breakpoint
+ALTER TABLE "ssh_branch_grants" ADD CONSTRAINT "ssh_branch_grants_capsule_id_capsules_id_fkey" FOREIGN KEY ("capsule_id") REFERENCES "capsules"("id") ON DELETE RESTRICT;--> statement-breakpoint
+ALTER TABLE "ssh_branch_grants" ADD CONSTRAINT "ssh_branch_grants_branch_id_capsule_branches_id_fkey" FOREIGN KEY ("branch_id") REFERENCES "capsule_branches"("id") ON DELETE RESTRICT;--> statement-breakpoint
+ALTER TABLE "ssh_branch_grants" ADD CONSTRAINT "ssh_branch_grants_bound_by_admin_user_id_users_id_fkey" FOREIGN KEY ("bound_by_admin_user_id") REFERENCES "users"("id") ON DELETE RESTRICT;--> statement-breakpoint
+ALTER TABLE "ssh_branch_grants" ADD CONSTRAINT "ssh_branch_grants_revoked_by_user_id_users_id_fkey" FOREIGN KEY ("revoked_by_user_id") REFERENCES "users"("id") ON DELETE RESTRICT;--> statement-breakpoint
+ALTER TABLE "ssh_public_keys" ADD CONSTRAINT "ssh_public_keys_owner_user_id_users_id_fkey" FOREIGN KEY ("owner_user_id") REFERENCES "users"("id") ON DELETE RESTRICT;--> statement-breakpoint
+ALTER TABLE "ssh_relays" ADD CONSTRAINT "ssh_relays_ticket_id_ssh_tickets_id_fkey" FOREIGN KEY ("ticket_id") REFERENCES "ssh_tickets"("id") ON DELETE RESTRICT;--> statement-breakpoint
+ALTER TABLE "ssh_relays" ADD CONSTRAINT "ssh_relays_public_key_id_ssh_public_keys_id_fkey" FOREIGN KEY ("public_key_id") REFERENCES "ssh_public_keys"("id") ON DELETE RESTRICT;--> statement-breakpoint
+ALTER TABLE "ssh_relays" ADD CONSTRAINT "ssh_relays_user_id_users_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE RESTRICT;--> statement-breakpoint
+ALTER TABLE "ssh_relays" ADD CONSTRAINT "ssh_relays_capsule_id_capsules_id_fkey" FOREIGN KEY ("capsule_id") REFERENCES "capsules"("id") ON DELETE RESTRICT;--> statement-breakpoint
+ALTER TABLE "ssh_relays" ADD CONSTRAINT "ssh_relays_branch_id_capsule_branches_id_fkey" FOREIGN KEY ("branch_id") REFERENCES "capsule_branches"("id") ON DELETE RESTRICT;--> statement-breakpoint
+ALTER TABLE "ssh_tickets" ADD CONSTRAINT "ssh_tickets_public_key_id_ssh_public_keys_id_fkey" FOREIGN KEY ("public_key_id") REFERENCES "ssh_public_keys"("id") ON DELETE RESTRICT;--> statement-breakpoint
+ALTER TABLE "ssh_tickets" ADD CONSTRAINT "ssh_tickets_grant_id_ssh_branch_grants_id_fkey" FOREIGN KEY ("grant_id") REFERENCES "ssh_branch_grants"("id") ON DELETE RESTRICT;--> statement-breakpoint
+ALTER TABLE "ssh_tickets" ADD CONSTRAINT "ssh_tickets_user_id_users_id_fkey" FOREIGN KEY ("user_id") REFERENCES "users"("id") ON DELETE RESTRICT;--> statement-breakpoint
+ALTER TABLE "ssh_tickets" ADD CONSTRAINT "ssh_tickets_capsule_id_capsules_id_fkey" FOREIGN KEY ("capsule_id") REFERENCES "capsules"("id") ON DELETE RESTRICT;--> statement-breakpoint
+ALTER TABLE "ssh_tickets" ADD CONSTRAINT "ssh_tickets_branch_id_capsule_branches_id_fkey" FOREIGN KEY ("branch_id") REFERENCES "capsule_branches"("id") ON DELETE RESTRICT;

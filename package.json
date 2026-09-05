@@ -34,7 +34,7 @@
     "db:push": "drizzle-kit push",
     "db:seed": "npm run build:server && npm run build:alias && node --import ./register.mjs app/dist/server/db/seed.js",
     "db:reset": "npm run build:server && npm run build:alias && node --import ./register.mjs app/dist/server/db/reset.js",
-    "db:rebuild": "npm run db:reset && rimraf app/server/db/migrations && npm run db:generate && npm run db:migrate && npm run db:seed",
+    "db:rebuild": "set -a && . /etc/qiln/runtime.env && set +a && npm run db:reset && rimraf app/server/db/migrations && npm run db:generate && npm run db:migrate && npm run db:seed",
     "db:studio": "drizzle-kit studio",
     "test": "vitest",
     "type:verify": "npm run build && npm run type:check",
