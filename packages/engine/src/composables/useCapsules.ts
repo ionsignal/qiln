@@ -278,11 +278,11 @@ export function provideCapsules(options: ProvideCapsulesOptions): CapsuleContext
   }
 
   async function startBranch(input: CapsuleBranchInput): Promise<void> {
-    await runBranchRuntimeMutation(input, 'starting', 'online', () => options.client.branches.start.mutate(input))
+    // await runBranchRuntimeMutation(input, 'starting', 'online', () => options.client.branches.start.mutate(input))
   }
 
   async function stopBranch(input: CapsuleBranchInput): Promise<void> {
-    await runBranchRuntimeMutation(input, 'stopping', 'offline', () => options.client.branches.stop.mutate(input))
+    // await runBranchRuntimeMutation(input, 'stopping', 'offline', () => options.client.branches.stop.mutate(input))
   }
 
   // ---------------------------------------------------------------------------
