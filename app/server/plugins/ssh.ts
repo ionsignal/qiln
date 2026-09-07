@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises'
 import fp from 'fastify-plugin'
+import { SshGatewayDiagnosticSchema } from '@qiln/core/server'
 import { QilnSshGateway } from '@qiln/ssh/server'
 import { registerSshAccessControlHandlers } from '@server/ssh/channel'
 import { SshHostPolicy } from '@server/ssh/policy'
@@ -60,6 +61,33 @@ export default fp(
         authenticationTimeoutMs: gatewayConfig.authenticationTimeoutMs,
         channelOpenTimeoutMs: gatewayConfig.channelOpenTimeoutMs,
         branchDialTimeoutMs: gatewayConfig.branchDialTimeoutMs,
+        onDiagnostic: event => {
+          const parsed = SshGatewayDiagnosticSchema.safeParse(event)
+          if (!parsed.success) {
+            fastify.log.warn('[SSH] Gateway diagnostic failed validation.')
+            return
+          }
+          const diagnostic = parsed.data
+          const fields = {
+            sshGateway: diagnostic,
+          }
+          if (diagnostic.outcome === 'failed') {
+            fastify.log.error(fields, '[SSH] Gateway failure')
+            return
+          }
+          if (
+            diagnostic.outcome === 'timed_out' ||
+            (diagnostic.outcome === 'rejected' && diagnostic.stage !== 'request')
+          ) {
+            fastify.log.warn(fields, '[SSH] Gateway request did not proceed')
+            return
+          }
+          if (diagnostic.stage === 'gateway') {
+            fastify.log.info(fields, '[SSH] Gateway lifecycle')
+            return
+          }
+          fastify.log.debug(fields, '[SSH] Gateway progress')
+        },
       },
       policy,
     )

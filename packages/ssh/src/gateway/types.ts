@@ -1,5 +1,6 @@
 import type {
   SshCanonicalPublicKey,
+  SshGatewayDiagnostic,
   SshGatewayKeyEligibilityOutput,
   SshRelayActivationOutput,
   SshRelayCloseOutput,
@@ -25,6 +26,7 @@ export interface SshGatewayConfig {
   authenticationTimeoutMs: number
   channelOpenTimeoutMs: number
   branchDialTimeoutMs: number
+  onDiagnostic?: (diagnostic: SshGatewayDiagnostic) => void | Promise<void>
 }
 
 export interface SshGatewayStats {
