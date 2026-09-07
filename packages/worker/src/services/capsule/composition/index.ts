@@ -152,13 +152,18 @@ export function composeCapsuleService<TDatabase extends PostgresJsDatabase, TTab
   const branch = composeBranchCapability({
     persistence: options.persistence,
     incus: options.incus,
+    channel: options.channel,
     project: options.project,
+    supervisor: options.supervisor,
+    operationReader,
+    operationSteps,
+    operationEvents,
     branchEvents,
     previews: route.preview,
     previewGate,
   })
   const reconciliation = new CapsuleRuntimeReconciliationCoordinator({
-    branch,
+    branch: branch.service,
     preview: route.reconciliation,
     intervalMs: options.routing.reconcileIntervalMs ?? DEFAULT_RUNTIME_RECONCILE_INTERVAL_MS,
   })
@@ -169,6 +174,7 @@ export function composeCapsuleService<TDatabase extends PostgresJsDatabase, TTab
     unarchive.abandonment,
     destroy.abandonment,
     capture.abandonment,
+    ...branch.abandonment,
     ...route.abandonment,
   ])
   const abandonmentCoordinator = new CapsuleOperationAbandonmentCoordinator({
@@ -184,7 +190,9 @@ export function composeCapsuleService<TDatabase extends PostgresJsDatabase, TTab
     unarchive: unarchive.submission,
     destroy: destroy.submission,
     capture: capture.submission,
-    branch,
+    start: branch.start,
+    stop: branch.stop,
+    branch: branch.service,
     snapshot,
     preview: route.preview,
     route: route.service,

@@ -6,7 +6,7 @@ import type {
   CapsuleTables,
 } from '@qiln/core/server'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
-import type { PreviewBranch, PreviewIdentity, PreviewPlan, PreviewRecord } from '../types'
+import type { PreviewAdmission, PreviewBranch, PreviewIdentity, PreviewPlan, PreviewRecord } from '../types'
 import { PreviewFailurePersistence, type PreviewFailureTransition } from './failure'
 import { PreviewIdentityPersistence } from './identity'
 import { PreviewLifecyclePersistence } from './lifecycle'
@@ -62,7 +62,7 @@ export class PreviewRepository<
     branch: PreviewBranch,
     application: CapsuleRouteApplicationPin,
     identity: PreviewIdentity,
-  ): Promise<PreviewRecord> {
+  ): Promise<PreviewAdmission> {
     return await this.identity.ensure(branch, application, identity)
   }
 
@@ -74,7 +74,7 @@ export class PreviewRepository<
     await this.lifecycle.resume(ownerId, capsuleId, branchId)
   }
 
-  public async apply(id: string, plan: PreviewPlan): Promise<PreviewRecord> {
+  public async apply(id: string, plan: PreviewPlan): Promise<PreviewAdmission> {
     return await this.route.apply(id, plan)
   }
 

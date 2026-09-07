@@ -1,13 +1,10 @@
 import { normalizeFailureDetails } from '../failures'
 import type {
   BranchRuntimeReconciliationCandidate,
-  BranchRuntimeTransitionContext,
-  BranchRuntimeMutationDefinition,
   CapsuleBranchRuntimeObservation,
   UnconfirmedCapsuleBranchRuntimeObservation,
 } from './types'
 
-export const CAPSULE_BRANCH_RUNTIME_RESOLUTION_ERROR_CODE = 'CAPSULE_BRANCH_RUNTIME_UNCERTAIN'
 export const CAPSULE_BRANCH_RUNTIME_INSTANCE_MISSING_ERROR_CODE = 'CAPSULE_BRANCH_RUNTIME_INSTANCE_MISSING'
 export const CAPSULE_BRANCH_RUNTIME_PROVIDER_STATE_UNSUPPORTED_ERROR_CODE =
   'CAPSULE_BRANCH_RUNTIME_PROVIDER_STATE_UNSUPPORTED'
@@ -17,10 +14,6 @@ export const CAPSULE_BRANCH_RUNTIME_OBSERVATION_UNAVAILABLE_ERROR_CODE =
 /**
  * Durable branch-runtime diagnostic used when Qiln cannot prove one of the
  * supported stable provider states.
- *
- * This error carries persistence-safe diagnostic context only. The branch
- * service still rethrows the original provider or persistence failure to its
- * caller after recording this diagnostic best effort.
  */
 export class CapsuleBranchRuntimeResolutionError extends Error {
   constructor(
@@ -65,37 +58,6 @@ export function describeCapsuleBranchRuntimeObservation(
         },
       }
   }
-}
-
-/**
- * Creates the diagnostic persisted when a start or stop mutation cannot be
- * resolved to a positively observed stable state.
- */
-export function createCapsuleBranchMutationResolutionError(
-  transition: BranchRuntimeTransitionContext,
-  definition: BranchRuntimeMutationDefinition,
-  observation: CapsuleBranchRuntimeObservation,
-  mutationError: unknown,
-  failureStage: string,
-): CapsuleBranchRuntimeResolutionError {
-  return new CapsuleBranchRuntimeResolutionError(
-    `Could not prove a stable runtime state after capsule branch ${definition.mutation}.`,
-    CAPSULE_BRANCH_RUNTIME_RESOLUTION_ERROR_CODE,
-    {
-      ownerId: transition.ownerId,
-      capsuleId: transition.capsuleId,
-      branchId: transition.branchId,
-      branchName: transition.branchName,
-      mutation: definition.mutation,
-      failureStage,
-      transitionalStatus: definition.transitionalStatus,
-      desiredStatus: definition.desiredStatus,
-      observation: describeCapsuleBranchRuntimeObservation(observation),
-      mutationError: normalizeFailureDetails(mutationError) ?? {
-        message: 'Unknown capsule branch runtime mutation failure.',
-      },
-    },
-  )
 }
 
 /**

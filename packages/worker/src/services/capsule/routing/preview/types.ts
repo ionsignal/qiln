@@ -54,6 +54,22 @@ export interface PreviewRecord {
   updatedAt: Date
 }
 
+/**
+ * Expected admission changes do not imply provider failure or uncertainty.
+ *
+ * A skipped result performs no allocation or apply-intent transition. Invalid
+ * ownership, contradictory identity, and invalid pins remain errors.
+ */
+export type PreviewAdmission =
+  | {
+      kind: 'proceed'
+      preview: PreviewRecord
+    }
+  | {
+      kind: 'skipped'
+      reason: 'operation_blocked' | 'lifecycle_changed' | 'runtime_changed' | 'withdrawal_requested'
+    }
+
 export interface PreviewIdentity {
   host: string
   providerRouteId: string

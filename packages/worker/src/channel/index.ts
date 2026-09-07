@@ -10,7 +10,6 @@ import { registerCapsuleSnapshotHandlers } from './handlers/capsule/snapshot'
 import { registerCapsuleUnarchiveHandler } from './handlers/capsule/unarchive'
 import { registerCapsulePreviewHandlers } from './handlers/capsule/preview'
 import { registerSshAuthorizedKeysSyncHandler } from './handlers/ssh'
-
 import type { QilnWorkerRuntime } from '../runtime'
 
 /**
@@ -23,10 +22,10 @@ export function registerCapsuleChannelHandlers(worker: QilnWorkerRuntime): void 
   registerCapsuleAgentReadHandler(worker)
   registerCapsuleCreateHandler(worker)
   registerCapsuleForkHandler(worker)
+  registerCapsuleBranchHandlers(worker)
   registerCapsuleArchiveHandler(worker)
   registerCapsuleUnarchiveHandler(worker)
   registerCapsuleDestroyHandler(worker)
-  registerCapsuleBranchHandlers(worker)
   registerCapsuleSnapshotHandlers(worker)
   registerCapsulePreviewHandlers(worker)
   registerCapsuleRouteHandlers(worker)

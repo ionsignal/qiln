@@ -2,11 +2,14 @@ import { z } from 'zod'
 import { TRPCError } from '@trpc/server'
 import {
   CapsuleBlueprintDigestSchema,
+  CapsuleBranchCommandBaseSchema,
   CapsuleBranchNameSchema,
+  CapsuleBranchStartReceiptSchema,
   CapsuleBranchStatusSchema,
-  CapsuleCommandAckSchema,
+  CapsuleBranchStopReceiptSchema,
 } from '@qiln/core/server'
 import { protectedProcedure, router } from '../../init'
+import { createUserMutationIdentity } from '../../identity'
 import { handleEngineError } from '../../utils'
 
 export const CapsuleBranchSummarySchema = z
@@ -26,12 +29,18 @@ export const CapsuleBranchSummarySchema = z
   })
   .strict()
 
-const CapsuleBranchIdentitySchema = z
+const CapsuleBranchStateInputSchema = z
   .object({
     capsuleId: z.uuid(),
     name: CapsuleBranchNameSchema,
   })
   .strict()
+
+const CapsuleBranchMutationInputSchema = CapsuleBranchCommandBaseSchema.pick({
+  capsuleId: true,
+  branchId: true,
+  idempotencyKey: true,
+}).strict()
 
 export const capsuleBranchesRouter = router({
   list: protectedProcedure.output(z.array(CapsuleBranchSummarySchema)).query(async ({ ctx }) => {
@@ -43,7 +52,7 @@ export const capsuleBranchesRouter = router({
   }),
 
   state: protectedProcedure
-    .input(CapsuleBranchIdentitySchema)
+    .input(CapsuleBranchStateInputSchema)
     .output(CapsuleBranchSummarySchema)
     .query(async ({ ctx, input }) => {
       try {
@@ -63,22 +72,24 @@ export const capsuleBranchesRouter = router({
     }),
 
   start: protectedProcedure
-    .input(CapsuleBranchIdentitySchema)
-    .output(CapsuleCommandAckSchema)
+    .input(CapsuleBranchMutationInputSchema)
+    .output(CapsuleBranchStartReceiptSchema)
     .mutation(async ({ ctx, input }) => {
       try {
-        return await ctx.engine.capsuleBranches.start(ctx.user.id, input.capsuleId, input.name)
+        const identity = createUserMutationIdentity(ctx.user)
+        return await ctx.engine.capsuleBranches.start(identity, input)
       } catch (error: unknown) {
         handleEngineError(error)
       }
     }),
 
   stop: protectedProcedure
-    .input(CapsuleBranchIdentitySchema)
-    .output(CapsuleCommandAckSchema)
+    .input(CapsuleBranchMutationInputSchema)
+    .output(CapsuleBranchStopReceiptSchema)
     .mutation(async ({ ctx, input }) => {
       try {
-        return await ctx.engine.capsuleBranches.stop(ctx.user.id, input.capsuleId, input.name)
+        const identity = createUserMutationIdentity(ctx.user)
+        return await ctx.engine.capsuleBranches.stop(identity, input)
       } catch (error: unknown) {
         handleEngineError(error)
       }

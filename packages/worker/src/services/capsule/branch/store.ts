@@ -1,15 +1,13 @@
-import { and, asc, desc, eq, inArray, isNull } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull, notExists } from 'drizzle-orm'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
-import type { CapsulePersistence, CapsuleTables } from '@qiln/core/server'
+import { CapsuleOperationStatus, type CapsulePersistence, type CapsuleTables } from '@qiln/core/server'
 import { IncusError } from '../../../errors'
 import { createFailureDetails, failureCodeFromUnknown, failureMessageFromUnknown } from '../failures'
 import { toJsonObject } from '../persistence/json'
-import type { PreviewGate } from '../routing/preview/gate'
 import type {
   BranchRuntimeErrorInput,
   BranchRuntimeErrorResult,
   BranchRuntimeReconciliationCandidate,
-  BranchRuntimeTransitionContext,
   ConfirmedBranchRuntimeStateInput,
   ConfirmedBranchRuntimeStateResult,
 } from './types'
@@ -28,25 +26,20 @@ const ACTIVE_BRANCH_STATUSES = [
 
 const RUNTIME_RECONCILIATION_STATUSES = ['offline', 'starting', 'online', 'stopping', 'error'] as const
 
+const NONTERMINAL_OPERATION_STATUSES = [CapsuleOperationStatus.ACCEPTED, CapsuleOperationStatus.RUNNING] as const
+
 /**
- * Persistence boundary for capsule branch runtime state.
+ * Read and reconciliation persistence for capsule branch runtime state.
  *
- * Capsule lifecycle is authoritative over branch runtime mutations.
- * Transitional branch states are durable mutation fences, and every state write
- * revalidates the active, unarchived capsule aggregate.
- *
- * Branch shutdown additionally rechecks durable preview withdrawal inside the
- * same capsule and branch transaction so Caddy ingress cannot race provider
- * shutdown after an earlier best-effort withdrawal request.
+ * Start and stop transitions belong to their durable operation repositories.
+ * Reconciliation writes are allowed only when no accepted or running capsule
+ * operation owns the aggregate.
  */
 export class CapsuleBranchStore<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
   TTables extends CapsuleTables = CapsuleTables,
 > {
-  constructor(
-    private readonly persistence: CapsulePersistence<TDatabase, TTables>,
-    private readonly previews: PreviewGate<TDatabase, TTables>,
-  ) {}
+  constructor(private readonly persistence: CapsulePersistence<TDatabase, TTables>) {}
 
   public async listBranches(ownerId: string) {
     const db = this.persistence.db
@@ -117,14 +110,15 @@ export class CapsuleBranchStore<
   }
 
   /**
-   * Lists branch runtimes that are safe to observe during Worker startup.
+   * Lists branch runtimes that are safe to observe during Worker
+   * reconciliation.
    *
-   * Capture-fenced, cleanup-required, archived, destroying, destroyed,
-   * provisioning, and failed-creation aggregates are intentionally excluded.
+   * The query-level operation exclusion avoids unnecessary provider reads. Each
+   * subsequent write repeats this fence after locking the capsule aggregate.
    */
   public async listRuntimeReconciliationCandidates(): Promise<BranchRuntimeReconciliationCandidate[]> {
     const db = this.persistence.db
-    const { capsules, capsuleBranches } = this.persistence.tables
+    const { capsules, capsuleBranches, capsuleOperations } = this.persistence.tables
     return await db
       .select({
         id: capsuleBranches.id,
@@ -140,25 +134,22 @@ export class CapsuleBranchStore<
           eq(capsules.lifecycleStatus, 'active'),
           isNull(capsules.archivedAt),
           inArray(capsuleBranches.status, RUNTIME_RECONCILIATION_STATUSES),
+          notExists(
+            db
+              .select({
+                id: capsuleOperations.id,
+              })
+              .from(capsuleOperations)
+              .where(
+                and(
+                  eq(capsuleOperations.capsuleId, capsuleBranches.capsuleId),
+                  inArray(capsuleOperations.status, NONTERMINAL_OPERATION_STATUSES),
+                ),
+              ),
+          ),
         ),
       )
       .orderBy(asc(capsuleBranches.ownerId), asc(capsuleBranches.id))
-  }
-
-  public async beginBranchStart(
-    ownerId: string,
-    capsuleId: string,
-    branchName: string,
-  ): Promise<BranchRuntimeTransitionContext> {
-    return await this.beginBranchRuntimeTransition(ownerId, capsuleId, branchName, 'offline', 'starting')
-  }
-
-  public async beginBranchStop(
-    ownerId: string,
-    capsuleId: string,
-    branchName: string,
-  ): Promise<BranchRuntimeTransitionContext> {
-    return await this.beginBranchRuntimeTransition(ownerId, capsuleId, branchName, 'online', 'stopping')
   }
 
   public async recordConfirmedRuntimeState(
@@ -168,6 +159,7 @@ export class CapsuleBranchStore<
     const branches = this.persistence.tables.capsuleBranches
     return await db.transaction(async tx => {
       await this.lockActiveCapsule(tx, input.ownerId, input.capsuleId)
+      await this.assertReconciliationAvailable(tx, input.capsuleId)
       const [branch] = await tx
         .select({
           id: branches.id,
@@ -252,6 +244,7 @@ export class CapsuleBranchStore<
     const branches = this.persistence.tables.capsuleBranches
     return await db.transaction(async tx => {
       await this.lockActiveCapsule(tx, input.ownerId, input.capsuleId)
+      await this.assertReconciliationAvailable(tx, input.capsuleId)
       const [branch] = await tx
         .select({
           id: branches.id,
@@ -325,93 +318,6 @@ export class CapsuleBranchStore<
     })
   }
 
-  private async beginBranchRuntimeTransition(
-    ownerId: string,
-    capsuleId: string,
-    branchName: string,
-    requiredStatus: 'offline' | 'online',
-    transitionalStatus: 'starting' | 'stopping',
-  ): Promise<BranchRuntimeTransitionContext> {
-    const db = this.persistence.db
-    const branches = this.persistence.tables.capsuleBranches
-    return await db.transaction(async tx => {
-      await this.lockActiveCapsule(tx, ownerId, capsuleId)
-      const [branch] = await tx
-        .select({
-          id: branches.id,
-          capsuleId: branches.capsuleId,
-          name: branches.name,
-          status: branches.status,
-        })
-        .from(branches)
-        .where(and(eq(branches.ownerId, ownerId), eq(branches.capsuleId, capsuleId), eq(branches.name, branchName)))
-        .for('update')
-        .limit(1)
-      if (!branch) {
-        throw new IncusError('Capsule branch not found or access denied.', 'NOT_FOUND', {
-          capsuleId,
-          branchName,
-        })
-      }
-      if (branch.status !== requiredStatus) {
-        throw new IncusError(
-          `Capsule branch cannot enter '${transitionalStatus}' from '${branch.status}'.`,
-          'CONFLICT',
-          {
-            capsuleId,
-            branchId: branch.id,
-            branchName,
-            currentStatus: branch.status,
-            requiredStatus,
-          },
-        )
-      }
-      if (transitionalStatus === 'stopping') {
-        await this.previews.assertBranchWithdrawn(tx, ownerId, capsuleId, branch.id)
-      }
-      const [transitioned] = await tx
-        .update(branches)
-        .set({
-          status: transitionalStatus,
-          ...(transitionalStatus === 'stopping'
-            ? {
-                runtimeIp: null,
-              }
-            : {}),
-          runtimeErrorCode: null,
-          runtimeErrorMessage: null,
-          runtimeErrorDetails: null,
-          runtimeErrorAt: null,
-          updatedAt: new Date(),
-        })
-        .where(and(eq(branches.id, branch.id), eq(branches.status, requiredStatus)))
-        .returning({
-          id: branches.id,
-        })
-      if (!transitioned) {
-        throw new IncusError(
-          'Capsule branch runtime transition conflicted with another lifecycle change.',
-          'CONFLICT',
-          {
-            capsuleId,
-            branchId: branch.id,
-            branchName,
-            requiredStatus,
-            transitionalStatus,
-          },
-        )
-      }
-      return {
-        ownerId,
-        branchId: branch.id,
-        capsuleId: branch.capsuleId,
-        branchName: branch.name,
-        previousStatus: requiredStatus,
-        transitionalStatus,
-      }
-    })
-  }
-
   private async lockActiveCapsule(
     tx: Parameters<Parameters<TDatabase['transaction']>[0]>[0],
     ownerId: string,
@@ -434,11 +340,42 @@ export class CapsuleBranchStore<
       })
     }
     if (capsule.lifecycleStatus !== 'active' || capsule.archivedAt !== null) {
-      throw new IncusError('Archived or non-active capsules cannot change branch runtime state.', 'CONFLICT', {
+      throw new IncusError('Archived or non-active capsules cannot reconcile branch runtime state.', 'CONFLICT', {
         capsuleId,
         lifecycleStatus: capsule.lifecycleStatus,
         archived: capsule.archivedAt !== null,
       })
     }
+  }
+
+  /**
+   * Rechecks operation ownership after the capsule row is locked.
+   *
+   * Candidate filtering alone is insufficient because a start operation can own
+   * an already-online branch while it finishes SSH coordination.
+   */
+  private async assertReconciliationAvailable(
+    tx: Parameters<Parameters<TDatabase['transaction']>[0]>[0],
+    capsuleId: string,
+  ): Promise<void> {
+    const operations = this.persistence.tables.capsuleOperations
+    const [operation] = await tx
+      .select({
+        id: operations.id,
+        type: operations.type,
+        status: operations.status,
+      })
+      .from(operations)
+      .where(and(eq(operations.capsuleId, capsuleId), inArray(operations.status, NONTERMINAL_OPERATION_STATUSES)))
+      .limit(1)
+    if (!operation) {
+      return
+    }
+    throw new IncusError('Branch runtime reconciliation is blocked by a nonterminal capsule operation.', 'CONFLICT', {
+      capsuleId,
+      operationId: operation.id,
+      operationType: operation.type,
+      operationStatus: operation.status,
+    })
   }
 }

@@ -3,6 +3,7 @@ import type { CapsuleRuntimeReconciliationCoordinator } from './reconciliation'
 import type { CapsuleOperationAbandonmentCoordinator } from './operations/abandonment/coordinator'
 import type { CapsuleArchiveSubmissionService } from './operations/archival/archive/submission'
 import type { CapsuleUnarchiveSubmissionService } from './operations/archival/unarchive/submission'
+import type { BranchSubmission } from './operations/branch/submission'
 import type { CaptureSubmission } from './operations/capture/submission'
 import type { CreateCapsuleSubmissionService } from './operations/create/submission'
 import type { DestroyCapsuleSubmissionService } from './operations/destroy/submission'
@@ -25,6 +26,8 @@ export interface CapsuleServiceCapabilities {
   unarchive: CapsuleUnarchiveSubmissionService
   destroy: DestroyCapsuleSubmissionService
   capture: CaptureSubmission
+  start: BranchSubmission<'branch_start'>
+  stop: BranchSubmission<'branch_stop'>
   branch: CapsuleBranchRuntimeService
   snapshot: CapsuleSnapshotService
   route: CommittedRouteService
@@ -47,6 +50,8 @@ export class CapsuleService {
   public readonly unarchive: CapsuleUnarchiveSubmissionService
   public readonly destroy: DestroyCapsuleSubmissionService
   public readonly capture: CaptureSubmission
+  public readonly start: BranchSubmission<'branch_start'>
+  public readonly stop: BranchSubmission<'branch_stop'>
   public readonly branch: CapsuleBranchRuntimeService
   public readonly snapshot: CapsuleSnapshotService
   public readonly route: CommittedRouteService
@@ -62,6 +67,8 @@ export class CapsuleService {
     this.unarchive = capabilities.unarchive
     this.destroy = capabilities.destroy
     this.capture = capabilities.capture
+    this.start = capabilities.start
+    this.stop = capabilities.stop
     this.branch = capabilities.branch
     this.snapshot = capabilities.snapshot
     this.route = capabilities.route

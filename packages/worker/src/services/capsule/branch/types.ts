@@ -6,25 +6,6 @@ import type { CapsuleBranchStatus } from '@qiln/core/server'
  */
 export type StableBranchRuntimeStatus = 'online' | 'offline'
 
-/**
- * Durable mutation fences written before a branch runtime provider mutation.
- */
-export type TransitionalBranchRuntimeStatus = 'starting' | 'stopping'
-export type BranchRuntimeMutation = 'start' | 'stop'
-
-/**
- * Explicit policy for one branch runtime mutation.
- *
- * The desired and opposite statuses are used when resolving a provider error
- * through a single follow-up provider observation.
- */
-export interface BranchRuntimeMutationDefinition {
-  mutation: BranchRuntimeMutation
-  transitionalStatus: TransitionalBranchRuntimeStatus
-  desiredStatus: StableBranchRuntimeStatus
-  oppositeStatus: StableBranchRuntimeStatus
-}
-
 export type ConfirmedCapsuleBranchRuntimeState =
   | {
       kind: 'confirmed'
@@ -57,7 +38,7 @@ export interface UnavailableCapsuleBranchRuntimeState {
  * Normalized provider-observation vocabulary consumed by branch runtime policy.
  *
  * Provider-specific state interpretation belongs to the observer. Persistence,
- * reconciliation, and mutation resolution operate only on these outcomes.
+ * reconciliation, and operation execution operate only on these outcomes.
  */
 export type CapsuleBranchRuntimeObservation =
   | ConfirmedCapsuleBranchRuntimeState
@@ -76,19 +57,6 @@ export interface BranchRuntimeReconciliationCandidate {
   ownerId: string
   name: string
   status: CapsuleBranchStatus
-}
-
-/**
- * Committed branch transition context used to perform one provider runtime
- * mutation.
- */
-export interface BranchRuntimeTransitionContext {
-  ownerId: string
-  branchId: string
-  capsuleId: string
-  branchName: string
-  previousStatus: 'offline' | 'online'
-  transitionalStatus: 'starting' | 'stopping'
 }
 
 export interface ConfirmedBranchRuntimeStateInput {

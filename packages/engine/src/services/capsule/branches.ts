@@ -3,11 +3,14 @@ import {
   CapsuleBranchCommandName,
   TargetType,
   type CapsuleBlueprintDigest,
+  type CapsuleBranchStart,
+  type CapsuleBranchStartReceipt,
   type CapsuleBranchStatus,
+  type CapsuleBranchStopReceipt,
   type CapsuleChannel,
-  type CapsuleCommandAck,
 } from '@qiln/core/server'
 import type { EnginePersistence } from '../../persistence'
+import type { CapsuleMutationIdentity } from './types'
 
 const OPERATIONAL_CAPSULE_LIFECYCLE_STATUSES = ['provisioning', 'active'] as const
 
@@ -47,6 +50,14 @@ type CapsuleBranchRow = {
   createdAt: Date
   updatedAt: Date
 }
+
+/**
+ * Caller-supplied mutation fields shared by start and stop.
+ *
+ * Owner and actor attribution remain separate trusted context. The caller
+ * retains the idempotency key when retrying the same submission.
+ */
+export type CapsuleBranchMutationInput = Pick<CapsuleBranchStart, 'capsuleId' | 'branchId' | 'idempotencyKey'>
 
 /**
  * Public Engine boundary for existing capsule branch runtimes.
@@ -147,25 +158,47 @@ export class CapsuleBranchesService {
     return row ? this.mapBranchRow(row) : null
   }
 
-  public async start(ownerId: string, capsuleId: string, name: string): Promise<CapsuleCommandAck> {
+  /**
+   * Returns durable start acceptance or replay, not confirmed online state.
+   *
+   * Worker-owned replay precedes mutable eligibility checks. An operational
+   * read here could incorrectly reject replay after the capsule changes state.
+   */
+  public async start(
+    identity: CapsuleMutationIdentity,
+    input: CapsuleBranchMutationInput,
+  ): Promise<CapsuleBranchStartReceipt> {
     return await this.channel.command(CapsuleBranchCommandName.BRANCH_START, {
       target: {
         type: TargetType.OWNER,
-        id: ownerId,
+        id: identity.ownerId,
       },
-      capsuleId,
-      name,
+      actor: identity.actor,
+      capsuleId: input.capsuleId,
+      branchId: input.branchId,
+      idempotencyKey: input.idempotencyKey,
     })
   }
 
-  public async stop(ownerId: string, capsuleId: string, name: string): Promise<CapsuleCommandAck> {
+  /**
+   * Returns durable stop acceptance or replay, not confirmed offline state.
+   *
+   * SSH relay closure, preview withdrawal, and runtime shutdown remain
+   * Worker-owned execution steps after acceptance.
+   */
+  public async stop(
+    identity: CapsuleMutationIdentity,
+    input: CapsuleBranchMutationInput,
+  ): Promise<CapsuleBranchStopReceipt> {
     return await this.channel.command(CapsuleBranchCommandName.BRANCH_STOP, {
       target: {
         type: TargetType.OWNER,
-        id: ownerId,
+        id: identity.ownerId,
       },
-      capsuleId,
-      name,
+      actor: identity.actor,
+      capsuleId: input.capsuleId,
+      branchId: input.branchId,
+      idempotencyKey: input.idempotencyKey,
     })
   }
 

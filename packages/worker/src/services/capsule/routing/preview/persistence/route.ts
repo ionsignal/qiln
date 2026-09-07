@@ -11,7 +11,7 @@ import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import { IncusError } from '../../../../../errors'
 import { createFailureDetails, failureCodeFromUnknown, failureMessageFromUnknown } from '../../../failures'
 import { toJsonObject } from '../../../persistence/json'
-import type { PreviewPlan, PreviewRecord } from '../types'
+import type { PreviewAdmission, PreviewPlan, PreviewRecord } from '../types'
 import type { PreviewLocks, PreviewTransaction } from './locks'
 
 const NONTERMINAL_OPERATION_STATUSES = [CapsuleOperationStatus.ACCEPTED, CapsuleOperationStatus.RUNNING] as const
@@ -41,6 +41,7 @@ interface PendingConfiguration {
  *
  * Apply eligibility, capsule/branch ownership, the capsule-wide operation
  * fence, plan consistency, and the `applying` write remain in one transaction.
+ * Expected admission changes return skipped without recording provider intent.
  */
 export class PreviewRoutePersistence<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
@@ -51,37 +52,42 @@ export class PreviewRoutePersistence<
     private readonly locks: PreviewLocks<TDatabase, TTables>,
   ) {}
 
-  public async apply(id: string, plan: PreviewPlan): Promise<PreviewRecord> {
-    return await this.persistence.db.transaction(async tx => {
-      const scope = await this.locks.branch(tx, plan.ownerId, plan.capsuleId, plan.branchId)
+  public async apply(id: string, plan: PreviewPlan): Promise<PreviewAdmission> {
+    return await this.persistence.db.transaction(async (tx): Promise<PreviewAdmission> => {
+      const scope = await this.locks.preview(tx, id)
+      const preview = scope.preview
+
+      this.assertPlan(preview, plan)
+
+      if (await this.operationBlocked(tx, plan.capsuleId)) {
+        return {
+          kind: 'skipped',
+          reason: 'operation_blocked',
+        }
+      }
       if (scope.capsule.lifecycleStatus !== 'active' || scope.capsule.archivedAt !== null) {
-        throw new IncusError('Branch preview capsule is no longer active and unarchived.', 'CONFLICT', {
-          capsuleId: plan.capsuleId,
-          ownerId: plan.ownerId,
-          lifecycleStatus: scope.capsule.lifecycleStatus,
-          archived: scope.capsule.archivedAt !== null,
-        })
+        return {
+          kind: 'skipped',
+          reason: 'lifecycle_changed',
+        }
       }
       if (
         scope.branch.status !== 'online' ||
         scope.branch.runtimeIp === null ||
         scope.branch.runtimeIp !== plan.runtimeIp
       ) {
-        throw new IncusError('Branch preview source branch is no longer eligible for Caddy application.', 'CONFLICT', {
-          previewId: plan.previewId,
-          branchId: plan.branchId,
-          branchStatus: scope.branch.status,
-          branchRuntimeIp: scope.branch.runtimeIp,
-          plannedRuntimeIp: plan.runtimeIp,
-        })
+        return {
+          kind: 'skipped',
+          reason: 'runtime_changed',
+        }
+      }
+      if (preview.withdrawalRequestedAt !== null) {
+        return {
+          kind: 'skipped',
+          reason: 'withdrawal_requested',
+        }
       }
 
-      await this.assertOperationFence(tx, plan)
-
-      const locked = await this.locks.preview(tx, id)
-      const preview = locked.preview
-
-      this.assertPlan(preview, plan)
       this.assertApplyState(preview)
 
       const previews = this.persistence.tables.capsuleBranchPreviews
@@ -104,8 +110,10 @@ export class PreviewRoutePersistence<
         })
         .where(and(eq(previews.id, id), eq(previews.status, preview.status), eq(previews.updatedAt, preview.updatedAt)))
         .returning()
-
-      return this.require(record, id, 'applying')
+      return {
+        kind: 'proceed',
+        preview: this.require(record, id, 'applying'),
+      }
     })
   }
 
@@ -271,32 +279,16 @@ export class PreviewRoutePersistence<
     })
   }
 
-  private async assertOperationFence(tx: PreviewTransaction<TDatabase>, plan: PreviewPlan): Promise<void> {
+  private async operationBlocked(tx: PreviewTransaction<TDatabase>, capsuleId: string): Promise<boolean> {
     const operations = this.persistence.tables.capsuleOperations
     const [operation] = await tx
       .select({
         id: operations.id,
-        type: operations.type,
-        status: operations.status,
       })
       .from(operations)
-      .where(and(eq(operations.capsuleId, plan.capsuleId), inArray(operations.status, NONTERMINAL_OPERATION_STATUSES)))
+      .where(and(eq(operations.capsuleId, capsuleId), inArray(operations.status, NONTERMINAL_OPERATION_STATUSES)))
       .limit(1)
-
-    if (!operation) {
-      return
-    }
-    throw new IncusError(
-      'Branch preview cannot mutate ingress while the capsule has a nonterminal operation.',
-      'CONFLICT',
-      {
-        previewId: plan.previewId,
-        capsuleId: plan.capsuleId,
-        operationId: operation.id,
-        operationType: operation.type,
-        operationStatus: operation.status,
-      },
-    )
+    return operation !== undefined
   }
 
   private assertApplyState(preview: PreviewRecord): void {
@@ -305,16 +297,6 @@ export class PreviewRoutePersistence<
         previewId: preview.id,
         status: preview.status,
       })
-    }
-    if (preview.withdrawalRequestedAt !== null) {
-      throw new IncusError(
-        'Branch preview is waiting for ingress withdrawal and cannot recreate its Caddy route.',
-        'CONFLICT',
-        {
-          previewId: preview.id,
-          withdrawalRequestedAt: preview.withdrawalRequestedAt.toISOString(),
-        },
-      )
     }
     if (
       preview.pendingRuntimeIp !== null ||

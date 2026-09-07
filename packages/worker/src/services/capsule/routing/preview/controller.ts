@@ -50,6 +50,9 @@ export class PreviewRouteController {
   constructor(private readonly dependencies: PreviewRouteControllerDependencies) {}
 
   public async reconcile(branch: PreviewBranch, existing: readonly PreviewRecord[]): Promise<void> {
+    if (branch.operationBlocked) {
+      return
+    }
     const withdrawalRequested = existing.some(preview => preview.withdrawalRequestedAt !== null)
     if (!this.eligible(branch) || withdrawalRequested) {
       const previews = withdrawalRequested
@@ -77,7 +80,11 @@ export class PreviewRouteController {
             application,
           })
           const identity = this.dependencies.host.create(branch.id, application.name)
-          preview = await this.dependencies.repository.ensure(branch, applicationPin, identity)
+          const admission = await this.dependencies.repository.ensure(branch, applicationPin, identity)
+          if (admission.kind === 'skipped') {
+            return
+          }
+          preview = admission.preview
           await this.apply(preview, branch.runtimeIp!)
         } catch (error: unknown) {
           const persistedPreview = preview ?? existing.find(candidate => candidate.applicationName === application.name)
@@ -240,7 +247,11 @@ export class PreviewRouteController {
       )
       return
     }
-    const applying = this.changed(await this.dependencies.repository.apply(preview.id, plan))
+    const admission = await this.dependencies.repository.apply(preview.id, plan)
+    if (admission.kind === 'skipped') {
+      return
+    }
+    const applying = this.changed(admission.preview)
     try {
       const observedState = await this.dependencies.caddy.routes.create(plan.route, state)
       const observed = this.find(observedState, applying.providerRouteId)
@@ -273,7 +284,11 @@ export class PreviewRouteController {
       )
       return
     }
-    const applying = this.changed(await this.dependencies.repository.apply(preview.id, plan))
+    const admission = await this.dependencies.repository.apply(preview.id, plan)
+    if (admission.kind === 'skipped') {
+      return
+    }
+    const applying = this.changed(admission.preview)
     try {
       const observedState = await this.dependencies.caddy.routes.replace(plan.route, state)
       const observed = this.find(observedState, applying.providerRouteId)
@@ -523,8 +538,7 @@ export class PreviewRouteController {
       branch.lifecycleStatus === 'active' &&
       branch.archivedAt === null &&
       branch.status === 'online' &&
-      branch.runtimeIp !== null &&
-      !branch.operationBlocked
+      branch.runtimeIp !== null
     )
   }
 }
