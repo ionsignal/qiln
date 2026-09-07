@@ -1,5 +1,6 @@
 import type { PgColumn } from 'drizzle-orm/pg-core'
 import { createCapsuleBranchesTable } from '../branch/record'
+import { createCapsuleBranchRuntimeOperationsTable } from '../operation/runtime'
 import { createCapsuleBranchResourcesTable } from '../branch/resource'
 import {
   createCapsuleSnapshotCaptureOperationsTable,
@@ -31,6 +32,10 @@ export function createSchema<TUserIdColumn extends PgColumn>(userIdColumn: TUser
   const capsules = createCapsulesTable(userIdColumn)
   const capsuleBranches = createCapsuleBranchesTable(userIdColumn, capsules.id)
   const capsuleOperations = createCapsuleOperationsTable(userIdColumn, capsules.id)
+  const capsuleBranchRuntimeOperations = createCapsuleBranchRuntimeOperationsTable(
+    capsuleOperations.id,
+    capsuleBranches.id,
+  )
   const capsuleCreateOperations = createCapsuleCreateOperationsTable(capsuleOperations.id, capsuleBranches.id)
   const capsuleBranchResources = createCapsuleBranchResourcesTable(
     userIdColumn,
@@ -83,6 +88,7 @@ export function createSchema<TUserIdColumn extends PgColumn>(userIdColumn: TUser
     capsuleOperations,
     capsuleCreateOperations,
     capsuleForkOperations,
+    capsuleBranchRuntimeOperations,
     capsuleOperationSteps,
     capsuleBranchResources,
     capsuleSnapshots,

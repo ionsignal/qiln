@@ -10,6 +10,10 @@ import { CapsuleBranchNameSchema } from './branch'
  * history. `snapshot_capture` creates immutable committed capsule history from
  * one durably fenced source branch.
  *
+ * `branch_start` and `branch_stop` coordinate runtime changes for one existing
+ * editable branch. Their immutable target belongs to the branch-runtime
+ * operation extension, and both use the capsule-wide nonterminal fence.
+ *
  * `promote` and `rollback` participate in the same capsule-wide nonterminal
  * operation fence. Their operation-specific immutable input belongs to the
  * route-operation extension.
@@ -21,6 +25,8 @@ export const CapsuleOperationType = {
   UNARCHIVE: 'unarchive',
   DESTROY: 'destroy',
   SNAPSHOT_CAPTURE: 'snapshot_capture',
+  BRANCH_START: 'branch_start',
+  BRANCH_STOP: 'branch_stop',
   PROMOTE: 'promote',
   ROLLBACK: 'rollback',
 } as const
@@ -34,6 +40,8 @@ export const CapsuleOperationTypeValues = [
   CapsuleOperationType.UNARCHIVE,
   CapsuleOperationType.DESTROY,
   CapsuleOperationType.SNAPSHOT_CAPTURE,
+  CapsuleOperationType.BRANCH_START,
+  CapsuleOperationType.BRANCH_STOP,
   CapsuleOperationType.PROMOTE,
   CapsuleOperationType.ROLLBACK,
 ] as const
@@ -146,6 +154,31 @@ export const CapsuleDestroyReceiptSchema = CapsuleOperationReceiptSchema.extend(
 }).strict()
 
 /**
+ * Receipt for durable branch-start acceptance or replay.
+ *
+ * The branch name is acceptance-time evidence. The UUID identifies the target;
+ * receipt delivery does not imply that runtime or access coordination
+ * finished.
+ */
+export const CapsuleBranchStartReceiptSchema = CapsuleOperationReceiptSchema.extend({
+  operationType: z.literal(CapsuleOperationType.BRANCH_START),
+  branchId: z.uuid(),
+  branchName: CapsuleBranchNameSchema,
+}).strict()
+
+/**
+ * Receipt for durable branch-stop acceptance or replay.
+ *
+ * Acceptance does not imply that SSH relays, previews, or the branch runtime
+ * have stopped. Consumers must read authoritative operation and branch state.
+ */
+export const CapsuleBranchStopReceiptSchema = CapsuleOperationReceiptSchema.extend({
+  operationType: z.literal(CapsuleOperationType.BRANCH_STOP),
+  branchId: z.uuid(),
+  branchName: CapsuleBranchNameSchema,
+}).strict()
+
+/**
  * Receipt for durable Snapshot Capture acceptance or replay.
  */
 export const CapsuleSnapshotCaptureReceiptSchema = CapsuleOperationReceiptSchema.extend({
@@ -198,6 +231,8 @@ export type CapsuleOperationRequestHash = z.infer<typeof CapsuleOperationRequest
 export type CapsuleOperationReceipt = z.infer<typeof CapsuleOperationReceiptSchema>
 export type CapsuleCreateReceipt = z.infer<typeof CapsuleCreateReceiptSchema>
 export type CapsuleForkReceipt = z.infer<typeof CapsuleForkReceiptSchema>
+export type CapsuleBranchStartReceipt = z.infer<typeof CapsuleBranchStartReceiptSchema>
+export type CapsuleBranchStopReceipt = z.infer<typeof CapsuleBranchStopReceiptSchema>
 export type CapsuleArchiveReceipt = z.infer<typeof CapsuleArchiveReceiptSchema>
 export type CapsuleUnarchiveReceipt = z.infer<typeof CapsuleUnarchiveReceiptSchema>
 export type CapsuleDestroyReceipt = z.infer<typeof CapsuleDestroyReceiptSchema>

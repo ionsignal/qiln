@@ -1,21 +1,29 @@
 import { z } from 'zod'
+import { CapsuleActorReferenceSchema } from '../../../schemas/capsule/actor'
 import {
   CapsuleBranchNameSchema,
   CapsuleBranchStatusSchema,
   type CapsuleBranchName,
   type CapsuleBranchStatus,
 } from '../../../schemas/capsule/branch'
+import {
+  CapsuleBranchStartReceiptSchema,
+  CapsuleBranchStopReceiptSchema,
+  CapsuleOperationIdempotencyKeySchema,
+} from '../../../schemas/capsule/operations'
 import { TargetOwnerSchema, TargetType } from '../targets'
-import { CapsuleCommandAckSchema, defineCapsuleCommand, defineCapsuleEvent } from './definitions'
+import { defineCapsuleCommand, defineCapsuleEvent } from './definitions'
 import type { input, output } from 'zod'
 import type { CapsuleCommandDefinition, CapsuleEventDefinition } from './definitions'
 
-const CAPSULE_BRANCH_LIFECYCLE_TIMEOUT_MS = 120_000
+const CAPSULE_BRANCH_ACCEPTANCE_TIMEOUT_MS = 15_000
 
 /**
- * Branch commands currently expose only runtime start and stop. The root branch
- * cannot be directly deleted. Capsule destroy governs terminal retirement of
- * the initial capsule lineage.
+ * Branch commands expose durable runtime start and stop submission. The root
+ * branch cannot be directly deleted. Capsule destroy governs terminal
+ * retirement of the initial capsule lineage.
+ *
+ * Receipts prove acceptance or replay, not completed runtime coordination.
  */
 export const CapsuleBranchCommandName = {
   BRANCH_START: 'capsule.branch.start',
@@ -40,23 +48,36 @@ export const CapsuleBranchEventNameValues = [CapsuleBranchEventName.BRANCH_STATE
 export { CapsuleBranchNameSchema, CapsuleBranchStatusSchema }
 export type { CapsuleBranchName, CapsuleBranchStatus }
 
+/**
+ * Exact owner-scoped branch mutation identity.
+ *
+ * Actor provenance must come from the authenticated publisher. The Worker
+ * persists the supplied idempotency key and resolves the branch by UUID rather
+ * than treating its mutable user-facing name as execution authority.
+ */
 export const CapsuleBranchCommandBaseSchema = z
   .object({
     target: TargetOwnerSchema,
+    actor: CapsuleActorReferenceSchema,
     capsuleId: z.uuid(),
-    name: CapsuleBranchNameSchema,
+    branchId: z.uuid(),
+    idempotencyKey: CapsuleOperationIdempotencyKeySchema,
   })
   .strict()
 
 export const CapsuleBranchStartInputSchema = CapsuleBranchCommandBaseSchema
+export const CapsuleBranchStartOutputSchema = CapsuleBranchStartReceiptSchema
 
 export type CapsuleBranchStartInput = input<typeof CapsuleBranchStartInputSchema>
 export type CapsuleBranchStart = output<typeof CapsuleBranchStartInputSchema>
+export type CapsuleBranchStartOutput = output<typeof CapsuleBranchStartOutputSchema>
 
 export const CapsuleBranchStopInputSchema = CapsuleBranchCommandBaseSchema
+export const CapsuleBranchStopOutputSchema = CapsuleBranchStopReceiptSchema
 
 export type CapsuleBranchStopInput = input<typeof CapsuleBranchStopInputSchema>
 export type CapsuleBranchStop = output<typeof CapsuleBranchStopInputSchema>
+export type CapsuleBranchStopOutput = output<typeof CapsuleBranchStopOutputSchema>
 
 export const CapsuleBranchStateChangedEventSchema = z
   .object({
@@ -77,8 +98,8 @@ export const CapsuleBranchCommandDefinitions = {
     kind: 'capsule.command',
     name: CapsuleBranchCommandName.BRANCH_START,
     inputSchema: CapsuleBranchStartInputSchema,
-    outputSchema: CapsuleCommandAckSchema,
-    timeoutMs: CAPSULE_BRANCH_LIFECYCLE_TIMEOUT_MS,
+    outputSchema: CapsuleBranchStartOutputSchema,
+    timeoutMs: CAPSULE_BRANCH_ACCEPTANCE_TIMEOUT_MS,
     target: {
       type: TargetType.OWNER,
       resolve(payload: CapsuleBranchStart) {
@@ -90,8 +111,8 @@ export const CapsuleBranchCommandDefinitions = {
     kind: 'capsule.command',
     name: CapsuleBranchCommandName.BRANCH_STOP,
     inputSchema: CapsuleBranchStopInputSchema,
-    outputSchema: CapsuleCommandAckSchema,
-    timeoutMs: CAPSULE_BRANCH_LIFECYCLE_TIMEOUT_MS,
+    outputSchema: CapsuleBranchStopOutputSchema,
+    timeoutMs: CAPSULE_BRANCH_ACCEPTANCE_TIMEOUT_MS,
     target: {
       type: TargetType.OWNER,
       resolve(payload: CapsuleBranchStop) {

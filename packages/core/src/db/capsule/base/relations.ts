@@ -9,6 +9,7 @@ export interface Helpers {
     capsuleOperations: RelationFragmentOneFn<'capsuleOperations'>
     capsuleCreateOperations: RelationFragmentOneFn<'capsuleCreateOperations'>
     capsuleForkOperations: RelationFragmentOneFn<'capsuleForkOperations'>
+    capsuleBranchRuntimeOperations: RelationFragmentOneFn<'capsuleBranchRuntimeOperations'>
     capsuleBranchResources: RelationFragmentOneFn<'capsuleBranchResources'>
     capsuleSnapshots: RelationFragmentOneFn<'capsuleSnapshots'>
     capsuleArtifactManifests: RelationFragmentOneFn<'capsuleArtifactManifests'>
@@ -23,6 +24,7 @@ export interface Helpers {
     capsuleBranches: RelationFragmentManyFn<'capsuleBranches'>
     capsuleOperations: RelationFragmentManyFn<'capsuleOperations'>
     capsuleForkOperations: RelationFragmentManyFn<'capsuleForkOperations'>
+    capsuleBranchRuntimeOperations: RelationFragmentManyFn<'capsuleBranchRuntimeOperations'>
     capsuleOperationSteps: RelationFragmentManyFn<'capsuleOperationSteps'>
     capsuleBranchResources: RelationFragmentManyFn<'capsuleBranchResources'>
     capsuleSnapshots: RelationFragmentManyFn<'capsuleSnapshots'>
@@ -60,6 +62,10 @@ export interface Helpers {
     operationId: RelationsBuilderColumnBase<'capsuleForkOperations'>
     sourceSnapshotId: RelationsBuilderColumnBase<'capsuleForkOperations'>
     targetBranchId: RelationsBuilderColumnBase<'capsuleForkOperations'>
+  }
+  capsuleBranchRuntimeOperations: {
+    operationId: RelationsBuilderColumnBase<'capsuleBranchRuntimeOperations'>
+    branchId: RelationsBuilderColumnBase<'capsuleBranchRuntimeOperations'>
   }
   capsuleOperationSteps: {
     ownerId: RelationsBuilderColumnBase<'capsuleOperationSteps'>
@@ -175,6 +181,10 @@ export function defineRelations(helpers: Helpers) {
         to: helpers.capsuleForkOperations.targetBranchId,
         optional: true,
       }),
+      runtimeOperations: helpers.many.capsuleBranchRuntimeOperations({
+        from: helpers.capsuleBranches.id,
+        to: helpers.capsuleBranchRuntimeOperations.branchId,
+      }),
       operationSteps: helpers.many.capsuleOperationSteps({
         from: helpers.capsuleBranches.id,
         to: helpers.capsuleOperationSteps.branchId,
@@ -211,6 +221,11 @@ export function defineRelations(helpers: Helpers) {
       forkOperation: helpers.one.capsuleForkOperations({
         from: helpers.capsuleOperations.id,
         to: helpers.capsuleForkOperations.operationId,
+        optional: true,
+      }),
+      branchRuntimeOperation: helpers.one.capsuleBranchRuntimeOperations({
+        from: helpers.capsuleOperations.id,
+        to: helpers.capsuleBranchRuntimeOperations.operationId,
         optional: true,
       }),
       snapshotCaptureOperation: helpers.one.capsuleSnapshotCaptureOperations({
@@ -256,6 +271,18 @@ export function defineRelations(helpers: Helpers) {
       }),
       targetBranch: helpers.one.capsuleBranches({
         from: helpers.capsuleForkOperations.targetBranchId,
+        to: helpers.capsuleBranches.id,
+        optional: false,
+      }),
+    },
+    capsuleBranchRuntimeOperations: {
+      operation: helpers.one.capsuleOperations({
+        from: helpers.capsuleBranchRuntimeOperations.operationId,
+        to: helpers.capsuleOperations.id,
+        optional: false,
+      }),
+      branch: helpers.one.capsuleBranches({
+        from: helpers.capsuleBranchRuntimeOperations.branchId,
         to: helpers.capsuleBranches.id,
         optional: false,
       }),

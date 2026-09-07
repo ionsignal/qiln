@@ -621,6 +621,7 @@ export const {
   capsuleOperations,
   capsuleCreateOperations,
   capsuleForkOperations,
+  capsuleBranchRuntimeOperations,
   capsuleOperationSteps,
   capsuleBranchResources,
   capsuleBranchPreviews,

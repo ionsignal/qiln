@@ -1,7 +1,7 @@
 {
   "version": "8",
   "dialect": "postgres",
-  "id": "5057f9ac-6e0e-4c1b-b8ea-e2e3b1686658",
+  "id": "e7fc840a-7236-4b63-8049-dc095510bdaa",
   "prevIds": ["00000000-0000-0000-0000-000000000000"],
   "ddl": [
     {
@@ -91,7 +91,18 @@
       "schema": "public"
     },
     {
-      "values": ["create", "fork", "archive", "unarchive", "destroy", "snapshot_capture", "promote", "rollback"],
+      "values": [
+        "create",
+        "fork",
+        "archive",
+        "unarchive",
+        "destroy",
+        "snapshot_capture",
+        "branch_start",
+        "branch_stop",
+        "promote",
+        "rollback"
+      ],
       "name": "capsule_operation_type",
       "entityType": "enums",
       "schema": "public"
@@ -264,6 +275,12 @@
     {
       "isRlsEnabled": false,
       "name": "capsule_branch_resources",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "capsule_branch_runtime_operations",
       "entityType": "tables",
       "schema": "public"
     },
@@ -1378,6 +1395,45 @@
       "entityType": "columns",
       "schema": "public",
       "table": "capsule_branch_resources"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "operation_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_branch_runtime_operations"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "branch_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_branch_runtime_operations"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "branch_name",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_branch_runtime_operations"
     },
     {
       "type": "uuid",
@@ -5941,6 +5997,27 @@
       "nameExplicit": true,
       "columns": [
         {
+          "value": "branch_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "capsule_branch_runtime_operations_branch_idx",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "capsule_branch_runtime_operations"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
           "value": "owner_id",
           "isExpression": false,
           "asc": true,
@@ -8706,6 +8783,32 @@
     },
     {
       "nameExplicit": false,
+      "columns": ["operation_id"],
+      "schemaTo": "public",
+      "tableTo": "capsule_operations",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "name": "capsule_branch_runtime_operations_GwiY7vP2YwPT_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "capsule_branch_runtime_operations"
+    },
+    {
+      "nameExplicit": false,
+      "columns": ["branch_id"],
+      "schemaTo": "public",
+      "tableTo": "capsule_branches",
+      "columnsTo": ["id"],
+      "onUpdate": "NO ACTION",
+      "onDelete": "RESTRICT",
+      "name": "capsule_branch_runtime_operations_1oTPfeXoHny4_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "capsule_branch_runtime_operations"
+    },
+    {
+      "nameExplicit": false,
       "columns": ["owner_id"],
       "schemaTo": "public",
       "tableTo": "users",
@@ -9725,6 +9828,14 @@
       "name": "capsule_branch_resources_pkey",
       "schema": "public",
       "table": "capsule_branch_resources",
+      "entityType": "pks"
+    },
+    {
+      "columns": ["operation_id"],
+      "nameExplicit": false,
+      "name": "capsule_branch_runtime_operations_pkey",
+      "schema": "public",
+      "table": "capsule_branch_runtime_operations",
       "entityType": "pks"
     },
     {

@@ -9,7 +9,7 @@ CREATE TYPE "capsule_branch_status" AS ENUM('provisioning', 'offline', 'capturin
 CREATE TYPE "capsule_lifecycle_status" AS ENUM('provisioning', 'active', 'archiving', 'unarchiving', 'destroying', 'destroyed', 'creation_failed', 'cleanup_required');--> statement-breakpoint
 CREATE TYPE "capsule_operation_status" AS ENUM('accepted', 'running', 'completed', 'failed', 'cleanup_required');--> statement-breakpoint
 CREATE TYPE "capsule_operation_step_status" AS ENUM('pending', 'running', 'completed', 'failed');--> statement-breakpoint
-CREATE TYPE "capsule_operation_type" AS ENUM('create', 'fork', 'archive', 'unarchive', 'destroy', 'snapshot_capture', 'promote', 'rollback');--> statement-breakpoint
+CREATE TYPE "capsule_operation_type" AS ENUM('create', 'fork', 'archive', 'unarchive', 'destroy', 'snapshot_capture', 'branch_start', 'branch_stop', 'promote', 'rollback');--> statement-breakpoint
 CREATE TYPE "capsule_route_alias_status" AS ENUM('inactive', 'active', 'mutating', 'cleanup_required', 'retired');--> statement-breakpoint
 CREATE TYPE "capsule_route_exposure" AS ENUM('experimental', 'production');--> statement-breakpoint
 CREATE TYPE "capsule_route_method" AS ENUM('DELETE', 'GET', 'HEAD', 'OPTIONS', 'PATCH', 'POST', 'PUT');--> statement-breakpoint
@@ -329,6 +329,12 @@ CREATE TABLE "capsule_branch_resources" (
             AND "blueprint_volume_name" IS NULL
           )
         ))
+);
+--> statement-breakpoint
+CREATE TABLE "capsule_branch_runtime_operations" (
+	"operation_id" uuid PRIMARY KEY,
+	"branch_id" uuid NOT NULL,
+	"branch_name" text NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE "capsule_branches" (
@@ -1268,6 +1274,7 @@ CREATE INDEX "capsule_branch_resources_blueprint_volume_idx" ON "capsule_branch_
 CREATE UNIQUE INDEX "capsule_branch_resources_operation_key_unique_idx" ON "capsule_branch_resources" ("created_by_operation_id","resource_key");--> statement-breakpoint
 CREATE UNIQUE INDEX "capsule_branch_resources_branch_key_unique_idx" ON "capsule_branch_resources" ("branch_id","resource_key");--> statement-breakpoint
 CREATE UNIQUE INDEX "capsule_branch_resources_branch_blueprint_volume_unique_idx" ON "capsule_branch_resources" ("branch_id","blueprint_volume_name") WHERE "blueprint_volume_name" IS NOT NULL;--> statement-breakpoint
+CREATE INDEX "capsule_branch_runtime_operations_branch_idx" ON "capsule_branch_runtime_operations" ("branch_id");--> statement-breakpoint
 CREATE INDEX "capsule_branches_owner_idx" ON "capsule_branches" ("owner_id");--> statement-breakpoint
 CREATE INDEX "capsule_branches_capsule_idx" ON "capsule_branches" ("capsule_id");--> statement-breakpoint
 CREATE INDEX "capsule_branches_runtime_status_idx" ON "capsule_branches" ("status");--> statement-breakpoint
@@ -1390,6 +1397,8 @@ ALTER TABLE "capsule_branch_resources" ADD CONSTRAINT "capsule_branch_resources_
 ALTER TABLE "capsule_branch_resources" ADD CONSTRAINT "capsule_branch_resources_branch_id_capsule_branches_id_fkey" FOREIGN KEY ("branch_id") REFERENCES "capsule_branches"("id") ON DELETE SET NULL;--> statement-breakpoint
 ALTER TABLE "capsule_branch_resources" ADD CONSTRAINT "capsule_branch_resources_3Q5TCQ46rOSG_fkey" FOREIGN KEY ("created_by_operation_id") REFERENCES "capsule_operations"("id") ON DELETE SET NULL;--> statement-breakpoint
 ALTER TABLE "capsule_branch_resources" ADD CONSTRAINT "capsule_branch_resources_ltnZH1shcsde_fkey" FOREIGN KEY ("last_operation_id") REFERENCES "capsule_operations"("id") ON DELETE SET NULL;--> statement-breakpoint
+ALTER TABLE "capsule_branch_runtime_operations" ADD CONSTRAINT "capsule_branch_runtime_operations_GwiY7vP2YwPT_fkey" FOREIGN KEY ("operation_id") REFERENCES "capsule_operations"("id") ON DELETE CASCADE;--> statement-breakpoint
+ALTER TABLE "capsule_branch_runtime_operations" ADD CONSTRAINT "capsule_branch_runtime_operations_1oTPfeXoHny4_fkey" FOREIGN KEY ("branch_id") REFERENCES "capsule_branches"("id") ON DELETE RESTRICT;--> statement-breakpoint
 ALTER TABLE "capsule_branches" ADD CONSTRAINT "capsule_branches_owner_id_users_id_fkey" FOREIGN KEY ("owner_id") REFERENCES "users"("id") ON DELETE CASCADE;--> statement-breakpoint
 ALTER TABLE "capsule_branches" ADD CONSTRAINT "capsule_branches_capsule_id_capsules_id_fkey" FOREIGN KEY ("capsule_id") REFERENCES "capsules"("id") ON DELETE CASCADE;--> statement-breakpoint
 ALTER TABLE "capsule_create_operations" ADD CONSTRAINT "capsule_create_operations_kBDKOqhsMbzu_fkey" FOREIGN KEY ("operation_id") REFERENCES "capsule_operations"("id") ON DELETE CASCADE;--> statement-breakpoint
