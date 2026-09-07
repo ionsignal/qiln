@@ -52,6 +52,7 @@ async function seed() {
         .values({
           ...user,
           password: hashedPassword,
+          isAdmin: true,
         })
         .onConflictDoUpdate({
           target: users.id,
@@ -60,6 +61,7 @@ async function seed() {
             email: user.email,
             password: hashedPassword,
             avatar: user.avatar,
+            isAdmin: true,
           },
         })
 
