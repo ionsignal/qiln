@@ -1,11 +1,20 @@
 export * from './types'
-export * from './stepKeys'
-export * from './failureContext'
-export * from './executionState'
-export * from './planner'
-export * from './resourceProvisioning'
-export * from './compensation'
-export * from './repository'
 export * from './submission'
 export * from './executor'
 export * from './abandonment'
+
+export * from './execution/diagnostics'
+export * from './execution/phases'
+export * from './execution/state'
+export * from './execution/steps'
+
+export * from './persistence/completion'
+export * from './persistence/locks'
+export * from './persistence/repository'
+
+export * from './policy/failure'
+export * from './policy/lineage'
+
+export * from './resource/compensate'
+export * from './resource/plan'
+export * from './resource/provision'

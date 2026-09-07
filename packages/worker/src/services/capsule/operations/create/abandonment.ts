@@ -12,7 +12,7 @@ import type {
   CapsuleOperationEventPublisher,
 } from '../../events'
 import type { PersistedCapsuleOperation } from '../shared'
-import type { CreateCapsuleOperationRepository } from './repository'
+import type { CreateCapsuleOperationRepository } from './persistence/repository'
 import type { CreateCapsuleTerminalResult } from './types'
 
 export interface CreateCapsuleAbandonmentHandlerDependencies {
@@ -39,12 +39,13 @@ function assertCreateAbandonmentRelationships(result: CreateCapsuleTerminalResul
 }
 
 /**
- * Applies create-specific startup abandonment policy.
+ * Applies create-specific startup abandonment policy through the repository
+ * facade.
  *
- * The create repository owns the classification transaction and decides whether
- * the durable base operation, create extension, root branch, and provider fence
+ * The classification capability owns the transaction and decides whether the
+ * durable base operation, create extension, root branch, and provider fence
  * prove a safe pre-provider failure or require manual cleanup. This adapter
- * publishes invalidations only from the repository's committed result.
+ * publishes invalidations only from the committed classification result.
  */
 export class CreateCapsuleAbandonmentHandler implements CapsuleOperationAbandonmentHandler {
   public readonly operationType = CapsuleOperationType.CREATE

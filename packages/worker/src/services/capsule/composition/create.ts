@@ -1,6 +1,15 @@
 import { CreateCapsuleAbandonmentHandler } from '../operations/create/abandonment'
 import { CreateCapsuleExecutor } from '../operations/create/executor'
-import { CreateCapsuleOperationRepository } from '../operations/create/repository'
+import { CreateCapsuleAcceptance } from '../operations/create/persistence/acceptance'
+import { CreateCapsuleClassification } from '../operations/create/persistence/classification'
+import { CreateCapsuleCompletion } from '../operations/create/persistence/completion'
+import { CreateCapsuleExecution } from '../operations/create/persistence/execution'
+import { CreateCapsuleLocks } from '../operations/create/persistence/locks'
+import { CreateCapsuleOperationRepository } from '../operations/create/persistence/repository'
+import { CreateCapsuleLineagePolicy } from '../operations/create/policy/lineage'
+import { CreateCapsuleCompensation } from '../operations/create/resource/compensate'
+import { CreateCapsuleResourcePlanner } from '../operations/create/resource/plan'
+import { CreateCapsuleProvisioner } from '../operations/create/resource/provision'
 import { CreateCapsuleSubmissionService } from '../operations/create/submission'
 import { CapsuleResourceDriver } from '../resource/driver'
 import type { OperationSupervisor } from '../../../coordination/supervisor'
@@ -41,19 +50,40 @@ export interface ComposedCreateCapability {
 /**
  * Composes the create operation vertical slice.
  *
- * This function only constructs objects. It performs no SQL, provider mutation,
- * operation scheduling, event publication, or command registration.
+ * Construction performs no SQL, provider mutation, operation scheduling, event
+ * publication, or command registration.
  */
 export function composeCreateCapability<TDatabase extends PostgresJsDatabase, TTables extends CapsuleTables>(
   options: ComposeCreateCapabilityOptions<TDatabase, TTables>,
 ): ComposedCreateCapability {
-  const repository = new CreateCapsuleOperationRepository(options.persistence, options.operationReader)
-  const resourceDriver = new CapsuleResourceDriver(options.incus, options.project)
+  const lineage = new CreateCapsuleLineagePolicy<TTables>()
+  const locks = new CreateCapsuleLocks(options.persistence)
+  const planner = new CreateCapsuleResourcePlanner()
+  const acceptance = new CreateCapsuleAcceptance(options.persistence, options.operationReader, locks, lineage)
+  const execution = new CreateCapsuleExecution(options.persistence, locks, lineage)
+  const completion = new CreateCapsuleCompletion(options.persistence, locks, lineage, planner, options.project)
+  const classification = new CreateCapsuleClassification(options.persistence, locks, lineage)
+  const repository = new CreateCapsuleOperationRepository({
+    acceptance,
+    execution,
+    completion,
+    classification,
+  })
+  const driver = new CapsuleResourceDriver(options.incus, options.project)
+  const provisioner = new CreateCapsuleProvisioner({
+    resources: options.resources,
+    driver,
+  })
+  const compensator = new CreateCapsuleCompensation({
+    resources: options.resources,
+    driver,
+  })
   const executor = new CreateCapsuleExecutor({
     repository,
     steps: options.operationSteps,
-    resources: options.resources,
-    driver: resourceDriver,
+    planner,
+    provisioner,
+    compensator,
     project: options.project,
     channel: options.channel,
     operationEvents: options.operationEvents,

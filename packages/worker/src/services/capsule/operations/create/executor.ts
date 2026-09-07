@@ -6,35 +6,31 @@ import {
   type CapsuleChannel,
 } from '@qiln/core/server'
 import { CapsuleOperationStepRunner } from '../shared'
-import { CreateCapsuleFailurePhase, createCreateCapsuleFailureContext } from './failureContext'
-import { CreateCapsuleExecutionState } from './executionState'
-import { CreateCapsuleCompensation } from './compensation'
-import { CreateCapsuleResourcePlanner, createResourceInventoryEntries } from './planner'
-import {
-  createManagedVolumes,
-  createRootBranchInstance,
-  ensureOwnerNamespace,
-  recordExternalBindMounts,
-  writeProvisioningFiles,
-  type CreateCapsuleResourceProvisioningDependencies,
-} from './resourceProvisioning'
-import { CreateCapsuleStepKey } from './stepKeys'
+import { CreatePhase } from './execution/phases'
+import { CreateCapsuleCompensationScope, type CreateCapsuleExecutionState } from './execution/state'
+import { CreateCapsuleStepKey } from './execution/steps'
+import { createResourceInventoryEntries } from './resource/plan'
 import { createCapsuleBranchResourceInventoryDigest } from '../../resource/inventory'
 import type { CapsuleOperationStepStore } from '../shared'
-import type { CreateCapsuleCompensationFailure } from './failureContext'
-import type { CreateCapsuleOperationRepository } from './repository'
-import type { CapsuleBranchResourceStore } from '../../resource/store'
-import type { CapsuleResourceDriver } from '../../resource/driver'
+import type { CreateCapsuleOperationRepository } from './persistence/repository'
+import type { CreateCapsuleCompensation } from './resource/compensate'
+import type { CreateCapsuleResourcePlanner } from './resource/plan'
+import type { CreateCapsuleProvisioner } from './resource/provision'
 import type { CapsuleBranchEventPublisher } from '../../events/branch'
 import type { CapsuleLifecycleEventPublisher, CapsuleOperationEventPublisher } from '../../events'
 import type { ProjectService } from '../../../project'
-import type { CreateCapsuleOperationContext, CreateCapsuleResourcePlan, CreateCapsuleTerminalResult } from './types'
+import type {
+  CreateCapsuleCompensationResult,
+  CreateCapsuleOperationContext,
+  CreateCapsuleTerminalResult,
+} from './types'
 
 export interface CreateCapsuleExecutorDependencies {
   repository: CreateCapsuleOperationRepository
   steps: CapsuleOperationStepStore
-  resources: CapsuleBranchResourceStore
-  driver: CapsuleResourceDriver
+  planner: CreateCapsuleResourcePlanner
+  provisioner: CreateCapsuleProvisioner
+  compensator: CreateCapsuleCompensation
   project: ProjectService
   channel: CapsuleChannel
   operationEvents: CapsuleOperationEventPublisher
@@ -48,35 +44,30 @@ export interface CreateCapsuleExecutorDependencies {
  * The executor receives only the operation ID. It reloads the complete
  * immutable execution input from PostgreSQL before claiming the operation.
  *
- * The workflow remains explicit here. Plain resource-provisioning functions own
- * focused per-resource mechanics but cannot reorder, skip, resume, retry, or
+ * The workflow remains explicit here. The injected provisioner owns focused
+ * per-resource mechanics but cannot reorder, skip, resume, retry, or
  * independently terminalize the create operation.
  */
 export class CreateCapsuleExecutor {
-  private readonly planner = new CreateCapsuleResourcePlanner()
-  private readonly compensation: CreateCapsuleCompensation
   private readonly stepRunner: CapsuleOperationStepRunner
-  private readonly resourceProvisioning: CreateCapsuleResourceProvisioningDependencies
 
   constructor(private readonly dependencies: CreateCapsuleExecutorDependencies) {
-    this.resourceProvisioning = {
-      resources: dependencies.resources,
-      driver: dependencies.driver,
-    }
-    this.compensation = new CreateCapsuleCompensation({
-      resources: dependencies.resources,
-      driver: dependencies.driver,
-    })
     this.stepRunner = new CapsuleOperationStepRunner(dependencies.steps)
   }
 
   public async execute(operationId: string): Promise<void> {
-    const state = new CreateCapsuleExecutionState(CreateCapsuleFailurePhase.LOAD_EXECUTION_INPUT)
+    const state: CreateCapsuleExecutionState = {
+      compensation: new CreateCapsuleCompensationScope(),
+      phase: CreatePhase.LOAD_EXECUTION_INPUT,
+      providerIntentConfirmed: false,
+      providerOwnershipUncertain: false,
+      completionAttempted: false,
+      completionConfirmed: false,
+    }
     let context: CreateCapsuleOperationContext | null = null
 
     try {
-      state.beginTerminalPhase(CreateCapsuleFailurePhase.LOAD_EXECUTION_INPUT)
-      const input = await this.dependencies.repository.loadAcceptedExecutionInput(operationId)
+      const input = await this.dependencies.repository.loadExecution(operationId)
       const executionContext: CreateCapsuleOperationContext = {
         operationId: input.operationId,
         capsuleId: input.capsuleId,
@@ -87,13 +78,35 @@ export class CreateCapsuleExecutor {
       }
       context = executionContext
 
-      state.beginTerminalPhase(CreateCapsuleFailurePhase.CLAIM_OPERATION)
+      const runStep = <TResult>(
+        stepKey: CreateCapsuleStepKey,
+        metadata: Record<string, unknown>,
+        action: () => Promise<TResult> | TResult,
+      ): Promise<TResult> => {
+        state.phase = stepKey
+        return this.stepRunner.run(
+          {
+            operationId: executionContext.operationId,
+            capsuleId: executionContext.capsuleId,
+            ownerId: executionContext.ownerId,
+            branchId: executionContext.rootBranchId,
+            branchName: executionContext.rootBranchName,
+            stepKey,
+            metadata,
+            failureContext: {
+              operationType: CapsuleOperationType.CREATE,
+              action: 'execute_create_step',
+            },
+          },
+          action,
+        )
+      }
 
-      const runningOperation = await this.dependencies.repository.claimForExecution(operationId)
+      state.phase = CreatePhase.CLAIM_OPERATION
+
+      const runningOperation = await this.dependencies.repository.claim(operationId)
       this.dependencies.operationEvents.publishChanged(runningOperation)
-      await this.runStep(
-        executionContext,
-        state,
+      await runStep(
         CreateCapsuleStepKey.INITIALIZE_SSH_ACCESS_FENCE,
         {
           reason: SshBranchAccessBlockReason.BRANCH_CREATED,
@@ -110,9 +123,7 @@ export class CreateCapsuleExecutor {
           })
         },
       )
-      const resourcePlan = await this.runStep(
-        executionContext,
-        state,
+      const plan = await runStep(
         CreateCapsuleStepKey.PLAN_RESOURCES,
         {
           blueprintName: input.blueprintName,
@@ -121,7 +132,7 @@ export class CreateCapsuleExecutor {
           provisioningFileDefinitionCount: input.blueprintSnapshot.provisioning.files.length,
         },
         () =>
-          this.planner.createPlan({
+          this.dependencies.planner.plan({
             namespace: executionContext.namespace,
             rootBranchId: executionContext.rootBranchId,
             rootBranchName: executionContext.rootBranchName,
@@ -132,114 +143,97 @@ export class CreateCapsuleExecutor {
           }),
       )
 
-      await this.runStep(
-        executionContext,
-        state,
+      const inventory = createResourceInventoryEntries(plan)
+      await runStep(
         CreateCapsuleStepKey.RECORD_RESOURCE_INVENTORY,
         {
-          resourceCount: this.resourceCount(resourcePlan),
+          resourceCount: inventory.length,
         },
-        () => this.recordResourceInventoryProof(executionContext, resourcePlan),
+        () =>
+          this.dependencies.repository.recordInventory(
+            operationId,
+            createCapsuleBranchResourceInventoryDigest(inventory, 'capsule create planned resource inventory'),
+          ),
       )
 
-      await this.runStep(
-        executionContext,
-        state,
+      await runStep(
         CreateCapsuleStepKey.VERIFY_ROOTFS_IMAGE,
         {
           provider: input.rootfsImagePin.provider,
           project: input.rootfsImagePin.project,
           fingerprint: input.rootfsImagePin.fingerprint,
         },
-        async () => {
-          await this.dependencies.driver.verifyRootfs(input.rootfsImagePin)
-        },
+        () => this.dependencies.provisioner.verifyRootfs(input.rootfsImagePin),
       )
 
-      state.beginTerminalPhase(CreateCapsuleFailurePhase.COMMIT_PROVIDER_INTENT_FENCE)
+      state.phase = CreatePhase.COMMIT_PROVIDER_INTENT_FENCE
 
-      // The operation-wide fence must commit before ensureOwnerNamespace or any
+      // The operation-wide fence must commit before ensureNamespace or any
       // other Incus state-changing call.
-      await this.dependencies.repository.commitProviderIntentFence(executionContext.operationId)
-      state.markProviderIntentCommitted()
+      await this.dependencies.repository.commitProviderIntent(operationId)
+      state.providerIntentConfirmed = true
 
-      await this.runStep(
-        executionContext,
-        state,
+      await runStep(
         CreateCapsuleStepKey.ENSURE_NAMESPACE,
         {
           namespace: executionContext.namespace,
-          resourceKey: resourcePlan.project.resourceKey,
+          resourceKey: plan.project.resourceKey,
         },
-        () => ensureOwnerNamespace(this.resourceProvisioning, executionContext, resourcePlan.project, state),
+        () => this.dependencies.provisioner.ensureNamespace(executionContext, plan.project, state),
       )
 
-      await this.runStep(
-        executionContext,
-        state,
+      await runStep(
         CreateCapsuleStepKey.RECORD_BIND_MOUNTS,
         {
-          count: resourcePlan.bindMounts.length,
+          count: plan.bindMounts.length,
         },
-        () => recordExternalBindMounts(this.resourceProvisioning, executionContext, resourcePlan.bindMounts),
+        () => this.dependencies.provisioner.recordBindMounts(executionContext, plan.bindMounts),
       )
 
-      await this.runStep(
-        executionContext,
-        state,
+      await runStep(
         CreateCapsuleStepKey.CREATE_VOLUMES,
         {
-          count: resourcePlan.volumes.length,
+          count: plan.volumes.length,
         },
-        () => createManagedVolumes(this.resourceProvisioning, executionContext, resourcePlan.volumes, state),
+        () => this.dependencies.provisioner.createVolumes(executionContext, plan.volumes, state),
       )
 
-      await this.runStep(
-        executionContext,
-        state,
+      await runStep(
         CreateCapsuleStepKey.CREATE_INSTANCE,
         {
-          instanceName: resourcePlan.instance.instanceName,
-          imageProject: resourcePlan.instance.rootfsImagePin.project,
-          imageFingerprint: resourcePlan.instance.rootfsImagePin.fingerprint,
-          resourceKey: resourcePlan.instance.resourceKey,
+          instanceName: plan.instance.instanceName,
+          imageProject: plan.instance.rootfsImagePin.project,
+          imageFingerprint: plan.instance.rootfsImagePin.fingerprint,
+          resourceKey: plan.instance.resourceKey,
         },
-        () => createRootBranchInstance(this.resourceProvisioning, executionContext, resourcePlan.instance, state),
+        () => this.dependencies.provisioner.createInstance(executionContext, plan.instance, state),
       )
 
-      await this.runStep(
-        executionContext,
-        state,
+      await runStep(
         CreateCapsuleStepKey.WRITE_PROVISIONING_FILES,
         {
-          count: resourcePlan.files.length,
+          count: plan.files.length,
         },
-        () =>
-          writeProvisioningFiles(
-            this.resourceProvisioning,
-            executionContext,
-            resourcePlan.instance.instanceName,
-            resourcePlan.files,
-            state,
-          ),
+        () => this.dependencies.provisioner.writeFiles(executionContext, plan.instance.instanceName, plan.files, state),
       )
 
-      await this.runStep(
-        executionContext,
-        state,
+      // Entering completion disables destructive compensation, including when
+      // completion-step accounting fails before its transaction can run.
+      state.completionAttempted = true
+      await runStep(
         CreateCapsuleStepKey.COMPLETE_CREATE,
         {
           capsuleStatus: 'active',
           rootBranchStatus: 'offline',
         },
         async () => {
-          const completed = await this.dependencies.repository.completeCreate(executionContext.operationId)
-          state.markCompletionCommitted()
+          const completed = await this.dependencies.repository.complete(operationId)
+          state.completionConfirmed = true
           this.publishTerminalResult(completed)
         },
       )
     } catch (error: unknown) {
-      if (state.completionCommitted) {
+      if (state.completionConfirmed) {
         // Aggregate completion already committed. Step-accounting or
         // post-commit invalidation failure cannot reverse the completed create.
         console.error(
@@ -248,239 +242,22 @@ export class CreateCapsuleExecutor {
         )
         return
       }
-      await this.resolveFailure(operationId, context, state, error)
+      let compensation: CreateCapsuleCompensationResult | null = null
+      if (state.providerIntentConfirmed && !state.completionAttempted && context !== null) {
+        compensation = await this.dependencies.compensator.compensate(context, state.compensation)
+      }
+      const classified = await this.dependencies.repository.fail({
+        operationId,
+        error,
+        phase: state.phase,
+        providerIntentConfirmed: state.providerIntentConfirmed,
+        providerOwnershipUncertain: state.providerOwnershipUncertain,
+        completionAttempted: state.completionAttempted,
+        compensation,
+      })
+      this.publishTerminalResult(classified)
       throw error
     }
-  }
-
-  private async recordResourceInventoryProof(
-    context: CreateCapsuleOperationContext,
-    plan: CreateCapsuleResourcePlan,
-  ): Promise<void> {
-    const digest = createCapsuleBranchResourceInventoryDigest(
-      createResourceInventoryEntries(plan),
-      'capsule create planned resource inventory',
-    )
-    await this.dependencies.repository.recordResourceInventoryProof(
-      context.ownerId,
-      context.operationId,
-      context.rootBranchId,
-      digest,
-    )
-  }
-
-  private async resolveFailure(
-    operationId: string,
-    context: CreateCapsuleOperationContext | null,
-    state: CreateCapsuleExecutionState,
-    error: unknown,
-  ): Promise<void> {
-    const failedPhase = state.currentFailurePhase
-    const failedStepKey = state.currentStepKey
-    if (!state.providerIntentCommitted) {
-      await this.failBeforeProviderMutation(operationId, context, state, error, failedPhase, failedStepKey)
-      return
-    }
-    if (!context) {
-      await this.markCleanupRequired(
-        operationId,
-        null,
-        state,
-        error,
-        false,
-        [],
-        'missing_execution_context_after_provider_intent',
-        failedPhase,
-        failedStepKey,
-      )
-      return
-    }
-    if (failedPhase === CreateCapsuleFailurePhase.COMPLETE_CREATE) {
-      await this.markCleanupRequired(
-        operationId,
-        context,
-        state,
-        error,
-        false,
-        [],
-        'complete_create_transaction_failed',
-        failedPhase,
-        failedStepKey,
-      )
-      return
-    }
-    const compensation = await this.compensation.compensateCreatedResources(
-      {
-        operationId: context.operationId,
-        namespace: context.namespace,
-        rootBranchName: context.rootBranchName,
-      },
-      state.compensation,
-    )
-    if (state.providerOwnershipUncertain || !compensation.fullyCompensated) {
-      await this.markCleanupRequired(
-        operationId,
-        context,
-        state,
-        error,
-        true,
-        compensation.failures,
-        state.providerOwnershipUncertain ? 'provider_ownership_uncertain' : 'compensation_incomplete',
-        failedPhase,
-        failedStepKey,
-      )
-      return
-    }
-    await this.failAfterSuccessfulCompensation(context, state, error, failedPhase, failedStepKey)
-  }
-
-  private async failBeforeProviderMutation(
-    operationId: string,
-    context: CreateCapsuleOperationContext | null,
-    state: CreateCapsuleExecutionState,
-    error: unknown,
-    failedPhase: CreateCapsuleFailurePhase,
-    failedStepKey: CreateCapsuleStepKey | null,
-  ): Promise<void> {
-    state.beginTerminalPhase(CreateCapsuleFailurePhase.FAIL_BEFORE_PROVIDER_MUTATION)
-    const terminal = await this.dependencies.repository.failBeforeProviderMutation(
-      operationId,
-      error,
-      createCreateCapsuleFailureContext({
-        operationId,
-        capsuleId: context?.capsuleId,
-        rootBranchId: context?.rootBranchId,
-        rootBranchName: context?.rootBranchName,
-        phase: CreateCapsuleFailurePhase.FAIL_BEFORE_PROVIDER_MUTATION,
-        failedPhase,
-        stepKey: failedStepKey,
-        action: 'classify_create_failure_before_provider_mutation',
-        providerIntentCommitted: false,
-        providerOwnershipUncertain: state.providerOwnershipUncertain,
-        completionCommitted: false,
-        compensationAttempted: false,
-        compensationCompleted: false,
-      }),
-    )
-    this.publishTerminalResult(terminal)
-  }
-
-  private async failAfterSuccessfulCompensation(
-    context: CreateCapsuleOperationContext,
-    state: CreateCapsuleExecutionState,
-    error: unknown,
-    failedPhase: CreateCapsuleFailurePhase,
-    failedStepKey: CreateCapsuleStepKey | null,
-  ): Promise<void> {
-    state.beginTerminalPhase(CreateCapsuleFailurePhase.FAIL_AFTER_SUCCESSFUL_COMPENSATION)
-    const failureContext = createCreateCapsuleFailureContext({
-      operationId: context.operationId,
-      capsuleId: context.capsuleId,
-      rootBranchId: context.rootBranchId,
-      rootBranchName: context.rootBranchName,
-      phase: CreateCapsuleFailurePhase.FAIL_AFTER_SUCCESSFUL_COMPENSATION,
-      failedPhase,
-      stepKey: failedStepKey,
-      action: 'fail_create_after_successful_compensation',
-      providerIntentCommitted: true,
-      providerOwnershipUncertain: false,
-      completionCommitted: false,
-      compensationAttempted: true,
-      compensationCompleted: true,
-    })
-    try {
-      const failed = await this.dependencies.repository.failAfterSuccessfulCompensation(
-        context.operationId,
-        error,
-        failureContext,
-      )
-      this.publishTerminalResult(failed)
-    } catch (terminalizationError: unknown) {
-      console.error(
-        `[CreateCapsuleExecutor] Failed to persist compensated create failure for '${context.operationId}'.`,
-        {
-          createError: error,
-          terminalizationError,
-        },
-      )
-      await this.markCleanupRequired(
-        context.operationId,
-        context,
-        state,
-        terminalizationError,
-        true,
-        [],
-        'fail_after_successful_compensation_transaction_failed',
-        failedPhase,
-        failedStepKey,
-      )
-    }
-  }
-
-  private async markCleanupRequired(
-    operationId: string,
-    context: CreateCapsuleOperationContext | null,
-    state: CreateCapsuleExecutionState,
-    error: unknown,
-    compensationAttempted: boolean,
-    compensationFailures: readonly CreateCapsuleCompensationFailure[],
-    action: string,
-    failedPhase: CreateCapsuleFailurePhase,
-    failedStepKey: CreateCapsuleStepKey | null,
-  ): Promise<void> {
-    state.beginTerminalPhase(CreateCapsuleFailurePhase.MARK_CLEANUP_REQUIRED)
-    const failureContext = createCreateCapsuleFailureContext({
-      operationId,
-      capsuleId: context?.capsuleId,
-      rootBranchId: context?.rootBranchId,
-      rootBranchName: context?.rootBranchName,
-      phase: CreateCapsuleFailurePhase.MARK_CLEANUP_REQUIRED,
-      failedPhase,
-      stepKey: failedStepKey,
-      action,
-      providerIntentCommitted: state.providerIntentCommitted,
-      providerOwnershipUncertain: state.providerOwnershipUncertain,
-      completionCommitted: false,
-      compensationAttempted,
-      compensationCompleted: compensationAttempted && compensationFailures.length === 0,
-      compensationFailures,
-    })
-    try {
-      const cleanup = await this.dependencies.repository.markCleanupRequired(operationId, error, failureContext)
-      this.publishTerminalResult(cleanup)
-    } catch (cleanupError: unknown) {
-      console.error(`[CreateCapsuleExecutor] Failed to persist cleanup-required state for '${operationId}'.`, {
-        createError: error,
-        cleanupError,
-      })
-      throw cleanupError
-    }
-  }
-
-  private async runStep<TResult>(
-    context: CreateCapsuleOperationContext,
-    state: CreateCapsuleExecutionState,
-    stepKey: CreateCapsuleStepKey,
-    metadata: Record<string, unknown>,
-    action: () => Promise<TResult> | TResult,
-  ): Promise<TResult> {
-    state.beginStep(stepKey)
-    return await this.stepRunner.run(
-      {
-        operationId: context.operationId,
-        capsuleId: context.capsuleId,
-        ownerId: context.ownerId,
-        branchId: context.rootBranchId,
-        branchName: context.rootBranchName,
-        stepKey,
-        metadata,
-        failureContext: {
-          operationType: CapsuleOperationType.CREATE,
-          action: 'execute_create_step',
-        },
-      },
-      action,
-    )
   }
 
   private publishTerminalResult(result: CreateCapsuleTerminalResult): void {
@@ -494,9 +271,5 @@ export class CreateCapsuleExecutor {
         result.branch.status,
       )
     }
-  }
-
-  private resourceCount(plan: CreateCapsuleResourcePlan): number {
-    return 1 + plan.bindMounts.length + plan.volumes.length + 1 + plan.files.length
   }
 }

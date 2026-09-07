@@ -15,6 +15,7 @@ import type { IncusFilePushOptions } from '../../../../incus/client/types'
 import type { IncusDeviceMap } from '../../../../incus/client'
 import type { ManagedVolume, ProvisioningFileTarget } from '../../resource/bootstrap/targets'
 import type { CapsuleOperationTransitionOutput } from '../shared'
+import type { CreatePhase } from './execution/phases'
 
 export interface SubmitCreateCapsuleInput {
   ownerId: string
@@ -75,6 +76,31 @@ export interface CreateCapsuleOperationContext {
   readonly rootBranchId: string
   readonly rootBranchName: string
   readonly namespace: string
+}
+
+export interface CreateCapsuleCompensationFailure {
+  phase: typeof CreatePhase.COMPENSATION
+  action: string
+  code: string
+  message: string
+  resourceId: string
+  resourceKey: string
+  details?: Record<string, unknown>
+}
+
+export interface CreateCapsuleCompensationResult {
+  fullyCompensated: boolean
+  failures: CreateCapsuleCompensationFailure[]
+}
+
+export interface CreateCapsuleFailureInput {
+  operationId: string
+  error: unknown
+  phase: CreatePhase
+  providerIntentConfirmed: boolean
+  providerOwnershipUncertain: boolean
+  completionAttempted: boolean
+  compensation: CreateCapsuleCompensationResult | null
 }
 
 export interface CreateCapsulePlannedResource {

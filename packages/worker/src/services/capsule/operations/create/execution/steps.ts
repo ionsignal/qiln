@@ -1,14 +1,16 @@
+import { CreatePhase } from './phases'
+
 export const CreateCapsuleStepKey = {
-  INITIALIZE_SSH_ACCESS_FENCE: 'initialize_ssh_access_fence',
-  PLAN_RESOURCES: 'plan_resources',
-  RECORD_RESOURCE_INVENTORY: 'record_resource_inventory',
-  VERIFY_ROOTFS_IMAGE: 'verify_rootfs_image',
-  ENSURE_NAMESPACE: 'ensure_namespace',
-  RECORD_BIND_MOUNTS: 'record_bind_mounts',
-  CREATE_VOLUMES: 'create_volumes',
-  CREATE_INSTANCE: 'create_instance',
-  WRITE_PROVISIONING_FILES: 'write_provisioning_files',
-  COMPLETE_CREATE: 'complete_create',
+  INITIALIZE_SSH_ACCESS_FENCE: CreatePhase.INITIALIZE_SSH_ACCESS_FENCE,
+  PLAN_RESOURCES: CreatePhase.PLAN_RESOURCES,
+  RECORD_RESOURCE_INVENTORY: CreatePhase.RECORD_RESOURCE_INVENTORY,
+  VERIFY_ROOTFS_IMAGE: CreatePhase.VERIFY_ROOTFS_IMAGE,
+  ENSURE_NAMESPACE: CreatePhase.ENSURE_NAMESPACE,
+  RECORD_BIND_MOUNTS: CreatePhase.RECORD_BIND_MOUNTS,
+  CREATE_VOLUMES: CreatePhase.CREATE_VOLUMES,
+  CREATE_INSTANCE: CreatePhase.CREATE_INSTANCE,
+  WRITE_PROVISIONING_FILES: CreatePhase.WRITE_PROVISIONING_FILES,
+  COMPLETE_CREATE: CreatePhase.COMPLETE_CREATE,
 } as const
 
 export type CreateCapsuleStepKey = (typeof CreateCapsuleStepKey)[keyof typeof CreateCapsuleStepKey]

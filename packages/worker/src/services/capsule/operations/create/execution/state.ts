@@ -1,6 +1,5 @@
-import type { CreateCapsuleFailurePhase } from './failureContext'
-import type { CreateCapsuleStepKey } from './stepKeys'
-import type { CreateCapsuleVolumeResource } from './types'
+import type { CreatePhase } from './phases'
+import type { CreateCapsuleVolumeResource } from '../types'
 
 export interface CreateCapsuleVolumeCompensationTarget {
   kind: 'volume'
@@ -42,7 +41,6 @@ export class CreateCapsuleCompensationScope {
 
   public recordCreatedVolume(resourceId: string, volume: CreateCapsuleVolumeResource): void {
     this.createdVolumeResourceIds.set(volumeIdentity(volume.pool, volume.volumeName), resourceId)
-
     this.directTargets.push({
       kind: 'volume',
       resourceId,
@@ -54,7 +52,6 @@ export class CreateCapsuleCompensationScope {
 
   public recordCreatedInstance(resourceId: string, resourceKey: string, instanceName: string): void {
     this.createdInstanceResourceId = resourceId
-
     this.directTargets.push({
       kind: 'instance',
       resourceId,
@@ -90,58 +87,11 @@ export class CreateCapsuleCompensationScope {
  * This state has no serialization, recovery, replay, or resume behavior.
  * PostgreSQL remains the durable source of truth.
  */
-export class CreateCapsuleExecutionState {
-  public readonly compensation = new CreateCapsuleCompensationScope()
-
-  private activeFailurePhase: CreateCapsuleFailurePhase
-  private activeStepKey: CreateCapsuleStepKey | null = null
-  private providerIntentFenceCommitted = false
-  private providerOwnershipUncertainState = false
-  private createCompletionCommitted = false
-
-  constructor(initialPhase: CreateCapsuleFailurePhase) {
-    this.activeFailurePhase = initialPhase
-  }
-
-  public beginStep(stepKey: CreateCapsuleStepKey): void {
-    this.activeFailurePhase = stepKey
-    this.activeStepKey = stepKey
-  }
-
-  public beginTerminalPhase(phase: CreateCapsuleFailurePhase): void {
-    this.activeFailurePhase = phase
-    this.activeStepKey = null
-  }
-
-  public markProviderIntentCommitted(): void {
-    this.providerIntentFenceCommitted = true
-  }
-
-  public markProviderOwnershipUncertain(): void {
-    this.providerOwnershipUncertainState = true
-  }
-
-  public markCompletionCommitted(): void {
-    this.createCompletionCommitted = true
-  }
-
-  public get currentFailurePhase(): CreateCapsuleFailurePhase {
-    return this.activeFailurePhase
-  }
-
-  public get currentStepKey(): CreateCapsuleStepKey | null {
-    return this.activeStepKey
-  }
-
-  public get providerIntentCommitted(): boolean {
-    return this.providerIntentFenceCommitted
-  }
-
-  public get providerOwnershipUncertain(): boolean {
-    return this.providerOwnershipUncertainState
-  }
-
-  public get completionCommitted(): boolean {
-    return this.createCompletionCommitted
-  }
+export interface CreateCapsuleExecutionState {
+  readonly compensation: CreateCapsuleCompensationScope
+  phase: CreatePhase
+  providerIntentConfirmed: boolean
+  providerOwnershipUncertain: boolean
+  completionAttempted: boolean
+  completionConfirmed: boolean
 }

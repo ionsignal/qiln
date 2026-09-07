@@ -5,7 +5,7 @@ import type { IncusImagesClient } from '../../../../incus/client/images'
 import type { CapsuleBranchEventPublisher } from '../../events/branch'
 import type { CapsuleLifecycleEventPublisher, CapsuleOperationEventPublisher } from '../../events'
 import type { CreateCapsuleExecutor } from './executor'
-import type { CreateCapsuleOperationRepository } from './repository'
+import type { CreateCapsuleOperationRepository } from './persistence/repository'
 import type { SubmitCreateCapsuleInput } from './types'
 
 interface CreateCapsuleRequestIdentity {
@@ -56,25 +56,18 @@ export class CreateCapsuleSubmissionService {
      * not depend on the mutable blueprint catalog still containing the original
      * definition.
      */
-    const replay = await this.repository.findIdempotentReplay(
-      input.ownerId,
-      input.actor,
-      input.idempotencyKey,
-      requestHash,
-    )
-
+    const replay = await this.repository.findReplay(input.ownerId, input.actor, input.idempotencyKey, requestHash)
     if (replay) {
       return replay.receipt
     }
 
     const blueprintPin = this.blueprints.pin(input.blueprintName, input.blueprintDigest)
     const rootfsImagePin = await this.images.resolve(blueprintPin.blueprint.image_alias)
-
     /**
      * The repository repeats replay detection during acceptance so concurrent
      * submissions remain race-safe after the preflight lookup.
      */
-    const acceptance = await this.repository.acceptCreate({
+    const acceptance = await this.repository.accept({
       ...input,
       requestHash,
       blueprintName: blueprintPin.name,
@@ -82,13 +75,9 @@ export class CreateCapsuleSubmissionService {
       blueprintSnapshot: blueprintPin.blueprint,
       rootfsImagePin,
     })
-
     if (!acceptance.newlyAccepted) {
       return acceptance.receipt
     }
-
-    // Ownership and state come from committed repository output rather than
-    // from the original command input.
     this.operationEvents.publishChanged(acceptance.operation)
     this.lifecycleEvents.publishChanged(acceptance.operation.ownerId, acceptance.capsule)
     this.branchEvents.publishStateChanged(
@@ -97,7 +86,6 @@ export class CreateCapsuleSubmissionService {
       acceptance.branch.name,
       acceptance.branch.status,
     )
-
     const operationId = acceptance.receipt.operationId
     const executor = this.executor
 
