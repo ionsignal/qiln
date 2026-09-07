@@ -51,9 +51,7 @@ export class ViteTransport {
             clientPort: this.clientPort,
           },
           warmup: {
-            ssrFiles: [
-              'renderer/+onRenderHtml.ts',
-            ],
+            ssrFiles: ['renderer/+onRenderHtml.ts'],
           },
         },
       },
