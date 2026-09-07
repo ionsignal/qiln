@@ -119,8 +119,8 @@ actions:
       # This fixed root-owned substrate is defense in depth only. Host grants,
       # access fences, tickets, redemption, and relay closure remain the
       # authorization authority.
-      install -d -o root -g root -m 0700 /etc/ssh/qiln
-      install -o root -g root -m 0600 /dev/null /etc/ssh/qiln/authorized_keys
+      install -d -o root -g qiln -m 0710 /etc/ssh/qiln
+      install -o root -g qiln -m 0640 /dev/null /etc/ssh/qiln/authorized_keys
 
       # Bootstrap and isolate the Python 3.13 Global Virtual Environment
       python3.13 -m venv /opt/qiln/venv
@@ -173,17 +173,11 @@ files:
 
   # The branch-local authorized-key file is a defense-in-depth availability
   # substrate. Host authorization does not depend on synchronization status.
-  - path: /etc/ssh/qiln
-    generator: dump
-    uid: 0
-    gid: 0
-    mode: '0700'
-
   - path: /etc/ssh/qiln/authorized_keys
     generator: dump
     uid: 0
-    gid: 0
-    mode: '0600'
+    gid: 1000
+    mode: '0640'
     content: ''
 
   - path: /etc/ssh/sshd_config.d/60-qiln.conf
@@ -213,11 +207,10 @@ files:
       UseDNS no
       MaxAuthTries 3
 
-      # TODO(ssh-ingress-acl): 10.0.0.0/8 is development-only. 
-      # Production must enforce gateway-only branch SSH ingress with a 
-      # Host-managed Incus ACL limited to the gateway private /32 before 
+      # Production must enforce gateway-only branch SSH ingress with a
+      # Host-managed Incus ACL limited to the gateway private /32 before
       # relying on eventual authorized-key synchronization.
-      AllowUsers qiln@10.0.0.0/8
+      AllowUsers qiln@10.10.10.10
 
   # Generates only absent branch host keys, preserves the synchronized
   # authorized-key file, and validates the complete sshd configuration before
@@ -236,7 +229,9 @@ files:
         exit 1
       fi
 
-      install -d -o root -g root -m 0700 /etc/ssh/qiln
+      # sshd reads keys as qiln; group traversal and read access must not
+      # permit the branch user to modify or replace the root-owned file.
+      install -d -o root -g qiln -m 0710 /etc/ssh/qiln
 
       if [ -L /etc/ssh/qiln/authorized_keys ]; then
         echo "Qiln SSH authorized-key file must not be a symbolic link." >&2
@@ -244,7 +239,7 @@ files:
       fi
 
       if [ ! -e /etc/ssh/qiln/authorized_keys ]; then
-        install -o root -g root -m 0600 /dev/null /etc/ssh/qiln/authorized_keys
+        install -o root -g qiln -m 0640 /dev/null /etc/ssh/qiln/authorized_keys
       fi
 
       if [ ! -f /etc/ssh/qiln/authorized_keys ]; then
@@ -252,12 +247,15 @@ files:
         exit 1
       fi
 
-      chown root:root /etc/ssh/qiln/authorized_keys
-      chmod 0600 /etc/ssh/qiln/authorized_keys
+      chown root:qiln /etc/ssh/qiln/authorized_keys
+      chmod 0640 /etc/ssh/qiln/authorized_keys
 
       # ssh-keygen -A preserves existing host keys and generates only missing
       # host-key types.
       ssh-keygen -A
+
+      # Bootstrap validates sshd before ssh.service creates its runtime directory.
+      install -d -o root -g root -m 0755 /run/sshd
       /usr/sbin/sshd -t -f /etc/ssh/sshd_config
 
   - path: /etc/systemd/system/qiln-sshd-bootstrap.service

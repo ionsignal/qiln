@@ -88,8 +88,8 @@ export class SshAuthorizedKeysSyncService<
     await this.preflightStaticSubstrate(project.files, branch)
     await project.files.write(branch.instanceName, SSH_AUTHORIZED_KEYS_FILE, encoded.bytes, {
       uid: 0,
-      gid: 0,
-      mode: '0600',
+      gid: 1000,
+      mode: '0640',
       type: 'file',
       write: 'overwrite',
     })
@@ -100,7 +100,7 @@ export class SshAuthorizedKeysSyncService<
       branchId: branch.branchId,
       path: SSH_AUTHORIZED_KEYS_FILE,
       expectedType: 'file',
-      expectedMode: '0600',
+      expectedMode: '0640',
     })
     if (!Buffer.from(readback.data).equals(Buffer.from(encoded.bytes))) {
       throw new IncusError('Branch SSH authorized-key readback did not match the requested bytes.', 'CONFLICT', {
@@ -139,7 +139,7 @@ export class SshAuthorizedKeysSyncService<
       branchId: branch.branchId,
       path: SSH_AUTHORIZED_KEYS_DIRECTORY,
       expectedType: 'directory',
-      expectedMode: '0700',
+      expectedMode: '0710',
     })
     const authorizedKeys = await files.read(branch.instanceName, SSH_AUTHORIZED_KEYS_FILE)
     this.assertMetadata(authorizedKeys.metadata, {
@@ -148,7 +148,7 @@ export class SshAuthorizedKeysSyncService<
       branchId: branch.branchId,
       path: SSH_AUTHORIZED_KEYS_FILE,
       expectedType: 'file',
-      expectedMode: '0600',
+      expectedMode: '0640',
     })
   }
 
@@ -160,10 +160,10 @@ export class SshAuthorizedKeysSyncService<
       branchId: string
       path: string
       expectedType: 'file' | 'directory'
-      expectedMode: '0600' | '0700'
+      expectedMode: '0640' | '0710'
     },
   ): void {
-    if (metadata.uid !== 0 || metadata.gid !== 0 || metadata.mode !== context.expectedMode) {
+    if (metadata.uid !== 0 || metadata.gid !== 1000 || metadata.mode !== context.expectedMode) {
       throw new IncusError(
         `Branch SSH ${context.expectedType} does not satisfy required root ownership and mode.`,
         'CONFLICT',
@@ -174,7 +174,7 @@ export class SshAuthorizedKeysSyncService<
           path: context.path,
           expectedUid: 0,
           actualUid: metadata.uid,
-          expectedGid: 0,
+          expectedGid: 1000,
           actualGid: metadata.gid,
           expectedMode: context.expectedMode,
           actualMode: metadata.mode,

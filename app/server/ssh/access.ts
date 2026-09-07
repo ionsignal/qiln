@@ -49,7 +49,6 @@ export class SshBranchAccessService {
         .where(eq(sshBranchAccess.branchId, branch.id))
         .for('update')
         .limit(1)
-
       if (existing) {
         if (existing.state !== SshBranchAccessState.BLOCKED || existing.blockReason !== reason) {
           throw sshConflict('The branch SSH access fence has already been initialized with different state.', {
@@ -58,14 +57,12 @@ export class SshBranchAccessService {
             blockReason: existing.blockReason,
           })
         }
-
         return {
           access: this.summary(existing, branch),
           changed: false,
           revocation: null,
         }
       }
-
       const now = new Date()
       const [created] = await tx
         .insert(sshBranchAccess)
@@ -85,7 +82,6 @@ export class SshBranchAccessService {
           branchId,
         })
       }
-
       return {
         access: this.summary(created, branch),
         changed: true,
@@ -100,21 +96,19 @@ export class SshBranchAccessService {
     branchId: string,
   ): Promise<SshBranchAccessMutationOutput> {
     return await this.db.transaction(async tx => {
-      const branch = await this.lockOwnedBranch(tx, ownerUserId, capsuleId, branchId)
       const capsule = await this.lockOwnedCapsule(tx, ownerUserId, capsuleId)
+      const branch = await this.lockOwnedBranch(tx, ownerUserId, capsuleId, branchId)
       const [access] = await tx
         .select()
         .from(sshBranchAccess)
         .where(eq(sshBranchAccess.branchId, branch.id))
         .for('update')
         .limit(1)
-
       if (!access) {
         throw sshConflict('The branch SSH access fence has not been initialized.', {
           branchId,
         })
       }
-
       if (branch.status !== 'online' || capsule.lifecycleStatus !== 'active' || capsule.archivedAt !== null) {
         throw sshConflict('SSH access can be enabled only after the editable branch is confirmed online.', {
           branchId,
@@ -123,7 +117,6 @@ export class SshBranchAccessService {
           capsuleArchived: capsule.archivedAt !== null,
         })
       }
-
       if (access.state === SshBranchAccessState.ENABLED) {
         return {
           access: this.summary(access, branch),
@@ -131,7 +124,6 @@ export class SshBranchAccessService {
           revocation: null,
         }
       }
-
       const now = new Date()
       const [enabled] = await tx
         .update(sshBranchAccess)
@@ -143,13 +135,11 @@ export class SshBranchAccessService {
         })
         .where(and(eq(sshBranchAccess.branchId, branch.id), eq(sshBranchAccess.state, SshBranchAccessState.BLOCKED)))
         .returning()
-
       if (!enabled) {
         throw sshConflict('Branch SSH access enablement conflicted with another state transition.', {
           branchId,
         })
       }
-
       return {
         access: this.summary(enabled, branch),
         changed: true,
@@ -168,13 +158,11 @@ export class SshBranchAccessService {
     this.authorizedKeysSync.scheduleBranch(ownerUserId, capsuleId, branchId)
     const closedRelayCount = await this.relays.confirmRelayClosures(transaction.relayIds)
     const record = transaction.accesses[0]
-
     if (!record) {
       throw sshConflict('Branch SSH access revocation returned no branch access state.', {
         branchId,
       })
     }
-
     return {
       access: this.summary(record.access, record.branch),
       changed: transaction.changed,
@@ -199,26 +187,21 @@ export class SshBranchAccessService {
       .from(capsuleBranches)
       .where(and(eq(capsuleBranches.ownerId, ownerUserId), eq(capsuleBranches.capsuleId, capsuleId)))
       .orderBy(asc(capsuleBranches.id))
-
     if (branches.length === 0) {
       throw sshNotFound('Capsule branches were not found for SSH access revocation.', {
         capsuleId,
       })
     }
-
     const transaction = await this.revokeBranches(
       ownerUserId,
       capsuleId,
       branches.map(branch => branch.id),
       reason,
     )
-
     for (const record of transaction.accesses) {
       this.authorizedKeysSync.scheduleBranch(ownerUserId, record.branch.capsuleId, record.branch.id)
     }
-
     const closedRelayCount = await this.relays.confirmRelayClosures(transaction.relayIds)
-
     return {
       capsuleId,
       branchAccess: transaction.accesses.map(record => this.summary(record.access, record.branch)),
@@ -240,7 +223,6 @@ export class SshBranchAccessService {
   ): Promise<AccessRevocationTransactionResult> {
     return await this.db.transaction(async tx => {
       await this.lockOwnedCapsule(tx, ownerUserId, capsuleId)
-
       const branches = await tx
         .select({
           id: capsuleBranches.id,
@@ -258,7 +240,6 @@ export class SshBranchAccessService {
         )
         .orderBy(asc(capsuleBranches.id))
         .for('update')
-
       if (branches.length !== branchIds.length) {
         throw sshNotFound('One or more capsule branches were not found for SSH access revocation.', {
           capsuleId,
@@ -266,14 +247,12 @@ export class SshBranchAccessService {
           actualBranchCount: branches.length,
         })
       }
-
       const accessRows = await tx
         .select()
         .from(sshBranchAccess)
         .where(inArray(sshBranchAccess.branchId, [...branchIds]))
         .orderBy(asc(sshBranchAccess.branchId))
         .for('update')
-
       if (accessRows.length !== branchIds.length) {
         throw sshConflict('One or more branch SSH access fences have not been initialized.', {
           capsuleId,
@@ -281,12 +260,10 @@ export class SshBranchAccessService {
           actualAccessCount: accessRows.length,
         })
       }
-
       const now = new Date()
       const enabledIds = accessRows
         .filter(access => access.state === SshBranchAccessState.ENABLED)
         .map(access => access.branchId)
-
       if (enabledIds.length > 0) {
         const blocked = await tx
           .update(sshBranchAccess)
@@ -307,7 +284,6 @@ export class SshBranchAccessService {
           throw sshConflict('Branch SSH access blocking conflicted with another state transition.')
         }
       }
-
       const differentlyBlockedIds = accessRows
         .filter(
           access =>
@@ -315,7 +291,6 @@ export class SshBranchAccessService {
             (access.blockReason !== reason || access.blockedAt === null),
         )
         .map(access => access.branchId)
-
       if (differentlyBlockedIds.length > 0) {
         await tx
           .update(sshBranchAccess)
@@ -326,7 +301,6 @@ export class SshBranchAccessService {
           })
           .where(inArray(sshBranchAccess.branchId, differentlyBlockedIds))
       }
-
       const revokedGrants = await tx
         .update(sshBranchGrants)
         .set({
@@ -343,7 +317,6 @@ export class SshBranchAccessService {
         .returning({
           id: sshBranchGrants.id,
         })
-
       const revokedTickets = await tx
         .update(sshTickets)
         .set({
@@ -359,17 +332,13 @@ export class SshBranchAccessService {
         .returning({
           id: sshTickets.id,
         })
-
       const relayIds = await this.relays.markBranchRelaysClosing(tx, branchIds, reason)
-
       const committedAccess = await tx
         .select()
         .from(sshBranchAccess)
         .where(inArray(sshBranchAccess.branchId, [...branchIds]))
         .orderBy(asc(sshBranchAccess.branchId))
-
       const branchesById = new Map(branches.map(branch => [branch.id, branch] as const))
-
       return {
         accesses: committedAccess.map(access => {
           const branch = branchesById.get(access.branchId)
@@ -414,14 +383,12 @@ export class SshBranchAccessService {
       )
       .for('update')
       .limit(1)
-
     if (!branch) {
       throw sshNotFound('Capsule branch not found or access denied.', {
         capsuleId,
         branchId,
       })
     }
-
     return branch
   }
 
@@ -436,13 +403,11 @@ export class SshBranchAccessService {
       .where(and(eq(capsules.id, capsuleId), eq(capsules.ownerId, ownerUserId)))
       .for('update')
       .limit(1)
-
     if (!capsule) {
       throw sshNotFound('Capsule not found or access denied.', {
         capsuleId,
       })
     }
-
     return capsule
   }
 
