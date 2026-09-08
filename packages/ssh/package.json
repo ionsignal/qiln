@@ -16,11 +16,16 @@
   },
   "dependencies": {
     "@qiln/core": "*",
+    "postgres": "3.4.9",
     "ssh2": "1.17.0"
+  },
+  "peerDependencies": {
+    "drizzle-orm": "1.0.0-rc.4"
   },
   "devDependencies": {
     "@types/node": "26.4.0",
     "@types/ssh2": "1.15.5",
+    "drizzle-orm": "1.0.0-rc.4",
     "typescript": "6.0.3",
     "vite": "8.2.2",
     "vite-plugin-dts": "5.0.3"

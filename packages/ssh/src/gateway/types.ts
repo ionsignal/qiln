@@ -8,7 +8,7 @@ import type {
   SshTicketIssueOutput,
 } from '@qiln/core/server'
 
-export interface SshGatewayHostPolicy {
+export interface SshGatewayPolicy {
   checkGatewayKeyEligibility(key: SshCanonicalPublicKey): Promise<SshGatewayKeyEligibilityOutput>
   issueGatewayTicket(key: SshCanonicalPublicKey): Promise<SshTicketIssueOutput>
   redeemGatewayTicket(ticket: string, key: SshCanonicalPublicKey, gatewayInstanceId: string): Promise<SshRelayOpening>

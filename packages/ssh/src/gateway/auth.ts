@@ -5,7 +5,7 @@ import { parseSshPublicKeyBlob } from '../key'
 import { ssh2Utils } from '../ssh2'
 import type { PublicKeyAuthContext } from 'ssh2'
 import type { SshCanonicalPublicKey } from '@qiln/core/server'
-import type { SshGatewayHostPolicy } from './types'
+import type { SshGatewayPolicy } from './types'
 
 export const SSH_GATEWAY_OUTER_USERNAME = 'qiln-gateway'
 
@@ -87,7 +87,7 @@ export function verifySignedPublicKeyRequest(context: PublicKeyAuthContext, key:
  */
 export async function authenticateGatewayPublicKey(
   context: PublicKeyAuthContext,
-  policy: SshGatewayHostPolicy,
+  policy: SshGatewayPolicy,
 ): Promise<SshGatewayAuthenticationResult> {
   if (context.username !== SSH_GATEWAY_OUTER_USERNAME) {
     return {

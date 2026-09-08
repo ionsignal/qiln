@@ -5,22 +5,22 @@ import {
   SshBranchAccessRevokeInputSchema,
   SshCapsuleAccessRevokeInputSchema,
   SshCapsuleAccessRevocationOutputSchema,
-} from '../../../schemas/ssh'
-import { TargetOwnerSchema, TargetType } from '../targets'
-import { defineCapsuleCommand } from './definitions'
+} from '../../../../schemas/ssh'
+import { TargetOwnerSchema, TargetType } from '../../targets'
+import { defineCapsuleCommand } from '../definitions'
 import type { input, output } from 'zod'
-import type { CapsuleCommandDefinition } from './definitions'
+import type { CapsuleCommandDefinition } from '../definitions'
 
 const SSH_ACCESS_CONTROL_TIMEOUT_MS = 60_000
 
 /**
- * Private Worker-to-Host SSH access-control commands.
+ * Private Worker-to-SSH access-control commands.
  *
- * The Host is authoritative for key registration, grants, access fences,
- * tickets, and relays. Worker callers supply only owner-targeted capsule and
- * branch identities plus the lifecycle reason represented by the command.
+ * The SSH authority owns key registration, grants, access fences, tickets, and
+ * relays. Worker callers supply only owner-targeted capsule and branch
+ * identities plus the lifecycle reason represented by the command.
  *
- * Host handlers must independently prove branch ownership, capsule lineage,
+ * SSH handlers must independently prove branch ownership, capsule lineage,
  * access-fence state, lifecycle eligibility, and relay closure.
  */
 export const CapsuleSshAccessCommandName = {

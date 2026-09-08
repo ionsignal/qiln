@@ -17,10 +17,9 @@ import { ssh2Utils, SshServer } from '../ssh2'
 import { authenticateGatewayPublicKey } from './auth'
 import { SshRelayRegistry } from './relay'
 import type { AuthContext, Connection, PublicKeyAuthContext, ServerChannel, ServerConfig, Session } from 'ssh2'
-import type { SshGatewayConfig, SshGatewayHostPolicy, SshGatewayStats, SshRelayClosureOrigin } from './types'
+import type { SshGatewayConfig, SshGatewayPolicy, SshGatewayStats, SshRelayClosureOrigin } from './types'
 
 const EVENT_LOOP_DELAY_RESOLUTION_MS = 20
-
 const RELAY_REGISTRATION_REJECTED_REASON = 'gateway_registration_rejected'
 const RELAY_SETUP_FAILED_REASON = 'gateway_setup_failed'
 const RELAY_STREAM_CLOSED_REASON = 'gateway_stream_closed'
@@ -162,10 +161,10 @@ function validateGatewayConfig(config: SshGatewayConfig): void {
 }
 
 /**
- * Fail-closed ssh2 gateway for one Host process.
+ * Fail-closed ssh2 gateway for one SSH authority process.
  *
  * The outer SSH connection terminates here. The accepted shell channel carries
- * the untouched inner SSH byte stream to exactly one Host-authorized branch
+ * the untouched inner SSH byte stream to exactly one policy-authorized branch
  * destination.
  */
 export class QilnSshGateway {
@@ -173,9 +172,12 @@ export class QilnSshGateway {
   private readonly incomingSockets = new Set<Socket>()
   private readonly protocolServers = new Set<InstanceType<typeof SshServer>>()
   private readonly durableClosureTasks = new Set<Promise<void>>()
+  private readonly setupTasks = new Set<Promise<void>>()
   private readonly eventLoopDelay: IntervalHistogram
 
   private listener: NetServer | null = null
+  private startPromise: Promise<void> | null = null
+  private stopPromise: Promise<void> | null = null
   private started = false
   private stopping = false
   private authenticatedConnections = 0
@@ -184,7 +186,7 @@ export class QilnSshGateway {
 
   constructor(
     private readonly config: SshGatewayConfig,
-    private readonly policy: SshGatewayHostPolicy,
+    private readonly policy: SshGatewayPolicy,
   ) {
     validateGatewayConfig(config)
     const tombstoneTtlMs =
@@ -214,27 +216,37 @@ export class QilnSshGateway {
   }
 
   public async start(): Promise<void> {
+    if (this.stopping) {
+      throw new Error('A stopped SSH gateway cannot restart. Create a new gateway instance.')
+    }
     if (this.started) {
       return
     }
-    if (this.stopping) {
-      throw new Error('SSH gateway cannot start while shutdown is in progress.')
+    if (!this.startPromise) {
+      this.startPromise = this.listen()
     }
+    await this.startPromise
+  }
+
+  private async listen(): Promise<void> {
     const listener = createServer(socket => {
       this.acceptSocket(socket)
     })
+    this.listener = listener
     listener.maxConnections = this.config.maxConnections
+    listener.on('error', (error: Error) => {
+      this.report(
+        {
+          stage: 'gateway',
+          outcome: 'failed',
+        },
+        undefined,
+        error,
+      )
+    })
     await new Promise<void>((resolve, reject) => {
       const onError = (error: Error) => {
         listener.off('listening', onListening)
-        this.report(
-          {
-            stage: 'gateway',
-            outcome: 'failed',
-          },
-          undefined,
-          error,
-        )
         reject(error)
       }
       const onListening = () => {
@@ -248,7 +260,9 @@ export class QilnSshGateway {
         port: this.config.bindPort,
       })
     })
-    this.listener = listener
+    if (this.stopping) {
+      return
+    }
     this.started = true
     this.eventLoopDelay.enable()
     this.report({
@@ -258,29 +272,44 @@ export class QilnSshGateway {
     })
   }
 
-  public async stop(): Promise<void> {
-    if (this.stopping) {
-      await this.waitForDurableClosures()
-      return
+  public stop(): Promise<void> {
+    if (!this.stopPromise) {
+      this.stopping = true
+      this.started = false
+      this.eventLoopDelay.disable()
+      this.registry.closeAll('shutdown')
+      for (const socket of this.incomingSockets) {
+        socket.destroy()
+      }
+      this.stopPromise = this.shutdown()
     }
-    this.stopping = true
-    this.started = false
-    this.eventLoopDelay.disable()
+    return this.stopPromise
+  }
+
+  private async shutdown(): Promise<void> {
+    if (this.startPromise) {
+      await this.startPromise.catch(() => undefined)
+    }
     const listener = this.listener
     this.listener = null
-    const listenerClosed = listener
-      ? new Promise<void>(resolve => {
-          listener.close(() => resolve())
+    if (listener?.listening) {
+      await new Promise<void>((resolve, reject) => {
+        listener.close(error => {
+          if (error) {
+            reject(error)
+            return
+          }
+          resolve()
         })
-      : Promise.resolve()
-    this.registry.closeAll('shutdown')
-    for (const socket of this.incomingSockets) {
-      socket.destroy()
+      })
     }
-    await listenerClosed
+    // Redemption may finish after sockets close. Its resulting relay must be
+    // durably closed before the runtime can release singleton authority.
+    while (this.setupTasks.size > 0) {
+      await Promise.allSettled([...this.setupTasks])
+    }
     await this.waitForDurableClosures()
     this.protocolServers.clear()
-    this.stopping = false
     this.report({
       stage: 'gateway',
       outcome: 'closed',
@@ -370,6 +399,10 @@ export class QilnSshGateway {
       this.handleAuthentication(context, state)
     })
     client.on('ready', () => {
+      if (this.stopping || state.closed || state.socket.destroyed) {
+        state.socket.destroy()
+        return
+      }
       if (!state.authenticated || state.ticket === null || state.key === null) {
         this.report(
           {
@@ -460,47 +493,57 @@ export class QilnSshGateway {
   }
 
   private handleAuthentication(context: AuthContext, state: GatewayConnectionState): void {
-    if (state.closed || state.authenticated || state.authInFlight || context.method !== 'publickey') {
+    if (
+      this.stopping ||
+      state.closed ||
+      state.socket.destroyed ||
+      state.authenticated ||
+      state.authInFlight ||
+      context.method !== 'publickey'
+    ) {
       this.authRejections++
       context.reject()
       return
     }
     state.authInFlight = true
-    void authenticateGatewayPublicKey(context as PublicKeyAuthContext, this.policy)
-      .then(result => {
-        if (state.closed || state.socket.destroyed) {
-          context.reject()
-          return
-        }
-        if (result.kind === 'probe_accepted') {
+    this.trackSetup(
+      authenticateGatewayPublicKey(context as PublicKeyAuthContext, this.policy)
+        .then(result => {
+          if (this.stopping || state.closed || state.socket.destroyed) {
+            context.reject()
+            return
+          }
+          if (result.kind === 'probe_accepted') {
+            context.accept()
+            return
+          }
+          if (result.kind !== 'authenticated') {
+            this.authRejections++
+            context.reject()
+            return
+          }
+          if (this.authenticatedConnections >= this.config.maxConnections) {
+            this.authRejections++
+            context.reject()
+            return
+          }
+          state.authenticated = true
+          state.ticket = result.ticket
+          state.key = result.key
+          this.authenticatedConnections++
+          this.clearAuthenticationTimer(state)
           context.accept()
-          return
-        }
-        if (result.kind !== 'authenticated') {
+        })
+        .catch((error: unknown) => {
           this.authRejections++
+          this.report({ stage: 'authentication', outcome: 'failed' }, state, error)
           context.reject()
-          return
-        }
-        if (this.authenticatedConnections >= this.config.maxConnections) {
-          this.authRejections++
-          context.reject()
-          return
-        }
-        state.authenticated = true
-        state.ticket = result.ticket
-        state.key = result.key
-        this.authenticatedConnections++
-        this.clearAuthenticationTimer(state)
-        context.accept()
-      })
-      .catch((error: unknown) => {
-        this.authRejections++
-        this.report({ stage: 'authentication', outcome: 'failed' }, state, error)
-        context.reject()
-      })
-      .finally(() => {
-        state.authInFlight = false
-      })
+        })
+        .finally(() => {
+          state.authInFlight = false
+        }),
+      state,
+    )
   }
 
   private configureSession(session: Session, state: GatewayConnectionState): void {
@@ -589,7 +632,7 @@ export class QilnSshGateway {
       state.ticket = null
       channel.pause()
       this.report({ stage: 'shell', outcome: 'accepted' }, state)
-      void this.openRelay(state, channel, ticket, key)
+      this.trackSetup(this.openRelay(state, channel, ticket, key), state)
     })
   }
 
@@ -620,7 +663,7 @@ export class QilnSshGateway {
         )
       }
     }
-    // Closure may happen while redemption is awaiting Host persistence.
+    // Closure may happen while redemption is awaiting SSH persistence.
     // ssh2's Channel.destroy() is protocol closure, not Node's destroyed flag.
     channel.on('error', (error: Error) => {
       this.report(
@@ -818,6 +861,18 @@ export class QilnSshGateway {
           ? RELAY_SETUP_FAILED_REASON
           : RELAY_STREAM_CLOSED_REASON
     this.trackDurableClosure(this.policy.closeRelay(relayId, this.config.gatewayInstanceId, reason), relayId, state)
+  }
+
+  private trackSetup(operation: Promise<void>, state: GatewayConnectionState): void {
+    const completion = operation
+      .catch((error: unknown) => {
+        this.report({ stage: 'connection', outcome: 'failed' }, state, error)
+        state.socket.destroy()
+      })
+      .finally(() => {
+        this.setupTasks.delete(completion)
+      })
+    this.setupTasks.add(completion)
   }
 
   private trackDurableClosure(operation: Promise<unknown>, relayId: string, state: GatewayConnectionState): void {

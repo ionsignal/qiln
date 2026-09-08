@@ -1,7 +1,6 @@
 import dts from 'vite-plugin-dts'
 import { defineConfig } from 'vite'
 import { resolve } from 'node:path'
-import { sentinel } from '@qiln/core/sentinel'
 
 export default defineConfig(() => {
   return {
@@ -10,7 +9,6 @@ export default defineConfig(() => {
         insertTypesEntry: true,
         include: ['src/**/*.ts'],
       }),
-      sentinel(),
     ],
     build: {
       lib: {
@@ -24,7 +22,7 @@ export default defineConfig(() => {
         checks: {
           pluginTimings: false,
         },
-        external: ['ssh2', /^@qiln\//, /^node:/],
+        external: ['postgres', 'ssh2', /^drizzle-orm(?:\/|$)/, /^@qiln\//, /^node:/],
         output: {
           preserveModules: false,
           exports: 'named',
