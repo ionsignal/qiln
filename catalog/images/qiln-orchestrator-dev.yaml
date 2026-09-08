@@ -150,6 +150,7 @@ actions:
       systemctl enable nats-server.service
 
       systemctl disable qiln-dev.service
+      systemctl disable qiln-ssh-dev.service
 
 files:
   # Incus/cloud-init image templates.
@@ -718,7 +719,7 @@ files:
       [Unit]
       Description=Initialize Qiln instance identity and development credentials
       After=local-fs.target
-      Before=ssh.service qiln-dev.service
+      Before=ssh.service qiln-dev.service qiln-ssh-dev.service
 
       [Service]
       Type=oneshot
@@ -802,8 +803,8 @@ files:
     content: |-
       qiln ALL=(ALL) NOPASSWD: ALL
 
-  # Non-secret runtime configuration shared by Qiln systemd services. Manual
-  # development runs must export these values before starting the Host.
+  # Non-secret Web and embedded Worker configuration. Manual development runs
+  # export these values before starting the Host. SSH settings live separately.
   - path: /etc/qiln/runtime.env
     generator: dump
     uid: 0
@@ -834,11 +835,30 @@ files:
       INCUS_REJECT_UNAUTHORIZED=true
       INCUS_PROJECT=default
 
+  # SSH remains a separate process while sharing development database and NATS
+  # credentials. This separation does not establish a production privilege
+  # boundary because both development services still run as the same OS user.
+  - path: /etc/qiln/ssh.env
+    generator: dump
+    uid: 0
+    gid: 0
+    mode: '0644'
+    content: |-
+      NODE_ENV=development
+      QILN_LOAD_DOTENV=false
+      QILN_HOST_CREDENTIAL_PATH=/run/qiln/qiln-host.env
+
+      PGHOST=/var/run/postgresql
+      PGPORT=5432
+      PGUSER=qiln
+      DATABASE_URL=postgresql:///qiln
+      NATS_SERVERS=nats://127.0.0.1:4222
+
       QILN_SSH_ENABLED=true
       QILN_SSH_TICKET_TTL_MS=30000
       QILN_SSH_RELAY_CLOSURE_TIMEOUT_MS=15000
       QILN_SSH_PUBLIC_HOST=qiln.edge.ionsignal.com
-      QILN_SSH_PUBLIC_PORT=2222
+      QILN_SSH_PUBLIC_PORT=2224
       QILN_SSH_GATEWAY_HOST_ALIAS=qiln-gateway
       QILN_SSH_BRANCH_HOST_ALIAS_PREFIX=qiln
       QILN_SSH_DEFAULT_IDENTITY_FILE=~/.ssh/id_ed25519_qiln
@@ -852,6 +872,42 @@ files:
       QILN_SSH_GATEWAY_AUTHENTICATION_TIMEOUT_MS=15000
       QILN_SSH_GATEWAY_CHANNEL_OPEN_TIMEOUT_MS=10000
       QILN_SSH_GATEWAY_BRANCH_DIAL_TIMEOUT_MS=10000
+
+  # The standalone SSH service owns the gateway credential and its independent
+  # build/watch process. Web restarts neither rebuild nor restart SSH.
+  #
+  # Like the Web development service, this remains disabled until the operator
+  # prepares the source checkout, installs dependencies, and applies migrations.
+  - path: /etc/systemd/system/qiln-ssh-dev.service
+    generator: dump
+    uid: 0
+    gid: 0
+    mode: '0644'
+    content: |-
+      [Unit]
+      Description=Qiln standalone SSH development authority
+      Requires=postgresql@18-main.service qiln-postgres-bootstrap.service nats-server.service qiln-instance-bootstrap.service
+      After=network-online.target postgresql@18-main.service qiln-postgres-bootstrap.service nats-server.service qiln-instance-bootstrap.service
+      Wants=network-online.target
+
+      [Service]
+      Type=simple
+      User=qiln
+      Group=qiln
+      WorkingDirectory=/opt/qiln
+      EnvironmentFile=/etc/qiln/ssh.env
+      Environment=QILN_HOST_CREDENTIAL_PATH=/run/qiln/qiln-host.env
+      ImportCredential=qiln-ssh-gateway-host-key
+      Environment=QILN_SSH_GATEWAY_HOST_KEY_PATH=%d/qiln-ssh-gateway-host-key
+      ExecStartPre=/bin/sh -ec 'if [ "$${QILN_SSH_GATEWAY_ENABLED:-false}" = "true" ]; then test -r "$${CREDENTIALS_DIRECTORY}/qiln-ssh-gateway-host-key"; fi'
+      ExecStart=/usr/bin/npm run ssh:dev
+      TimeoutStopSec=40s
+      UMask=0077
+      NoNewPrivileges=true
+      PrivateTmp=true
+
+      [Install]
+      WantedBy=multi-user.target
 
   # This development-only service runs the Qiln Host and embedded Worker in one
   # process. The installer must supply the validated host checkout at /opt/qiln
@@ -871,8 +927,8 @@ files:
     content: |-
       [Unit]
       Description=Qiln development server with embedded Worker
-      Requires=postgresql@18-main.service qiln-postgres-bootstrap.service nats-server.service qiln-instance-bootstrap.service
-      After=network-online.target postgresql@18-main.service qiln-postgres-bootstrap.service nats-server.service qiln-instance-bootstrap.service
+      Requires=postgresql@18-main.service qiln-postgres-bootstrap.service nats-server.service qiln-instance-bootstrap.service qiln-ssh-dev.service
+      After=network-online.target postgresql@18-main.service qiln-postgres-bootstrap.service nats-server.service qiln-instance-bootstrap.service qiln-ssh-dev.service
       Wants=network-online.target
 
       [Service]
@@ -882,9 +938,6 @@ files:
       WorkingDirectory=/opt/qiln
       EnvironmentFile=/etc/qiln/runtime.env
       Environment=QILN_HOST_CREDENTIAL_PATH=/run/qiln/qiln-host.env
-      ImportCredential=qiln-ssh-gateway-host-key
-      Environment=QILN_SSH_GATEWAY_HOST_KEY_PATH=%d/qiln-ssh-gateway-host-key
-      ExecStartPre=/bin/sh -ec 'if [ "$${QILN_SSH_GATEWAY_ENABLED:-false}" = "true" ]; then test -r "$${CREDENTIALS_DIRECTORY}/qiln-ssh-gateway-host-key"; fi'
       ExecStart=/usr/bin/npm run server:dev
       TimeoutStopSec=30s
       UMask=0077
