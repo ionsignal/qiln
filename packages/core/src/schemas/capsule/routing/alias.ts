@@ -96,7 +96,7 @@ export const CapsuleRouteMatcherSchema = z
     })
   })
 
-export const CapsuleRouteMatcherPinSchema = CapsuleRouteMatcherSchema.extend({
+export const CapsuleRouteMatcherPinSchema = CapsuleRouteMatcherSchema.safeExtend({
   digest: CapsuleRouteMatcherDigestSchema,
 }).strict()
 
