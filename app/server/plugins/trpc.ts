@@ -16,7 +16,7 @@ export default fp(
           createContext(opts, {
             db: fastify.db,
             engine: fastify.engine,
-            ssh: fastify.sshPolicy,
+            ssh: fastify.ssh,
           }),
         onError: ({ path, error, type }) => {
           if (error.code === 'INTERNAL_SERVER_ERROR') {

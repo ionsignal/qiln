@@ -2,8 +2,8 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "module": "ESNext",
-    "rootDir": "./",
-    "outDir": "../dist/server",
+    "rootDir": "../",
+    "outDir": "../dist",
     "lib": ["es2025"],
     "types": ["node"],
     "moduleResolution": "bundler",
@@ -19,5 +19,5 @@
     "verbose": true
   },
   "include": ["./**/*.ts", "../types/**/*.d.ts"],
-  "exclude": ["node_modules"]
+  "exclude": ["node_modules", "../dist"]
 }

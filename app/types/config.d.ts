@@ -10,7 +10,7 @@ import type {
 } from '@qiln/worker/server'
 import type { Session } from '@server/plugins/session'
 import type { Database, Persistence } from '@server/db'
-import type { SshHostPolicy } from '@server/ssh/policy'
+import type { SshControlClient } from '@server/ssh/client'
 import type { UpgradeRouter } from '@server/websocket/router'
 
 type MultipartConfig = {
@@ -52,31 +52,6 @@ type WorkerConfig = {
   embedded: boolean
 }
 
-type SshGatewayConfig = {
-  enabled: boolean
-  bindHost: string
-  bindPort: number
-  instanceId: string
-  hostKeyPath: string
-  maxConnections: number
-  maxRelays: number
-  authenticationTimeoutMs: number
-  channelOpenTimeoutMs: number
-  branchDialTimeoutMs: number
-}
-
-type SshConfig = {
-  enabled: boolean
-  ticketTtlMs: number
-  relayClosureTimeoutMs: number
-  publicHost: string
-  publicPort: number
-  gatewayHostAlias: string
-  branchHostAliasPrefix: string
-  defaultIdentityFile: string
-  gateway: SshGatewayConfig
-}
-
 type DatabaseConfig = NonNullable<WorkerRuntimeConfig['database']>
 type DefinitionConfig = NonNullable<WorkerRuntimeConfig['definitions']>
 type IncusConfig = NonNullable<WorkerRuntimeConfig['incus']>
@@ -104,7 +79,6 @@ type Config = WorkerHostConfig & {
   ssl: string
   development: DevelopmentConfig
   worker: WorkerConfig
-  ssh: SshConfig
   cookies: CookiesConfig
   multipart: MultipartConfig
   limit: LimitConfig
@@ -130,7 +104,7 @@ declare module 'fastify' {
     engine: QilnEngineController
     worker: QilnWorkerRuntime | null
     channel: CapsuleNatsChannel
-    sshPolicy: SshHostPolicy
+    ssh: SshControlClient
     upgrades: UpgradeRouter
     config: EnvironmentConfig
   }
@@ -151,7 +125,5 @@ export type {
   CaddyConfig,
   RoutingConfig,
   WorkerConfig,
-  SshConfig,
-  SshGatewayConfig,
   FeatureConfig,
 }
