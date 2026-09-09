@@ -24,29 +24,29 @@
     "@trpc/server": "11.18.0",
     "@trpc/client": "11.18.0",
     "drizzle-orm": "1.0.0-rc.4",
-    "fastify": "5.12.1",
+    "fastify": "5.12.3",
     "fastify-plugin": "6.0.0",
-    "naive-ui": "2.45.1",
-    "vue": "3.5.41",
-    "zod": "4.4.3"
+    "naive-ui": "2.45.3",
+    "vue": "3.5.42",
+    "zod": "4.5.4"
   },
   "devDependencies": {
     "@nats-io/transport-node": "3.4.0",
     "@trpc/server": "11.18.0",
     "@trpc/client": "11.18.0",
-    "@types/node": "26.4.0",
+    "@types/node": "26.5.0",
     "@vitejs/plugin-vue": "6.0.8",
     "drizzle-orm": "1.0.0-rc.4",
-    "naive-ui": "2.45.1",
+    "naive-ui": "2.45.3",
     "typescript": "6.0.3",
     "vite": "8.2.2",
-    "vite-plugin-dts": "5.0.3",
-    "vue": "3.5.41",
+    "vite-plugin-dts": "5.1.0",
+    "vue": "3.5.42",
     "@vue-flow/core": "1.48.2"
   },
   "dependencies": {
     "@qiln/core": "*",
     "yaml": "2.9.0",
-    "zod": "4.4.3"
+    "zod": "4.5.4"
   }
 }
