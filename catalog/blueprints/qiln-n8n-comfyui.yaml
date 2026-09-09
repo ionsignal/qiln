@@ -191,7 +191,7 @@ applications:
     port: 5678
     protocol: http
     entrypoint: /
-    exposure: proxy
+    exposure: internal
     endpoint:
       mode: passthrough
     verification:
