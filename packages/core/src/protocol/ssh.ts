@@ -1,11 +1,7 @@
 import { Buffer } from 'node:buffer'
 import { createHash } from 'node:crypto'
 import { z } from 'zod'
-import {
-  MAX_SSH_PUBLIC_KEY_BLOB_LENGTH,
-  SshPublicKeyAlgorithmSchema,
-  SshPublicKeyBlobSchema,
-} from '../../schemas/ssh/key'
+import { MAX_SSH_PUBLIC_KEY_BLOB_LENGTH, SshPublicKeyAlgorithmSchema, SshPublicKeyBlobSchema } from '../schemas/ssh/key'
 
 export const SSH_AUTHORIZED_KEYS_SYNC_SUBJECT = 'qiln.private.ssh.authorizedKeys.sync'
 export const SSH_AUTHORIZED_KEYS_SYNC_QUEUE = 'qiln-worker-ssh-authorized-keys'

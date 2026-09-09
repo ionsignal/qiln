@@ -10,7 +10,7 @@ import type {
 } from '@qiln/worker/server'
 import type { Session } from '@server/plugins/session'
 import type { Database, Persistence } from '@server/db'
-import type { SshControlClient } from '@server/ssh/client'
+import type { SshControlClient } from '@server/ssh'
 import type { UpgradeRouter } from '@server/websocket/router'
 
 type MultipartConfig = {

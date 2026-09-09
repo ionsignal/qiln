@@ -18,7 +18,7 @@ import {
   type SshAuthorizedKeysSyncAck,
   type SshAuthorizedKeysSyncHandler,
   type SshAuthorizedKeysSyncRequestInput,
-} from '../ssh/sync'
+} from '../ssh'
 import {
   CapsuleEventSchema,
   getCapsuleCommandDefinition,

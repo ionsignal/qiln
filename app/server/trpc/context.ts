@@ -4,7 +4,7 @@ import type { CreateFastifyContextOptions } from '@trpc/server/adapters/fastify'
 import type { IncomingMessage } from 'http'
 import type { FastifyRequest, FastifyReply } from 'fastify'
 import type { AuthenticatedUser } from '@/types/entities'
-import type { SshControlClient } from '@server/ssh/client'
+import type { SshControlClient } from '@server/ssh'
 
 export interface InnerContextOptions {
   req: FastifyRequest | IncomingMessage

@@ -9,11 +9,11 @@ import {
   type SshAuthorizedKeysSyncAck,
   type SshAuthorizedKeysSyncRequest,
 } from '@qiln/core/server'
-import { IncusError } from '../../errors'
-import { branchInstanceName } from '../capsule/resource/identity'
-import type { IncusInstanceFileMetadata } from '../../incus/client/files'
-import type { IncusClient } from '../../incus/client'
-import type { ProjectService } from '../project'
+import { IncusError } from '../errors'
+import { branchInstanceName } from './capsule/resource/identity'
+import type { IncusInstanceFileMetadata } from '../incus/client/files'
+import type { IncusClient } from '../incus/client'
+import type { ProjectService } from './project'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
 const SSH_AUTHORIZED_KEYS_DIRECTORY = '/etc/ssh/qiln'
