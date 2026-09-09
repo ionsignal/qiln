@@ -27,7 +27,7 @@
     "ssh:clean": "rimraf ssh/dist",
     "ssh:build": "npm run type:check:ssh && vite build --config ssh/vite.config.ts",
     "ssh:dev": "npm run ssh:clean && npm run ssh:watch",
-    "ssh:watch": "set -a && . /etc/qiln/runtime.env && set +a && concurrently --kill-others-on-fail --prefix-colors 'magenta,green,cyan' --names 'BUILD,SSH,TYPES' \"npm:ssh:watch:build\" \"npm:ssh:watch:run\" \"npm:ssh:watch:types\"",
+    "ssh:watch": "set -a && . /etc/qiln/ssh.env && set +a && concurrently --kill-others-on-fail --prefix-colors 'magenta,green,cyan' --names 'BUILD,SSH,TYPES' \"npm:ssh:watch:build\" \"npm:ssh:watch:run\" \"npm:ssh:watch:types\"",
     "ssh:watch:build": "vite build --watch --mode development --config ssh/vite.config.ts",
     "ssh:watch:run": "node scripts/wait-for.js ssh/dist/ready.json && nodemon --verbose --signal SIGTERM --watch ssh/dist/ready.json --ext json --delay 250ms --exec \"node ssh/dist/index.js\"",
     "ssh:watch:types": "tsc --project ssh/tsconfig.json --watch --preserveWatchOutput",
@@ -57,7 +57,9 @@
   "engines": {
     "node": ">=22.22.2"
   },
-  "workspaces": ["packages/*"],
+  "workspaces": [
+    "packages/*"
+  ],
   "packageManager": "npm@12.0.2",
   "overrides": {
     "fast-uri": "3.1.5",
