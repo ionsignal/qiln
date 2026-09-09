@@ -6,8 +6,8 @@ import {
   CapsuleOperationEventName,
   type CapsuleArchiveReceipt,
   type CapsuleBlueprintDigest,
-  type CapsuleBranchName,
-  type CapsuleBranchStatus,
+  type CapsuleBranchStartReceipt,
+  type CapsuleBranchStopReceipt,
   type CapsuleCreateReceipt,
   type CapsuleDestroyReceipt,
   type CapsuleEvent,
@@ -25,13 +25,16 @@ export interface CapsuleEventStreamSubscription {
   unsubscribe: () => void
 }
 
-export interface CapsuleBranchInput {
+export interface CapsuleBranchMutationInput {
   capsuleId: string
-  name: CapsuleBranchName
+  branchId: string
+  idempotencyKey: CapsuleOperationIdempotencyKey
 }
 
+export type CapsuleBranchInput = CapsuleBranchMutationInput
+
 export interface CapsuleCreateClientInput {
-  rootBranchName: CapsuleBranchName
+  rootBranchName: string
   blueprintName: string
   blueprintDigest: CapsuleBlueprintDigest
   idempotencyKey: CapsuleOperationIdempotencyKey
@@ -65,8 +68,8 @@ export interface CapsuleContext {
   unarchive: (input: CapsuleMutationInput) => Promise<CapsuleUnarchiveReceipt>
   destroy: (input: CapsuleMutationInput) => Promise<CapsuleDestroyReceipt>
 
-  startBranch: (input: CapsuleBranchInput) => Promise<void>
-  stopBranch: (input: CapsuleBranchInput) => Promise<void>
+  startBranch: (input: CapsuleBranchMutationInput) => Promise<CapsuleBranchStartReceipt>
+  stopBranch: (input: CapsuleBranchMutationInput) => Promise<CapsuleBranchStopReceipt>
 
   getOperation: (operationId: string) => Promise<CapsuleOperationSummary>
   listOperations: (capsuleId: string) => Promise<CapsuleOperationSummary[]>
@@ -78,10 +81,6 @@ const CapsuleContextKey: InjectionKey<CapsuleContext> = Symbol('CapsuleContext')
 
 function toError(error: unknown, fallbackMessage: string): Error {
   return error instanceof Error ? error : new Error(fallbackMessage)
-}
-
-function branchIdentityMatches(branch: CapsuleBranchSummary, input: CapsuleBranchInput): boolean {
-  return branch.capsuleId === input.capsuleId && branch.name === input.name
 }
 
 /**
@@ -108,32 +107,6 @@ export function provideCapsules(options: ProvideCapsulesOptions): CapsuleContext
   // ---------------------------------------------------------------------------
   // Branch collection
   // ---------------------------------------------------------------------------
-
-  function findBranch(input: CapsuleBranchInput): CapsuleBranchSummary | undefined {
-    return options.branches.value.find(branch => branchIdentityMatches(branch, input))
-  }
-
-  function updateBranch(
-    input: CapsuleBranchInput,
-    update: (branch: CapsuleBranchSummary) => CapsuleBranchSummary,
-  ): boolean {
-    let updated = false
-    options.branches.value = options.branches.value.map(branch => {
-      if (!branchIdentityMatches(branch, input)) {
-        return branch
-      }
-      updated = true
-      return update(branch)
-    })
-    return updated
-  }
-
-  function setLocalBranchStatus(input: CapsuleBranchInput, status: CapsuleBranchStatus): boolean {
-    return updateBranch(input, branch => ({
-      ...branch,
-      status,
-    }))
-  }
 
   async function refreshBranches(): Promise<void> {
     options.branches.value = await options.client.branches.list.query()
@@ -228,61 +201,38 @@ export function provideCapsules(options: ProvideCapsulesOptions): CapsuleContext
    * A durable mutation receipt must not be converted into a client-visible
    * mutation failure merely because the follow-up branch refresh failed.
    */
-  async function submitCapsuleMutation<TResult>(submit: () => Promise<TResult>): Promise<TResult> {
+  async function submitMutationAndRefreshBranches<TResult>(submit: () => Promise<TResult>): Promise<TResult> {
     const result = await submit()
     await refreshBranchesSafely()
     return result
   }
 
   async function createCapsule(input: CapsuleCreateClientInput): Promise<CapsuleCreateReceipt> {
-    return await submitCapsuleMutation(() => options.client.create.mutate(input))
+    return await submitMutationAndRefreshBranches(() => options.client.create.mutate(input))
   }
 
   async function archive(input: CapsuleMutationInput): Promise<CapsuleArchiveReceipt> {
-    return await submitCapsuleMutation(() => options.client.archive.mutate(input))
+    return await submitMutationAndRefreshBranches(() => options.client.archive.mutate(input))
   }
 
   async function unarchive(input: CapsuleMutationInput): Promise<CapsuleUnarchiveReceipt> {
-    return await submitCapsuleMutation(() => options.client.unarchive.mutate(input))
+    return await submitMutationAndRefreshBranches(() => options.client.unarchive.mutate(input))
   }
 
   async function destroy(input: CapsuleMutationInput): Promise<CapsuleDestroyReceipt> {
-    return await submitCapsuleMutation(() => options.client.destroy.mutate(input))
+    return await submitMutationAndRefreshBranches(() => options.client.destroy.mutate(input))
   }
 
   // ---------------------------------------------------------------------------
   // Branch runtime mutations
   // ---------------------------------------------------------------------------
 
-  async function runBranchRuntimeMutation(
-    input: CapsuleBranchInput,
-    pendingStatus: CapsuleBranchStatus,
-    completedStatus: CapsuleBranchStatus,
-    mutate: () => Promise<unknown>,
-  ): Promise<void> {
-    const previousStatus = findBranch(input)?.status
-
-    setLocalBranchStatus(input, pendingStatus)
-
-    try {
-      await mutate()
-      setLocalBranchStatus(input, completedStatus)
-      await refreshBranchesSafely()
-    } catch (error: unknown) {
-      const refreshed = await refreshBranchesSafely()
-      if (!refreshed && previousStatus) {
-        setLocalBranchStatus(input, previousStatus)
-      }
-      throw error
-    }
+  async function startBranch(input: CapsuleBranchMutationInput): Promise<CapsuleBranchStartReceipt> {
+    return await submitMutationAndRefreshBranches(() => options.client.branches.start.mutate(input))
   }
 
-  async function startBranch(input: CapsuleBranchInput): Promise<void> {
-    // await runBranchRuntimeMutation(input, 'starting', 'online', () => options.client.branches.start.mutate(input))
-  }
-
-  async function stopBranch(input: CapsuleBranchInput): Promise<void> {
-    // await runBranchRuntimeMutation(input, 'stopping', 'offline', () => options.client.branches.stop.mutate(input))
+  async function stopBranch(input: CapsuleBranchMutationInput): Promise<CapsuleBranchStopReceipt> {
+    return await submitMutationAndRefreshBranches(() => options.client.branches.stop.mutate(input))
   }
 
   // ---------------------------------------------------------------------------

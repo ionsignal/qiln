@@ -1,3 +1,4 @@
+<!-- packages/engine/src/components/CapsuleBranchCard.vue -->
 <template>
   <n-card bordered embedded size="small" class="capsule-branch-card">
     <template #header>
@@ -33,8 +34,8 @@
           size="small"
           type="success"
           secondary
-          :disabled="branch.status !== 'offline'"
-          :loading="branch.status === 'starting'"
+          :disabled="branch.status !== 'offline' || submittingAction !== null"
+          :loading="submittingAction === 'start'"
           @click="handleStart">
           <template #icon>
             <icon :path="mdiPlay" :size="16" />
@@ -45,8 +46,8 @@
           size="small"
           type="warning"
           secondary
-          :disabled="branch.status !== 'online'"
-          :loading="branch.status === 'stopping'"
+          :disabled="branch.status !== 'online' || submittingAction !== null"
+          :loading="submittingAction === 'stop'"
           @click="handleStop">
           <template #icon>
             <icon :path="mdiStop" :size="16" />
@@ -59,13 +60,21 @@
 </template>
 
 <script setup lang="ts">
-  import { computed } from 'vue'
+  import { computed, ref } from 'vue'
   import { NButton, NButtonGroup, NCard, NFlex, NTag, NText, useMessage } from 'naive-ui'
   import { isTRPCClientError } from '@trpc/client'
   import { mdiCpu64Bit, mdiMemory, mdiPlay, mdiStop } from '@mdi/js'
+  import { CapsuleOperationIdempotencyKeySchema, type CapsuleOperationIdempotencyKey } from '@qiln/core/client'
   import { useCapsuleContext } from '../composables/useCapsules'
   import { Icon } from './Icon'
   import type { CapsuleBranchSummary } from '../types'
+
+  type BranchMutationAction = 'start' | 'stop'
+
+  interface PendingBranchMutation {
+    action: BranchMutationAction
+    idempotencyKey: CapsuleOperationIdempotencyKey
+  }
 
   const props = defineProps<{
     branch: CapsuleBranchSummary
@@ -73,6 +82,8 @@
 
   const message = useMessage()
   const { startBranch, stopBranch } = useCapsuleContext()
+  const pendingMutation = ref<PendingBranchMutation | null>(null)
+  const submittingAction = ref<BranchMutationAction | null>(null)
   const statusType = computed(() => {
     switch (props.branch.status) {
       case 'online':
@@ -90,27 +101,64 @@
     }
   })
 
-  async function handleStart(): Promise<void> {
-    try {
-      await startBranch({
-        capsuleId: props.branch.capsuleId,
-        name: props.branch.name,
-      })
-      message.success('Capsule branch started.')
-    } catch (error: unknown) {
-      message.error(isTRPCClientError(error) ? error.message : 'Failed to start capsule branch.')
+  function generateOperationIdempotencyKey(): CapsuleOperationIdempotencyKey | null {
+    if (typeof globalThis.crypto?.randomUUID !== 'function') {
+      return null
     }
+    const parsed = CapsuleOperationIdempotencyKeySchema.safeParse(globalThis.crypto.randomUUID())
+    return parsed.success ? parsed.data : null
+  }
+
+  function resolveOperationIdempotencyKey(action: BranchMutationAction): CapsuleOperationIdempotencyKey | null {
+    if (pendingMutation.value?.action === action) {
+      return pendingMutation.value.idempotencyKey
+    }
+    const idempotencyKey = generateOperationIdempotencyKey()
+    if (!idempotencyKey) {
+      return null
+    }
+    pendingMutation.value = {
+      action,
+      idempotencyKey,
+    }
+    return idempotencyKey
+  }
+
+  async function handleStart(): Promise<void> {
+    await submitBranchMutation('start')
   }
 
   async function handleStop(): Promise<void> {
+    await submitBranchMutation('stop')
+  }
+
+  async function submitBranchMutation(action: BranchMutationAction): Promise<void> {
+    if (submittingAction.value !== null) {
+      return
+    }
+    const idempotencyKey = resolveOperationIdempotencyKey(action)
+    if (!idempotencyKey) {
+      message.error('Failed to generate a capsule operation idempotency key. Please retry in a modern browser.')
+      return
+    }
+    submittingAction.value = action
     try {
-      await stopBranch({
+      const input = {
         capsuleId: props.branch.capsuleId,
-        name: props.branch.name,
-      })
-      message.success('Capsule branch stopped.')
+        branchId: props.branch.id,
+        idempotencyKey,
+      }
+      if (action === 'start') {
+        await startBranch(input)
+      } else {
+        await stopBranch(input)
+      }
+      pendingMutation.value = null
+      message.success(`Capsule branch ${action} accepted.`)
     } catch (error: unknown) {
-      message.error(isTRPCClientError(error) ? error.message : 'Failed to stop capsule branch.')
+      message.error(isTRPCClientError(error) ? error.message : `Failed to submit capsule branch ${action}.`)
+    } finally {
+      submittingAction.value = null
     }
   }
 </script>
