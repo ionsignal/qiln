@@ -1,6 +1,6 @@
-import { CapsuleOperationCommandName, type CapsuleCommandHandlerOptions } from '@qiln/core/server'
-import { mapWorkerCapsuleCommandError } from '../../errors'
-import type { QilnWorkerRuntime } from '../../../runtime'
+import { CapsuleLifecycleCommandName, type CapsuleCommandHandlerOptions } from '@qiln/core/server'
+import { mapWorkerCapsuleCommandError } from '../../../errors'
+import type { QilnWorkerRuntime } from '../../../../runtime'
 
 /**
  * Registers durable capsule-destroy submission.
@@ -8,12 +8,12 @@ import type { QilnWorkerRuntime } from '../../../runtime'
  * The handler returns the durable operation receipt without waiting for
  * provider deletion or terminal aggregate completion.
  */
-export function registerCapsuleDestroyHandler(worker: QilnWorkerRuntime): void {
+export function registerCapsuleLifecycleDestroyHandler(worker: QilnWorkerRuntime): void {
   const handlerOptions: CapsuleCommandHandlerOptions = {
     mapError: mapWorkerCapsuleCommandError,
   }
   worker.channel.handle(
-    CapsuleOperationCommandName.CAPSULE_DESTROY,
+    CapsuleLifecycleCommandName.CAPSULE_DESTROY,
     async input => {
       return await worker.capsule.destroy.submit({
         ownerId: input.target.id,

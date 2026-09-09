@@ -10,9 +10,9 @@ import {
   AgentSnapshotManifestRootsOutputSchema,
 } from '../../../schemas/agent'
 import { TargetOwnerSchema, TargetType } from '../targets'
-import { defineCapsuleCommand } from './definitions'
+import { defineCapsuleCommand } from '../definitions'
 import type { input, output } from 'zod'
-import type { CapsuleCommandDefinition } from './definitions'
+import type { CapsuleCommandDefinition } from '../definitions'
 
 const CAPSULE_AGENT_SNAPSHOT_READ_TIMEOUT_MS = 30_000
 

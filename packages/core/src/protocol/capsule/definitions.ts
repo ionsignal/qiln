@@ -1,19 +1,5 @@
-import { z } from 'zod'
 import type { output, ZodType } from 'zod'
-import type { Target, TargetTypeValue } from '../targets'
-
-/**
- * A generic command acknowledgement for operations where success does not need
- * to return extra data. Business failures travel through the capsule bus error
- * envelope rather than through command output unions.
- */
-export const CapsuleCommandAckSchema = z
-  .object({
-    ok: z.literal(true),
-  })
-  .strict()
-
-export type CapsuleCommandAck = z.infer<typeof CapsuleCommandAckSchema>
+import type { Target, TargetTypeValue } from './targets'
 
 export interface CapsuleTargetPolicy<TPayload = unknown> {
   type: TargetTypeValue

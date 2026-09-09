@@ -8,7 +8,7 @@ import {
   CapsuleBlueprintCommandDefinitions,
   CapsuleBlueprintCommandName,
   CapsuleBlueprintCommandNameValues,
-} from './blueprints'
+} from './blueprint'
 import {
   CapsuleBranchCommandDefinitions,
   CapsuleBranchCommandName,
@@ -21,20 +21,20 @@ import {
 import { CapsuleCreateCommandDefinitions, CapsuleCreateCommandName, CapsuleCreateCommandNameValues } from './create'
 import { CapsuleForkCommandDefinitions, CapsuleForkCommandName, CapsuleForkCommandNameValues } from './fork'
 import {
+  CapsuleLifecycleCommandDefinitions,
+  CapsuleLifecycleCommandName,
+  CapsuleLifecycleCommandNameValues,
   CapsuleLifecycleEventDefinitions,
   CapsuleLifecycleEventName,
   CapsuleLifecycleEventNameValues,
   CapsuleLifecycleEventSchemas,
 } from './lifecycle'
 import {
-  CapsuleOperationCommandDefinitions,
-  CapsuleOperationCommandName,
-  CapsuleOperationCommandNameValues,
   CapsuleOperationEventDefinitions,
   CapsuleOperationEventName,
   CapsuleOperationEventNameValues,
   CapsuleOperationEventSchemas,
-} from './operations'
+} from './operation'
 import {
   CapsulePreviewCommandDefinitions,
   CapsulePreviewCommandName,
@@ -70,16 +70,16 @@ import {
   CapsuleSshControlCommandName,
   CapsuleSshControlCommandNameValues,
 } from './ssh/index'
-import type { CapsuleCommandDefinition, CapsuleEventDefinition } from './definitions'
+import type { CapsuleCommandDefinition, CapsuleEventDefinition } from '../definitions'
 
-export * from './definitions'
+export * from '../definitions'
 export * from './agent'
-export * from './blueprints'
+export * from './blueprint'
 export * from './branch'
 export * from './create'
 export * from './fork'
 export * from './lifecycle'
-export * from './operations'
+export * from './operation'
 export * from './preview'
 export * from './routing'
 export * from './snapshot'
@@ -90,7 +90,7 @@ export const CapsuleCommandName = {
   ...CapsuleCreateCommandName,
   ...CapsuleForkCommandName,
   ...CapsuleBranchCommandName,
-  ...CapsuleOperationCommandName,
+  ...CapsuleLifecycleCommandName,
   ...CapsulePreviewCommandName,
   ...CapsuleRouteCommandName,
   ...CapsuleSnapshotCommandName,
@@ -106,7 +106,7 @@ export const CapsuleCommandNameValues = [
   ...CapsuleCreateCommandNameValues,
   ...CapsuleForkCommandNameValues,
   ...CapsuleBranchCommandNameValues,
-  ...CapsuleOperationCommandNameValues,
+  ...CapsuleLifecycleCommandNameValues,
   ...CapsulePreviewCommandNameValues,
   ...CapsuleRouteCommandNameValues,
   ...CapsuleSnapshotCommandNameValues,
@@ -144,7 +144,7 @@ export const CapsuleCommandDefinitions = {
   ...CapsuleCreateCommandDefinitions,
   ...CapsuleForkCommandDefinitions,
   ...CapsuleBranchCommandDefinitions,
-  ...CapsuleOperationCommandDefinitions,
+  ...CapsuleLifecycleCommandDefinitions,
   ...CapsulePreviewCommandDefinitions,
   ...CapsuleRouteCommandDefinitions,
   ...CapsuleSnapshotCommandDefinitions,

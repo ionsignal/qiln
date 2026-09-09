@@ -5,7 +5,7 @@ import {
   CapsuleCreateCommandName,
   CapsuleCreateOutputSchema,
   CapsuleDestroyOperationOutputSchema,
-  CapsuleOperationCommandName,
+  CapsuleLifecycleCommandName,
   CapsuleOperationFailureSchema,
   CapsuleOperationStatus,
   CapsuleOperationSummarySchema,
@@ -105,7 +105,7 @@ export class CapsuleOperationsService {
     capsuleId: string,
     idempotencyKey: CapsuleOperationIdempotencyKey,
   ): Promise<CapsuleArchiveOperationOutput> {
-    const output = await this.channel.command(CapsuleOperationCommandName.CAPSULE_ARCHIVE, {
+    const output = await this.channel.command(CapsuleLifecycleCommandName.CAPSULE_ARCHIVE, {
       target: {
         type: TargetType.OWNER,
         id: identity.ownerId,
@@ -122,7 +122,7 @@ export class CapsuleOperationsService {
     capsuleId: string,
     idempotencyKey: CapsuleOperationIdempotencyKey,
   ): Promise<CapsuleUnarchiveOperationOutput> {
-    const output = await this.channel.command(CapsuleOperationCommandName.CAPSULE_UNARCHIVE, {
+    const output = await this.channel.command(CapsuleLifecycleCommandName.CAPSULE_UNARCHIVE, {
       target: {
         type: TargetType.OWNER,
         id: identity.ownerId,
@@ -139,7 +139,7 @@ export class CapsuleOperationsService {
     capsuleId: string,
     idempotencyKey: CapsuleOperationIdempotencyKey,
   ): Promise<CapsuleDestroyOperationOutput> {
-    const output = await this.channel.command(CapsuleOperationCommandName.CAPSULE_DESTROY, {
+    const output = await this.channel.command(CapsuleLifecycleCommandName.CAPSULE_DESTROY, {
       target: {
         type: TargetType.OWNER,
         id: identity.ownerId,

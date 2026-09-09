@@ -5,9 +5,9 @@ import {
   CapsuleBranchPreviewStatusSchema,
 } from '../../../schemas/capsule/routing'
 import { TargetOwnerSchema, TargetType } from '../targets'
-import { defineCapsuleCommand, defineCapsuleEvent } from './definitions'
+import { defineCapsuleCommand, defineCapsuleEvent } from '../definitions'
 import type { input, output } from 'zod'
-import type { CapsuleCommandDefinition, CapsuleEventDefinition } from './definitions'
+import type { CapsuleCommandDefinition, CapsuleEventDefinition } from '../definitions'
 
 const CAPSULE_PREVIEWS_LIST_TIMEOUT_MS = 15_000
 

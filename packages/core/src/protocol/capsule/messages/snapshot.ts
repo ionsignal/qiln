@@ -11,9 +11,9 @@ import {
 } from '../../../schemas/capsule/snapshot/read'
 import { CapsuleSnapshotListOutputSchema } from '../../../schemas/capsule/snapshot/record'
 import { TargetOwnerSchema, TargetType } from '../targets'
-import { defineCapsuleCommand } from './definitions'
+import { defineCapsuleCommand } from '../definitions'
 import type { input, output, ZodType } from 'zod'
-import type { CapsuleCommandDefinition, CapsuleEventDefinition } from './definitions'
+import type { CapsuleCommandDefinition, CapsuleEventDefinition } from '../definitions'
 
 const CAPSULE_SNAPSHOTS_LIST_TIMEOUT_MS = 15_000
 const CAPSULE_SNAPSHOT_CAPTURE_ACCEPTANCE_TIMEOUT_MS = 15_000

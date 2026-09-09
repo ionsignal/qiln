@@ -1,15 +1,15 @@
-import { registerCapsuleBlueprintHandlers } from './handlers/blueprints'
+import { registerSshAuthorizedKeysSyncHandler } from './handlers/ssh'
+import { registerCapsuleBlueprintHandlers } from './handlers/blueprint'
 import { registerCapsuleAgentReadHandler } from './handlers/capsule/agent'
-import { registerCapsuleArchiveHandler } from './handlers/capsule/archive'
 import { registerCapsuleBranchHandlers } from './handlers/capsule/branch'
 import { registerCapsuleCreateHandler } from './handlers/capsule/create'
-import { registerCapsuleDestroyHandler } from './handlers/capsule/destroy'
 import { registerCapsuleForkHandler } from './handlers/capsule/fork'
 import { registerCapsuleRouteHandlers } from './handlers/capsule/routing'
 import { registerCapsuleSnapshotHandlers } from './handlers/capsule/snapshot'
-import { registerCapsuleUnarchiveHandler } from './handlers/capsule/unarchive'
 import { registerCapsulePreviewHandlers } from './handlers/capsule/preview'
-import { registerSshAuthorizedKeysSyncHandler } from './handlers/ssh'
+import { registerCapsuleLifecycleArchiveHandler } from './handlers/capsule/lifecycle/archive'
+import { registerCapsuleLifecycleDestroyHandler } from './handlers/capsule/lifecycle/destroy'
+import { registerCapsuleLifecycleUnarchiveHandler } from './handlers/capsule/lifecycle/unarchive'
 import type { QilnWorkerRuntime } from '../runtime'
 
 /**
@@ -19,16 +19,16 @@ import type { QilnWorkerRuntime } from '../runtime'
  * operation classification, and branch runtime reconciliation have completed.
  */
 export function registerCapsuleChannelHandlers(worker: QilnWorkerRuntime): void {
+  registerSshAuthorizedKeysSyncHandler(worker)
+  registerCapsuleBlueprintHandlers(worker)
   registerCapsuleAgentReadHandler(worker)
   registerCapsuleCreateHandler(worker)
   registerCapsuleForkHandler(worker)
   registerCapsuleBranchHandlers(worker)
-  registerCapsuleArchiveHandler(worker)
-  registerCapsuleUnarchiveHandler(worker)
-  registerCapsuleDestroyHandler(worker)
   registerCapsuleSnapshotHandlers(worker)
   registerCapsulePreviewHandlers(worker)
   registerCapsuleRouteHandlers(worker)
-  registerCapsuleBlueprintHandlers(worker)
-  registerSshAuthorizedKeysSyncHandler(worker)
+  registerCapsuleLifecycleDestroyHandler(worker)
+  registerCapsuleLifecycleArchiveHandler(worker)
+  registerCapsuleLifecycleUnarchiveHandler(worker)
 }

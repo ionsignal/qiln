@@ -1,9 +1,9 @@
 import { z } from 'zod'
 import { CapsuleBlueprintManifestSchema } from '../../../schemas/blueprint/catalog'
 import { TargetSystemSchema, TargetType } from '../targets'
-import { defineCapsuleCommand } from './definitions'
+import { defineCapsuleCommand } from '../definitions'
 import type { input, output } from 'zod'
-import type { CapsuleCommandDefinition } from './definitions'
+import type { CapsuleCommandDefinition } from '../definitions'
 
 const CAPSULE_BLUEPRINTS_LIST_TIMEOUT_MS = 15_000
 

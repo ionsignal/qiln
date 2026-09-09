@@ -3,9 +3,9 @@ import { CapsuleActorReferenceSchema } from '../../../schemas/capsule/actor'
 import { CapsuleBranchNameSchema } from '../../../schemas/capsule/branch'
 import { CapsuleForkReceiptSchema, CapsuleOperationIdempotencyKeySchema } from '../../../schemas/capsule/operations'
 import { TargetOwnerSchema, TargetType } from '../targets'
-import { defineCapsuleCommand } from './definitions'
+import { defineCapsuleCommand } from '../definitions'
 import type { input, output } from 'zod'
-import type { CapsuleCommandDefinition } from './definitions'
+import type { CapsuleCommandDefinition } from '../definitions'
 
 const CAPSULE_FORK_ACCEPTANCE_TIMEOUT_MS = 15_000
 

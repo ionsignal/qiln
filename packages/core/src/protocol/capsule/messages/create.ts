@@ -3,9 +3,9 @@ import { CapsuleBlueprintDigestSchema, DEFAULT_CAPSULE_BLUEPRINT_NAME } from '..
 import { CapsuleActorReferenceSchema } from '../../../schemas/capsule/actor'
 import { CapsuleCreateReceiptSchema, CapsuleOperationIdempotencyKeySchema } from '../../../schemas/capsule/operations'
 import { TargetOwnerSchema, TargetType } from '../targets'
-import { defineCapsuleCommand } from './definitions'
+import { defineCapsuleCommand } from '../definitions'
 import type { input, output } from 'zod'
-import type { CapsuleCommandDefinition } from './definitions'
+import type { CapsuleCommandDefinition } from '../definitions'
 
 const CAPSULE_CREATE_ACCEPTANCE_TIMEOUT_MS = 15_000
 

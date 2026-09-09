@@ -11,8 +11,8 @@ import {
   SshPublicKeySummarySchema,
 } from '../../../../schemas/ssh'
 import { TargetOwnerSchema, TargetType } from '../../targets'
-import { defineCapsuleCommand } from '../definitions'
-import type { CapsuleCommandDefinition } from '../definitions'
+import { defineCapsuleCommand } from '../../definitions'
+import type { CapsuleCommandDefinition } from '../../definitions'
 
 const SSH_CONTROL_TIMEOUT_MS = 60_000
 
