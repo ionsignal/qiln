@@ -25,7 +25,7 @@ import {
   capsuleOperations,
   capsuleSnapshotCaptureOperations,
   capsuleSnapshots,
-} from '@server/db/schema'
+} from '@/db/capsule'
 import { resolveAgentAuthority } from '@server/agent/authority'
 import type { Database } from '@server/db'
 

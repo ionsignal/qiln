@@ -1,7 +1,7 @@
 import bcrypt from 'bcrypt'
 import { z } from 'zod'
 import { TRPCError } from '@trpc/server'
-import { users } from '@server/db/schema'
+import { users } from '@/db/users'
 import { publicProcedure, router } from '@server/trpc/procedures'
 
 export const authRouter = router({

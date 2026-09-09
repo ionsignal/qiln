@@ -27,7 +27,7 @@ import {
   capsuleSnapshotResourceProviderEnum,
   createCapsuleSchema,
 } from '@qiln/core/server'
-import { users } from './identity'
+import { users } from './users'
 
 /**
  * Shared capsule handles keep Web, SSH, and migration composition bound to the

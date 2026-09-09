@@ -1,6 +1,6 @@
 import postgres from 'postgres'
 import { drizzle } from 'drizzle-orm/postgres-js'
-import { users } from '../app/db/identity'
+import { users } from '../app/db/users'
 import { capsuleTables } from '../app/db/capsule'
 import { sshTables } from '../app/db/ssh'
 import type { SshPersistence } from '@qiln/ssh/server'

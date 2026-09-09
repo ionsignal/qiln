@@ -1,15 +1,15 @@
 import fp from 'fastify-plugin'
-import { createDataLayer } from '@server/db'
+import { createDatabase } from '@server/db'
 
 export default fp(
   async fastify => {
-    fastify.log.info('[Db] Initializing Data Layer (Postgres)...')
+    fastify.log.info('[Db] Initializing database (Postgres)...')
     const connectionString = fastify.config.database.url
-    const { db, persistence, close } = createDataLayer(connectionString)
+    const { db, persistence, close } = createDatabase(connectionString)
     fastify.decorate('db', db)
     fastify.decorate('persistence', persistence)
     fastify.addHook('onClose', async () => {
-      fastify.log.info('[Db] Shutting down Data Layer...')
+      fastify.log.info('[Db] Closing database connection...')
       await close()
     })
   },

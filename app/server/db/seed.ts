@@ -3,8 +3,9 @@ import { randomBytes } from 'node:crypto'
 import { eq } from 'drizzle-orm'
 import { createAgentKey } from '@server/agent/key'
 import { loadEnvironmentConfig } from '@server/env'
-import { createDataLayer } from '@server/db'
-import { agentCredentials, users } from '@server/db/schema'
+import { createDatabase } from '@server/db'
+import { agentCredentials } from '@/db/access'
+import { users } from '@/db/users'
 
 // Deterministic IDs for the default users
 const SYSTEM_USER_ID = '0193f123-4567-7000-ab12-34567890abcd'
@@ -33,9 +34,9 @@ async function seed() {
   if (!config.database?.url) {
     throw new Error('Database configuration missing. Check your .env file.')
   }
-  // Initialize Data Layer (DB + Broker)
+  // Initialize the Web database connection
   // We destructure 'close' to ensure we shut down the Postgres client properly
-  const { db, close } = createDataLayer(config.database.url)
+  const { db, close } = createDatabase(config.database.url)
   const isDev = process.env.NODE_ENV !== 'production'
   const credentialsLog: string[] = []
   const agentCredentialLog: string[] = []

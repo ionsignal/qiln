@@ -8,7 +8,7 @@ import {
   type AgentGetContextOutput,
   type CapsuleChannel,
 } from '@qiln/core/server'
-import { capsuleBranches } from '@server/db/schema'
+import { capsuleBranches } from '@/db/capsule'
 import { resolveAgentAuthority } from '@server/agent/authority'
 import type { Database } from '@server/db'
 

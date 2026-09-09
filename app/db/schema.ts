@@ -1,7 +1,9 @@
-import { users, sessions, agentCredentials, schema as webSchema } from '../server/db/schema'
+import { webSchema } from './web'
 import { sshSchema } from './ssh'
 
-export { users, sessions, agentCredentials }
+export { users } from './users'
+export { sessions, agentCredentials } from './access'
+
 export * from './capsule'
 export * from './ssh'
 

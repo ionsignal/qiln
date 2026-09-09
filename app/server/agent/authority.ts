@@ -5,7 +5,9 @@ import {
   CapsuleLifecycleStateSchema,
   type CapsuleLifecycleState,
 } from '@qiln/core/server'
-import { agentCredentials, capsules, users } from '@server/db/schema'
+import { agentCredentials } from '@/db/access'
+import { capsules } from '@/db/capsule'
+import { users } from '@/db/users'
 import { consumeUnknownAgentKeyVerification, parseAgentKey, verifyAgentKeyHash } from '@server/agent/key'
 import type { Database } from '@server/db'
 

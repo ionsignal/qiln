@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import { and, asc, desc, eq } from 'drizzle-orm'
 import { createAgentKey } from '@server/agent/key'
-import { agentCredentials, capsules } from '@server/db/schema'
+import { agentCredentials } from '@/db/access'
+import { capsules } from '@/db/capsule'
 import type { Database } from '@server/db'
 
 export class AgentCredentialNotFoundError extends Error {

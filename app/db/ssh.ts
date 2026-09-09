@@ -8,7 +8,7 @@ import {
   sshTicketStatusEnum,
   sshRelayStatusEnum,
 } from '@qiln/ssh/server'
-import { users } from './identity'
+import { users } from './users'
 import { capsuleTables } from './capsule'
 
 /**

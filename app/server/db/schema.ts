@@ -1,7 +1,7 @@
 import { defineRelations } from 'drizzle-orm'
 import { boolean, index, pgTable, text, timestamp, uuid } from 'drizzle-orm/pg-core'
 import { defineCapsuleRelations, mergeRelationFragments } from '@qiln/core/server'
-import { users } from '../../db/identity'
+import { users } from '../../db/users'
 import { capsuleSchema, capsuleTables } from '../../db/capsule'
 
 export { users }

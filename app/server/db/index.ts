@@ -1,5 +1,6 @@
 import postgres from 'postgres'
-import { capsuleTables, relations } from '@server/db/schema'
+import { capsuleTables } from '@/db/capsule'
+import { relations } from '@server/db/relations'
 import { drizzle } from 'drizzle-orm/postgres-js'
 import type { CapsulePersistence } from '@qiln/core/server'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
@@ -15,18 +16,18 @@ export type Database = PostgresJsDatabase<typeof relations>
 export type Persistence = CapsulePersistence<Database, typeof capsuleTables>
 
 /**
- * Factory function to create the Postgres Data Layer.
+ * Creates the Web database connection and package persistence dependency.
  */
-export function createDataLayer(connectionString: string) {
+export function createDatabase(connectionString: string) {
   if (!connectionString) {
     throw new Error('[Fatal] Database connection string is missing.')
   }
-  const queryClient = postgres(connectionString, {
+  const client = postgres(connectionString, {
     max: 20,
     transform: { undefined: null },
   })
   const db = drizzle({
-    client: queryClient,
+    client,
     relations,
     logger: process.env.NODE_ENV === 'development',
   })
@@ -35,7 +36,7 @@ export function createDataLayer(connectionString: string) {
     tables: capsuleTables,
   } satisfies Persistence
   const close = async () => {
-    await queryClient.end()
+    await client.end()
   }
   return {
     db,
