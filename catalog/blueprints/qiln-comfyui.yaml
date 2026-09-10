@@ -1,0 +1,129 @@
+schema_version: 1
+
+name: comfyui-capsule
+display_name: AI Workflow Capsule (ComfyUI)
+description: ComfyUI capsule blueprint with durable branch storage and read-only shared model mount.
+image_alias: qiln-noble-python-node
+
+provisioning:
+  volumes:
+    # The seed contains normal, commit-pinned ComfyUI Git repositories.
+    # Each branch receives its own writable ZFS clone rather than sharing source
+    # files through a bind mount.
+    - name: workspace
+      type: clone
+      pool: is-nvme-pool
+      source_volume: qiln-n8n-c9d4de11-comfyui-306af3a8-v1
+      mount_path: /workspace
+      shifted: true
+      readonly: false
+    - name: shared-models
+      type: bind
+      host_path: /srv/qiln/shared/models
+      mount_path: /workspace/models
+      shifted: true
+      readonly: true
+
+  files:
+    - path: /workspace/capsule
+      type: directory
+      uid: 1000
+      gid: 1000
+      mode: '0755'
+
+    - path: /workspace/models
+      type: directory
+      uid: 1000
+      gid: 1000
+      mode: '0755'
+
+    - path: /workspace/capsule/comfyui
+      type: directory
+      uid: 1000
+      gid: 1000
+      mode: '0755'
+
+    - path: /workspace/capsule/comfyui/graphs
+      type: directory
+      uid: 1000
+      gid: 1000
+      mode: '0755'
+
+    - path: /workspace/capsule/comfyui/config
+      type: directory
+      uid: 1000
+      gid: 1000
+      mode: '0755'
+
+    - path: /workspace/capsule/routes
+      type: directory
+      uid: 1000
+      gid: 1000
+      mode: '0755'
+
+    - path: /workspace/capsule/tests
+      type: directory
+      uid: 1000
+      gid: 1000
+      mode: '0755'
+
+    - path: /workspace/capsule/shared
+      type: directory
+      uid: 1000
+      gid: 1000
+      mode: '0755'
+
+    # The future ComfyUI launcher must pass this file explicitly through
+    # ComfyUI's extra-model-path configuration option.
+    - path: /workspace/capsule/comfyui/config/extra_model_paths.yaml
+      uid: 1000
+      gid: 1000
+      mode: '0644'
+      content: |
+        qiln_vault:
+          base_path: /workspace/models/comfyui
+          checkpoints: checkpoints/
+          loras: loras/
+          vae: vae/
+
+runtime:
+  config:
+    security.privileged: 'false'
+    security.nesting: 'false'
+    nvidia.runtime: 'true'
+    boot.autostart: 'false'
+    limits.kernel.memlock: unlimited
+
+  devices:
+    eth0:
+      type: nic
+      network: incusbr0
+      security.ipv4_filtering: 'true'
+      security.mac_filtering: 'true'
+    root:
+      type: disk
+      pool: is-nvme-pool
+      path: /
+
+snapshot:
+  policy_version: 1
+
+  # Mutable branch state must live in managed volumes. Fork reconstructs the
+  # rootfs from the exact image pin and historical Blueprint configuration.
+  # Bind mounts are reattached without preserving their contents or versions.
+  instance_rootfs:
+    mode: rebuildable
+
+applications:
+  - name: comfyui
+    port: 8188
+    protocol: http
+    entrypoint: /
+    exposure: internal
+    endpoint:
+      mode: passthrough
+    verification:
+      method: GET
+      path: /
+      expected_statuses:
+        - 200
