@@ -10,9 +10,10 @@ export type CreateTransaction<TDatabase extends PostgresJsDatabase> = Parameters
 /**
  * Create-owned locked queries participating in the caller's transaction.
  *
- * Existing-row transactions acquire operation, extension, capsule, branches,
- * and resources in that order. This is a create-local convention rather than a
- * claim about lock ordering in other Worker capabilities.
+ * Existing-row transactions discover the operation's parent without locking
+ * descendants, acquire the capsule lock, and revalidate the operation identity
+ * under its row lock before acquiring extension, branch, or resource locks.
+ * Reloading the already-locked capsule does not change this parent-first order.
  */
 export class CreateCapsuleLocks<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
@@ -32,13 +33,40 @@ export class CreateCapsuleLocks<
 
   public async optionalOperation(tx: CreateTransaction<TDatabase>, operationId: string) {
     const operations = this.persistence.tables.capsuleOperations
+    const [identity] = await tx
+      .select({
+        ownerId: operations.ownerId,
+        capsuleId: operations.capsuleId,
+        type: operations.type,
+      })
+      .from(operations)
+      .where(eq(operations.id, operationId))
+      .limit(1)
+    if (!identity || identity.type !== CapsuleOperationType.CREATE) {
+      return null
+    }
+    await this.capsule(tx, identity.ownerId, identity.capsuleId)
     const [operation] = await tx
       .select()
       .from(operations)
-      .where(and(eq(operations.id, operationId), eq(operations.type, CapsuleOperationType.CREATE)))
+      .where(
+        and(
+          eq(operations.id, operationId),
+          eq(operations.type, CapsuleOperationType.CREATE),
+          eq(operations.ownerId, identity.ownerId),
+          eq(operations.capsuleId, identity.capsuleId),
+        ),
+      )
       .for('update')
       .limit(1)
-    return operation ?? null
+    if (!operation) {
+      throw new IncusError('Capsule create identity changed while acquiring its parent locks.', 'CONFLICT', {
+        operationId,
+        ownerId: identity.ownerId,
+        capsuleId: identity.capsuleId,
+      })
+    }
+    return operation
   }
 
   public async extension(tx: CreateTransaction<TDatabase>, operationId: string) {
