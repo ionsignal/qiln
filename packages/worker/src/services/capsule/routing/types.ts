@@ -16,8 +16,6 @@ import type {
   CapsuleRouteRevisionStatus,
   CapsuleRouteTargetPin,
   CapsuleRouteVerificationEvidence,
-  CapsuleSnapshotLimitationValue,
-  CapsuleSnapshotModeValue,
 } from '@qiln/core/server'
 
 export interface RouteCapsuleRecord {
@@ -106,8 +104,6 @@ export interface RouteSnapshotRecord {
   blueprintName: string
   blueprintDigest: CapsuleBlueprintDigest
   blueprintPin: CapsuleBlueprintPin
-  mode: CapsuleSnapshotModeValue
-  limitations: CapsuleSnapshotLimitationValue[]
 }
 
 export interface RouteGraphRow {

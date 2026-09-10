@@ -1,7 +1,6 @@
 import { z } from 'zod'
 import { CapsuleBlueprintApplicationSchema } from '../../blueprint/application'
 import { CapsuleBlueprintReferenceSchema } from '../../blueprint/catalog'
-import { CapsuleSnapshotAssuranceSchema } from '../snapshot/mode'
 
 export const CAPSULE_ROUTE_APPLICATION_PIN_SCHEMA_VERSION = 1 as const
 export const CAPSULE_ROUTE_TARGET_PIN_SCHEMA_VERSION = 1 as const
@@ -35,12 +34,18 @@ export const CapsuleRouteApplicationPinSchema = CapsuleRouteApplicationPinBodySc
   digest: CapsuleRouteApplicationDigestSchema,
 }).strict()
 
+/**
+ * Immutable route target identity.
+ *
+ * A snapshot supplies restoration evidence only. Golden tests, diff review,
+ * application correctness, and promotion authorization remain independent
+ * route-policy requirements.
+ */
 export const CapsuleRouteTargetPinBodySchema = z
   .object({
     schemaVersion: z.literal(CAPSULE_ROUTE_TARGET_PIN_SCHEMA_VERSION),
     snapshotId: z.uuid(),
     application: CapsuleRouteApplicationPinSchema,
-    assurance: CapsuleSnapshotAssuranceSchema,
   })
   .strict()
 
@@ -52,7 +57,7 @@ export const CapsuleRouteTargetPinSchema = CapsuleRouteTargetPinBodySchema.exten
  * Client-safe immutable target reference.
  *
  * Full Blueprint application configuration remains server-side. Committed route
- * reads expose only the application identity, snapshot assurance, and verified
+ * reads expose only the application identity, snapshot identity, and verified
  * target digest.
  */
 export const CapsuleRouteTargetReferenceSchema = z
@@ -62,7 +67,6 @@ export const CapsuleRouteTargetReferenceSchema = z
     snapshotId: z.uuid(),
     blueprint: CapsuleBlueprintReferenceSchema,
     applicationName: z.string(),
-    assurance: CapsuleSnapshotAssuranceSchema,
   })
   .strict()
 

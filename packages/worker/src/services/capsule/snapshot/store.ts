@@ -1,21 +1,44 @@
-import { and, asc, desc, eq, isNotNull, isNull, ne, or } from 'drizzle-orm'
+import { and, asc, eq } from 'drizzle-orm'
 import {
   CapsuleOperationStatus,
   CapsuleOperationType,
-  CapsuleSnapshotMode,
+  CapsuleSnapshotResourceReferenceSchema,
+  verifyCapsuleBlueprintPin,
   type CapsulePersistence,
   type CapsuleTables,
 } from '@qiln/core/server'
 import { IncusError } from '../../../errors'
-import type { CapsuleSnapshotListOptions, CapsuleSnapshotRecord, CapsuleSnapshotSelectionCandidate } from './types'
+import { readRootfs, sameRootfs } from '../operations/shared/rootfs'
+import { volumeResourceKey } from '../resource/identity'
+import { parseVolumeResourceMetadata } from '../resource/metadata'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
+import type { CapsuleSnapshotRecord } from './types'
+
+export type SnapshotReadTransaction<TDatabase extends PostgresJsDatabase> = Parameters<
+  Parameters<TDatabase['transaction']>[0]
+>[0]
+
+interface SnapshotGraphRow {
+  snapshot: CapsuleTables['capsuleSnapshots']['$inferSelect']
+  branch: CapsuleTables['capsuleBranches']['$inferSelect'] | null
+  creation: CapsuleTables['capsuleSnapshotCreateOperations']['$inferSelect'] | null
+  operation: CapsuleTables['capsuleOperations']['$inferSelect'] | null
+  reference: CapsuleTables['capsuleSnapshotResourceReferences']['$inferSelect'] | null
+  resource: CapsuleTables['capsuleSnapshotCreateResources']['$inferSelect'] | null
+  source: CapsuleTables['capsuleBranchResources']['$inferSelect'] | null
+}
+
+function conflict(snapshotId: string, message: string): never {
+  throw new IncusError(message, 'CONFLICT', {
+    snapshotId,
+  })
+}
 
 /**
- * Persistence boundary for committed capsule snapshot history.
+ * Reads complete committed restoration graphs.
  *
- * Experimental visibility changes only which committed rows are returned. It
- * does not weaken ownership, operation completion, manifest linkage, immutable
- * Blueprint evidence, or immutable capture-policy checks.
+ * Left joins preserve incomplete references so contradictory history fails
+ * validation instead of disappearing from a successful read.
  */
 export class CapsuleSnapshotStore<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
@@ -23,20 +46,63 @@ export class CapsuleSnapshotStore<
 > {
   constructor(private readonly persistence: CapsulePersistence<TDatabase, TTables>) {}
 
-  public async list(
+  public async list(ownerId: string, capsuleId: string): Promise<CapsuleSnapshotRecord[]> {
+    return await this.persistence.db.transaction(
+      async tx => {
+        await this.assertOwner(tx, ownerId, capsuleId)
+        const rows = await this.rows(tx, ownerId, capsuleId)
+        const grouped = new Map<string, SnapshotGraphRow[]>()
+        for (const row of rows) {
+          const records = grouped.get(row.snapshot.id) ?? []
+          records.push(row)
+          grouped.set(row.snapshot.id, records)
+        }
+        return [...grouped.values()].map(records => this.validate(ownerId, records))
+      },
+      {
+        isolationLevel: 'repeatable read',
+        accessMode: 'read only',
+      },
+    )
+  }
+
+  public async get(ownerId: string, capsuleId: string, snapshotId: string): Promise<CapsuleSnapshotRecord> {
+    return await this.persistence.db.transaction(
+      async tx => {
+        return await this.read(tx, ownerId, capsuleId, snapshotId)
+      },
+      {
+        isolationLevel: 'repeatable read',
+        accessMode: 'read only',
+      },
+    )
+  }
+
+  /**
+   * Reads immutable restoration evidence inside an existing transaction.
+   *
+   * Mutation callers retain responsibility for their capsule and branch locks.
+   * This method neither locks mutable runtime state nor authorizes mutation.
+   */
+  public async read(
+    tx: SnapshotReadTransaction<TDatabase>,
     ownerId: string,
     capsuleId: string,
-    options: CapsuleSnapshotListOptions = {},
-  ): Promise<CapsuleSnapshotRecord[]> {
-    const db = this.persistence.db
-    const {
-      capsules,
-      capsuleOperations,
-      capsuleSnapshots,
-      capsuleArtifactManifests,
-      capsuleSnapshotCaptureOperations,
-    } = this.persistence.tables
-    const [capsule] = await db
+    snapshotId: string,
+  ): Promise<CapsuleSnapshotRecord> {
+    const rows = await this.rows(tx, ownerId, capsuleId, snapshotId)
+    if (rows.length === 0) {
+      throw new IncusError('Committed snapshot not found or access denied.', 'NOT_FOUND', {
+        capsuleId,
+        snapshotId,
+      })
+    }
+    return this.validate(ownerId, rows)
+  }
+
+  private async assertOwner(tx: SnapshotReadTransaction<TDatabase>, ownerId: string, capsuleId: string): Promise<void> {
+    const capsules = this.persistence.tables.capsules
+    const [capsule] = await tx
       .select({
         id: capsules.id,
       })
@@ -44,183 +110,204 @@ export class CapsuleSnapshotStore<
       .where(and(eq(capsules.id, capsuleId), eq(capsules.ownerId, ownerId)))
       .limit(1)
     if (!capsule) {
-      throw new IncusError('Capsule not found.', 'NOT_FOUND', {
+      throw new IncusError('Capsule not found or access denied.', 'NOT_FOUND', {
         capsuleId,
       })
     }
-    const visibility = options.includeExperimental ? undefined : eq(capsuleSnapshots.mode, CapsuleSnapshotMode.HARDENED)
-    return await db
+  }
+
+  private async rows(
+    tx: SnapshotReadTransaction<TDatabase>,
+    ownerId: string,
+    capsuleId: string,
+    snapshotId?: string,
+  ): Promise<SnapshotGraphRow[]> {
+    const tables = this.persistence.tables
+    return await tx
       .select({
-        id: capsuleSnapshots.id,
-        capsuleId: capsuleSnapshots.capsuleId,
-        sourceBranchId: capsuleSnapshots.sourceBranchId,
-        sourceBranchName: capsuleSnapshots.sourceBranchName,
-        sourceBranchResourceInventoryDigest: capsuleSnapshots.sourceBranchResourceInventoryDigest,
-        blueprintSchemaVersion: capsuleSnapshots.blueprintSchemaVersion,
-        blueprintName: capsuleSnapshots.blueprintName,
-        blueprintDigest: capsuleSnapshots.blueprintDigest,
-        blueprintPin: capsuleSnapshots.blueprintPin,
-        capturePolicySchemaVersion: capsuleSnapshots.capturePolicySchemaVersion,
-        capturePolicyDigest: capsuleSnapshots.capturePolicyDigest,
-        capturePolicyPin: capsuleSnapshots.capturePolicyPin,
-        artifactManifestSchemaVersion: capsuleArtifactManifests.schemaVersion,
-        artifactManifestDigest: capsuleArtifactManifests.digest,
-        agentArtifactContentPolicy: capsuleSnapshots.agentArtifactContentPolicy,
-        mode: capsuleSnapshots.mode,
-        limitations: capsuleSnapshots.limitations,
-        createdAt: capsuleSnapshots.createdAt,
-        archivedAt: capsuleSnapshots.archivedAt,
+        snapshot: tables.capsuleSnapshots,
+        branch: tables.capsuleBranches,
+        creation: tables.capsuleSnapshotCreateOperations,
+        operation: tables.capsuleOperations,
+        reference: tables.capsuleSnapshotResourceReferences,
+        resource: tables.capsuleSnapshotCreateResources,
+        source: tables.capsuleBranchResources,
       })
-      .from(capsuleSnapshots)
-      .innerJoin(capsuleArtifactManifests, eq(capsuleArtifactManifests.snapshotId, capsuleSnapshots.id))
-      .innerJoin(
-        capsuleSnapshotCaptureOperations,
-        and(
-          eq(capsuleSnapshotCaptureOperations.snapshotId, capsuleSnapshots.id),
-          eq(capsuleSnapshotCaptureOperations.sourceBranchId, capsuleSnapshots.sourceBranchId),
-          eq(capsuleSnapshotCaptureOperations.sourceBranchName, capsuleSnapshots.sourceBranchName),
-          eq(
-            capsuleSnapshotCaptureOperations.sourceBranchResourceInventoryDigest,
-            capsuleSnapshots.sourceBranchResourceInventoryDigest,
-          ),
-          eq(capsuleSnapshotCaptureOperations.blueprintSchemaVersion, capsuleSnapshots.blueprintSchemaVersion),
-          eq(capsuleSnapshotCaptureOperations.blueprintName, capsuleSnapshots.blueprintName),
-          eq(capsuleSnapshotCaptureOperations.blueprintDigest, capsuleSnapshots.blueprintDigest),
-          eq(capsuleSnapshotCaptureOperations.blueprintPin, capsuleSnapshots.blueprintPin),
-          eq(capsuleSnapshotCaptureOperations.capturePolicySchemaVersion, capsuleSnapshots.capturePolicySchemaVersion),
-          eq(capsuleSnapshotCaptureOperations.capturePolicyDigest, capsuleSnapshots.capturePolicyDigest),
-          eq(capsuleSnapshotCaptureOperations.capturePolicyPin, capsuleSnapshots.capturePolicyPin),
-          eq(capsuleSnapshotCaptureOperations.requestedMode, capsuleSnapshots.mode),
-          eq(capsuleSnapshotCaptureOperations.agentArtifactContentPolicy, capsuleSnapshots.agentArtifactContentPolicy),
-        ),
+      .from(tables.capsuleSnapshots)
+      .innerJoin(tables.capsules, eq(tables.capsules.id, tables.capsuleSnapshots.capsuleId))
+      .leftJoin(tables.capsuleBranches, eq(tables.capsuleBranches.id, tables.capsuleSnapshots.sourceBranchId))
+      .leftJoin(
+        tables.capsuleSnapshotCreateOperations,
+        eq(tables.capsuleSnapshotCreateOperations.snapshotId, tables.capsuleSnapshots.id),
       )
-      .innerJoin(
-        capsuleOperations,
-        and(
-          eq(capsuleOperations.id, capsuleSnapshotCaptureOperations.operationId),
-          eq(capsuleOperations.ownerId, ownerId),
-          eq(capsuleOperations.capsuleId, capsuleSnapshots.capsuleId),
-          eq(capsuleOperations.type, CapsuleOperationType.SNAPSHOT_CAPTURE),
-          eq(capsuleOperations.status, 'completed'),
-          isNotNull(capsuleOperations.completedAt),
-        ),
+      .leftJoin(
+        tables.capsuleOperations,
+        eq(tables.capsuleOperations.id, tables.capsuleSnapshotCreateOperations.operationId),
+      )
+      .leftJoin(
+        tables.capsuleSnapshotResourceReferences,
+        eq(tables.capsuleSnapshotResourceReferences.snapshotId, tables.capsuleSnapshots.id),
+      )
+      .leftJoin(
+        tables.capsuleSnapshotCreateResources,
+        eq(tables.capsuleSnapshotCreateResources.id, tables.capsuleSnapshotResourceReferences.createResourceId),
+      )
+      .leftJoin(
+        tables.capsuleBranchResources,
+        eq(tables.capsuleBranchResources.id, tables.capsuleSnapshotResourceReferences.sourceBranchResourceId),
       )
       .where(
         and(
-          eq(capsuleSnapshots.capsuleId, capsule.id),
-          visibility ??
-            or(
-              eq(capsuleSnapshots.mode, CapsuleSnapshotMode.EXPERIMENTAL),
-              eq(capsuleSnapshots.mode, CapsuleSnapshotMode.HARDENED),
-            ),
+          eq(tables.capsules.ownerId, ownerId),
+          eq(tables.capsuleSnapshots.capsuleId, capsuleId),
+          snapshotId === undefined ? undefined : eq(tables.capsuleSnapshots.id, snapshotId),
         ),
       )
-      .orderBy(asc(capsuleSnapshots.createdAt), asc(capsuleSnapshots.id))
+      .orderBy(
+        asc(tables.capsuleSnapshots.createdAt),
+        asc(tables.capsuleSnapshots.id),
+        asc(tables.capsuleSnapshotResourceReferences.blueprintVolumeName),
+      )
   }
 
-  /**
-   * Returns newest-first non-archived candidates backed by completed capture
-   * operations. Passing a branch ID limits results to exact captures from that
-   * branch; the selector independently verifies each candidate's immutable
-   * manifest evidence before returning it to an agent.
-   */
-  public async candidates(
-    ownerId: string,
-    capsuleId: string,
-    branchId?: string,
-  ): Promise<CapsuleSnapshotSelectionCandidate[]> {
-    const { capsules, capsuleOperations, capsuleSnapshots, capsuleSnapshotCaptureOperations } = this.persistence.tables
-    const branchCondition = branchId === undefined ? undefined : eq(capsuleSnapshots.sourceBranchId, branchId)
-    return await this.persistence.db
-      .select({
-        id: capsuleSnapshots.id,
-        sourceBranchId: capsuleSnapshots.sourceBranchId,
-        sourceBranchName: capsuleSnapshots.sourceBranchName,
-        createdAt: capsuleSnapshots.createdAt,
-        agentArtifactContentPolicy: capsuleSnapshots.agentArtifactContentPolicy,
-      })
-      .from(capsuleSnapshots)
-      .innerJoin(capsules, and(eq(capsules.id, capsuleSnapshots.capsuleId), eq(capsules.ownerId, ownerId)))
-      .innerJoin(
-        capsuleSnapshotCaptureOperations,
-        and(
-          eq(capsuleSnapshotCaptureOperations.snapshotId, capsuleSnapshots.id),
-          eq(capsuleSnapshotCaptureOperations.sourceBranchId, capsuleSnapshots.sourceBranchId),
-          eq(capsuleSnapshotCaptureOperations.sourceBranchName, capsuleSnapshots.sourceBranchName),
-        ),
-      )
-      .innerJoin(
-        capsuleOperations,
-        and(
-          eq(capsuleOperations.id, capsuleSnapshotCaptureOperations.operationId),
-          eq(capsuleOperations.ownerId, ownerId),
-          eq(capsuleOperations.capsuleId, capsuleSnapshots.capsuleId),
-          eq(capsuleOperations.type, CapsuleOperationType.SNAPSHOT_CAPTURE),
-          eq(capsuleOperations.status, CapsuleOperationStatus.COMPLETED),
-          isNotNull(capsuleOperations.completedAt),
-        ),
-      )
-      .where(and(eq(capsuleSnapshots.capsuleId, capsuleId), branchCondition, isNull(capsuleSnapshots.archivedAt)))
-      .orderBy(desc(capsuleSnapshots.createdAt), desc(capsuleSnapshots.id))
-  }
-
-  /**
-   * Resolves the source snapshot of one completed fork only when its target
-   * branch remains owned by the scoped capsule and is not destroyed.
-   */
-  public async forkBase(
-    ownerId: string,
-    capsuleId: string,
-    branchId: string,
-  ): Promise<CapsuleSnapshotSelectionCandidate | null> {
-    const { capsuleBranches, capsuleForkOperations, capsuleOperations, capsuleSnapshots } = this.persistence.tables
-    const candidates = await this.persistence.db
-      .select({
-        id: capsuleSnapshots.id,
-        sourceBranchId: capsuleSnapshots.sourceBranchId,
-        sourceBranchName: capsuleSnapshots.sourceBranchName,
-        createdAt: capsuleSnapshots.createdAt,
-        agentArtifactContentPolicy: capsuleSnapshots.agentArtifactContentPolicy,
-      })
-      .from(capsuleBranches)
-      .innerJoin(capsuleForkOperations, eq(capsuleForkOperations.targetBranchId, capsuleBranches.id))
-      .innerJoin(
-        capsuleOperations,
-        and(
-          eq(capsuleOperations.id, capsuleForkOperations.operationId),
-          eq(capsuleOperations.ownerId, ownerId),
-          eq(capsuleOperations.capsuleId, capsuleId),
-          eq(capsuleOperations.type, CapsuleOperationType.FORK),
-          eq(capsuleOperations.status, CapsuleOperationStatus.COMPLETED),
-          isNotNull(capsuleOperations.completedAt),
-        ),
-      )
-      .innerJoin(
-        capsuleSnapshots,
-        and(
-          eq(capsuleSnapshots.id, capsuleForkOperations.sourceSnapshotId),
-          eq(capsuleSnapshots.capsuleId, capsuleId),
-          isNull(capsuleSnapshots.archivedAt),
-        ),
-      )
-      .where(
-        and(
-          eq(capsuleBranches.id, branchId),
-          eq(capsuleBranches.ownerId, ownerId),
-          eq(capsuleBranches.capsuleId, capsuleId),
-          ne(capsuleBranches.status, 'destroyed'),
-        ),
-      )
-      .orderBy(desc(capsuleSnapshots.createdAt), desc(capsuleSnapshots.id))
-      .limit(2)
-    if (candidates.length > 1) {
-      throw new IncusError('Selected capsule branch has contradictory completed fork provenance.', 'CONFLICT', {
-        ownerId,
-        capsuleId,
-        branchId,
-        candidateSnapshotIds: candidates.map(candidate => candidate.id),
-      })
+  private validate(ownerId: string, rows: readonly SnapshotGraphRow[]): CapsuleSnapshotRecord {
+    const first = rows[0]
+    if (!first) {
+      throw new IncusError('Committed snapshot graph is empty.', 'CONFLICT')
     }
-    return candidates[0] ?? null
+    const { snapshot, branch, creation, operation } = first
+    if (
+      !branch ||
+      !creation ||
+      !operation ||
+      branch.ownerId !== ownerId ||
+      branch.capsuleId !== snapshot.capsuleId ||
+      branch.id !== snapshot.sourceBranchId ||
+      creation.snapshotId !== snapshot.id ||
+      creation.sourceBranchId !== snapshot.sourceBranchId ||
+      creation.sourceBranchName !== snapshot.sourceBranchName ||
+      creation.sourceBranchResourceInventoryDigest !== snapshot.sourceBranchResourceInventoryDigest ||
+      operation.id !== creation.operationId ||
+      operation.ownerId !== ownerId ||
+      operation.capsuleId !== snapshot.capsuleId ||
+      operation.type !== CapsuleOperationType.SNAPSHOT_CREATE ||
+      operation.status !== CapsuleOperationStatus.COMPLETED ||
+      operation.executionStartedAt === null ||
+      operation.completedAt === null ||
+      operation.failedAt !== null ||
+      operation.failureCode !== null ||
+      operation.failureMessage !== null ||
+      operation.failureDetails !== null
+    ) {
+      conflict(snapshot.id, 'Snapshot does not resolve a completed, owned Create Snapshot operation.')
+    }
+    const blueprint = verifyCapsuleBlueprintPin(snapshot.blueprintPin)
+    const acceptedBlueprint = verifyCapsuleBlueprintPin(creation.blueprintPin)
+    const rootfs = readRootfs(snapshot.rootfsImagePin, blueprint.blueprint.image_alias, {
+      snapshotId: snapshot.id,
+    })
+    const acceptedRootfs = readRootfs(creation.rootfsImagePin, acceptedBlueprint.blueprint.image_alias, {
+      snapshotId: snapshot.id,
+      operationId: operation.id,
+    })
+    if (
+      blueprint.blueprint.schema_version !== snapshot.blueprintSchemaVersion ||
+      blueprint.name !== snapshot.blueprintName ||
+      blueprint.digest !== snapshot.blueprintDigest ||
+      acceptedBlueprint.blueprint.schema_version !== creation.blueprintSchemaVersion ||
+      acceptedBlueprint.name !== creation.blueprintName ||
+      acceptedBlueprint.digest !== creation.blueprintDigest ||
+      acceptedBlueprint.name !== blueprint.name ||
+      acceptedBlueprint.digest !== blueprint.digest ||
+      !sameRootfs(rootfs, acceptedRootfs)
+    ) {
+      conflict(snapshot.id, 'Snapshot restoration pins disagree with their accepted operation input.')
+    }
+    const managed = blueprint.blueprint.provisioning.volumes.filter(volume => volume.type !== 'bind')
+    if (
+      (managed.length > 0 && operation.providerMutationStartedAt === null) ||
+      (managed.length === 0 && operation.providerMutationStartedAt !== null)
+    ) {
+      conflict(snapshot.id, 'Snapshot provider intent does not agree with its managed-volume coverage.')
+    }
+    const references = rows.flatMap(row => (row.reference === null ? [] : [row]))
+    if (references.length !== managed.length) {
+      conflict(snapshot.id, 'Snapshot does not retain exactly one reference for every managed volume.')
+    }
+    const seen = new Set<string>()
+    const resources = references.map(row => {
+      const { reference, resource, source } = row
+      if (
+        row.snapshot.id !== snapshot.id ||
+        row.creation?.operationId !== creation.operationId ||
+        row.operation?.id !== operation.id ||
+        !reference ||
+        !resource ||
+        !source
+      ) {
+        conflict(snapshot.id, 'Snapshot contains incomplete or contradictory provider-reference provenance.')
+      }
+      const volume = managed.find(candidate => candidate.name === reference.blueprintVolumeName)
+      if (!volume || seen.has(volume.name)) {
+        conflict(snapshot.id, 'Snapshot contains an unknown or duplicate managed-volume reference.')
+      }
+      seen.add(volume.name)
+      if (
+        reference.snapshotId !== snapshot.id ||
+        reference.createResourceId !== resource.id ||
+        reference.sourceBranchResourceId !== source.id ||
+        resource.operationId !== operation.id ||
+        resource.sourceBranchResourceId !== source.id ||
+        resource.blueprintVolumeName !== reference.blueprintVolumeName ||
+        resource.provider !== reference.provider ||
+        resource.kind !== reference.kind ||
+        resource.project !== reference.project ||
+        resource.pool !== reference.pool ||
+        resource.sourceVolume !== reference.sourceVolume ||
+        resource.snapshotName !== reference.snapshotName ||
+        resource.status !== 'created' ||
+        resource.failureCode !== null ||
+        resource.failureMessage !== null ||
+        resource.failureDetails !== null ||
+        source.ownerId !== ownerId ||
+        source.branchId !== snapshot.sourceBranchId ||
+        source.provider !== 'incus' ||
+        source.resourceType !== 'zfs_volume' ||
+        source.cleanupPolicy !== 'delete_with_branch' ||
+        source.blueprintVolumeName !== volume.name ||
+        source.createdByOperationId === null
+      ) {
+        conflict(snapshot.id, 'Snapshot provider reference does not match its successful creation evidence.')
+      }
+      const metadata = parseVolumeResourceMetadata(source.metadata)
+      if (
+        metadata.namespace !== `user-${ownerId}` ||
+        metadata.namespace !== reference.project ||
+        metadata.pool !== volume.pool ||
+        metadata.pool !== reference.pool ||
+        metadata.volumeName !== reference.sourceVolume ||
+        metadata.mountPath !== volume.mount_path ||
+        source.resourceKey !== volumeResourceKey(metadata.namespace, metadata.pool, metadata.volumeName)
+      ) {
+        conflict(snapshot.id, 'Snapshot provider reference does not match its managed-volume boundary.')
+      }
+      return CapsuleSnapshotResourceReferenceSchema.parse({
+        provider: reference.provider,
+        kind: reference.kind,
+        blueprintVolumeName: reference.blueprintVolumeName,
+        sourceBranchResourceId: reference.sourceBranchResourceId,
+        createResourceId: reference.createResourceId,
+        project: reference.project,
+        pool: reference.pool,
+        sourceVolume: reference.sourceVolume,
+        snapshotName: reference.snapshotName,
+      })
+    })
+    return {
+      ...snapshot,
+      blueprintPin: blueprint,
+      rootfsImagePin: rootfs,
+      resources,
+    }
   }
 }

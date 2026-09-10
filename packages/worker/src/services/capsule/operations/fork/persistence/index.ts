@@ -1,4 +1,5 @@
 export * from './source'
+export * from './locks'
 export * from './accept'
 export * from './input'
 export * from './execution'

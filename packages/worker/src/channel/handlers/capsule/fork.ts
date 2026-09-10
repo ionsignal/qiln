@@ -3,7 +3,7 @@ import { mapWorkerCapsuleCommandError } from '../../errors'
 import type { QilnWorkerRuntime } from '../../../runtime'
 
 /**
- * Registers durable experimental snapshot-fork submission.
+ * Registers durable snapshot-fork submission.
  *
  * The handler returns after acceptance or replay. Provider materialization
  * continues under the Worker operation supervisor.

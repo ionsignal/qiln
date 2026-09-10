@@ -62,9 +62,9 @@ function createNullableOperationIdColumn(columnName: string, operationIdColumn?:
  * policy, and provider state satisfy fail-closed ownership checks.
  *
  * Managed volumes and bind mounts retain their originating blueprint volume
- * identity. Snapshot Capture must resolve capture-policy roots and external
- * boundaries through this explicit identity rather than provider names, mount
- * paths, or live provider discovery.
+ * identity. Create Snapshot must resolve every managed Blueprint volume through
+ * this explicit identity rather than provider names, mount paths, or live
+ * provider discovery. Bind mounts remain unversioned external configuration.
  */
 export function createCapsuleBranchResourcesTable(
   ownerIdColumn?: PgColumn,

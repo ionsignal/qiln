@@ -1,4 +1,11 @@
-import { CapsuleOperationType } from '@qiln/core/server'
+import {
+  CapsuleOperationType,
+  CapsuleSshAccessCommandName,
+  SshBranchAccessBlockReason,
+  TargetType,
+  type CapsuleChannel,
+} from '@qiln/core/server'
+import { IncusError } from '../../../../errors'
 import { CapsuleOperationStepRunner } from '../shared'
 import { ForkExecutionState } from './state'
 import { ForkStep } from './steps'
@@ -8,7 +15,6 @@ import type {
   CapsuleLifecycleEventPublisher,
   CapsuleOperationEventPublisher,
 } from '../../events'
-import type { CapsuleBranchResourceStore } from '../../resource'
 import type { ForkCompensation } from './compensation'
 import type { ForkProvider } from './provider'
 import type { ForkRepository } from './persistence'
@@ -17,9 +23,9 @@ import type { ForkExecution, ForkTerminal } from './types'
 export interface ForkExecutorDependencies {
   repository: ForkRepository
   steps: CapsuleOperationStepStore
-  resources: CapsuleBranchResourceStore
   provider: ForkProvider
   compensation: ForkCompensation
+  channel: CapsuleChannel
   operationEvents: CapsuleOperationEventPublisher
   lifecycleEvents: CapsuleLifecycleEventPublisher
   branchEvents: CapsuleBranchEventPublisher
@@ -29,7 +35,8 @@ export interface ForkExecutorDependencies {
  * Executes one accepted fork from immutable PostgreSQL input.
  *
  * The executor receives only an operation ID and never resumes provider work
- * after process loss.
+ * after process loss. Host SSH access is initialized as blocked before provider
+ * materialization; enablement remains owned by branch start.
  */
 export class ForkExecutor {
   private readonly runner: CapsuleOperationStepRunner
@@ -41,12 +48,13 @@ export class ForkExecutor {
   public async execute(operationId: string): Promise<void> {
     const state = new ForkExecutionState()
     let execution: ForkExecution | null = null
+    let claimed = false
     try {
-      state.phase('load')
-      const fork = await this.dependencies.repository.load(operationId)
-      execution = fork
       state.phase('claim')
       const running = await this.dependencies.repository.claim(operationId)
+      claimed = true
+      const fork = running.execution
+      execution = fork
       this.dependencies.operationEvents.publishChanged(running.operation)
       await this.step(fork, state, ForkStep.PLAN, {
         sourceSnapshotId: fork.sourceSnapshotId,
@@ -54,6 +62,35 @@ export class ForkExecutor {
         volumeCount: fork.plan.volumes.length,
         fileCount: fork.plan.files.length,
       })
+      await this.step(
+        fork,
+        state,
+        ForkStep.INITIALIZE_SSH,
+        {
+          reason: SshBranchAccessBlockReason.BRANCH_FORKED,
+        },
+        async () => {
+          const result = await this.dependencies.channel.command(CapsuleSshAccessCommandName.BRANCH_ACCESS_INITIALIZE, {
+            target: {
+              type: TargetType.OWNER,
+              id: fork.ownerId,
+            },
+            capsuleId: fork.capsuleId,
+            branchId: fork.branchId,
+            reason: SshBranchAccessBlockReason.BRANCH_FORKED,
+          })
+          if (
+            result.access.capsuleId !== fork.capsuleId ||
+            result.access.branchId !== fork.branchId ||
+            result.access.state !== 'blocked'
+          ) {
+            throw new IncusError('Host SSH policy did not confirm blocked access for the fork branch.', 'CONFLICT', {
+              operationId,
+              branchId: fork.branchId,
+            })
+          }
+        },
+      )
       await this.step(
         fork,
         state,
@@ -110,7 +147,6 @@ export class ForkExecutor {
         ForkStep.FILES,
         {
           count: fork.plan.files.length,
-          snapshotRestoredCount: fork.plan.files.filter(file => file.restoredByClone).length,
         },
         () => this.dependencies.provider.files(fork),
       )
@@ -123,6 +159,9 @@ export class ForkExecutor {
         },
         () => this.dependencies.provider.verify(fork),
       )
+      // Entering finalization disables destructive compensation even if
+      // completion-step accounting fails before the commit action runs.
+      state.beginFinalization()
       await this.step(
         fork,
         state,
@@ -132,7 +171,6 @@ export class ForkExecutor {
         },
         async () => {
           state.phase('complete')
-          state.beginFinalization()
           const committed = await this.dependencies.repository.commit(operationId)
           state.completed()
           this.publish(committed)
@@ -142,6 +180,11 @@ export class ForkExecutor {
       if (state.hasCompleted) {
         console.error(`[ForkExecutor] Fork '${operationId}' committed, but post-commit accounting failed.`, error)
         return
+      }
+      if (!claimed) {
+        // A failed or ambiguously acknowledged claim cannot prove this
+        // invocation owns execution. Startup abandonment handles work left over.
+        throw error
       }
       await this.fail(operationId, execution, state, error)
       throw error
@@ -166,6 +209,7 @@ export class ForkExecutor {
       failedPhase,
       failedStep,
       providerIntentObserved: state.hasProviderIntent,
+      providerOwnershipUncertain: failedStep === ForkStep.PROJECT,
       finalizationAttempted: finalizationStarted,
     }
     state.phase('classify')
@@ -176,39 +220,36 @@ export class ForkExecutor {
       }
       return
     }
-    const compensation = await this.dependencies.compensation.run(execution)
-    if (compensation.complete) {
-      try {
-        const terminal = await this.dependencies.repository.compensated(operationId, error, {
-          ...context,
-          compensationAttempted: true,
-          compensationComplete: true,
-        })
+    try {
+      const compensation = await this.dependencies.compensation.run(operationId)
+      context.compensationAttempted = true
+      context.compensationComplete = compensation.complete
+      if (compensation.complete && context.providerOwnershipUncertain !== true) {
+        const terminal = await this.dependencies.repository.compensated(operationId, error, context)
         this.publish(terminal)
         return
-      } catch (terminalizationError: unknown) {
-        console.error(`[ForkExecutor] Fork '${operationId}' was compensated, but ordinary terminalization failed.`, {
-          forkError: error,
-          terminalizationError,
-        })
-        const terminal = await this.dependencies.repository.classify(operationId, terminalizationError, {
-          ...context,
-          compensationAttempted: true,
-          compensationComplete: true,
-          compensatedTerminalizationFailed: true,
-        })
-        if (terminal) {
-          this.publish(terminal)
-        }
-        return
       }
+      context.compensationFailures = compensation.failures
+    } catch (compensationError: unknown) {
+      console.error(`[ForkExecutor] Fork '${operationId}' compensation or terminalization could not be proven.`, {
+        forkError: error,
+        compensationError,
+      })
+      context.compensationAttempted = true
+      context.compensationUncertain = true
+      context.compensationError =
+        compensationError instanceof Error
+          ? {
+              name: compensationError.name,
+              message: compensationError.message,
+            }
+          : {
+              value: compensationError,
+            }
     }
-    const terminal = await this.dependencies.repository.classify(operationId, error, {
-      ...context,
-      compensationAttempted: true,
-      compensationComplete: false,
-      compensationFailures: compensation.failures,
-    })
+    // Fresh classification preserves a terminal result if its transaction
+    // committed despite a lost acknowledgement. It never retries compensation.
+    const terminal = await this.dependencies.repository.classify(operationId, error, context)
     if (terminal) {
       this.publish(terminal)
     }
@@ -243,11 +284,13 @@ export class ForkExecutor {
   private publish(result: ForkTerminal): void {
     this.dependencies.operationEvents.publishChanged(result.operation)
     this.dependencies.lifecycleEvents.publishChanged(result.operation.ownerId, result.capsule)
-    this.dependencies.branchEvents.publishStateChanged(
-      result.operation.ownerId,
-      result.branch.capsuleId,
-      result.branch.name,
-      result.branch.status,
-    )
+    if (result.branch) {
+      this.dependencies.branchEvents.publishStateChanged(
+        result.operation.ownerId,
+        result.branch.capsuleId,
+        result.branch.name,
+        result.branch.status,
+      )
+    }
   }
 }

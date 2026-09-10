@@ -3,13 +3,11 @@ import { mapWorkerCapsuleCommandError } from '../../errors'
 import type { QilnWorkerRuntime } from '../../../runtime'
 
 /**
- * Registers committed snapshot history reads and experimental Snapshot Capture
+ * Registers committed snapshot history reads and durable Create Snapshot
  * submission.
  *
- * Capture execution remains disabled by default through Worker configuration.
- * The command may be registered while disabled because the Worker-owned
- * submission boundary rejects acceptance before any operation, branch fence,
- * provider intent, or provider mutation is created.
+ * Mutation receipts prove acceptance or replay. Provider execution continues
+ * under the Worker operation supervisor.
  */
 export function registerCapsuleSnapshotHandlers(worker: QilnWorkerRuntime): void {
   const handlerOptions: CapsuleCommandHandlerOptions = {
@@ -18,22 +16,19 @@ export function registerCapsuleSnapshotHandlers(worker: QilnWorkerRuntime): void
   worker.channel.handle(
     CapsuleSnapshotCommandName.SNAPSHOTS_LIST,
     async input => {
-      return await worker.capsule.snapshot.list(input.target.id, input.capsuleId, {
-        includeExperimental: input.includeExperimental,
-      })
+      return await worker.capsule.snapshot.list(input.target.id, input.capsuleId)
     },
     handlerOptions,
   )
   worker.channel.handle(
-    CapsuleSnapshotCommandName.SNAPSHOT_CAPTURE,
+    CapsuleSnapshotCommandName.SNAPSHOT_CREATE,
     async input => {
-      return await worker.capsule.capture.submit({
+      return await worker.capsule.createSnapshot.submit({
         ownerId: input.target.id,
         actor: input.actor,
         capsuleId: input.capsuleId,
         sourceBranchId: input.sourceBranchId,
         idempotencyKey: input.idempotencyKey,
-        agentArtifactContentPolicy: input.agentArtifactContentPolicy,
       })
     },
     handlerOptions,

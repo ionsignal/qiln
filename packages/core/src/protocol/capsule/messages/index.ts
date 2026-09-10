@@ -1,10 +1,5 @@
 import { z } from 'zod'
 import {
-  CapsuleAgentReadCommandDefinitions,
-  CapsuleAgentReadCommandName,
-  CapsuleAgentReadCommandNameValues,
-} from './agent'
-import {
   CapsuleBlueprintCommandDefinitions,
   CapsuleBlueprintCommandName,
   CapsuleBlueprintCommandNameValues,
@@ -57,10 +52,6 @@ import {
   CapsuleSnapshotCommandDefinitions,
   CapsuleSnapshotCommandName,
   CapsuleSnapshotCommandNameValues,
-  CapsuleSnapshotEventDefinitions,
-  CapsuleSnapshotEventName,
-  CapsuleSnapshotEventNameValues,
-  CapsuleSnapshotEventSchemas,
 } from './snapshot'
 import {
   CapsuleSshAccessCommandDefinitions,
@@ -73,7 +64,6 @@ import {
 import type { CapsuleCommandDefinition, CapsuleEventDefinition } from '../definitions'
 
 export * from '../definitions'
-export * from './agent'
 export * from './blueprint'
 export * from './branch'
 export * from './create'
@@ -86,7 +76,6 @@ export * from './snapshot'
 export * from './ssh/index'
 
 export const CapsuleCommandName = {
-  ...CapsuleAgentReadCommandName,
   ...CapsuleCreateCommandName,
   ...CapsuleForkCommandName,
   ...CapsuleBranchCommandName,
@@ -102,7 +91,6 @@ export const CapsuleCommandName = {
 export type CapsuleCommandName = (typeof CapsuleCommandName)[keyof typeof CapsuleCommandName]
 
 export const CapsuleCommandNameValues = [
-  ...CapsuleAgentReadCommandNameValues,
   ...CapsuleCreateCommandNameValues,
   ...CapsuleForkCommandNameValues,
   ...CapsuleBranchCommandNameValues,
@@ -123,7 +111,6 @@ export const CapsuleEventName = {
   ...CapsuleOperationEventName,
   ...CapsulePreviewEventName,
   ...CapsuleRouteEventName,
-  ...CapsuleSnapshotEventName,
 } as const
 
 export type CapsuleEventName = (typeof CapsuleEventName)[keyof typeof CapsuleEventName]
@@ -134,13 +121,11 @@ export const CapsuleEventNameValues = [
   ...CapsuleOperationEventNameValues,
   ...CapsulePreviewEventNameValues,
   ...CapsuleRouteEventNameValues,
-  ...CapsuleSnapshotEventNameValues,
 ] as const
 
 export const CapsuleEventNameSchema = z.enum(CapsuleEventNameValues)
 
 export const CapsuleCommandDefinitions = {
-  ...CapsuleAgentReadCommandDefinitions,
   ...CapsuleCreateCommandDefinitions,
   ...CapsuleForkCommandDefinitions,
   ...CapsuleBranchCommandDefinitions,
@@ -163,7 +148,6 @@ export const CapsuleEventDefinitions = {
   ...CapsuleOperationEventDefinitions,
   ...CapsulePreviewEventDefinitions,
   ...CapsuleRouteEventDefinitions,
-  ...CapsuleSnapshotEventDefinitions,
 } as const satisfies Record<CapsuleEventName, CapsuleEventDefinition>
 
 export type CapsuleEventRegistry = typeof CapsuleEventDefinitions
@@ -176,7 +160,6 @@ const CapsuleEventSchemas = [
   ...CapsuleOperationEventSchemas,
   ...CapsulePreviewEventSchemas,
   ...CapsuleRouteEventSchemas,
-  ...CapsuleSnapshotEventSchemas,
 ] as const
 
 export const CapsuleEventSchema = z.discriminatedUnion('type', CapsuleEventSchemas)

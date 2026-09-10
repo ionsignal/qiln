@@ -165,9 +165,9 @@ function normalizeInventoryEntries(
  * capsule branch. Mutable runtime state is deliberately excluded so normal
  * resource status transitions do not invalidate the creation-time proof.
  *
- * Blueprint volume identity is included because it is capture-policy evidence,
- * not mutable provider progress. Changing or removing it invalidates the
- * creation-time ownership proof.
+ * Blueprint volume identity is included because it links managed-volume
+ * restoration and external bind configuration to the historical Blueprint.
+ * Changing or removing it invalidates the creation-time ownership proof.
  */
 export function createCapsuleBranchResourceInventoryDigest(
   entries: readonly CapsuleBranchResourceInventoryEntry[],

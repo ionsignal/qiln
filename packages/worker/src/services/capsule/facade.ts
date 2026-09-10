@@ -1,13 +1,14 @@
 import type { CapsuleBranchRuntimeService } from './branch/service'
+import type { DiffService } from './diff/service'
 import type { CapsuleRuntimeReconciliationCoordinator } from './reconciliation'
 import type { CapsuleOperationAbandonmentCoordinator } from './operations/abandonment/coordinator'
 import type { CapsuleArchiveSubmissionService } from './operations/archival/archive/submission'
 import type { CapsuleUnarchiveSubmissionService } from './operations/archival/unarchive/submission'
 import type { BranchSubmission } from './operations/branch/submission'
-import type { CaptureSubmission } from './operations/capture/submission'
 import type { CreateCapsuleSubmissionService } from './operations/create/submission'
 import type { DestroyCapsuleSubmissionService } from './operations/destroy/submission'
 import type { ForkSubmission } from './operations/fork/submission'
+import type { SnapshotSubmission } from './operations/snapshot/submission'
 import type { CommittedRouteService } from './routing/service'
 import type { CapsuleSnapshotService } from './snapshot/service'
 import type { PreviewService } from './routing/preview/service'
@@ -25,11 +26,12 @@ export interface CapsuleServiceCapabilities {
   archive: CapsuleArchiveSubmissionService
   unarchive: CapsuleUnarchiveSubmissionService
   destroy: DestroyCapsuleSubmissionService
-  capture: CaptureSubmission
+  createSnapshot: SnapshotSubmission
   start: BranchSubmission<'branch_start'>
   stop: BranchSubmission<'branch_stop'>
   branch: CapsuleBranchRuntimeService
   snapshot: CapsuleSnapshotService
+  diff: DiffService
   route: CommittedRouteService
   preview: PreviewService
   reconciliation: CapsuleRuntimeReconciliationCoordinator
@@ -49,11 +51,12 @@ export class CapsuleService {
   public readonly archive: CapsuleArchiveSubmissionService
   public readonly unarchive: CapsuleUnarchiveSubmissionService
   public readonly destroy: DestroyCapsuleSubmissionService
-  public readonly capture: CaptureSubmission
+  public readonly createSnapshot: SnapshotSubmission
   public readonly start: BranchSubmission<'branch_start'>
   public readonly stop: BranchSubmission<'branch_stop'>
   public readonly branch: CapsuleBranchRuntimeService
   public readonly snapshot: CapsuleSnapshotService
+  public readonly diff: DiffService
   public readonly route: CommittedRouteService
   public readonly preview: PreviewService
   public readonly reconciliation: CapsuleRuntimeReconciliationCoordinator
@@ -66,11 +69,12 @@ export class CapsuleService {
     this.archive = capabilities.archive
     this.unarchive = capabilities.unarchive
     this.destroy = capabilities.destroy
-    this.capture = capabilities.capture
+    this.createSnapshot = capabilities.createSnapshot
     this.start = capabilities.start
     this.stop = capabilities.stop
     this.branch = capabilities.branch
     this.snapshot = capabilities.snapshot
+    this.diff = capabilities.diff
     this.route = capabilities.route
     this.preview = capabilities.preview
     this.reconciliation = capabilities.reconciliation

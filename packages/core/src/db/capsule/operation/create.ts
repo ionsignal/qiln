@@ -32,8 +32,8 @@ function createRootBranchIdColumn(rootBranchIdColumn?: PgColumn) {
  * produced by that mutation.
  *
  * `rootfsImagePin` records the exact image selected from the mutable Blueprint
- * alias before provider mutation. Future Snapshot Capture and fork paths use
- * this pin rather than resolving the alias again.
+ * alias before provider mutation. Create Snapshot and fork paths use this pin
+ * rather than resolving the alias again.
  *
  * The referenced root branch remains the domain object. This row describes the
  * create mutation and must not become an alternate source of mutable branch

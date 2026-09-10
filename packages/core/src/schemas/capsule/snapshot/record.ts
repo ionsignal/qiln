@@ -1,11 +1,7 @@
 import { z } from 'zod'
 import { CapsuleBlueprintReferenceSchema } from '../../blueprint/catalog'
-import { CapsuleArtifactManifestReferenceSchema } from '../artifact/reference'
 import { CapsuleBranchNameSchema } from '../branch'
 import { CapsuleBranchResourceInventoryDigestSchema } from '../resources'
-import { CapsuleSnapshotAssuranceSchema } from './mode'
-import { CapsuleSnapshotCapturePolicyReferenceSchema } from './policy'
-import { CapsuleSnapshotAgentArtifactContentPolicySchema } from './read'
 
 export const CapsuleSnapshotTimestampSchema = z.string().datetime({
   offset: true,
@@ -14,13 +10,14 @@ export const CapsuleSnapshotTimestampSchema = z.string().datetime({
 /**
  * Client-safe committed snapshot summary.
  *
- * A returned row proves that Qiln committed the snapshot through its capture
- * operation and linked it to durable evidence. Detailed manifests, Git records,
- * dependencies, provider references, Blueprint pins, and diagnostics remain
+ * A returned row proves that Qiln committed the snapshot through Create
+ * Snapshot and retained the restoration evidence needed to fork an editable
+ * branch. Provider references, Blueprint pins, and diagnostics remain
  * server-side.
  *
- * Snapshot eligibility is represented by assurance mode and explicit
- * limitations rather than a provisional fork-readiness boolean.
+ * A snapshot does not claim to preserve mutable rootfs changes, external bind
+ * mount contents, application correctness, Git history, file-level contents, or
+ * a detailed change report.
  */
 export const CapsuleSnapshotSummarySchema = z
   .object({
@@ -30,12 +27,7 @@ export const CapsuleSnapshotSummarySchema = z
     sourceBranchName: CapsuleBranchNameSchema,
     sourceBranchResourceInventoryDigest: CapsuleBranchResourceInventoryDigestSchema,
     blueprint: CapsuleBlueprintReferenceSchema,
-    capturePolicy: CapsuleSnapshotCapturePolicyReferenceSchema,
-    artifactManifest: CapsuleArtifactManifestReferenceSchema,
-    agentArtifactContentPolicy: CapsuleSnapshotAgentArtifactContentPolicySchema,
-    assurance: CapsuleSnapshotAssuranceSchema,
     createdAt: CapsuleSnapshotTimestampSchema,
-    archivedAt: CapsuleSnapshotTimestampSchema.nullable(),
   })
   .strict()
 

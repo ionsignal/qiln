@@ -1,6 +1,5 @@
 import { registerSshAuthorizedKeysSyncHandler } from './handlers/ssh'
 import { registerCapsuleBlueprintHandlers } from './handlers/blueprint'
-import { registerCapsuleAgentReadHandler } from './handlers/capsule/agent'
 import { registerCapsuleBranchHandlers } from './handlers/capsule/branch'
 import { registerCapsuleCreateHandler } from './handlers/capsule/create'
 import { registerCapsuleForkHandler } from './handlers/capsule/fork'
@@ -21,7 +20,6 @@ import type { QilnWorkerRuntime } from '../runtime'
 export function registerCapsuleChannelHandlers(worker: QilnWorkerRuntime): void {
   registerSshAuthorizedKeysSyncHandler(worker)
   registerCapsuleBlueprintHandlers(worker)
-  registerCapsuleAgentReadHandler(worker)
   registerCapsuleCreateHandler(worker)
   registerCapsuleForkHandler(worker)
   registerCapsuleBranchHandlers(worker)

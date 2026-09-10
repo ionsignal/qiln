@@ -1,4 +1,4 @@
-import { and, asc, eq, isNotNull, isNull } from 'drizzle-orm'
+import { and, asc, eq, isNotNull } from 'drizzle-orm'
 import {
   CapsuleDestroyReceiptSchema,
   CapsuleOperationStatus,
@@ -73,27 +73,25 @@ export class DestroyCapsuleAcceptancePersistence<
         }
 
         /**
-         * Experimental committed snapshots retain provider snapshots attached
-         * to branch storage. Destroy must fail closed until snapshot archival
-         * and provider-retention deletion are implemented.
+         * Committed snapshots may retain provider snapshots attached to branch
+         * storage. Destroy must fail closed until snapshot retirement and
+         * provider-retention deletion are implemented.
          *
-         * The capsule row lock serializes this check with Snapshot Capture's
+         * The capsule row lock serializes this check with Create Snapshot's
          * atomic commit transaction.
          */
-        const [retainedSnapshot] = await tx
+        const [snapshot] = await tx
           .select({
             id: capsuleSnapshots.id,
-            mode: capsuleSnapshots.mode,
           })
           .from(capsuleSnapshots)
-          .where(and(eq(capsuleSnapshots.capsuleId, input.capsuleId), isNull(capsuleSnapshots.archivedAt)))
+          .where(eq(capsuleSnapshots.capsuleId, input.capsuleId))
           .limit(1)
-        if (retainedSnapshot) {
-          throw new IncusError('Capsule cannot be destroyed while it has retained committed snapshots.', 'CONFLICT', {
+        if (snapshot) {
+          throw new IncusError('Capsule cannot be destroyed while it has committed snapshots.', 'CONFLICT', {
             ownerId: input.ownerId,
             capsuleId: input.capsuleId,
-            snapshotId: retainedSnapshot.id,
-            snapshotMode: retainedSnapshot.mode,
+            snapshotId: snapshot.id,
             policy: 'snapshot_retention_deletion_not_implemented',
           })
         }

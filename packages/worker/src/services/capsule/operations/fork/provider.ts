@@ -1,4 +1,3 @@
-import { CapsuleBranchResourceStatus } from '@qiln/core/server'
 import { IncusError } from '../../../../errors'
 import type { IncusClient } from '../../../../incus/client'
 import type { ProjectService } from '../../../project'
@@ -17,8 +16,9 @@ export interface ForkProviderDependencies {
  * Performs provider mutations authorized by one immutable fork execution plan.
  *
  * Every resource is resolved from the branch resource rows accepted with the
- * operation. No provider listing, discovery, adoption, or inferred ownership is
- * allowed.
+ * operation. Managed-volume sources cannot come from provider listing,
+ * discovery, adoption, or inferred ownership. The owner project remains an
+ * explicitly retained resource.
  */
 export class ForkProvider {
   constructor(private readonly dependencies: ForkProviderDependencies) {}
@@ -61,15 +61,14 @@ export class ForkProvider {
         await this.dependencies.resources.recordBranchResourceCreateIntent(resource.id, input.operationId)
         intentCommitted = true
         await project.storage.cloneSnapshot(planned.pool, planned.volumeName, planned.source, planned.config)
-        await this.dependencies.resources.recordBranchResourceCreateOutcome(resource.id, input.operationId)
       } catch (error: unknown) {
         if (intentCommitted) {
-          await this.recordCreateFailure(resource, error, {
+          await this.recordCreateFailure(input.operationId, resource, error, {
             operationId: input.operationId,
             capsuleId: input.capsuleId,
             branchId: input.branchId,
             action: 'clone_fork_snapshot_volume',
-            artifactRootId: planned.artifactRootId,
+            blueprintVolumeName: planned.blueprintVolumeName,
             sourceProject: planned.source.project,
             sourcePool: planned.source.pool,
             sourceVolume: planned.source.volume,
@@ -80,6 +79,9 @@ export class ForkProvider {
         }
         throw error
       }
+      // A lost outcome acknowledgement must not overwrite a possibly committed
+      // successful-create record. Compensation reloads durable accounting.
+      await this.dependencies.resources.recordBranchResourceCreateOutcome(resource.id, input.operationId)
     }
   }
 
@@ -91,10 +93,9 @@ export class ForkProvider {
       await this.dependencies.resources.recordBranchResourceCreateIntent(resource.id, input.operationId)
       intentCommitted = true
       await this.dependencies.driver.createInstance(input.plan.project.namespace, planned)
-      await this.dependencies.resources.recordBranchResourceCreateOutcome(resource.id, input.operationId)
     } catch (error: unknown) {
       if (intentCommitted) {
-        await this.recordCreateFailure(resource, error, {
+        await this.recordCreateFailure(input.operationId, resource, error, {
           operationId: input.operationId,
           capsuleId: input.capsuleId,
           branchId: input.branchId,
@@ -104,63 +105,24 @@ export class ForkProvider {
       }
       throw error
     }
+    await this.dependencies.resources.recordBranchResourceCreateOutcome(resource.id, input.operationId)
   }
 
   /**
-   * Restores provisioning-file accounting without overwriting captured volume
-   * state. Files targeting managed volumes already exist in cloned snapshot
-   * storage.
+   * Reconstructs only provisioning files on the rebuilt rootfs.
+   *
+   * Managed-volume entries are excluded from the plan. Cloned contents,
+   * including intentional file edits and deletions, are never overwritten or
+   * represented as individually verified historical provisioning files.
    */
   public async files(input: ForkExecution): Promise<void> {
-    const currentResources = await this.dependencies.resources.listBranchResourceInventoryByBranchId(input.branchId)
-    const currentByKey = new Map(currentResources.map(resource => [resource.resourceKey, resource] as const))
     for (const planned of input.plan.files) {
       const resource = this.resource(input, planned)
-      const current = currentByKey.get(planned.resourceKey)
-      if (!current || current.id !== resource.id) {
-        throw new IncusError(
-          'Fork provisioning file resource was not found after provider materialization.',
-          'CONFLICT',
-          {
-            operationId: input.operationId,
-            branchId: input.branchId,
-            resourceKey: planned.resourceKey,
-            acceptedResourceId: resource.id,
-            currentResourceId: current?.id ?? null,
-          },
-        )
-      }
-      const target = planned.target
-      if (planned.restoredByClone) {
-        if (target.target !== 'volume') {
-          throw new IncusError('Fork file marked snapshot-restored does not target a managed volume.', 'CONFLICT', {
-            operationId: input.operationId,
-            branchId: input.branchId,
-            resourceKey: planned.resourceKey,
-          })
-        }
-        const plannedVolume = input.plan.volumes.find(
-          volume => volume.pool === target.pool && volume.volumeName === target.volumeName,
-        )
-        const backing = plannedVolume ? currentByKey.get(plannedVolume.resourceKey) : undefined
-        if (!backing || backing.status !== CapsuleBranchResourceStatus.CREATED) {
-          throw new IncusError('Fork snapshot-restored file has no positively created backing volume.', 'CONFLICT', {
-            operationId: input.operationId,
-            branchId: input.branchId,
-            resourceKey: planned.resourceKey,
-            backingResourceId: backing?.id ?? null,
-            backingResourceStatus: backing?.status ?? null,
-          })
-        }
-        await this.dependencies.resources.recordDerivedResourceRestore(resource.id, input.operationId)
-        continue
-      }
-      if (target.target !== 'instance') {
-        throw new IncusError('Fork file requiring a provider write does not target the rebuilt instance.', 'CONFLICT', {
+      if (planned.target.target !== 'instance') {
+        throw new IncusError('Fork provisioning may write only to the rebuilt instance rootfs.', 'CONFLICT', {
           operationId: input.operationId,
           branchId: input.branchId,
           resourceKey: planned.resourceKey,
-          target: target.target,
         })
       }
       let intentCommitted = false
@@ -172,10 +134,9 @@ export class ForkProvider {
           input.plan.instance.instanceName,
           planned,
         )
-        await this.dependencies.resources.recordBranchResourceCreateOutcome(resource.id, input.operationId)
       } catch (error: unknown) {
         if (intentCommitted) {
-          await this.recordCreateFailure(resource, error, {
+          await this.recordCreateFailure(input.operationId, resource, error, {
             operationId: input.operationId,
             capsuleId: input.capsuleId,
             branchId: input.branchId,
@@ -186,6 +147,7 @@ export class ForkProvider {
         }
         throw error
       }
+      await this.dependencies.resources.recordBranchResourceCreateOutcome(resource.id, input.operationId)
     }
   }
 
@@ -208,29 +170,38 @@ export class ForkProvider {
 
   private resource(input: ForkExecution, planned: ForkPlannedResource): ForkResourceRecord {
     const matches = input.resources.filter(resource => resource.resourceKey === planned.resourceKey)
-    if (matches.length !== 1) {
-      throw new IncusError('Fork execution could not resolve exactly one accepted resource row.', 'CONFLICT', {
+    const resource = matches[0]
+    if (
+      matches.length !== 1 ||
+      !resource ||
+      resource.ownerId !== input.ownerId ||
+      resource.branchId !== input.branchId ||
+      resource.branchName !== input.branchName ||
+      resource.createdByOperationId !== input.operationId ||
+      resource.lastOperationId !== input.operationId ||
+      resource.provider !== planned.provider ||
+      resource.resourceType !== planned.resourceType ||
+      resource.blueprintVolumeName !== planned.blueprintVolumeName ||
+      resource.cleanupPolicy !== planned.cleanupPolicy
+    ) {
+      throw new IncusError('Fork execution could not resolve exactly one attributed accepted resource.', 'CONFLICT', {
         operationId: input.operationId,
         branchId: input.branchId,
         resourceKey: planned.resourceKey,
         resourceCount: matches.length,
       })
     }
-    return matches[0]!
+    return resource
   }
 
   private async recordCreateFailure(
+    operationId: string,
     resource: ForkResourceRecord,
     error: unknown,
     context: Record<string, unknown>,
   ): Promise<void> {
     try {
-      await this.dependencies.resources.recordBranchResourceCreateFailure(
-        resource.id,
-        resource.createdByOperationId!,
-        error,
-        context,
-      )
+      await this.dependencies.resources.recordBranchResourceCreateFailure(resource.id, operationId, error, context)
     } catch (persistenceError: unknown) {
       console.error(`[ForkProvider] Failed to persist create failure for fork resource '${resource.id}'.`, {
         providerError: error,

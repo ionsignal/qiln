@@ -7,7 +7,7 @@ import { CapsuleBranchNameSchema } from './branch'
  *
  * `create` initializes the capsule aggregate and its root editable branch.
  * `fork` creates a new editable branch from immutable committed snapshot
- * history. `snapshot_capture` creates immutable committed capsule history from
+ * history. `snapshot_create` creates immutable committed capsule history from
  * one durably fenced source branch.
  *
  * `branch_start` and `branch_stop` coordinate runtime changes for one existing
@@ -24,7 +24,7 @@ export const CapsuleOperationType = {
   ARCHIVE: 'archive',
   UNARCHIVE: 'unarchive',
   DESTROY: 'destroy',
-  SNAPSHOT_CAPTURE: 'snapshot_capture',
+  SNAPSHOT_CREATE: 'snapshot_create',
   BRANCH_START: 'branch_start',
   BRANCH_STOP: 'branch_stop',
   PROMOTE: 'promote',
@@ -39,7 +39,7 @@ export const CapsuleOperationTypeValues = [
   CapsuleOperationType.ARCHIVE,
   CapsuleOperationType.UNARCHIVE,
   CapsuleOperationType.DESTROY,
-  CapsuleOperationType.SNAPSHOT_CAPTURE,
+  CapsuleOperationType.SNAPSHOT_CREATE,
   CapsuleOperationType.BRANCH_START,
   CapsuleOperationType.BRANCH_STOP,
   CapsuleOperationType.PROMOTE,
@@ -179,10 +179,10 @@ export const CapsuleBranchStopReceiptSchema = CapsuleOperationReceiptSchema.exte
 }).strict()
 
 /**
- * Receipt for durable Snapshot Capture acceptance or replay.
+ * Receipt for durable Create Snapshot acceptance or replay.
  */
-export const CapsuleSnapshotCaptureReceiptSchema = CapsuleOperationReceiptSchema.extend({
-  operationType: z.literal(CapsuleOperationType.SNAPSHOT_CAPTURE),
+export const CapsuleSnapshotCreateReceiptSchema = CapsuleOperationReceiptSchema.extend({
+  operationType: z.literal(CapsuleOperationType.SNAPSHOT_CREATE),
   sourceBranchId: z.uuid(),
   sourceBranchName: CapsuleBranchNameSchema,
 }).strict()
@@ -236,6 +236,6 @@ export type CapsuleBranchStopReceipt = z.infer<typeof CapsuleBranchStopReceiptSc
 export type CapsuleArchiveReceipt = z.infer<typeof CapsuleArchiveReceiptSchema>
 export type CapsuleUnarchiveReceipt = z.infer<typeof CapsuleUnarchiveReceiptSchema>
 export type CapsuleDestroyReceipt = z.infer<typeof CapsuleDestroyReceiptSchema>
-export type CapsuleSnapshotCaptureReceipt = z.infer<typeof CapsuleSnapshotCaptureReceiptSchema>
+export type CapsuleSnapshotCreateReceipt = z.infer<typeof CapsuleSnapshotCreateReceiptSchema>
 export type CapsuleOperationFailure = z.infer<typeof CapsuleOperationFailureSchema>
 export type CapsuleOperationSummary = z.infer<typeof CapsuleOperationSummarySchema>

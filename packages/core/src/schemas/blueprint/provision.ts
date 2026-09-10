@@ -64,11 +64,11 @@ export const CapsuleBlueprintVolumeDefinitionSchema = z.discriminatedUnion('type
 ])
 
 /**
- * V1 capsule artifacts support regular files and directories only.
+ * Blueprint provisioning supports regular files and directories only.
  *
- * Blueprint-defined symlinks are rejected at this policy boundary. A future
- * collector must independently use `lstat`, must not follow symlinks, and must
- * fail capture when it encounters an unsupported filesystem entry.
+ * These definitions reconstruct configured files on a rebuilt rootfs.
+ * Managed-volume contents are restored through provider snapshots rather than
+ * interpreted or constrained by this provisioning contract.
  */
 export const CapsuleBlueprintFileDefinitionSchema = z
   .object({

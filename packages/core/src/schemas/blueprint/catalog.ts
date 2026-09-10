@@ -17,7 +17,7 @@ export const CapsuleBlueprintReferenceSchema = z
 /**
  * Client-safe blueprint catalog item.
  *
- * Full provisioning and capture-policy details remain server-side.
+ * Full provisioning and restoration configuration remains server-side.
  */
 export const CapsuleBlueprintManifestItemSchema = z
   .object({

@@ -1,6 +1,6 @@
 import { and, eq } from 'drizzle-orm'
 import {
-  CapsuleSnapshotCaptureOutputSchema,
+  CapsuleSnapshotCreateOutputSchema,
   CapsuleSnapshotCommandName,
   CapsuleSnapshotListOutputSchema,
   GlobalError,
@@ -8,37 +8,31 @@ import {
   TargetType,
   type CapsuleChannel,
   type CapsuleOperationIdempotencyKey,
-  type CapsuleSnapshotAgentArtifactContentPolicyValue,
-  type CapsuleSnapshotCaptureOutput,
+  type CapsuleSnapshotCreateOutput,
   type CapsuleSnapshotListOutput,
 } from '@qiln/core/server'
 import type { EnginePersistence } from '../../persistence'
 import type { CapsuleMutationIdentity } from './types'
 
-export interface CapsuleSnapshotListOptions {
-  includeExperimental?: boolean
-}
-
-export interface CapsuleSnapshotCaptureRequest {
+export interface CapsuleSnapshotCreateRequest {
   capsuleId: string
   sourceBranchId: string
   idempotencyKey: CapsuleOperationIdempotencyKey
-  agentArtifactContentPolicy: CapsuleSnapshotAgentArtifactContentPolicyValue
 }
 
 /**
- * Public Engine boundary for committed capsule snapshot history and Snapshot
- * Capture submission.
+ * Public Engine boundary for committed capsule snapshot history and Create
+ * Snapshot submission.
  *
  * Snapshot commands are owner-targeted at the protocol layer. The Engine
  * derives owner and actor authority from authenticated context and proves local
  * capsule visibility before dispatch. The Worker independently verifies durable
- * ownership, aggregate state, source-branch eligibility, capture-policy
+ * ownership, aggregate state, offline source-branch eligibility, restoration
  * evidence, and the capsule-wide nonterminal-operation fence.
  *
- * Capture returns only a durable acceptance or replay receipt. It does not wait
- * for provider snapshot creation, artifact collection, atomic snapshot commit,
- * or branch restoration.
+ * Create returns only a durable acceptance or replay receipt. It does not wait
+ * for managed-volume provider snapshots or the atomic commit of complete
+ * restoration evidence.
  */
 export class CapsuleSnapshotsService {
   constructor(
@@ -46,11 +40,7 @@ export class CapsuleSnapshotsService {
     private readonly channel: CapsuleChannel,
   ) {}
 
-  public async list(
-    ownerId: string,
-    capsuleId: string,
-    options: CapsuleSnapshotListOptions = {},
-  ): Promise<CapsuleSnapshotListOutput> {
+  public async list(ownerId: string, capsuleId: string): Promise<CapsuleSnapshotListOutput> {
     await this.assertOwnedCapsule(ownerId, capsuleId)
     const snapshots = await this.channel.command(CapsuleSnapshotCommandName.SNAPSHOTS_LIST, {
       target: {
@@ -58,26 +48,23 @@ export class CapsuleSnapshotsService {
         id: ownerId,
       },
       capsuleId,
-      includeExperimental: options.includeExperimental ?? false,
     })
     return CapsuleSnapshotListOutputSchema.parse(snapshots)
   }
 
   /**
-   * Submits an experimental Snapshot Capture operation using authenticated
-   * owner and actor authority.
+   * Submits Create Snapshot using authenticated owner and actor authority.
    *
-   * Browser input supplies only domain identity, idempotency, and the immutable
-   * agent artifact-content policy. Capture mode, owner target, actor
-   * provenance, provider identities, and all mutation fences remain trusted
-   * server-side concerns.
+   * Browser input supplies only domain identity and idempotency. Owner target,
+   * actor provenance, provider identities, restoration pins, and all mutation
+   * fences remain trusted server-side concerns.
    */
-  public async capture(
+  public async create(
     identity: CapsuleMutationIdentity,
-    input: CapsuleSnapshotCaptureRequest,
-  ): Promise<CapsuleSnapshotCaptureOutput> {
+    input: CapsuleSnapshotCreateRequest,
+  ): Promise<CapsuleSnapshotCreateOutput> {
     await this.assertOwnedCapsule(identity.ownerId, input.capsuleId)
-    const receipt = await this.channel.command(CapsuleSnapshotCommandName.SNAPSHOT_CAPTURE, {
+    const receipt = await this.channel.command(CapsuleSnapshotCommandName.SNAPSHOT_CREATE, {
       target: {
         type: TargetType.OWNER,
         id: identity.ownerId,
@@ -86,9 +73,8 @@ export class CapsuleSnapshotsService {
       capsuleId: input.capsuleId,
       sourceBranchId: input.sourceBranchId,
       idempotencyKey: input.idempotencyKey,
-      agentArtifactContentPolicy: input.agentArtifactContentPolicy,
     })
-    return CapsuleSnapshotCaptureOutputSchema.parse(receipt)
+    return CapsuleSnapshotCreateOutputSchema.parse(receipt)
   }
 
   /**
@@ -96,7 +82,7 @@ export class CapsuleSnapshotsService {
    *
    * Missing and foreign capsules are intentionally indistinguishable. The
    * Worker remains authoritative and repeats this ownership proof before
-   * validating snapshot reads or accepting Snapshot Capture.
+   * validating snapshot reads or accepting Create Snapshot.
    */
   private async assertOwnedCapsule(ownerId: string, capsuleId: string): Promise<void> {
     const { db, tables } = this.persistence

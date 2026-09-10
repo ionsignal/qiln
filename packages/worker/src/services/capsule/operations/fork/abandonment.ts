@@ -28,7 +28,7 @@ function assertRelationships(result: ForkTerminal): void {
       `[ForkAbandonment] Lifecycle result belongs to capsule '${result.capsule.capsuleId}', but operation '${result.operation.operationId}' belongs to capsule '${result.operation.capsuleId}'.`,
     )
   }
-  if (result.branch.capsuleId !== result.operation.capsuleId) {
+  if (result.branch && result.branch.capsuleId !== result.operation.capsuleId) {
     throw new Error(
       `[ForkAbandonment] Branch '${result.branch.id}' belongs to capsule '${result.branch.capsuleId}', but operation '${result.operation.operationId}' belongs to capsule '${result.operation.capsuleId}'.`,
     )
@@ -54,17 +54,21 @@ export class ForkAbandonment implements CapsuleOperationAbandonmentHandler {
         classified: false,
       }
     }
+
     assertAbandonedOperationTransitionIdentity(operation, result.operation)
     assertAbandonedOperationTransitionTerminal(result.operation)
     assertRelationships(result)
+
     this.dependencies.operationEvents.publishChanged(result.operation)
     this.dependencies.lifecycleEvents.publishChanged(result.operation.ownerId, result.capsule)
-    this.dependencies.branchEvents.publishStateChanged(
-      result.operation.ownerId,
-      result.branch.capsuleId,
-      result.branch.name,
-      result.branch.status,
-    )
+    if (result.branch) {
+      this.dependencies.branchEvents.publishStateChanged(
+        result.operation.ownerId,
+        result.branch.capsuleId,
+        result.branch.name,
+        result.branch.status,
+      )
+    }
     return {
       classified: true,
       operation: result.operation,

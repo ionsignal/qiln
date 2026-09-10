@@ -2,7 +2,6 @@ import { and, eq, ne } from 'drizzle-orm'
 import {
   AgentBranchContextSchema,
   AgentGetContextOutputSchema,
-  CapsuleAgentReadCommandName,
   type AgentBranchContext,
   type AgentGetContext,
   type AgentGetContextOutput,
@@ -25,7 +24,7 @@ function hasBranchSelector(input: AgentGetContext): boolean {
   return input.branchId !== undefined || input.branchName !== undefined
 }
 
-async function branch(
+async function selectBranch(
   db: Database,
   ownerId: string,
   capsuleId: string,
@@ -58,12 +57,14 @@ async function branch(
 
 /**
  * Resolves API-key authority and an optional branch selector through host-owned
- * credential and capsule persistence, then asks the Worker for one exact
- * immutable manifest-readable snapshot reference.
+ * credential and capsule persistence.
+ *
+ * Snapshot selection is temporarily unavailable. The channel parameter remains
+ * for Host integration compatibility, but no Worker command is dispatched.
  */
 export async function resolveAgentContext(
   db: Database,
-  channel: CapsuleChannel,
+  _channel: CapsuleChannel,
   apiKey: string | null,
   input: AgentGetContext,
 ): Promise<AgentGetContextOutput> {
@@ -81,22 +82,13 @@ export async function resolveAgentContext(
     })
   }
   const selectedBranch = hasBranchSelector(input)
-    ? await branch(db, authority.requester.id, authority.capsule.capsuleId, input)
+    ? await selectBranch(db, authority.requester.id, authority.capsule.capsuleId, input)
     : null
-  const snapshot = await channel.command(CapsuleAgentReadCommandName.SNAPSHOT, {
-    target: {
-      type: 'owner',
-      id: authority.requester.id,
-    },
-    actor: authority.agent,
-    capsuleId: authority.capsule.capsuleId,
-    ...(selectedBranch === null ? {} : { branchId: selectedBranch.id }),
-  })
   return AgentGetContextOutputSchema.parse({
     requester: authority.requester,
     agent: authority.agent,
     capsule: authority.capsule,
     branch: selectedBranch,
-    snapshot,
+    snapshot: null,
   })
 }

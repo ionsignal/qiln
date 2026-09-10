@@ -25,10 +25,10 @@ export type {
  * aggregate transitions. This contract contains only branch resource identity,
  * cleanup policy, metadata, and creation provenance.
  *
- * Managed volumes and bind mounts retain their originating blueprint volume
- * identity. Snapshot Capture must resolve policy roots and external boundaries
- * through this identity rather than provider names, mount paths, or live
- * provider discovery.
+ * Managed volumes and bind mounts retain their originating Blueprint volume
+ * identity. Create Snapshot resolves every managed volume through this identity
+ * rather than provider names, mount paths, or live provider discovery. Bind
+ * mounts remain unversioned external configuration.
  */
 export interface BranchResourceInput {
   operationId: string

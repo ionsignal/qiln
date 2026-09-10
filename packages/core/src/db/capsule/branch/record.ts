@@ -22,9 +22,9 @@ import {
  * Canonical database enum for capsule branch runtime and mutation-fence state.
  *
  * Logical capsule archive state is not represented here. A branch remains
- * offline while its capsule is archived. `capturing` fences an offline source
- * branch during Snapshot Capture. Destroying and destroyed represent terminal
- * capsule-level provider retirement flow.
+ * offline while its capsule is archived. `snapshotting` fences an offline
+ * source branch during Create Snapshot. Destroying and destroyed represent
+ * terminal capsule-level provider retirement flow.
  */
 export const capsuleBranchStatusEnum = pgEnum('capsule_branch_status', CapsuleBranchStatusValues)
 
@@ -117,7 +117,7 @@ export function createCapsuleBranchesTable(ownerIdColumn?: PgColumn, capsuleIdCo
       check(
         'capsule_branches_inactive_runtime_ip_check',
         sql`(
-          ${table.status} NOT IN ('offline', 'capturing')
+          ${table.status} NOT IN ('offline', 'snapshotting')
           OR ${table.runtimeIp} IS NULL
         )`,
       ),

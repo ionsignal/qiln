@@ -1,6 +1,5 @@
 import { z } from 'zod'
 import { CapsuleBlueprintIdentifierSchema } from '../../blueprint/provision'
-import { CapsuleArtifactRootIdSchema } from '../artifact/entry'
 
 const IncusResourceIdentitySchema = z
   .string()
@@ -10,6 +9,37 @@ const IncusResourceIdentitySchema = z
   .refine(value => !/[\u0000-\u001f\u007f]/.test(value), {
     message: 'Incus snapshot reference identities cannot contain control characters.',
   })
+
+/**
+ * Operation-scoped state for one planned managed-volume provider snapshot.
+ *
+ * These states describe Create Snapshot execution accounting. They are not
+ * committed snapshot history and must never become branch-fork authority.
+ */
+export const CapsuleSnapshotCreateResourceStatus = {
+  PLANNED: 'planned',
+  CREATING: 'creating',
+  CREATED: 'created',
+  DELETING: 'deleting',
+  DELETED: 'deleted',
+  MISSING: 'missing',
+  ERROR: 'error',
+} as const
+
+export type CapsuleSnapshotCreateResourceStatusValue =
+  (typeof CapsuleSnapshotCreateResourceStatus)[keyof typeof CapsuleSnapshotCreateResourceStatus]
+
+export const CapsuleSnapshotCreateResourceStatusValues = [
+  CapsuleSnapshotCreateResourceStatus.PLANNED,
+  CapsuleSnapshotCreateResourceStatus.CREATING,
+  CapsuleSnapshotCreateResourceStatus.CREATED,
+  CapsuleSnapshotCreateResourceStatus.DELETING,
+  CapsuleSnapshotCreateResourceStatus.DELETED,
+  CapsuleSnapshotCreateResourceStatus.MISSING,
+  CapsuleSnapshotCreateResourceStatus.ERROR,
+] as const
+
+export const CapsuleSnapshotCreateResourceStatusSchema = z.enum(CapsuleSnapshotCreateResourceStatusValues)
 
 export const CapsuleSnapshotResourceProvider = {
   INCUS: 'incus',
@@ -31,22 +61,21 @@ export const CapsuleSnapshotResourceKindValues = [CapsuleSnapshotResourceKind.CU
 export const CapsuleSnapshotResourceKindSchema = z.enum(CapsuleSnapshotResourceKindValues)
 
 /**
- * Immutable physical Incus snapshot identity for one managed artifact root.
+ * Immutable physical Incus snapshot identity for one managed Blueprint volume.
  *
  * `sourceBranchResourceId` links this evidence to Qiln's durable branch
- * resource ledger. `captureResourceId` identifies the exact successful
- * operation-scoped provider mutation copied into committed snapshot history.
- * Future forks must use this committed identity rather than rediscovering a
- * source snapshot from live provider inventory.
+ * resource ledger. `createResourceId` identifies the exact successful Create
+ * Snapshot provider mutation copied into committed snapshot history. Forks must
+ * use this committed identity rather than rediscovering a source snapshot from
+ * live provider inventory.
  */
 export const CapsuleSnapshotIncusVolumeReferenceSchema = z
   .object({
     provider: z.literal(CapsuleSnapshotResourceProvider.INCUS),
     kind: z.literal(CapsuleSnapshotResourceKind.CUSTOM_VOLUME_SNAPSHOT),
-    artifactRootId: CapsuleArtifactRootIdSchema,
     blueprintVolumeName: CapsuleBlueprintIdentifierSchema,
     sourceBranchResourceId: z.uuid(),
-    captureResourceId: z.uuid(),
+    createResourceId: z.uuid(),
     project: IncusResourceIdentitySchema,
     pool: IncusResourceIdentitySchema,
     sourceVolume: IncusResourceIdentitySchema,

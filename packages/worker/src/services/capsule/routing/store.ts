@@ -112,8 +112,6 @@ export class CommittedRouteStore<
           blueprintName: capsuleSnapshots.blueprintName,
           blueprintDigest: capsuleSnapshots.blueprintDigest,
           blueprintPin: capsuleSnapshots.blueprintPin,
-          mode: capsuleSnapshots.mode,
-          limitations: capsuleSnapshots.limitations,
         },
       })
       .from(capsules)

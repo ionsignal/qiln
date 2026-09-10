@@ -15,7 +15,7 @@ export const CapsuleBranchNameSchema = z
 export const CapsuleBranchStatusValues = [
   'provisioning',
   'offline',
-  'capturing',
+  'snapshotting',
   'starting',
   'online',
   'stopping',

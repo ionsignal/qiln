@@ -1,6 +1,5 @@
 import type {
   CapsuleActorReference,
-  CapsuleArtifactRootId,
   CapsuleBlueprintIdentifier,
   CapsuleBlueprintPin,
   CapsuleBranchName,
@@ -12,9 +11,7 @@ import type {
   CapsuleForkReceipt,
   CapsuleLifecycleState,
   CapsuleOperationRequestHash,
-  CapsuleSnapshotCapturePolicyPin,
-  CapsuleSnapshotLimitationValue,
-  CapsuleSnapshotModeValue,
+  CapsuleSnapshotResourceReference,
   CapsuleRootfsImagePin,
 } from '@qiln/core/server'
 import type { IncusDeviceMap } from '../../../../incus/client'
@@ -37,29 +34,13 @@ export interface AcceptForkInput extends SubmitForkInput {
   requestHash: CapsuleOperationRequestHash
 }
 
-export interface ForkSnapshotResource {
-  id: string
-  artifactRootId: CapsuleArtifactRootId
-  blueprintVolumeName: CapsuleBlueprintIdentifier
-  sourceBranchResourceId: string
-  captureResourceId: string
-  provider: 'incus'
-  kind: 'custom_volume_snapshot'
-  project: string
-  pool: string
-  sourceVolume: string
-  snapshotName: string
-}
-
 export interface ForkSource {
+  ownerId: string
   snapshotId: string
   capsuleId: string
   blueprint: CapsuleBlueprintPin
   rootfsImagePin: CapsuleRootfsImagePin
-  capturePolicy: CapsuleSnapshotCapturePolicyPin
-  mode: CapsuleSnapshotModeValue
-  limitations: CapsuleSnapshotLimitationValue[]
-  resources: ForkSnapshotResource[]
+  resources: CapsuleSnapshotResourceReference[]
 }
 
 export interface ForkPlannedResource {
@@ -89,7 +70,6 @@ export interface ForkVolumeResource extends ForkPlannedResource {
   kind: 'volume'
   blueprintVolumeName: CapsuleBlueprintIdentifier
   deviceName: CapsuleBlueprintIdentifier
-  artifactRootId: CapsuleArtifactRootId
   pool: string
   volumeName: string
   mountPath: string
@@ -112,12 +92,18 @@ export interface ForkInstanceResource extends ForkPlannedResource {
   devices: IncusDeviceMap
 }
 
+/**
+ * Only rebuilt-rootfs provisioning creates individual file accounting.
+ *
+ * Managed-volume contents come from the committed snapshot, including edits and
+ * deletions. Fork does not claim that historical provisioning files still exist
+ * inside those volumes.
+ */
 export interface ForkFileResource extends ForkPlannedResource {
   kind: 'file'
   path: string
   content: string
-  target: ProvisioningFileTarget
-  restoredByClone: boolean
+  target: Extract<ProvisioningFileTarget, { target: 'instance' }>
   options: IncusFilePushOptions
 }
 
@@ -160,6 +146,8 @@ export interface ForkResourceRecord {
 export const ForkResourceProofStage = {
   ACCEPTED: 'accepted',
   COMPLETED: 'completed',
+  COMPENSATING: 'compensating',
+  COMPENSATED: 'compensated',
 } as const
 
 export type ForkResourceProofStage = (typeof ForkResourceProofStage)[keyof typeof ForkResourceProofStage]
@@ -194,9 +182,6 @@ export interface ForkExecution {
   cpu: string
   memory: string
   blueprint: CapsuleBlueprintPin
-  capturePolicy: CapsuleSnapshotCapturePolicyPin
-  sourceMode: CapsuleSnapshotModeValue
-  sourceLimitations: CapsuleSnapshotLimitationValue[]
   inventoryDigest: CapsuleBranchResourceInventoryDigest
   plan: ForkPlan
   resources: ForkResourceRecord[]
@@ -204,12 +189,13 @@ export interface ForkExecution {
 
 export interface ForkRunning {
   operation: CapsuleOperationTransitionOutput
+  execution: ForkExecution
 }
 
 export interface ForkTerminal {
   operation: CapsuleOperationTransitionOutput
   capsule: CapsuleLifecycleState
-  branch: ForkBranch
+  branch: ForkBranch | null
 }
 
 export type ForkAbandonmentResult = ForkTerminal | null

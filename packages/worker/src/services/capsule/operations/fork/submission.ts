@@ -1,5 +1,4 @@
 import { CapsuleOperationType, type CapsuleForkReceipt } from '@qiln/core/server'
-import { IncusError } from '../../../../errors'
 import { createOperationRequestHash } from '../shared'
 import type { OperationSupervisor } from '../../../../coordination'
 import type {
@@ -21,16 +20,11 @@ interface ForkRequestIdentity {
   memory: string
 }
 
-export interface ForkSubmissionOptions {
-  enabled: boolean
-}
-
 /**
- * Accepts or replays experimental snapshot forks.
+ * Accepts or replays branches forked from committed snapshots.
  *
- * The feature gate is Worker-owned and is checked before any durable operation,
- * provisional branch, resource plan, provider intent, or provider mutation is
- * created.
+ * Only newly accepted operations are scheduled. Replay never authorizes a
+ * replacement executor or additional provider mutation.
  */
 export class ForkSubmission {
   constructor(
@@ -40,15 +34,9 @@ export class ForkSubmission {
     private readonly operationEvents: CapsuleOperationEventPublisher,
     private readonly lifecycleEvents: CapsuleLifecycleEventPublisher,
     private readonly branchEvents: CapsuleBranchEventPublisher,
-    private readonly options: ForkSubmissionOptions,
   ) {}
 
   public async submit(input: SubmitForkInput): Promise<CapsuleForkReceipt> {
-    if (!this.options.enabled) {
-      throw new IncusError('Experimental snapshot forks are disabled for this Worker.', 'FORBIDDEN', {
-        feature: 'experimental_snapshots',
-      })
-    }
     const requestHash = createOperationRequestHash(
       {
         operationType: CapsuleOperationType.FORK,
@@ -59,7 +47,7 @@ export class ForkSubmission {
         cpu: input.cpu,
         memory: input.memory,
       } satisfies ForkRequestIdentity,
-      'experimental capsule fork request',
+      'capsule fork request',
     )
     const acceptance = await this.repository.accept({
       ...input,

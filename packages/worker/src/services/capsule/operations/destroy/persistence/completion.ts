@@ -1,4 +1,4 @@
-import { and, eq, isNotNull, isNull } from 'drizzle-orm'
+import { and, eq, isNotNull } from 'drizzle-orm'
 import {
   CapsuleOperationStatus,
   CapsuleOperationType,
@@ -74,30 +74,28 @@ export async function completeDestroyCapsule<TDatabase extends PostgresJsDatabas
     }
 
     /**
-     * Revalidate retained snapshot absence inside terminal completion.
+     * Revalidate committed snapshot absence inside terminal completion.
      *
      * Acceptance performs the same check before any provider mutation. This
      * second check makes terminal storage retirement fail closed if durable
      * snapshot state is introduced unexpectedly or future concurrency policy
      * changes weaken the current capsule-wide operation fence.
      */
-    const [retainedSnapshot] = await tx
+    const [snapshot] = await tx
       .select({
         id: capsuleSnapshots.id,
-        mode: capsuleSnapshots.mode,
       })
       .from(capsuleSnapshots)
-      .where(and(eq(capsuleSnapshots.capsuleId, operation.capsuleId), isNull(capsuleSnapshots.archivedAt)))
+      .where(eq(capsuleSnapshots.capsuleId, operation.capsuleId))
       .limit(1)
-    if (retainedSnapshot) {
+    if (snapshot) {
       throw new IncusError(
-        'Capsule destroy cannot complete while a committed snapshot retains provider storage.',
+        'Capsule destroy cannot complete while committed snapshots remain.',
         'CONFLICT',
         {
           operationId,
           capsuleId: operation.capsuleId,
-          snapshotId: retainedSnapshot.id,
-          snapshotMode: retainedSnapshot.mode,
+          snapshotId: snapshot.id,
           policy: 'snapshot_retention_deletion_not_implemented',
         },
       )

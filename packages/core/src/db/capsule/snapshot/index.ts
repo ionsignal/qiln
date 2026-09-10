@@ -1,5 +1,2 @@
 export * from './record'
-export * from './manifest'
-export * from './git'
-export * from './dependency'
 export * from './resource'

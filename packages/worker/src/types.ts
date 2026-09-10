@@ -37,10 +37,6 @@ export interface WorkerRoutingConfig {
   verificationTimeoutMs?: number
 }
 
-export interface WorkerFeatureConfig {
-  experimentalSnapshots?: boolean
-}
-
 export interface WorkerRuntimeConfig {
   database?: WorkerDatabaseConfig
   nats?: WorkerNatsConfig
@@ -48,7 +44,6 @@ export interface WorkerRuntimeConfig {
   incus?: WorkerIncusConfig
   caddy?: WorkerCaddyConfig
   routing?: WorkerRoutingConfig
-  features?: WorkerFeatureConfig
 }
 
 export interface WorkerRuntimeOptions<

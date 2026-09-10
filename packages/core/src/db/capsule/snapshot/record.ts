@@ -1,35 +1,12 @@
 import { sql } from 'drizzle-orm'
-import {
-  check,
-  index,
-  integer,
-  jsonb,
-  pgEnum,
-  pgTable,
-  text,
-  timestamp,
-  uuid,
-  type PgColumn,
-} from 'drizzle-orm/pg-core'
-import {
-  CapsuleSnapshotAgentArtifactContentPolicyValues,
-  CapsuleSnapshotModeValues,
-  type CapsuleBlueprintDigest,
-  type CapsuleBlueprintPin,
-  type CapsuleBranchName,
-  type CapsuleBranchResourceInventoryDigest,
-  type CapsuleRootfsImagePin,
-  type CapsuleSnapshotCapturePolicyDigest,
-  type CapsuleSnapshotCapturePolicyPin,
-  type CapsuleSnapshotLimitationValue,
+import { check, index, integer, jsonb, pgTable, text, timestamp, uuid, type PgColumn } from 'drizzle-orm/pg-core'
+import type {
+  CapsuleBlueprintDigest,
+  CapsuleBlueprintPin,
+  CapsuleBranchName,
+  CapsuleBranchResourceInventoryDigest,
+  CapsuleRootfsImagePin,
 } from '../../../schemas'
-
-export const capsuleSnapshotModeEnum = pgEnum('capsule_snapshot_mode', CapsuleSnapshotModeValues)
-
-export const CapsuleSnapshotAgentArtifactContentPolicyEnum = pgEnum(
-  'capsule_snapshot_agent_artifact_content_policy',
-  CapsuleSnapshotAgentArtifactContentPolicyValues,
-)
 
 function createCapsuleIdColumn(capsuleIdColumn?: PgColumn) {
   return capsuleIdColumn
@@ -48,26 +25,18 @@ function createSourceBranchIdColumn(sourceBranchIdColumn?: PgColumn) {
 }
 
 /**
- * Creates immutable committed capsule snapshot history.
+ * Immutable committed restoration evidence for one capsule branch state.
  *
- * A row is a committed-history marker, not staging or execution state. Snapshot
- * Capture must insert this row and its complete evidence graph in the same
- * transaction that links the capture operation result and terminalizes the base
- * operation.
+ * Create Snapshot inserts this row and every managed-volume provider reference
+ * in the same transaction that links the operation result and completes the
+ * base operation. This table is never staging or execution state.
  *
- * The complete historical Blueprint pin and immutable rootfs image pin are
- * committed with the snapshot so future branch forks and route revisions never
- * depend on mutable registry state, image aliases, or traversing the original
- * create operation lineage.
+ * Historical Blueprint configuration and the exact rootfs image pin authorize
+ * reconstruction without consulting mutable catalogs or image aliases.
  *
- * Experimental snapshots are committed history, but their mode and limitations
- * explicitly prevent them from receiving production traffic. Hardened mode is
- * reserved for a future writer that proves its stronger evidence contract.
- *
- * `archivedAt` is the only intentionally mutable lifecycle field. Blueprint,
- * rootfs image, capture policy, source identity, resource-inventory evidence,
- * assurance, manifest evidence, Git records, dependency references, and
- * physical provider references are immutable by repository policy.
+ * Bind mounts remain unversioned external configuration. A snapshot does not
+ * guarantee their contents or availability, mutable rootfs changes, application
+ * correctness, Git history, or a detailed explanation of changes.
  */
 export function createCapsuleSnapshotsTable(capsuleIdColumn?: PgColumn, sourceBranchIdColumn?: PgColumn) {
   const capsuleId = createCapsuleIdColumn(capsuleIdColumn)
@@ -90,14 +59,6 @@ export function createCapsuleSnapshotsTable(capsuleIdColumn?: PgColumn, sourceBr
       blueprintDigest: text('blueprint_digest').$type<CapsuleBlueprintDigest>().notNull(),
       blueprintPin: jsonb('blueprint_pin').$type<CapsuleBlueprintPin>().notNull(),
       rootfsImagePin: jsonb('rootfs_image_pin').$type<CapsuleRootfsImagePin>().notNull(),
-      capturePolicySchemaVersion: integer('capture_policy_schema_version').notNull(),
-      capturePolicyDigest: text('capture_policy_digest').$type<CapsuleSnapshotCapturePolicyDigest>().notNull(),
-      capturePolicyPin: jsonb('capture_policy_pin').$type<CapsuleSnapshotCapturePolicyPin>().notNull(),
-      agentArtifactContentPolicy: CapsuleSnapshotAgentArtifactContentPolicyEnum('agent_artifact_content_policy')
-        .notNull()
-        .default('deny'),
-      mode: capsuleSnapshotModeEnum('mode').notNull().default('experimental'),
-      limitations: jsonb('limitations').$type<CapsuleSnapshotLimitationValue[]>().notNull(),
       createdAt: timestamp('created_at', {
         withTimezone: true,
         mode: 'date',
@@ -105,45 +66,16 @@ export function createCapsuleSnapshotsTable(capsuleIdColumn?: PgColumn, sourceBr
       })
         .notNull()
         .defaultNow(),
-      archivedAt: timestamp('archived_at', {
-        withTimezone: true,
-        mode: 'date',
-        precision: 3,
-      }),
     },
     table => [
       index('capsule_snapshots_capsule_created_idx').on(table.capsuleId, table.createdAt),
       index('capsule_snapshots_source_branch_idx').on(table.sourceBranchId),
       index('capsule_snapshots_blueprint_digest_idx').on(table.blueprintDigest),
-      index('capsule_snapshots_policy_digest_idx').on(table.capturePolicyDigest),
-      index('capsule_snapshots_mode_idx').on(table.mode),
       check('capsule_snapshots_blueprint_schema_check', sql`${table.blueprintSchemaVersion} = 1`),
       check('capsule_snapshots_blueprint_digest_check', sql`${table.blueprintDigest} ~ '^sha256:[a-f0-9]{64}$'`),
-      check('capsule_snapshots_policy_schema_check', sql`${table.capturePolicySchemaVersion} = 1`),
-      check('capsule_snapshots_policy_digest_check', sql`${table.capturePolicyDigest} ~ '^sha256:[a-f0-9]{64}$'`),
       check(
         'capsule_snapshots_inventory_digest_check',
         sql`${table.sourceBranchResourceInventoryDigest} ~ '^sha256:[a-f0-9]{64}$'`,
-      ),
-      check(
-        'capsule_snapshots_assurance_check',
-        sql`(
-          (
-            ${table.mode} = 'experimental'
-            AND jsonb_typeof(${table.limitations}) = 'array'
-            AND jsonb_array_length(${table.limitations}) > 0
-          )
-          OR
-          (
-            ${table.mode} = 'hardened'
-            AND jsonb_typeof(${table.limitations}) = 'array'
-            AND jsonb_array_length(${table.limitations}) = 0
-          )
-        )`,
-      ),
-      check(
-        'capsule_snapshots_archive_timestamp_check',
-        sql`${table.archivedAt} IS NULL OR ${table.archivedAt} >= ${table.createdAt}`,
       ),
     ],
   )

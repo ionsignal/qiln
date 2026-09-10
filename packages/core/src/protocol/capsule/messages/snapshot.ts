@@ -1,47 +1,40 @@
 import { z } from 'zod'
-import { CapsuleActorReferenceSchema, CapsuleActorType } from '../../../schemas/capsule/actor'
+import { CapsuleActorReferenceSchema } from '../../../schemas/capsule/actor'
 import {
   CapsuleOperationIdempotencyKeySchema,
-  CapsuleSnapshotCaptureReceiptSchema,
+  CapsuleSnapshotCreateReceiptSchema,
 } from '../../../schemas/capsule/operations'
-import { CapsuleSnapshotMode } from '../../../schemas/capsule/snapshot/mode'
-import {
-  CapsuleSnapshotAgentArtifactContentPolicy,
-  CapsuleSnapshotAgentArtifactContentPolicySchema,
-} from '../../../schemas/capsule/snapshot/read'
 import { CapsuleSnapshotListOutputSchema } from '../../../schemas/capsule/snapshot/record'
 import { TargetOwnerSchema, TargetType } from '../targets'
 import { defineCapsuleCommand } from '../definitions'
-import type { input, output, ZodType } from 'zod'
-import type { CapsuleCommandDefinition, CapsuleEventDefinition } from '../definitions'
+import type { input, output } from 'zod'
+import type { CapsuleCommandDefinition } from '../definitions'
 
 const CAPSULE_SNAPSHOTS_LIST_TIMEOUT_MS = 15_000
-const CAPSULE_SNAPSHOT_CAPTURE_ACCEPTANCE_TIMEOUT_MS = 15_000
+const CAPSULE_SNAPSHOT_CREATE_ACCEPTANCE_TIMEOUT_MS = 15_000
 
 export const CapsuleSnapshotCommandName = {
   SNAPSHOTS_LIST: 'capsule.snapshots.list',
-  SNAPSHOT_CAPTURE: 'capsule.snapshot.capture',
+  SNAPSHOT_CREATE: 'capsule.snapshot.create',
 } as const
 
 export type CapsuleSnapshotCommandName = (typeof CapsuleSnapshotCommandName)[keyof typeof CapsuleSnapshotCommandName]
 
 export const CapsuleSnapshotCommandNameValues = [
   CapsuleSnapshotCommandName.SNAPSHOTS_LIST,
-  CapsuleSnapshotCommandName.SNAPSHOT_CAPTURE,
+  CapsuleSnapshotCommandName.SNAPSHOT_CREATE,
 ] as const
 
 /**
- * Owner-scoped committed snapshot history request.
+ * Owner-scoped committed restoration history.
  *
- * Experimental snapshots are excluded unless the authenticated caller
- * explicitly requests them. This flag changes visibility only; it does not
- * weaken committed-operation linkage or ownership checks.
+ * Every returned snapshot must satisfy the same restoration contract. There are
+ * no snapshot modes or weaker visibility-dependent evidence requirements.
  */
 export const CapsuleSnapshotsListInputSchema = z
   .object({
     target: TargetOwnerSchema,
     capsuleId: z.uuid(),
-    includeExperimental: z.boolean().default(false),
   })
   .strict()
 
@@ -52,48 +45,27 @@ export type CapsuleSnapshotsList = output<typeof CapsuleSnapshotsListInputSchema
 export type CapsuleSnapshotsListOutput = output<typeof CapsuleSnapshotsListOutputSchema>
 
 /**
- * Accepts an experimental Snapshot Capture operation.
+ * Accepts Create Snapshot for one exact editable source branch.
  *
- * The actor is supplied by a trusted authenticated publisher rather than
- * browser input.
+ * The trusted authenticated publisher derives actor provenance. The Worker must
+ * prove source ownership, offline state, inventory, and restoration pins before
+ * durable acceptance. The receipt does not imply snapshot completion.
  */
-export const CapsuleSnapshotCaptureInputSchema = z
+export const CapsuleSnapshotCreateInputSchema = z
   .object({
     target: TargetOwnerSchema,
     actor: CapsuleActorReferenceSchema,
     capsuleId: z.uuid(),
     sourceBranchId: z.uuid(),
     idempotencyKey: CapsuleOperationIdempotencyKeySchema,
-    mode: z.literal(CapsuleSnapshotMode.EXPERIMENTAL).default(CapsuleSnapshotMode.EXPERIMENTAL),
-    agentArtifactContentPolicy: CapsuleSnapshotAgentArtifactContentPolicySchema.default(
-      CapsuleSnapshotAgentArtifactContentPolicy.DENY,
-    ),
   })
   .strict()
-  .superRefine((input, context) => {
-    if (
-      input.agentArtifactContentPolicy === CapsuleSnapshotAgentArtifactContentPolicy.OWNER_AUTHORIZED_UNREVIEWED &&
-      (input.actor.type !== CapsuleActorType.USER || input.actor.id !== input.target.id)
-    ) {
-      context.addIssue({
-        code: 'custom',
-        path: ['agentArtifactContentPolicy'],
-        message: 'Unchecked agent artifact reads may be elected only by the capsule owner user.',
-      })
-    }
-  })
 
-export const CapsuleSnapshotCaptureOutputSchema = CapsuleSnapshotCaptureReceiptSchema
+export const CapsuleSnapshotCreateOutputSchema = CapsuleSnapshotCreateReceiptSchema
 
-export type CapsuleSnapshotCaptureInput = input<typeof CapsuleSnapshotCaptureInputSchema>
-export type CapsuleSnapshotCapture = output<typeof CapsuleSnapshotCaptureInputSchema>
-export type CapsuleSnapshotCaptureOutput = output<typeof CapsuleSnapshotCaptureOutputSchema>
-
-export const CapsuleSnapshotEventName = {} as const
-
-export type CapsuleSnapshotEventName = (typeof CapsuleSnapshotEventName)[keyof typeof CapsuleSnapshotEventName]
-
-export const CapsuleSnapshotEventNameValues = [] as const
+export type CapsuleSnapshotCreateInput = input<typeof CapsuleSnapshotCreateInputSchema>
+export type CapsuleSnapshotCreate = output<typeof CapsuleSnapshotCreateInputSchema>
+export type CapsuleSnapshotCreateOutput = output<typeof CapsuleSnapshotCreateOutputSchema>
 
 export const CapsuleSnapshotCommandDefinitions = {
   [CapsuleSnapshotCommandName.SNAPSHOTS_LIST]: defineCapsuleCommand({
@@ -109,24 +81,17 @@ export const CapsuleSnapshotCommandDefinitions = {
       },
     },
   }),
-  [CapsuleSnapshotCommandName.SNAPSHOT_CAPTURE]: defineCapsuleCommand({
+  [CapsuleSnapshotCommandName.SNAPSHOT_CREATE]: defineCapsuleCommand({
     kind: 'capsule.command',
-    name: CapsuleSnapshotCommandName.SNAPSHOT_CAPTURE,
-    inputSchema: CapsuleSnapshotCaptureInputSchema,
-    outputSchema: CapsuleSnapshotCaptureOutputSchema,
-    timeoutMs: CAPSULE_SNAPSHOT_CAPTURE_ACCEPTANCE_TIMEOUT_MS,
+    name: CapsuleSnapshotCommandName.SNAPSHOT_CREATE,
+    inputSchema: CapsuleSnapshotCreateInputSchema,
+    outputSchema: CapsuleSnapshotCreateOutputSchema,
+    timeoutMs: CAPSULE_SNAPSHOT_CREATE_ACCEPTANCE_TIMEOUT_MS,
     target: {
       type: TargetType.OWNER,
-      resolve(payload: CapsuleSnapshotCapture) {
+      resolve(payload: CapsuleSnapshotCreate) {
         return payload.target
       },
     },
   }),
 } as const satisfies Record<CapsuleSnapshotCommandName, CapsuleCommandDefinition>
-
-export const CapsuleSnapshotEventDefinitions = {} as const satisfies Record<
-  CapsuleSnapshotEventName,
-  CapsuleEventDefinition
->
-
-export const CapsuleSnapshotEventSchemas = [] as const satisfies readonly ZodType[]

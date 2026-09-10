@@ -15,6 +15,7 @@ import { ForkCommitPersistence } from './commit'
 import { ForkExecutionPersistence } from './execution'
 import { ForkFailurePersistence } from './failure'
 import { ForkInputPersistence } from './input'
+import { ForkLocks } from './locks'
 import { ForkSourcePersistence } from './source'
 
 /**
@@ -36,11 +37,12 @@ export class ForkRepository<
   constructor(persistence: CapsulePersistence<TDatabase, TTables>, reader: CapsuleOperationReader<TDatabase, TTables>) {
     const planner = new ForkPlanner()
     const sources = new ForkSourcePersistence(persistence)
-    this.acceptance = new ForkAcceptancePersistence(persistence, reader, planner, sources)
-    this.input = new ForkInputPersistence(persistence, planner, sources)
-    this.execution = new ForkExecutionPersistence(persistence)
-    this.commitPersistence = new ForkCommitPersistence(persistence, planner, sources)
-    this.failure = new ForkFailurePersistence(persistence, reader, planner, sources)
+    const locks = new ForkLocks(persistence)
+    this.acceptance = new ForkAcceptancePersistence(persistence, reader, planner, sources, locks)
+    this.input = new ForkInputPersistence(persistence, planner, sources, locks)
+    this.execution = new ForkExecutionPersistence(persistence, locks, this.input)
+    this.commitPersistence = new ForkCommitPersistence(persistence, locks, this.input)
+    this.failure = new ForkFailurePersistence(persistence, locks, this.input)
   }
 
   public async accept(
@@ -65,6 +67,10 @@ export class ForkRepository<
 
   public async commit(operationId: string): Promise<ForkTerminal> {
     return await this.commitPersistence.commit(operationId)
+  }
+
+  public async compensation(operationId: string): Promise<ForkExecution> {
+    return await this.input.compensation(operationId)
   }
 
   public async compensated(

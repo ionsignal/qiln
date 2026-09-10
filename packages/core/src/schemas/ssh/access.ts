@@ -22,7 +22,7 @@ export const SshBranchAccessBlockReason = {
   BRANCH_CREATED: 'branch_created',
   BRANCH_FORKED: 'branch_forked',
   BRANCH_STOP: 'branch_stop',
-  SNAPSHOT_CAPTURE: 'snapshot_capture',
+  SNAPSHOT_CREATE: 'snapshot_create',
   CAPSULE_ARCHIVE: 'capsule_archive',
   CAPSULE_DESTROY: 'capsule_destroy',
   ADMIN_REVOKED: 'admin_revoked',
@@ -35,7 +35,7 @@ export const SshBranchAccessBlockReasonValues = [
   SshBranchAccessBlockReason.BRANCH_CREATED,
   SshBranchAccessBlockReason.BRANCH_FORKED,
   SshBranchAccessBlockReason.BRANCH_STOP,
-  SshBranchAccessBlockReason.SNAPSHOT_CAPTURE,
+  SshBranchAccessBlockReason.SNAPSHOT_CREATE,
   SshBranchAccessBlockReason.CAPSULE_ARCHIVE,
   SshBranchAccessBlockReason.CAPSULE_DESTROY,
   SshBranchAccessBlockReason.ADMIN_REVOKED,
@@ -51,7 +51,7 @@ export const SshBranchAccessInitializationReasonSchema = z.enum([
 
 export const SshBranchAccessRevocationReasonSchema = z.enum([
   SshBranchAccessBlockReason.BRANCH_STOP,
-  SshBranchAccessBlockReason.SNAPSHOT_CAPTURE,
+  SshBranchAccessBlockReason.SNAPSHOT_CREATE,
 ])
 
 export const SshCapsuleAccessRevocationReasonSchema = z.enum([

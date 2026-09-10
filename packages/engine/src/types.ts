@@ -108,8 +108,8 @@ export type CapsuleOperationSummary = EngineRouterOutputs['capsules']['operation
 /**
  * Client-safe committed snapshot summary inferred from the Engine router.
  *
- * Detailed artifact entries, Git evidence, dependency references, physical
- * provider references, policy pins, and capture diagnostics remain
- * server-only.
+ * Create Snapshot retains restoration evidence, not diff review, golden-test
+ * results, or promotion approval. Physical provider references, historical
+ * Blueprint and rootfs image pins, and operation diagnostics remain server-only.
  */
 export type CapsuleSnapshotSummary = EngineRouterOutputs['capsules']['snapshots']['list'][number]

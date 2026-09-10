@@ -63,7 +63,7 @@ export const CapsuleRootfsImageAliasSchema = z
  * Immutable rootfs reconstruction authority.
  *
  * The pin is accepted before provider mutation and copied through create,
- * Snapshot Capture, committed snapshot, and fork provenance. A mutable image
+ * Create Snapshot, committed snapshot, and fork provenance. A mutable image
  * alias can identify this pin at create acceptance but must never be consulted
  * when rebuilding a branch from committed history.
  */

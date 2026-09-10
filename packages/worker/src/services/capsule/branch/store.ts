@@ -15,7 +15,7 @@ import type {
 const ACTIVE_BRANCH_STATUSES = [
   'provisioning',
   'offline',
-  'capturing',
+  'snapshotting',
   'starting',
   'online',
   'stopping',

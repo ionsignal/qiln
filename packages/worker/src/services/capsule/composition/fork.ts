@@ -15,7 +15,7 @@ import type {
 } from '../events'
 import type { CapsuleOperationReader, CapsuleOperationStepStore } from '../operations/shared'
 import type { CapsuleBranchResourceStore } from '../resource'
-import type { CapsulePersistence, CapsuleTables } from '@qiln/core/server'
+import type { CapsuleChannel, CapsulePersistence, CapsuleTables } from '@qiln/core/server'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
 export interface ComposeForkCapabilityOptions<
@@ -24,6 +24,7 @@ export interface ComposeForkCapabilityOptions<
 > {
   persistence: CapsulePersistence<TDatabase, TTables>
   incus: IncusClient
+  channel: CapsuleChannel
   project: ProjectService
   supervisor: OperationSupervisor
   operationReader: CapsuleOperationReader<TDatabase, TTables>
@@ -32,7 +33,6 @@ export interface ComposeForkCapabilityOptions<
   operationEvents: CapsuleOperationEventPublisher
   lifecycleEvents: CapsuleLifecycleEventPublisher
   branchEvents: CapsuleBranchEventPublisher
-  enabled: boolean
 }
 
 export interface ComposedForkCapability {
@@ -41,10 +41,11 @@ export interface ComposedForkCapability {
 }
 
 /**
- * Composes the experimental snapshot-fork vertical slice.
+ * Composes the snapshot-fork vertical slice.
  *
  * Construction performs no SQL, provider mutation, scheduling, event
- * publication, or command registration.
+ * publication, or command registration. The channel delegates SSH fence
+ * initialization to Host policy rather than introducing Worker authorization.
  */
 export function composeForkCapability<TDatabase extends PostgresJsDatabase, TTables extends CapsuleTables>(
   options: ComposeForkCapabilityOptions<TDatabase, TTables>,
@@ -60,13 +61,14 @@ export function composeForkCapability<TDatabase extends PostgresJsDatabase, TTab
   const compensation = new ForkCompensation({
     incus: options.incus,
     resources: options.resources,
+    repository,
   })
   const executor = new ForkExecutor({
     repository,
     steps: options.operationSteps,
-    resources: options.resources,
     provider,
     compensation,
+    channel: options.channel,
     operationEvents: options.operationEvents,
     lifecycleEvents: options.lifecycleEvents,
     branchEvents: options.branchEvents,
@@ -78,9 +80,6 @@ export function composeForkCapability<TDatabase extends PostgresJsDatabase, TTab
     options.operationEvents,
     options.lifecycleEvents,
     options.branchEvents,
-    {
-      enabled: options.enabled,
-    },
   )
   const abandonment = new ForkAbandonment({
     repository,

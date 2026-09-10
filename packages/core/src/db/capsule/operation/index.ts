@@ -1,6 +1,6 @@
 export * from './record'
 export * from './create'
 export * from './fork'
-export * from './capture'
+export * from './snapshot'
 export * from './runtime'
 export * from './step'

@@ -10,7 +10,7 @@ import type { CapsuleCommandDefinition } from '../definitions'
 const CAPSULE_FORK_ACCEPTANCE_TIMEOUT_MS = 15_000
 
 /**
- * Creates an editable branch from one committed experimental snapshot.
+ * Creates an editable branch from one exact committed snapshot.
  *
  * The command returns after durable acceptance. Exact provider cloning and
  * branch materialization continue under the Worker operation supervisor.

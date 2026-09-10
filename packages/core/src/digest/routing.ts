@@ -151,7 +151,6 @@ function normalizeEvidence(body: CapsuleRouteEvidencePinBody): CapsuleRouteEvide
     risk: {
       actor: body.risk.actor,
       acknowledgedAt: body.risk.acknowledgedAt,
-      acceptedLimitations: [...body.risk.acceptedLimitations].sort(compareStableString),
     },
   }
   const parsed = CapsuleRouteEvidencePinBodySchema.safeParse(normalized)
@@ -180,7 +179,6 @@ function targetBody(pin: CapsuleRouteTargetPin): CapsuleRouteTargetPinBody {
     schemaVersion: pin.schemaVersion,
     snapshotId: pin.snapshotId,
     application: pin.application,
-    assurance: pin.assurance,
   }
 }
 
@@ -306,10 +304,6 @@ export function createCapsuleRouteTargetPin(value: unknown): CapsuleRouteTargetP
     schemaVersion: body.data.schemaVersion,
     snapshotId: body.data.snapshotId,
     application,
-    assurance: {
-      mode: body.data.assurance.mode,
-      limitations: [...body.data.assurance.limitations].sort(compareStableString),
-    },
   }
   const pin = CapsuleRouteTargetPinSchema.safeParse({
     ...normalized,
@@ -403,7 +397,6 @@ export function createCapsuleRouteTargetReference(value: unknown): CapsuleRouteT
     snapshotId: target.snapshotId,
     blueprint: target.application.blueprint,
     applicationName: target.application.application.name,
-    assurance: target.assurance,
   })
   if (!reference.success) {
     throw new GlobalError(

@@ -1,44 +1,33 @@
-import { z } from 'zod'
 import {
-  CapsuleOperationIdempotencyKeySchema,
-  CapsuleSnapshotAgentArtifactContentPolicy,
-  CapsuleSnapshotAgentArtifactContentPolicySchema,
-  CapsuleSnapshotCaptureOutputSchema,
+  CapsuleSnapshotCreateInputSchema,
+  CapsuleSnapshotCreateOutputSchema,
   CapsuleSnapshotListOutputSchema,
+  CapsuleSnapshotsListInputSchema,
 } from '@qiln/core/server'
 import { protectedProcedure, router } from '../../init'
 import { createUserMutationIdentity } from '../../identity'
 import { handleEngineError } from '../../utils'
 
-const CapsuleSnapshotListInputSchema = z
-  .object({
-    capsuleId: z.uuid(),
-    includeExperimental: z.boolean().default(false),
-  })
-  .strict()
+const CapsuleSnapshotListInputSchema = CapsuleSnapshotsListInputSchema.pick({
+  capsuleId: true,
+}).strict()
 
-const CapsuleSnapshotCaptureInputSchema = z
-  .object({
-    capsuleId: z.uuid(),
-    sourceBranchId: z.uuid(),
-    idempotencyKey: CapsuleOperationIdempotencyKeySchema,
-    agentArtifactContentPolicy: CapsuleSnapshotAgentArtifactContentPolicySchema.default(
-      CapsuleSnapshotAgentArtifactContentPolicy.DENY,
-    ),
-  })
-  .strict()
+const CapsuleSnapshotCreateMutationInputSchema = CapsuleSnapshotCreateInputSchema.pick({
+  capsuleId: true,
+  sourceBranchId: true,
+  idempotencyKey: true,
+}).strict()
 
 /**
- * Client boundary for committed capsule snapshot history and experimental
- * Snapshot Capture submission.
+ * Client boundary for committed capsule snapshot history and Create Snapshot
+ * submission.
  *
  * Owner identity and operation actor provenance are derived from authenticated
- * tRPC context. Browser input cannot select a capture mode, provider identity,
- * policy evidence, or weaken Worker-owned capture fences. A capsule owner may
- * explicitly choose the immutable agent artifact-content policy for a new
- * Snapshot Capture operation.
+ * tRPC context. Browser input cannot select provider identities, restoration
+ * pins, or weaken Worker-owned snapshot fences. Every returned snapshot must
+ * satisfy the same committed restoration contract.
  *
- * Capture returns a durable operation receipt. Clients must refetch
+ * Create returns a durable operation receipt. Clients must refetch
  * authoritative operation, branch, and committed snapshot state after receiving
  * invalidation events or reconnecting.
  */
@@ -48,21 +37,19 @@ export const capsuleSnapshotsRouter = router({
     .output(CapsuleSnapshotListOutputSchema)
     .query(async ({ ctx, input }) => {
       try {
-        return await ctx.engine.capsuleSnapshots.list(ctx.user.id, input.capsuleId, {
-          includeExperimental: input.includeExperimental,
-        })
+        return await ctx.engine.capsuleSnapshots.list(ctx.user.id, input.capsuleId)
       } catch (error: unknown) {
         handleEngineError(error)
       }
     }),
 
-  capture: protectedProcedure
-    .input(CapsuleSnapshotCaptureInputSchema)
-    .output(CapsuleSnapshotCaptureOutputSchema)
+  create: protectedProcedure
+    .input(CapsuleSnapshotCreateMutationInputSchema)
+    .output(CapsuleSnapshotCreateOutputSchema)
     .mutation(async ({ ctx, input }) => {
       try {
         const identity = createUserMutationIdentity(ctx.user)
-        return await ctx.engine.capsuleSnapshots.capture(identity, input)
+        return await ctx.engine.capsuleSnapshots.create(identity, input)
       } catch (error: unknown) {
         handleEngineError(error)
       }

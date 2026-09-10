@@ -1,5 +1,6 @@
 import { CapsuleService } from '../facade'
 import { CapsuleRuntimeReconciliationCoordinator } from '../reconciliation'
+import { DiffService } from '../diff/service'
 import { CapsuleBranchEventPublisher } from '../events/branch'
 import { CapsuleLifecycleEventPublisher } from '../events/lifecycle'
 import { CapsuleOperationEventPublisher } from '../events/operation'
@@ -14,12 +15,11 @@ import { CapsuleBranchResourceStore } from '../resource/store'
 import { PreviewGate } from '../routing/preview/gate'
 import { composeArchiveCapability } from './archive'
 import { composeBranchCapability } from './branch'
-import { composeCaptureCapability } from './capture'
 import { composeCreateCapability } from './create'
 import { composeDestroyCapability } from './destroy'
 import { composeForkCapability } from './fork'
 import { composeRoutingCapability } from './routing'
-import { composeSnapshotCapability } from './snapshot'
+import { composeCreateSnapshotCapability, composeSnapshotCapability } from './snapshot'
 import { composeUnarchiveCapability } from './unarchive'
 import type { CaddyClient } from '../../../caddy'
 import type { WorkerRoutingConfig } from '../../../types'
@@ -43,7 +43,6 @@ export interface ComposeCapsuleServiceOptions<
   routing: WorkerRoutingConfig
   blueprints: CapsuleBlueprintRegistry
   supervisor: OperationSupervisor
-  experimentalSnapshotsEnabled: boolean
 }
 
 /**
@@ -103,6 +102,7 @@ export function composeCapsuleService<TDatabase extends PostgresJsDatabase, TTab
   const fork = composeForkCapability({
     persistence: options.persistence,
     incus: options.incus,
+    channel: options.channel,
     project: options.project,
     supervisor: options.supervisor,
     operationReader,
@@ -111,7 +111,6 @@ export function composeCapsuleService<TDatabase extends PostgresJsDatabase, TTab
     operationEvents,
     lifecycleEvents,
     branchEvents,
-    enabled: options.experimentalSnapshotsEnabled,
   })
   const destroy = composeDestroyCapability({
     persistence: options.persistence,
@@ -125,22 +124,21 @@ export function composeCapsuleService<TDatabase extends PostgresJsDatabase, TTab
     branchEvents,
     previewGate,
   })
-  const capture = composeCaptureCapability({
+  const createSnapshot = composeCreateSnapshotCapability({
     persistence: options.persistence,
     incus: options.incus,
+    channel: options.channel,
     supervisor: options.supervisor,
-    operationReader,
     operationSteps,
     operationEvents,
     lifecycleEvents,
     branchEvents,
     previewGate,
-    enabled: options.experimentalSnapshotsEnabled,
   })
   const snapshot = composeSnapshotCapability({
     persistence: options.persistence,
-    incus: options.incus,
   })
+  const diff = new DiffService()
   const route = composeRoutingCapability({
     persistence: options.persistence,
     caddy: options.caddy,
@@ -173,7 +171,7 @@ export function composeCapsuleService<TDatabase extends PostgresJsDatabase, TTab
     archive.abandonment,
     unarchive.abandonment,
     destroy.abandonment,
-    capture.abandonment,
+    createSnapshot.abandonment,
     ...branch.abandonment,
     ...route.abandonment,
   ])
@@ -189,11 +187,12 @@ export function composeCapsuleService<TDatabase extends PostgresJsDatabase, TTab
     archive: archive.submission,
     unarchive: unarchive.submission,
     destroy: destroy.submission,
-    capture: capture.submission,
+    createSnapshot: createSnapshot.submission,
     start: branch.start,
     stop: branch.stop,
     branch: branch.service,
     snapshot,
+    diff,
     preview: route.preview,
     route: route.service,
     reconciliation,

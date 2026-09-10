@@ -16,11 +16,11 @@ import {
   toCapsuleLifecycleState,
   toCapsuleOperationTransition,
   type CapsuleOperationReader,
-  type PersistedCapsuleOperation,
 } from '../../shared'
 import type { ForkPlanner } from '../plan'
 import type { AcceptForkInput, ForkAcceptance, ForkBranch, ForkPlannedResource } from '../types'
 import { assertForkEvidence, ForkSourcePersistence } from './source'
+import type { ForkLocks, ForkScope, ForkTransaction } from './locks'
 
 /**
  * Owns atomic fork acceptance and race-safe idempotent replay.
@@ -37,6 +37,7 @@ export class ForkAcceptancePersistence<
     private readonly reader: CapsuleOperationReader<TDatabase, TTables>,
     private readonly planner: ForkPlanner,
     private readonly sources: ForkSourcePersistence<TDatabase, TTables>,
+    private readonly locks: ForkLocks<TDatabase, TTables>,
   ) {}
 
   public async accept(input: AcceptForkInput): Promise<ForkAcceptance> {
@@ -47,7 +48,11 @@ export class ForkAcceptancePersistence<
     const tables = this.persistence.tables
     try {
       return await this.persistence.db.transaction(async tx => {
-        const capsule = await this.lockCapsule(tx, input.ownerId, input.capsuleId)
+        const capsule = await this.locks.capsule(tx, input.ownerId, input.capsuleId)
+        const replay = await this.replayLocked(tx, input)
+        if (replay) {
+          return replay
+        }
         if (capsule.lifecycleStatus !== 'active' || capsule.archivedAt !== null) {
           throw new IncusError('Only an active, unarchived capsule can fork a branch.', 'CONFLICT', {
             ownerId: input.ownerId,
@@ -56,7 +61,7 @@ export class ForkAcceptancePersistence<
             archived: capsule.archivedAt !== null,
           })
         }
-        const source = await this.sources.lock(tx, input.ownerId, input.capsuleId, input.sourceSnapshotId)
+        const source = await this.sources.read(tx, input.ownerId, input.capsuleId, input.sourceSnapshotId)
         const now = new Date()
         const [operation] = await tx
           .insert(tables.capsuleOperations)
@@ -73,12 +78,7 @@ export class ForkAcceptancePersistence<
             createdAt: now,
             updatedAt: now,
           })
-          .returning({
-            id: tables.capsuleOperations.id,
-            ownerId: tables.capsuleOperations.ownerId,
-            capsuleId: tables.capsuleOperations.capsuleId,
-            status: tables.capsuleOperations.status,
-          })
+          .returning()
         if (!operation) {
           throw new IncusError('Failed to accept the capsule fork operation.', 'API_ERROR')
         }
@@ -97,12 +97,7 @@ export class ForkAcceptancePersistence<
             createdAt: now,
             updatedAt: now,
           })
-          .returning({
-            id: tables.capsuleBranches.id,
-            capsuleId: tables.capsuleBranches.capsuleId,
-            name: tables.capsuleBranches.name,
-            status: tables.capsuleBranches.status,
-          })
+          .returning()
         if (!branch) {
           throw new IncusError('Failed to create the provisional fork branch.', 'API_ERROR', {
             operationId: operation.id,
@@ -131,39 +126,22 @@ export class ForkAcceptancePersistence<
             blueprintDigest: source.blueprint.digest,
             blueprintPin: source.blueprint,
             rootfsImagePin: source.rootfsImagePin,
-            capturePolicySchemaVersion: source.capturePolicy.schemaVersion,
-            capturePolicyDigest: source.capturePolicy.digest,
-            capturePolicyPin: source.capturePolicy,
-            sourceSnapshotMode: source.mode,
-            sourceSnapshotLimitations: source.limitations,
             cpu: input.cpu,
             memory: input.memory,
           })
-          .returning({
-            operationId: tables.capsuleForkOperations.operationId,
-            targetBranchId: tables.capsuleForkOperations.targetBranchId,
-          })
-        if (!extension || extension.operationId !== operation.id || extension.targetBranchId !== branch.id) {
+          .returning()
+        if (!extension) {
           throw new IncusError('Failed to persist immutable capsule fork input.', 'API_ERROR', {
             operationId: operation.id,
             branchId: branch.id,
           })
         }
-        const resourceRows = await tx
+        const resources = await tx
           .insert(tables.capsuleBranchResources)
           .values(
             plan.resources.map(resource => this.resourceValue(operation.id, input.ownerId, branch, resource, now)),
           )
-          .returning({
-            id: tables.capsuleBranchResources.id,
-          })
-        if (resourceRows.length !== plan.resources.length) {
-          throw new IncusError('Failed to persist the complete fork branch resource plan.', 'API_ERROR', {
-            operationId: operation.id,
-            expectedResourceCount: plan.resources.length,
-            insertedResourceCount: resourceRows.length,
-          })
-        }
+          .returning()
         const [provedBranch] = await tx
           .update(tables.capsuleBranches)
           .set({
@@ -178,44 +156,37 @@ export class ForkAcceptancePersistence<
               eq(tables.capsuleBranches.status, 'provisioning'),
             ),
           )
-          .returning({
-            id: tables.capsuleBranches.id,
-            capsuleId: tables.capsuleBranches.capsuleId,
-            name: tables.capsuleBranches.name,
-            status: tables.capsuleBranches.status,
-          })
+          .returning()
         if (!provedBranch) {
           throw new IncusError('Failed to commit the fork branch resource inventory proof.', 'CONFLICT', {
             operationId: operation.id,
             branchId: branch.id,
           })
         }
-        return {
-          newlyAccepted: true,
-          receipt: this.receipt({
-            operationId: operation.id,
-            operationStatus: operation.status,
-            capsuleId: operation.capsuleId,
-            sourceSnapshotId: source.snapshotId,
-            branchId: branch.id,
-            branchName: branch.name,
-            replayed: false,
-          }),
-          operation: toCapsuleOperationTransition({
-            ownerId: operation.ownerId,
-            operationId: operation.id,
-            operationType: CapsuleOperationType.FORK,
-            operationStatus: operation.status,
-            capsuleId: operation.capsuleId,
-          }),
-          capsule: toCapsuleLifecycleState({
-            capsuleId: operation.capsuleId,
-            lifecycleStatus: capsule.lifecycleStatus,
-            archivedAt: capsule.archivedAt,
-            destroyedAt: capsule.destroyedAt,
-          }),
-          branch: provedBranch,
-        }
+
+        assertForkEvidence(operation, extension, source, provedBranch)
+
+        this.planner.assertResources({
+          operationId: operation.id,
+          ownerId: operation.ownerId,
+          branchId: provedBranch.id,
+          branchName: provedBranch.name,
+          extensionInventoryDigest: extension.targetBranchResourceInventoryDigest,
+          branchInventoryDigest: provedBranch.resourceInventoryDigest,
+          stage: 'accepted',
+          plan,
+          resources,
+        })
+
+        return this.result(
+          {
+            operation,
+            capsule,
+            extension,
+            branch: provedBranch,
+          },
+          false,
+        )
       })
     } catch (error: unknown) {
       if (!isUniqueConstraintViolation(error)) {
@@ -247,61 +218,132 @@ export class ForkAcceptancePersistence<
       requestDescription: 'capsule fork',
     })
 
-    return await this.result(operation)
+    if (operation.capsuleId !== input.capsuleId) {
+      throw new IncusError('Capsule fork replay belongs to another capsule.', 'CONFLICT', {
+        operationId: operation.id,
+      })
+    }
+    return await this.persistence.db.transaction(async tx => {
+      await this.locks.capsule(tx, input.ownerId, input.capsuleId)
+      return await this.replayLocked(tx, input)
+    })
   }
 
-  private async result(operation: PersistedCapsuleOperation): Promise<ForkAcceptance> {
-    return await this.persistence.db.transaction(async tx => {
-      const tables = this.persistence.tables
-      const [extension] = await tx
-        .select()
-        .from(tables.capsuleForkOperations)
-        .where(eq(tables.capsuleForkOperations.operationId, operation.id))
-        .for('update')
-        .limit(1)
-      if (!extension) {
-        throw new IncusError('Capsule fork operation is missing immutable input.', 'API_ERROR', {
-          operationId: operation.id,
-        })
-      }
-      const capsule = await this.lockCapsule(tx, operation.ownerId, operation.capsuleId)
-      const source = await this.sources.lock(tx, operation.ownerId, operation.capsuleId, extension.sourceSnapshotId)
-      const branch = await this.lockBranch(tx, operation.ownerId, operation.capsuleId, extension.targetBranchId)
+  /**
+   * The caller holds the requested capsule lock before checking replay and
+   * before checking mutable lifecycle eligibility.
+   *
+   * The operation is reloaded under that lock so receipt status and aggregate
+   * state never come from different reads around a concurrent completion.
+   */
+  private async replayLocked(tx: ForkTransaction<TDatabase>, input: AcceptForkInput): Promise<ForkAcceptance | null> {
+    const operations = this.persistence.tables.capsuleOperations
+    const [existing] = await tx
+      .select()
+      .from(operations)
+      .where(and(eq(operations.ownerId, input.ownerId), eq(operations.idempotencyKey, input.idempotencyKey)))
+      .limit(1)
+    if (!existing) {
+      return null
+    }
+    this.assertReplay(existing, input)
+    const scope = await this.locks.scope(tx, existing.id)
+    this.assertReplay(scope.operation, input)
+    if (
+      !scope.extension ||
+      !scope.branch ||
+      scope.extension.sourceSnapshotId !== input.sourceSnapshotId ||
+      scope.extension.targetBranchName !== input.branchName ||
+      scope.extension.cpu !== input.cpu ||
+      scope.extension.memory !== input.memory
+    ) {
+      throw new IncusError('Capsule fork replay has contradictory immutable input.', 'CONFLICT', {
+        operationId: scope.operation.id,
+      })
+    }
+    const source = await this.sources.read(
+      tx,
+      scope.operation.ownerId,
+      scope.operation.capsuleId,
+      scope.extension.sourceSnapshotId,
+    )
 
-      assertForkEvidence(operation, extension, source, branch)
+    assertForkEvidence(scope.operation, scope.extension, source, scope.branch)
 
-      return {
-        newlyAccepted: false,
-        receipt: this.receipt({
-          operationId: operation.id,
-          operationStatus: operation.status,
-          capsuleId: operation.capsuleId,
-          sourceSnapshotId: extension.sourceSnapshotId,
-          branchId: extension.targetBranchId,
-          branchName: extension.targetBranchName,
-          replayed: true,
-        }),
-        operation: toCapsuleOperationTransition({
-          ownerId: operation.ownerId,
-          operationId: operation.id,
-          operationType: CapsuleOperationType.FORK,
-          operationStatus: operation.status,
-          capsuleId: operation.capsuleId,
-        }),
-        capsule: toCapsuleLifecycleState({
-          capsuleId: operation.capsuleId,
-          lifecycleStatus: capsule.lifecycleStatus,
-          archivedAt: capsule.archivedAt,
-          destroyedAt: capsule.destroyedAt,
-        }),
-        branch: {
-          id: branch.id,
-          capsuleId: branch.capsuleId,
-          name: branch.name,
-          status: branch.status,
+    return this.result(scope, true)
+  }
+
+  private assertReplay(operation: ForkScope['operation'], input: AcceptForkInput): void {
+    assertOperationReplayIdentity(
+      {
+        id: operation.id,
+        type: operation.type,
+        requestHash: operation.requestHash,
+        actor: {
+          type: operation.actorType,
+          id: operation.actorId,
         },
-      }
-    })
+      },
+      {
+        actor: input.actor,
+        operationType: CapsuleOperationType.FORK,
+        requestHash: input.requestHash,
+        requestDescription: 'capsule fork',
+      },
+    )
+    if (
+      operation.ownerId !== input.ownerId ||
+      operation.capsuleId !== input.capsuleId ||
+      operation.idempotencyKey !== input.idempotencyKey
+    ) {
+      throw new IncusError('Capsule fork replay no longer matches its durable request identity.', 'CONFLICT', {
+        operationId: operation.id,
+      })
+    }
+  }
+
+  private result(scope: ForkScope, replayed: boolean): ForkAcceptance {
+    const { operation, capsule, extension, branch } = scope
+    if (!extension || !branch) {
+      throw new IncusError(
+        'Capsule fork receipt requires an immutable extension and owned target branch.',
+        'CONFLICT',
+        {
+          operationId: operation.id,
+        },
+      )
+    }
+    return {
+      newlyAccepted: !replayed,
+      receipt: this.receipt({
+        operationId: operation.id,
+        operationStatus: operation.status,
+        capsuleId: operation.capsuleId,
+        sourceSnapshotId: extension.sourceSnapshotId,
+        branchId: extension.targetBranchId,
+        branchName: extension.targetBranchName,
+        replayed,
+      }),
+      operation: toCapsuleOperationTransition({
+        ownerId: operation.ownerId,
+        operationId: operation.id,
+        operationType: CapsuleOperationType.FORK,
+        operationStatus: operation.status,
+        capsuleId: operation.capsuleId,
+      }),
+      capsule: toCapsuleLifecycleState({
+        capsuleId: operation.capsuleId,
+        lifecycleStatus: capsule.lifecycleStatus,
+        archivedAt: capsule.archivedAt,
+        destroyedAt: capsule.destroyedAt,
+      }),
+      branch: {
+        id: branch.id,
+        capsuleId: branch.capsuleId,
+        name: branch.name,
+        status: branch.status,
+      },
+    }
   }
 
   private receipt(input: {
@@ -348,49 +390,5 @@ export class ForkAcceptancePersistence<
       createdAt: now,
       updatedAt: now,
     }
-  }
-
-  private async lockCapsule(
-    tx: Parameters<Parameters<TDatabase['transaction']>[0]>[0],
-    ownerId: string,
-    capsuleId: string,
-  ) {
-    const capsules = this.persistence.tables.capsules
-    const [capsule] = await tx
-      .select()
-      .from(capsules)
-      .where(and(eq(capsules.id, capsuleId), eq(capsules.ownerId, ownerId)))
-      .for('update')
-      .limit(1)
-    if (!capsule) {
-      throw new IncusError('Capsule not found or access denied.', 'NOT_FOUND', {
-        ownerId,
-        capsuleId,
-      })
-    }
-    return capsule
-  }
-
-  private async lockBranch(
-    tx: Parameters<Parameters<TDatabase['transaction']>[0]>[0],
-    ownerId: string,
-    capsuleId: string,
-    branchId: string,
-  ) {
-    const branches = this.persistence.tables.capsuleBranches
-    const [branch] = await tx
-      .select()
-      .from(branches)
-      .where(and(eq(branches.id, branchId), eq(branches.ownerId, ownerId), eq(branches.capsuleId, capsuleId)))
-      .for('update')
-      .limit(1)
-    if (!branch) {
-      throw new IncusError('Capsule fork target branch was not found.', 'NOT_FOUND', {
-        ownerId,
-        capsuleId,
-        branchId,
-      })
-    }
-    return branch
   }
 }

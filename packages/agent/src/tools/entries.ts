@@ -8,13 +8,13 @@ import type { QilnAgentClient } from '../client'
 import type { QilnAgentTool } from './tool'
 
 /**
- * Reads one bounded page of immutable manifest entries beneath one exact root
- * in one exact committed snapshot.
+ * Retains the manifest-entry capability as an explicit unavailable response
+ * while agent snapshot reads are disabled.
  */
 export const qilnReadManifestEntriesTool = {
   name: 'qiln_read_manifest_entries',
   description:
-    'Read one bounded page of immutable artifact-manifest entries beneath one selected root in an exact committed snapshot. Obtain rootId from qiln_read_manifest_roots, then use returned logicalPath values as exact selectors for qiln_read_artifact_content where policy permits. This tool cannot discover snapshots, traverse arbitrary filesystems, read editable branches, or inspect live runtimes.',
+    'Snapshot manifest-entry reads are temporarily unavailable. This compatibility tool accepts the existing snapshotId, rootId, optional afterLogicalPath, and limit selectors, then returns available: false, empty entries, and no next cursor. An empty response does not prove the snapshot or root exists or has no artifacts. This tool cannot traverse filesystems, read editable branches, or inspect live runtimes.',
   inputSchema: AgentSnapshotManifestEntriesInputSchema,
   outputSchema: AgentSnapshotManifestEntriesOutputSchema,
   async execute(

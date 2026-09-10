@@ -2,8 +2,9 @@ import { CapsuleBranchResourceStatus, CapsuleBranchResourceType } from '@qiln/co
 import { IncusError } from '../../../../errors'
 import { failureCodeFromUnknown, failureMessageFromUnknown, normalizeFailureDetails } from '../../failures'
 import type { IncusClient } from '../../../../incus/client'
-import type { CapsuleBranchResourceStore, CapsuleBranchResourceInventoryRow } from '../../resource'
-import type { ForkExecution, ForkFileResource, ForkInstanceResource, ForkVolumeResource } from './types'
+import type { CapsuleBranchResourceStore } from '../../resource'
+import type { ForkRepository } from './persistence'
+import type { ForkInstanceResource, ForkResourceRecord, ForkVolumeResource } from './types'
 
 export interface ForkCompensationFailure {
   resourceId: string
@@ -21,32 +22,39 @@ export interface ForkCompensationResult {
 export interface ForkCompensationDependencies {
   incus: IncusClient
   resources: CapsuleBranchResourceStore
+  repository: ForkRepository
 }
 
 /**
  * Compensates only direct resources whose successful creation is durably
  * recorded.
  *
- * Planned resources are proven untouched. Creating, deleting, and error states
- * remain uncertain and prevent ordinary compensated failure.
+ * Planned direct resources have no recorded create intent. Creating, deleting,
+ * and error states remain uncertain and prevent ordinary compensated failure.
+ *
+ * Every accounting read re-proves the complete immutable plan. Missing rows
+ * cannot count as successful cleanup, and abandoned forks never call this
+ * process-local execution capability.
  */
 export class ForkCompensation {
   constructor(private readonly dependencies: ForkCompensationDependencies) {}
 
-  public async run(input: ForkExecution): Promise<ForkCompensationResult> {
+  public async run(operationId: string): Promise<ForkCompensationResult> {
     const failures: ForkCompensationFailure[] = []
-    let resources = await this.dependencies.resources.listBranchResourceInventoryByBranchId(input.branchId)
+    const input = await this.dependencies.repository.compensation(operationId)
     const direct = [...input.plan.volumes, input.plan.instance].reverse()
     for (const target of direct) {
-      const resource = this.find(resources, target.resourceKey)
+      const resource = this.find(input.resources, target.resourceKey)
       if (!resource) {
         failures.push(this.missing(target.resourceKey))
         continue
       }
-      if (resource.status === CapsuleBranchResourceStatus.PLANNED) {
+      if (!this.pristine(resource)) {
+        failures.push(this.uncertain(resource))
         continue
       }
       if (
+        resource.status === CapsuleBranchResourceStatus.PLANNED ||
         resource.status === CapsuleBranchResourceStatus.DELETED ||
         resource.status === CapsuleBranchResourceStatus.MISSING
       ) {
@@ -57,29 +65,30 @@ export class ForkCompensation {
         continue
       }
       try {
-        await this.delete(input.operationId, target, resource)
+        await this.delete(operationId, input.plan.project.namespace, target, resource)
       } catch (error: unknown) {
         failures.push(this.failure(resource, error))
       }
     }
-    resources = await this.dependencies.resources.listBranchResourceInventoryByBranchId(input.branchId)
-    const resourcesByKey = new Map(resources.map(resource => [resource.resourceKey, resource] as const))
-    for (const file of input.plan.files) {
+    const materialized = await this.dependencies.repository.compensation(operationId)
+    const resourcesByKey = new Map(materialized.resources.map(resource => [resource.resourceKey, resource] as const))
+    const backing = resourcesByKey.get(materialized.plan.instance.resourceKey)
+    for (const file of materialized.plan.files) {
       const resource = resourcesByKey.get(file.resourceKey)
       if (!resource) {
         failures.push(this.missing(file.resourceKey))
         continue
       }
-      if (resource.status === CapsuleBranchResourceStatus.PLANNED) {
+      if (
+        this.pristine(resource) &&
+        (resource.status === CapsuleBranchResourceStatus.PLANNED ||
+          resource.status === CapsuleBranchResourceStatus.DELETED)
+      ) {
         continue
       }
-      if (resource.status === CapsuleBranchResourceStatus.DELETED) {
-        continue
-      }
-      const backingKey = this.backing(input, file)
-      const backing = resourcesByKey.get(backingKey)
       if (
         !backing ||
+        !this.pristine(backing) ||
         (backing.status !== CapsuleBranchResourceStatus.DELETED &&
           backing.status !== CapsuleBranchResourceStatus.MISSING)
       ) {
@@ -87,9 +96,9 @@ export class ForkCompensation {
           resourceId: resource.id,
           resourceKey: resource.resourceKey,
           code: 'FORK_DERIVED_RESOURCE_BACKING_UNCERTAIN',
-          message: 'Fork provisioning-file backing resource is not terminal.',
+          message: 'Fork provisioning-file backing instance is not terminal.',
           details: {
-            backingResourceKey: backingKey,
+            backingResourceKey: materialized.plan.instance.resourceKey,
             backingResourceId: backing?.id ?? null,
             backingResourceStatus: backing?.status ?? null,
           },
@@ -97,15 +106,14 @@ export class ForkCompensation {
         continue
       }
       try {
-        await this.dependencies.resources.recordDerivedResourceCompensation(resource.id, input.operationId)
+        await this.dependencies.resources.recordDerivedResourceCompensation(resource.id, operationId)
       } catch (error: unknown) {
         failures.push(this.failure(resource, error))
       }
     }
-    resources = await this.dependencies.resources.listBranchResourceInventoryByBranchId(input.branchId)
-    const nonterminal = resources.filter(resource => !this.isCompensated(resource))
-    for (const resource of nonterminal) {
-      if (!failures.some(failure => failure.resourceId === resource.id)) {
+    const final = await this.dependencies.repository.compensation(operationId)
+    for (const resource of final.resources) {
+      if (!this.isCompensated(resource) && !failures.some(failure => failure.resourceId === resource.id)) {
         failures.push(this.uncertain(resource))
       }
     }
@@ -117,87 +125,56 @@ export class ForkCompensation {
 
   private async delete(
     operationId: string,
+    namespace: string,
     target: ForkVolumeResource | ForkInstanceResource,
-    resource: CapsuleBranchResourceInventoryRow,
+    resource: ForkResourceRecord,
   ): Promise<void> {
     await this.dependencies.resources.recordBranchResourceDeleteIntent(resource.id, operationId)
-    const namespace = this.namespace(target)
     const project = this.dependencies.incus.project(namespace)
+    let outcome: 'deleted' | 'missing' = 'deleted'
     try {
       if (target.kind === 'instance') {
         await project.instances.delete(target.instanceName)
       } else {
         await project.storage.delete(target.pool, target.volumeName)
       }
-      await this.dependencies.resources.recordBranchResourceDeleteOutcome(
-        resource.id,
-        operationId,
-        CapsuleBranchResourceStatus.DELETED,
-      )
     } catch (error: unknown) {
       if (error instanceof IncusError && error.code === 'NOT_FOUND') {
-        await this.dependencies.resources.recordBranchResourceDeleteOutcome(
-          resource.id,
-          operationId,
-          CapsuleBranchResourceStatus.MISSING,
-        )
-        return
+        outcome = 'missing'
+      } else {
+        try {
+          await this.dependencies.resources.recordBranchResourceDeleteFailure(resource.id, operationId, error, {
+            operationId,
+            action: target.kind === 'instance' ? 'compensate_fork_instance' : 'compensate_fork_volume',
+            resourceId: resource.id,
+            resourceKey: resource.resourceKey,
+          })
+        } catch (persistenceError: unknown) {
+          console.error(`[ForkCompensation] Failed to persist compensation failure for '${resource.id}'.`, {
+            providerError: error,
+            persistenceError,
+          })
+        }
+        throw error
       }
-      try {
-        await this.dependencies.resources.recordBranchResourceDeleteFailure(resource.id, operationId, error, {
-          operationId,
-          action: target.kind === 'instance' ? 'compensate_fork_instance' : 'compensate_fork_volume',
-          resourceId: resource.id,
-          resourceKey: resource.resourceKey,
-        })
-      } catch (persistenceError: unknown) {
-        console.error(`[ForkCompensation] Failed to persist compensation failure for '${resource.id}'.`, {
-          providerError: error,
-          persistenceError,
-        })
-      }
-      throw error
     }
+    // Persistence failures are not provider-confirmed absence. A lost outcome
+    // acknowledgement is resolved only through a fresh accounting read.
+    await this.dependencies.resources.recordBranchResourceDeleteOutcome(resource.id, operationId, outcome)
   }
 
-  private namespace(target: ForkVolumeResource | ForkInstanceResource): string {
-    const namespace = target.metadata.namespace
-    if (typeof namespace !== 'string' || namespace.trim() === '') {
-      throw new IncusError('Fork compensation target has invalid namespace metadata.', 'CONFLICT', {
-        resourceKey: target.resourceKey,
-      })
-    }
-    return namespace
-  }
-
-  private backing(input: ForkExecution, file: ForkFileResource): string {
-    if (file.target.target === 'instance') {
-      return input.plan.instance.resourceKey
-    }
-    const target = file.target
-    const volume = input.plan.volumes.find(
-      candidate => candidate.pool === target.pool && candidate.volumeName === target.volumeName,
-    )
-    if (!volume) {
-      throw new IncusError('Fork provisioning file cannot resolve its managed backing volume.', 'CONFLICT', {
-        operationId: input.operationId,
-        branchId: input.branchId,
-        resourceKey: file.resourceKey,
-        pool: target.pool,
-        volumeName: target.volumeName,
-      })
-    }
-    return volume.resourceKey
-  }
-
-  private find(
-    resources: readonly CapsuleBranchResourceInventoryRow[],
-    resourceKey: string,
-  ): CapsuleBranchResourceInventoryRow | undefined {
+  private find(resources: readonly ForkResourceRecord[], resourceKey: string): ForkResourceRecord | undefined {
     return resources.find(resource => resource.resourceKey === resourceKey)
   }
 
-  private isCompensated(resource: CapsuleBranchResourceInventoryRow): boolean {
+  private pristine(resource: ForkResourceRecord): boolean {
+    return resource.failureCode === null && resource.failureMessage === null && resource.failureDetails === null
+  }
+
+  private isCompensated(resource: ForkResourceRecord): boolean {
+    if (!this.pristine(resource)) {
+      return false
+    }
     if (
       resource.resourceType === CapsuleBranchResourceType.INCUS_PROJECT ||
       resource.resourceType === CapsuleBranchResourceType.BIND_MOUNT
@@ -235,7 +212,7 @@ export class ForkCompensation {
     }
   }
 
-  private uncertain(resource: CapsuleBranchResourceInventoryRow): ForkCompensationFailure {
+  private uncertain(resource: ForkResourceRecord): ForkCompensationFailure {
     return {
       resourceId: resource.id,
       resourceKey: resource.resourceKey,
@@ -248,7 +225,7 @@ export class ForkCompensation {
     }
   }
 
-  private failure(resource: CapsuleBranchResourceInventoryRow, error: unknown): ForkCompensationFailure {
+  private failure(resource: ForkResourceRecord, error: unknown): ForkCompensationFailure {
     const failure: ForkCompensationFailure = {
       resourceId: resource.id,
       resourceKey: resource.resourceKey,

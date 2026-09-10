@@ -2,20 +2,17 @@ import { and, eq } from 'drizzle-orm'
 import {
   CapsuleOperationStatus,
   CapsuleOperationType,
-  CapsuleSnapshotAssuranceSchema,
-  CapsuleSnapshotMode,
-  createCapsuleSnapshotCapturePolicyPin,
   verifyCapsuleBlueprintPin,
-  verifyCapsuleSnapshotCapturePolicyPin,
   type CapsuleBlueprintPin,
   type CapsuleBranchName,
   type CapsuleBranchResourceInventoryDigest,
+  type CapsulePersistence,
   type CapsuleRootfsImagePin,
-  type CapsuleSnapshotCapturePolicyPin,
+  type CapsuleTables,
 } from '@qiln/core/server'
 import { IncusError } from '../../../errors'
-import { readRootfs, sameRootfs } from '../operations/shared'
-import type { CapsulePersistence, CapsuleTables } from '@qiln/core/server'
+import { readRootfs, sameRootfs } from '../operations/shared/rootfs'
+import { CapsuleSnapshotStore } from '../snapshot/store'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
 type Transaction<TDatabase extends PostgresJsDatabase> = Parameters<Parameters<TDatabase['transaction']>[0]>[0]
@@ -34,43 +31,27 @@ export interface CapsuleBranchProvenanceBranch {
 }
 
 export interface CapsuleBranchProvenancePins {
+  operationId: string
   blueprint: CapsuleBlueprintPin
   rootfsImagePin: CapsuleRootfsImagePin
-  capturePolicy: CapsuleSnapshotCapturePolicyPin
-}
-
-function compareStableString(left: string, right: string): number {
-  if (left < right) {
-    return -1
-  }
-  if (left > right) {
-    return 1
-  }
-  return 0
-}
-
-function sameStrings(left: readonly string[], right: readonly string[]): boolean {
-  if (left.length !== right.length) {
-    return false
-  }
-  const leftValues = [...left].sort(compareStableString)
-  const rightValues = [...right].sort(compareStableString)
-  return leftValues.every((value, index) => value === rightValues[index])
 }
 
 /**
- * Resolves immutable Blueprint, rootfs, and capture-policy provenance for an
- * editable branch without consulting mutable registry or provider state.
+ * Resolves branch reconstruction evidence without consulting mutable catalogs
+ * or provider state.
  *
- * Root branches derive provenance from completed create operations. Forked
- * branches derive it from completed fork operations and their source
- * snapshots.
+ * The originating operation identity also lets mutation callers independently
+ * verify resource creation provenance.
  */
 export class CapsuleBranchProvenance<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
   TTables extends CapsuleTables = CapsuleTables,
 > {
-  constructor(private readonly persistence: CapsulePersistence<TDatabase, TTables>) {}
+  private readonly snapshots: CapsuleSnapshotStore<TDatabase, TTables>
+
+  constructor(private readonly persistence: CapsulePersistence<TDatabase, TTables>) {
+    this.snapshots = new CapsuleSnapshotStore(persistence)
+  }
 
   public async load(branch: CapsuleBranchProvenanceBranch): Promise<CapsuleBranchProvenancePins> {
     return await this.persistence.db.transaction(async tx => {
@@ -82,55 +63,104 @@ export class CapsuleBranchProvenance<
     tx: Transaction<TDatabase>,
     branch: CapsuleBranchProvenanceBranch,
   ): Promise<CapsuleBranchProvenancePins> {
+    const current = await this.lockBranch(tx, branch)
     const tables = this.persistence.tables
-    const createExtensions = await tx
+    const creates = await tx
       .select()
       .from(tables.capsuleCreateOperations)
-      .where(eq(tables.capsuleCreateOperations.rootBranchId, branch.id))
+      .where(eq(tables.capsuleCreateOperations.rootBranchId, current.id))
       .limit(2)
       .for('update')
-    const forkExtensions = await tx
+    const forks = await tx
       .select()
       .from(tables.capsuleForkOperations)
-      .where(eq(tables.capsuleForkOperations.targetBranchId, branch.id))
+      .where(eq(tables.capsuleForkOperations.targetBranchId, current.id))
       .limit(2)
       .for('update')
-    if (branch.isRootBranch) {
-      if (createExtensions.length !== 1 || forkExtensions.length !== 0) {
-        throw new IncusError('Capsule root branch does not have exactly one create provenance record.', 'CONFLICT', {
-          ownerId: branch.ownerId,
-          capsuleId: branch.capsuleId,
-          branchId: branch.id,
-          createOperationCount: createExtensions.length,
-          forkOperationCount: forkExtensions.length,
+    if (current.isRootBranch) {
+      if (creates.length !== 1 || forks.length !== 0) {
+        throw new IncusError('Root branch does not have exactly one create provenance record.', 'CONFLICT', {
+          branchId: current.id,
         })
       }
-      return await this.fromCreate(tx, branch, createExtensions[0]!)
+      return await this.fromCreate(tx, current, creates[0]!)
     }
-    if (createExtensions.length !== 0 || forkExtensions.length !== 1) {
-      throw new IncusError('Capsule fork branch does not have exactly one fork provenance record.', 'CONFLICT', {
-        ownerId: branch.ownerId,
-        capsuleId: branch.capsuleId,
-        branchId: branch.id,
-        createOperationCount: createExtensions.length,
-        forkOperationCount: forkExtensions.length,
+    if (creates.length !== 0 || forks.length !== 1) {
+      throw new IncusError('Forked branch does not have exactly one fork provenance record.', 'CONFLICT', {
+        branchId: current.id,
       })
     }
-    return await this.fromFork(tx, branch, forkExtensions[0]!)
+    return await this.fromFork(tx, current, forks[0]!)
+  }
+
+  /**
+   * Serializes standalone and transaction-local provenance reads through the
+   * capsule before locking branch or originating-operation evidence.
+   *
+   * The supplied branch is a candidate, not locking authority. Its identity and
+   * reconstruction fields must still match after acquiring the parent lock.
+   * Runtime and lifecycle eligibility remain the caller's responsibility.
+   */
+  private async lockBranch(
+    tx: Transaction<TDatabase>,
+    branch: CapsuleBranchProvenanceBranch,
+  ): Promise<CapsuleBranchProvenanceBranch> {
+    const { capsules, capsuleBranches } = this.persistence.tables
+    const [capsule] = await tx
+      .select({
+        id: capsules.id,
+      })
+      .from(capsules)
+      .where(and(eq(capsules.id, branch.capsuleId), eq(capsules.ownerId, branch.ownerId)))
+      .for('update')
+      .limit(1)
+    if (!capsule) {
+      throw new IncusError('Capsule not found or access denied while resolving branch provenance.', 'NOT_FOUND', {
+        capsuleId: branch.capsuleId,
+      })
+    }
+    const [current] = await tx
+      .select()
+      .from(capsuleBranches)
+      .where(
+        and(
+          eq(capsuleBranches.id, branch.id),
+          eq(capsuleBranches.ownerId, branch.ownerId),
+          eq(capsuleBranches.capsuleId, capsule.id),
+        ),
+      )
+      .for('update')
+      .limit(1)
+    if (!current) {
+      throw new IncusError('Capsule branch not found or access denied while resolving provenance.', 'NOT_FOUND', {
+        capsuleId: branch.capsuleId,
+        branchId: branch.id,
+      })
+    }
+    if (
+      current.name !== branch.name ||
+      current.isRootBranch !== branch.isRootBranch ||
+      current.blueprintName !== branch.blueprintName ||
+      current.blueprintDigest !== branch.blueprintDigest ||
+      current.cpu !== branch.cpu ||
+      current.memory !== branch.memory ||
+      current.resourceInventoryDigest !== branch.resourceInventoryDigest
+    ) {
+      throw new IncusError('Branch provenance candidate changed while acquiring its parent locks.', 'CONFLICT', {
+        capsuleId: branch.capsuleId,
+        branchId: branch.id,
+      })
+    }
+    return current
   }
 
   private async fromCreate(
     tx: Transaction<TDatabase>,
     branch: CapsuleBranchProvenanceBranch,
-    extension: TTables['capsuleCreateOperations']['$inferSelect'],
+    extension: CapsuleTables['capsuleCreateOperations']['$inferSelect'],
   ): Promise<CapsuleBranchProvenancePins> {
-    const operation = await this.operation(tx, extension.operationId)
+    await this.assertOperation(tx, extension.operationId, 'create', branch)
     if (
-      operation.type !== CapsuleOperationType.CREATE ||
-      operation.status !== CapsuleOperationStatus.COMPLETED ||
-      operation.completedAt === null ||
-      operation.ownerId !== branch.ownerId ||
-      operation.capsuleId !== branch.capsuleId ||
       extension.rootBranchId !== branch.id ||
       extension.rootBranchName !== branch.name ||
       extension.blueprintName !== branch.blueprintName ||
@@ -138,13 +168,9 @@ export class CapsuleBranchProvenance<
       extension.cpu !== branch.cpu ||
       extension.memory !== branch.memory
     ) {
-      throw new IncusError('Capsule branch does not match its completed create operation.', 'CONFLICT', {
-        ownerId: branch.ownerId,
-        capsuleId: branch.capsuleId,
+      throw new IncusError('Branch does not match its completed create operation.', 'CONFLICT', {
         branchId: branch.id,
-        createOperationId: extension.operationId,
-        operationType: operation.type,
-        operationStatus: operation.status,
+        operationId: extension.operationId,
       })
     }
     const blueprint = verifyCapsuleBlueprintPin({
@@ -152,158 +178,99 @@ export class CapsuleBranchProvenance<
       digest: extension.blueprintDigest,
       blueprint: extension.blueprintSnapshot,
     })
-    const rootfsImagePin = readRootfs(extension.rootfsImagePin, blueprint.blueprint.image_alias, {
-      ownerId: branch.ownerId,
-      capsuleId: branch.capsuleId,
-      branchId: branch.id,
-      createOperationId: extension.operationId,
-    })
     return {
+      operationId: extension.operationId,
       blueprint,
-      rootfsImagePin,
-      capturePolicy: createCapsuleSnapshotCapturePolicyPin(blueprint),
+      rootfsImagePin: readRootfs(extension.rootfsImagePin, blueprint.blueprint.image_alias, {
+        branchId: branch.id,
+        operationId: extension.operationId,
+      }),
     }
   }
 
   private async fromFork(
     tx: Transaction<TDatabase>,
     branch: CapsuleBranchProvenanceBranch,
-    extension: TTables['capsuleForkOperations']['$inferSelect'],
+    extension: CapsuleTables['capsuleForkOperations']['$inferSelect'],
   ): Promise<CapsuleBranchProvenancePins> {
-    const operation = await this.operation(tx, extension.operationId)
+    await this.assertOperation(tx, extension.operationId, 'fork', branch)
+    const blueprint = verifyCapsuleBlueprintPin(extension.blueprintPin)
+    const rootfsImagePin = readRootfs(extension.rootfsImagePin, blueprint.blueprint.image_alias, {
+      branchId: branch.id,
+      operationId: extension.operationId,
+    })
     if (
-      operation.type !== CapsuleOperationType.FORK ||
+      extension.targetBranchId !== branch.id ||
+      extension.targetBranchName !== branch.name ||
+      extension.targetBranchResourceInventoryDigest !== branch.resourceInventoryDigest ||
+      extension.blueprintSchemaVersion !== blueprint.blueprint.schema_version ||
+      extension.blueprintName !== blueprint.name ||
+      extension.blueprintDigest !== blueprint.digest ||
+      branch.blueprintName !== blueprint.name ||
+      branch.blueprintDigest !== blueprint.digest ||
+      extension.cpu !== branch.cpu ||
+      extension.memory !== branch.memory
+    ) {
+      throw new IncusError('Branch does not match its completed fork operation.', 'CONFLICT', {
+        branchId: branch.id,
+        operationId: extension.operationId,
+      })
+    }
+    const snapshot = await this.snapshots.read(tx, branch.ownerId, branch.capsuleId, extension.sourceSnapshotId)
+    if (
+      snapshot.blueprintName !== blueprint.name ||
+      snapshot.blueprintDigest !== blueprint.digest ||
+      !sameRootfs(snapshot.rootfsImagePin, rootfsImagePin)
+    ) {
+      throw new IncusError('Fork provenance disagrees with its committed source snapshot.', 'CONFLICT', {
+        branchId: branch.id,
+        operationId: extension.operationId,
+        snapshotId: snapshot.id,
+      })
+    }
+    return {
+      operationId: extension.operationId,
+      blueprint,
+      rootfsImagePin,
+    }
+  }
+
+  private async assertOperation(
+    tx: Transaction<TDatabase>,
+    operationId: string,
+    type: typeof CapsuleOperationType.CREATE | typeof CapsuleOperationType.FORK,
+    branch: CapsuleBranchProvenanceBranch,
+  ): Promise<void> {
+    const operations = this.persistence.tables.capsuleOperations
+    const [operation] = await tx
+      .select()
+      .from(operations)
+      .where(
+        and(
+          eq(operations.id, operationId),
+          eq(operations.ownerId, branch.ownerId),
+          eq(operations.capsuleId, branch.capsuleId),
+        ),
+      )
+      .for('update')
+      .limit(1)
+    if (
+      !operation ||
+      operation.type !== type ||
       operation.status !== CapsuleOperationStatus.COMPLETED ||
       operation.completedAt === null ||
       operation.ownerId !== branch.ownerId ||
       operation.capsuleId !== branch.capsuleId ||
-      extension.targetBranchId !== branch.id ||
-      extension.targetBranchName !== branch.name ||
-      extension.targetBranchResourceInventoryDigest !== branch.resourceInventoryDigest ||
-      extension.blueprintName !== branch.blueprintName ||
-      extension.blueprintDigest !== branch.blueprintDigest ||
-      extension.cpu !== branch.cpu ||
-      extension.memory !== branch.memory
+      operation.failedAt !== null ||
+      operation.failureCode !== null ||
+      operation.failureMessage !== null ||
+      operation.failureDetails !== null
     ) {
-      throw new IncusError('Capsule branch does not match its completed fork operation.', 'CONFLICT', {
-        ownerId: branch.ownerId,
-        capsuleId: branch.capsuleId,
+      throw new IncusError('Branch provenance does not resolve a completed owned operation.', 'CONFLICT', {
         branchId: branch.id,
-        forkOperationId: extension.operationId,
-        sourceSnapshotId: extension.sourceSnapshotId,
-        operationType: operation.type,
-        operationStatus: operation.status,
-      })
-    }
-    const blueprint = verifyCapsuleBlueprintPin(extension.blueprintPin)
-    const rootfsImagePin = readRootfs(extension.rootfsImagePin, blueprint.blueprint.image_alias, {
-      ownerId: branch.ownerId,
-      capsuleId: branch.capsuleId,
-      branchId: branch.id,
-      forkOperationId: extension.operationId,
-      sourceSnapshotId: extension.sourceSnapshotId,
-    })
-    const capturePolicy = verifyCapsuleSnapshotCapturePolicyPin(extension.capturePolicyPin)
-    if (
-      blueprint.blueprint.schema_version !== extension.blueprintSchemaVersion ||
-      blueprint.name !== extension.blueprintName ||
-      blueprint.digest !== extension.blueprintDigest ||
-      capturePolicy.schemaVersion !== extension.capturePolicySchemaVersion ||
-      capturePolicy.digest !== extension.capturePolicyDigest ||
-      capturePolicy.blueprintName !== blueprint.name ||
-      capturePolicy.blueprintDigest !== blueprint.digest
-    ) {
-      throw new IncusError('Capsule fork provenance contains contradictory immutable pins.', 'CONFLICT', {
-        ownerId: branch.ownerId,
-        capsuleId: branch.capsuleId,
-        branchId: branch.id,
-        forkOperationId: extension.operationId,
-        sourceSnapshotId: extension.sourceSnapshotId,
-      })
-    }
-    const assurance = CapsuleSnapshotAssuranceSchema.parse({
-      mode: extension.sourceSnapshotMode,
-      limitations: extension.sourceSnapshotLimitations,
-    })
-    if (assurance.mode !== CapsuleSnapshotMode.EXPERIMENTAL) {
-      throw new IncusError('Capsule branch provenance uses an unsupported source assurance mode.', 'CONFLICT', {
-        ownerId: branch.ownerId,
-        capsuleId: branch.capsuleId,
-        branchId: branch.id,
-        forkOperationId: extension.operationId,
-        sourceSnapshotId: extension.sourceSnapshotId,
-        sourceSnapshotMode: assurance.mode,
-      })
-    }
-    const snapshot = await this.snapshot(tx, branch.capsuleId, extension.sourceSnapshotId)
-    const snapshotBlueprint = verifyCapsuleBlueprintPin(snapshot.blueprintPin)
-    const snapshotRootfsImagePin = readRootfs(snapshot.rootfsImagePin, snapshotBlueprint.blueprint.image_alias, {
-      ownerId: branch.ownerId,
-      capsuleId: branch.capsuleId,
-      branchId: branch.id,
-      forkOperationId: extension.operationId,
-      sourceSnapshotId: extension.sourceSnapshotId,
-    })
-    const snapshotPolicy = verifyCapsuleSnapshotCapturePolicyPin(snapshot.capturePolicyPin)
-    const snapshotAssurance = CapsuleSnapshotAssuranceSchema.parse({
-      mode: snapshot.mode,
-      limitations: snapshot.limitations,
-    })
-    if (
-      snapshotBlueprint.blueprint.schema_version !== snapshot.blueprintSchemaVersion ||
-      snapshotBlueprint.name !== snapshot.blueprintName ||
-      snapshotBlueprint.digest !== snapshot.blueprintDigest ||
-      snapshotPolicy.schemaVersion !== snapshot.capturePolicySchemaVersion ||
-      snapshotPolicy.digest !== snapshot.capturePolicyDigest ||
-      snapshotPolicy.blueprintName !== snapshotBlueprint.name ||
-      snapshotPolicy.blueprintDigest !== snapshotBlueprint.digest ||
-      snapshotBlueprint.name !== blueprint.name ||
-      snapshotBlueprint.digest !== blueprint.digest ||
-      !sameRootfs(snapshotRootfsImagePin, rootfsImagePin) ||
-      snapshotPolicy.digest !== capturePolicy.digest ||
-      snapshotAssurance.mode !== assurance.mode ||
-      !sameStrings(snapshotAssurance.limitations, assurance.limitations)
-    ) {
-      throw new IncusError('Capsule fork provenance disagrees with its immutable source snapshot.', 'CONFLICT', {
-        ownerId: branch.ownerId,
-        capsuleId: branch.capsuleId,
-        branchId: branch.id,
-        forkOperationId: extension.operationId,
-        sourceSnapshotId: extension.sourceSnapshotId,
-      })
-    }
-    return {
-      blueprint,
-      rootfsImagePin,
-      capturePolicy,
-    }
-  }
-
-  private async operation(tx: Transaction<TDatabase>, operationId: string) {
-    const operations = this.persistence.tables.capsuleOperations
-    const [operation] = await tx.select().from(operations).where(eq(operations.id, operationId)).for('update').limit(1)
-    if (!operation) {
-      throw new IncusError('Capsule branch source operation was not found.', 'NOT_FOUND', {
         operationId,
+        expectedType: type,
       })
     }
-    return operation
-  }
-
-  private async snapshot(tx: Transaction<TDatabase>, capsuleId: string, snapshotId: string) {
-    const snapshots = this.persistence.tables.capsuleSnapshots
-    const [snapshot] = await tx
-      .select()
-      .from(snapshots)
-      .where(and(eq(snapshots.id, snapshotId), eq(snapshots.capsuleId, capsuleId)))
-      .for('update')
-      .limit(1)
-    if (!snapshot) {
-      throw new IncusError('Capsule branch fork source snapshot was not found.', 'NOT_FOUND', {
-        capsuleId,
-        snapshotId,
-      })
-    }
-    return snapshot
   }
 }

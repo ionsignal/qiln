@@ -144,7 +144,6 @@ export class QilnWorkerRuntime<
       blueprints: this.blueprints,
       supervisor: this.supervisor,
       routing: this.config.routing,
-      experimentalSnapshotsEnabled: this.config.features?.experimentalSnapshots ?? false,
       persistence: options.persistence,
     })
   }
@@ -240,11 +239,6 @@ export class QilnWorkerRuntime<
       console.log(
         `${WORKER_LOG_PREFIX} Runtime started with mutation authority on PostgreSQL backend ${this.authority.recordedBackendPid}.`,
       )
-      if (this.config.features?.experimentalSnapshots) {
-        console.warn(
-          `${WORKER_LOG_PREFIX} Experimental snapshots are enabled. Snapshot Capture and editable forks remain non-production and retain explicit assurance limitations.`,
-        )
-      }
     } catch (error: unknown) {
       await this.disposeAfterStartupFailure(error)
       throw error

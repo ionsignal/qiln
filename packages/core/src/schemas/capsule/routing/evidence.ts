@@ -1,6 +1,5 @@
 import { z } from 'zod'
 import { CapsuleActorReferenceSchema, type CapsuleActorReference } from '../actor'
-import { CapsuleSnapshotLimitationsSchema } from '../snapshot/mode'
 
 export const CAPSULE_ROUTE_EVIDENCE_SCHEMA_VERSION = 1 as const
 export const CAPSULE_ROUTE_POLICY_VERSION = 1 as const
@@ -168,7 +167,6 @@ export const CapsuleRouteRiskEvidenceSchema = z
   .object({
     actor: CapsuleActorReferenceSchema,
     acknowledgedAt: CapsuleRouteEvidenceTimestampSchema,
-    acceptedLimitations: CapsuleSnapshotLimitationsSchema,
   })
   .strict()
 

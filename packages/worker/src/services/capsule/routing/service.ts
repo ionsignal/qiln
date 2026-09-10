@@ -1,6 +1,5 @@
 import {
   CapsuleRouteAliasListOutputSchema,
-  CapsuleSnapshotLimitationsSchema,
   createCapsuleBlueprintReference,
   createCapsuleRouteApplicationPin,
   createCapsuleRouteMatcherPin,
@@ -14,15 +13,6 @@ import { IncusError } from '../../../errors'
 import { toIsoTimestamp } from '../operations/shared'
 import type { CommittedRouteStore } from './store'
 import type { CommittedRouteRecord, HeadedRouteRecord } from './types'
-
-function sameStrings(left: readonly string[], right: readonly string[]): boolean {
-  if (left.length !== right.length) {
-    return false
-  }
-  const leftValues = [...left].sort()
-  const rightValues = [...right].sort()
-  return leftValues.every((value, index) => value === rightValues[index])
-}
 
 /**
  * Maps PostgreSQL-authoritative, integrity-checked alias graphs into
@@ -94,13 +84,10 @@ export class CommittedRouteService {
     }
     const target = verifyCapsuleRouteTargetPin(revision.targetPin)
     const evidence = verifyCapsuleRouteEvidencePin(revision.evidencePin)
-    const limitations = CapsuleSnapshotLimitationsSchema.parse(snapshot.limitations)
     if (
       target.snapshotId !== snapshot.id ||
       target.application.blueprint.name !== blueprint.name ||
-      target.application.blueprint.digest !== blueprint.digest ||
-      target.assurance.mode !== snapshot.mode ||
-      !sameStrings(target.assurance.limitations, limitations)
+      target.application.blueprint.digest !== blueprint.digest
     ) {
       throw new IncusError('Committed route target does not match its immutable snapshot evidence.', 'API_ERROR', {
         aliasId: record.alias.id,

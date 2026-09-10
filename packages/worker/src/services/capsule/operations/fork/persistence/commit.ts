@@ -1,4 +1,4 @@
-import { and, asc, eq, isNotNull } from 'drizzle-orm'
+import { and, eq, isNotNull } from 'drizzle-orm'
 import {
   CapsuleOperationStatus,
   CapsuleOperationType,
@@ -8,9 +8,9 @@ import {
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import { IncusError } from '../../../../../errors'
 import { toCapsuleLifecycleState, toCapsuleOperationTransition } from '../../shared'
-import type { ForkPlanner } from '../plan'
 import type { ForkTerminal } from '../types'
-import { assertForkEvidence, ForkSourcePersistence } from './source'
+import type { ForkInputPersistence } from './input'
+import type { ForkLocks } from './locks'
 
 /**
  * Atomically completes a fork after the locked target branch resource graph is
@@ -23,116 +23,29 @@ export class ForkCommitPersistence<
 > {
   constructor(
     private readonly persistence: CapsulePersistence<TDatabase, TTables>,
-    private readonly planner: ForkPlanner,
-    private readonly sources: ForkSourcePersistence<TDatabase, TTables>,
+    private readonly locks: ForkLocks<TDatabase, TTables>,
+    private readonly input: ForkInputPersistence<TDatabase, TTables>,
   ) {}
 
   public async commit(operationId: string): Promise<ForkTerminal> {
     return await this.persistence.db.transaction(async tx => {
-      const tables = this.persistence.tables
-      const [operation] = await tx
-        .select()
-        .from(tables.capsuleOperations)
-        .where(
-          and(
-            eq(tables.capsuleOperations.id, operationId),
-            eq(tables.capsuleOperations.type, CapsuleOperationType.FORK),
-          ),
-        )
-        .for('update')
-        .limit(1)
+      const scope = await this.locks.scope(tx, operationId)
+      const { operation, capsule, branch } = scope
       if (
-        !operation ||
         operation.status !== CapsuleOperationStatus.RUNNING ||
-        operation.providerMutationStartedAt === null
+        operation.providerMutationStartedAt === null ||
+        !branch
       ) {
         throw new IncusError('Capsule fork operation is not eligible for completion.', 'CONFLICT', {
           operationId,
-          operationStatus: operation?.status ?? null,
-          providerIntentCommitted: operation?.providerMutationStartedAt !== null,
-        })
-      }
-      const [extension] = await tx
-        .select()
-        .from(tables.capsuleForkOperations)
-        .where(eq(tables.capsuleForkOperations.operationId, operation.id))
-        .for('update')
-        .limit(1)
-      if (!extension) {
-        throw new IncusError('Capsule fork operation is missing immutable input.', 'CONFLICT', {
-          operationId,
-        })
-      }
-      const [capsule] = await tx
-        .select()
-        .from(tables.capsules)
-        .where(and(eq(tables.capsules.id, operation.capsuleId), eq(tables.capsules.ownerId, operation.ownerId)))
-        .for('update')
-        .limit(1)
-      if (!capsule) {
-        throw new IncusError('Capsule fork aggregate was not found.', 'NOT_FOUND', {
-          operationId,
-          capsuleId: operation.capsuleId,
-        })
-      }
-      const source = await this.sources.lock(tx, operation.ownerId, operation.capsuleId, extension.sourceSnapshotId)
-      const [branch] = await tx
-        .select()
-        .from(tables.capsuleBranches)
-        .where(
-          and(
-            eq(tables.capsuleBranches.id, extension.targetBranchId),
-            eq(tables.capsuleBranches.ownerId, operation.ownerId),
-            eq(tables.capsuleBranches.capsuleId, operation.capsuleId),
-          ),
-        )
-        .for('update')
-        .limit(1)
-      if (!branch) {
-        throw new IncusError('Capsule fork target branch was not found.', 'NOT_FOUND', {
-          operationId,
-          branchId: extension.targetBranchId,
+          operationStatus: operation.status,
+          providerIntentCommitted: operation.providerMutationStartedAt !== null,
         })
       }
 
-      assertForkEvidence(operation, extension, source, branch)
+      await this.input.prove(tx, scope, 'completed')
 
-      if (capsule.lifecycleStatus !== 'active' || capsule.archivedAt !== null || branch.status !== 'provisioning') {
-        throw new IncusError('Capsule fork aggregate is not eligible for completion.', 'CONFLICT', {
-          operationId,
-          lifecycleStatus: capsule.lifecycleStatus,
-          archived: capsule.archivedAt !== null,
-          branchStatus: branch.status,
-        })
-      }
-      const plan = this.planner.create({
-        operationId: operation.id,
-        ownerId: operation.ownerId,
-        branchId: branch.id,
-        branchName: branch.name,
-        cpu: extension.cpu,
-        memory: extension.memory,
-        source,
-      })
-      const resources = await tx
-        .select()
-        .from(tables.capsuleBranchResources)
-        .where(eq(tables.capsuleBranchResources.branchId, branch.id))
-        .orderBy(asc(tables.capsuleBranchResources.createdAt), asc(tables.capsuleBranchResources.id))
-        .for('update')
-
-      this.planner.assertResources({
-        operationId: operation.id,
-        ownerId: operation.ownerId,
-        branchId: branch.id,
-        branchName: branch.name,
-        extensionInventoryDigest: extension.targetBranchResourceInventoryDigest,
-        branchInventoryDigest: branch.resourceInventoryDigest,
-        stage: 'completed',
-        plan,
-        resources,
-      })
-
+      const tables = this.persistence.tables
       const now = new Date()
       const [completed] = await tx
         .update(tables.capsuleOperations)
@@ -149,9 +62,7 @@ export class ForkCommitPersistence<
             isNotNull(tables.capsuleOperations.providerMutationStartedAt),
           ),
         )
-        .returning({
-          id: tables.capsuleOperations.id,
-        })
+        .returning()
       const [offline] = await tx
         .update(tables.capsuleBranches)
         .set({
@@ -168,6 +79,7 @@ export class ForkCommitPersistence<
             eq(tables.capsuleBranches.id, branch.id),
             eq(tables.capsuleBranches.ownerId, operation.ownerId),
             eq(tables.capsuleBranches.capsuleId, operation.capsuleId),
+            eq(tables.capsuleBranches.isRootBranch, false),
             eq(tables.capsuleBranches.status, 'provisioning'),
           ),
         )
@@ -185,14 +97,14 @@ export class ForkCommitPersistence<
       }
       return {
         operation: toCapsuleOperationTransition({
-          ownerId: operation.ownerId,
-          operationId: operation.id,
+          ownerId: completed.ownerId,
+          operationId: completed.id,
           operationType: CapsuleOperationType.FORK,
-          operationStatus: CapsuleOperationStatus.COMPLETED,
-          capsuleId: operation.capsuleId,
+          operationStatus: completed.status,
+          capsuleId: completed.capsuleId,
         }),
         capsule: toCapsuleLifecycleState({
-          capsuleId: operation.capsuleId,
+          capsuleId: capsule.id,
           lifecycleStatus: capsule.lifecycleStatus,
           archivedAt: capsule.archivedAt,
           destroyedAt: capsule.destroyedAt,

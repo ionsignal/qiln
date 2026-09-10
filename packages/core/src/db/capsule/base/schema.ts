@@ -3,21 +3,14 @@ import { createCapsuleBranchesTable } from '../branch/record'
 import { createCapsuleBranchRuntimeOperationsTable } from '../operation/runtime'
 import { createCapsuleBranchResourcesTable } from '../branch/resource'
 import {
-  createCapsuleSnapshotCaptureOperationsTable,
-  createCapsuleSnapshotCaptureResourcesTable,
-} from '../operation/capture'
+  createCapsuleSnapshotCreateOperationsTable,
+  createCapsuleSnapshotCreateResourcesTable,
+} from '../operation/snapshot'
 import { createCapsuleCreateOperationsTable } from '../operation/create'
 import { createCapsuleForkOperationsTable } from '../operation/fork'
 import { createCapsuleOperationsTable } from '../operation/record'
 import { createCapsuleOperationStepsTable } from '../operation/step'
 import { createCapsulesTable } from '../record'
-import { createCapsuleSnapshotDependencyReferencesTable } from '../snapshot/dependency'
-import { createCapsuleSnapshotGitRemotesTable, createCapsuleSnapshotGitRepositoriesTable } from '../snapshot/git'
-import {
-  createCapsuleArtifactEntriesTable,
-  createCapsuleArtifactManifestRootsTable,
-  createCapsuleArtifactManifestsTable,
-} from '../snapshot/manifest'
 import { createCapsuleSnapshotsTable } from '../snapshot/record'
 import { createCapsuleSnapshotResourceReferencesTable } from '../snapshot/resource'
 
@@ -54,33 +47,19 @@ export function createSchema<TUserIdColumn extends PgColumn>(userIdColumn: TUser
     capsuleSnapshots.id,
     capsuleBranches.id,
   )
-  const capsuleArtifactManifests = createCapsuleArtifactManifestsTable(capsuleSnapshots.id)
-  const capsuleArtifactManifestRoots = createCapsuleArtifactManifestRootsTable(capsuleArtifactManifests.id)
-  const capsuleArtifactEntries = createCapsuleArtifactEntriesTable(capsuleArtifactManifestRoots.id)
-  const capsuleSnapshotGitRepositories = createCapsuleSnapshotGitRepositoriesTable(
-    capsuleSnapshots.id,
-    capsuleArtifactManifestRoots.id,
-  )
-  const capsuleSnapshotGitRemotes = createCapsuleSnapshotGitRemotesTable(capsuleSnapshotGitRepositories.id)
-  const capsuleSnapshotDependencyReferences = createCapsuleSnapshotDependencyReferencesTable(
-    capsuleSnapshots.id,
-    capsuleArtifactManifestRoots.id,
-    capsuleBranchResources.id,
-  )
-  const capsuleSnapshotCaptureOperations = createCapsuleSnapshotCaptureOperationsTable(
+  const capsuleSnapshotCreateOperations = createCapsuleSnapshotCreateOperationsTable(
     capsuleOperations.id,
     capsuleBranches.id,
     capsuleSnapshots.id,
   )
-  const capsuleSnapshotCaptureResources = createCapsuleSnapshotCaptureResourcesTable(
-    capsuleSnapshotCaptureOperations.operationId,
+  const capsuleSnapshotCreateResources = createCapsuleSnapshotCreateResourcesTable(
+    capsuleSnapshotCreateOperations.operationId,
     capsuleBranchResources.id,
   )
   const capsuleSnapshotResourceReferences = createCapsuleSnapshotResourceReferencesTable(
     capsuleSnapshots.id,
-    capsuleArtifactManifestRoots.id,
     capsuleBranchResources.id,
-    capsuleSnapshotCaptureResources.id,
+    capsuleSnapshotCreateResources.id,
   )
   return {
     capsules,
@@ -92,15 +71,9 @@ export function createSchema<TUserIdColumn extends PgColumn>(userIdColumn: TUser
     capsuleOperationSteps,
     capsuleBranchResources,
     capsuleSnapshots,
-    capsuleArtifactManifests,
-    capsuleArtifactManifestRoots,
-    capsuleArtifactEntries,
-    capsuleSnapshotGitRepositories,
-    capsuleSnapshotGitRemotes,
-    capsuleSnapshotDependencyReferences,
+    capsuleSnapshotCreateOperations,
+    capsuleSnapshotCreateResources,
     capsuleSnapshotResourceReferences,
-    capsuleSnapshotCaptureOperations,
-    capsuleSnapshotCaptureResources,
   }
 }
 

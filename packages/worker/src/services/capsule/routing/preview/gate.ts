@@ -9,8 +9,8 @@ type Transaction<TDatabase extends PostgresJsDatabase> = Parameters<Parameters<T
  * Enforces the lifecycle boundary between mutable branch previews and capsule
  * mutations that can retire, freeze, or replace the preview upstream.
  *
- * A preview must be durably inactive before its branch can stop or enter
- * Snapshot Capture, and before its capsule can archive or destroy. Locking
+ * A preview must be durably inactive before its branch runtime stops or enters
+ * Create Snapshot, and before its capsule can archive or destroy. Locking
  * preview rows inside the caller's aggregate transaction prevents a concurrent
  * Caddy apply from racing past that lifecycle boundary.
  */

@@ -1,5 +1,6 @@
 export const ForkStep = {
   PLAN: 'plan_fork',
+  INITIALIZE_SSH: 'initialize_fork_ssh_access_fence',
   ROOTFS: 'verify_rootfs_image',
   PROJECT: 'ensure_project',
   BINDS: 'record_bind_mounts',
@@ -20,6 +21,7 @@ export type ForkStep = (typeof ForkStep)[keyof typeof ForkStep]
  */
 export const ForkSteps = [
   ForkStep.PLAN,
+  ForkStep.INITIALIZE_SSH,
   ForkStep.ROOTFS,
   ForkStep.PROJECT,
   ForkStep.BINDS,
