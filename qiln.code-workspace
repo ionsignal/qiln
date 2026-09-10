@@ -5,14 +5,11 @@
       "path": ".",
     },
     {
-      "name": "qiln",
-      "path": "../qiln",
-    },
-    {
       "name": "iondocs",
       "path": "../iondocs",
     },
     {
+      "name": "pi-harness",
       "path": "../pi-harness",
     },
     {
@@ -20,11 +17,20 @@
       "path": "../caddydocs",
     },
     {
+      "name": "ssh2",
+      "path": "../ssh2",
+    },
+    {
       "name": "n8n",
       "path": "../n8n",
     },
     {
+      "name": "comfyui",
       "path": "../comfyui",
+    },
+    {
+      "name": "drizzle-orm",
+      "path": "../drizzle-orm",
     },
     {
       "name": "trpc",
@@ -41,6 +47,10 @@
     {
       "name": "yaml",
       "path": "../yaml",
+    },
+    {
+      "name": "vite",
+      "path": "../vite",
     },
     {
       "name": "incus",

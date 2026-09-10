@@ -110,6 +110,7 @@ export type CapsuleOperationSummary = EngineRouterOutputs['capsules']['operation
  *
  * Create Snapshot retains restoration evidence, not diff review, golden-test
  * results, or promotion approval. Physical provider references, historical
- * Blueprint and rootfs image pins, and operation diagnostics remain server-only.
+ * Blueprint and rootfs image pins, and operation diagnostics remain
+ * server-only.
  */
 export type CapsuleSnapshotSummary = EngineRouterOutputs['capsules']['snapshots']['list'][number]

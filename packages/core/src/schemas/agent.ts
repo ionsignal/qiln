@@ -46,9 +46,9 @@ export const AgentGetContextInputSchema = z
 /**
  * Temporary agent context compatibility boundary.
  *
- * Identity and optional capsule and branch scope remain Host-derived.
- * Snapshot selection is unavailable rather than inferred from restoration
- * history that no longer provides the former artifact-read contract.
+ * Identity and optional capsule and branch scope remain Host-derived. Snapshot
+ * selection is unavailable rather than inferred from restoration history that
+ * no longer provides the former artifact-read contract.
  */
 export const AgentGetContextOutputSchema = z
   .object({
@@ -108,8 +108,8 @@ export const AgentSnapshotArtifactContentRequestSchema = z
 
 /**
  * Stub responses explicitly distinguish unavailable reads from real empty
- * manifests or files. Echoed selectors are request identifiers, not evidence
- * of snapshot existence, ownership, or committed artifact content.
+ * manifests or files. Echoed selectors are request identifiers, not evidence of
+ * snapshot existence, ownership, or committed artifact content.
  */
 const SnapshotReadUnavailableSchema = z
   .object({

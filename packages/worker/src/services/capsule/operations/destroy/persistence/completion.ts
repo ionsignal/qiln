@@ -89,16 +89,12 @@ export async function completeDestroyCapsule<TDatabase extends PostgresJsDatabas
       .where(eq(capsuleSnapshots.capsuleId, operation.capsuleId))
       .limit(1)
     if (snapshot) {
-      throw new IncusError(
-        'Capsule destroy cannot complete while committed snapshots remain.',
-        'CONFLICT',
-        {
-          operationId,
-          capsuleId: operation.capsuleId,
-          snapshotId: snapshot.id,
-          policy: 'snapshot_retention_deletion_not_implemented',
-        },
-      )
+      throw new IncusError('Capsule destroy cannot complete while committed snapshots remain.', 'CONFLICT', {
+        operationId,
+        capsuleId: operation.capsuleId,
+        snapshotId: snapshot.id,
+        policy: 'snapshot_retention_deletion_not_implemented',
+      })
     }
     const resources = await lockDestroyBranchResourceInventories<TDatabase, TTables>(
       tx,

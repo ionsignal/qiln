@@ -31,7 +31,8 @@ export class AgentArtifactContentDeniedError extends Error {
 }
 
 /**
- * Retains credential and capsule-scope checks without querying snapshot history.
+ * Retains credential and capsule-scope checks without querying snapshot
+ * history.
  *
  * Successful authorization permits only an unavailable response. It does not
  * prove that a requested snapshot exists or belongs to the credential's scope.
@@ -67,7 +68,8 @@ export async function resolveAgentManifestRoots(
 }
 
 /**
- * Preserves the manifest-entry endpoint with an explicit unavailable empty page.
+ * Preserves the manifest-entry endpoint with an explicit unavailable empty
+ * page.
  *
  * Echoed selectors identify only the request; they do not attest to a real
  * snapshot or manifest root.

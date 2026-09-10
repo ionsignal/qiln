@@ -13,7 +13,8 @@ export type CreateTransaction<TDatabase extends PostgresJsDatabase> = Parameters
  * Existing-row transactions discover the operation's parent without locking
  * descendants, acquire the capsule lock, and revalidate the operation identity
  * under its row lock before acquiring extension, branch, or resource locks.
- * Reloading the already-locked capsule does not change this parent-first order.
+ * Reloading the already-locked capsule does not change this parent-first
+ * order.
  */
 export class CreateCapsuleLocks<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,

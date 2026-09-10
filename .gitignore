@@ -12,6 +12,7 @@ server/db/migrations
 CREDENTIALS.md
 OVERVIEW.md
 PROMPT.md
+SERVER.md
 CODE.md
 NOTES.md
 CADDY.md
