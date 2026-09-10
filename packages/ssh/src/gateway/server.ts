@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { createConnection, createServer, isIP, type Server as NetServer, type Socket } from 'node:net'
-import { monitorEventLoopDelay, type IntervalHistogram } from 'node:perf_hooks'
+import { monitorEventLoopDelay, type ELDHistogram } from 'node:perf_hooks'
 import {
   SSH_GATEWAY_DIAGNOSTIC_MARKER,
   SshGatewayDiagnosticCodeSchema,
@@ -173,7 +173,7 @@ export class QilnSshGateway {
   private readonly protocolServers = new Set<InstanceType<typeof SshServer>>()
   private readonly durableClosureTasks = new Set<Promise<void>>()
   private readonly setupTasks = new Set<Promise<void>>()
-  private readonly eventLoopDelay: IntervalHistogram
+  private readonly eventLoopDelay: ELDHistogram
 
   private listener: NetServer | null = null
   private startPromise: Promise<void> | null = null
