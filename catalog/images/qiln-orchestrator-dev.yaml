@@ -1,12 +1,12 @@
 image:
   distribution: ubuntu
-  release: noble
+  release: resolute
   architecture: amd64
   description: Qiln Orchestrator Development Image
 
 source:
   downloader: debootstrap
-  url: http://archive.ubuntu.com/ubuntu
+  url: https://archive.ubuntu.com/ubuntu
   keyserver: keyserver.ubuntu.com
   keys:
     - 0xF6ECB3762474EDA9D21B7022871920D1991BC93C # Ubuntu Archive Automatic Signing Key (2018)
@@ -49,9 +49,9 @@ packages:
     # Standard Ubuntu repositories.
     - name: sources.list
       url: |-
-        deb http://archive.ubuntu.com/ubuntu {{ image.release }} main restricted universe multiverse
-        deb http://archive.ubuntu.com/ubuntu {{ image.release }}-updates main restricted universe multiverse
-        deb http://security.ubuntu.com/ubuntu {{ image.release }}-security main restricted universe multiverse
+        deb https://archive.ubuntu.com/ubuntu {{ image.release }} main restricted universe multiverse
+        deb https://archive.ubuntu.com/ubuntu {{ image.release }}-updates main restricted universe multiverse
+        deb https://security.ubuntu.com/ubuntu {{ image.release }}-security main restricted universe multiverse
 
     # NodeSource Node.js v22 repository.
     - name: nodesource.list
@@ -66,7 +66,7 @@ packages:
     # Official PostgreSQL repository.
     - name: pgdg
       url: |-
-        deb [signed-by=/etc/apt/keyrings/postgresql.asc] https://apt.postgresql.org/pub/repos/apt noble-pgdg main
+        deb [signed-by=/etc/apt/keyrings/postgresql.asc] https://apt.postgresql.org/pub/repos/apt {{ image.release }}-pgdg main
 
 actions:
   # Bootstrap repository keyrings before package installation.
