@@ -6,7 +6,7 @@ image:
 
 source:
   downloader: debootstrap
-  url: https://archive.ubuntu.com/ubuntu
+  url: https://us.archive.ubuntu.com/ubuntu
   keyserver: keyserver.ubuntu.com
   keys:
     - 0xF6ECB3762474EDA9D21B7022871920D1991BC93C # Ubuntu Archive Automatic Signing Key (2018)
@@ -49,8 +49,8 @@ packages:
     # Standard Ubuntu repositories.
     - name: sources.list
       url: |-
-        deb https://archive.ubuntu.com/ubuntu {{ image.release }} main restricted universe multiverse
-        deb https://archive.ubuntu.com/ubuntu {{ image.release }}-updates main restricted universe multiverse
+        deb https://us.archive.ubuntu.com/ubuntu {{ image.release }} main restricted universe multiverse
+        deb https://us.archive.ubuntu.com/ubuntu {{ image.release }}-updates main restricted universe multiverse
         deb https://security.ubuntu.com/ubuntu {{ image.release }}-security main restricted universe multiverse
 
     # NodeSource Node.js v22 repository.
@@ -435,8 +435,8 @@ files:
       WantedBy=multi-user.target
 
   # One root-owned prerequisite owns this concrete orchestrator's SSH host
-  # identity and materializes the Host and administrator credentials consumed
-  # by development services.
+  # identity and administrator roster. It also materializes the development
+  # shell Host credential; systemd services import their own private copies.
   - path: /usr/local/sbin/qiln-instance-bootstrap
     generator: dump
     uid: 0
@@ -733,6 +733,23 @@ files:
       [Install]
       WantedBy=multi-user.target
 
+  # The identical filename shadows Resolute's generated type-wide LXC drop-in
+  # for this unit without modifying /run. Preserve all six non-credential
+  # settings, omitting only the empty LoadCredential and ImportCredential resets.
+  - path: /etc/systemd/system/qiln-instance-bootstrap.service.d/zzz-lxc-service.conf
+    generator: dump
+    uid: 0
+    gid: 0
+    mode: '0644'
+    content: |-
+      [Service]
+      ProcSubset=all
+      ProtectProc=default
+      ProtectControlGroups=no
+      ProtectKernelTunables=no
+      NoNewPrivileges=no
+      PrivateNetwork=no
+
   # The complete secret-bearing NATS configuration is delivered as a direct
   # per-instance Incus system credential and imported only by this service.
   - path: /etc/systemd/system/nats-server.service.d/qiln-credentials.conf
@@ -748,9 +765,25 @@ files:
       ImportCredential=nats-server.conf
       ExecStartPre=/usr/bin/test -r %d/nats-server.conf
       ExecStart=
-      ExecStart=/usr/sbin/nats-server -c ${CREDENTIALS_DIRECTORY}/nats-server.conf
+      ExecStart=/usr/sbin/nats-server -c %d/nats-server.conf
       NoNewPrivileges=true
       PrivateTmp=true
+
+  # Shadow the generated LXC credential resets only for this unit while
+  # preserving its six non-credential LXC settings.
+  - path: /etc/systemd/system/nats-server.service.d/zzz-lxc-service.conf
+    generator: dump
+    uid: 0
+    gid: 0
+    mode: '0644'
+    content: |-
+      [Service]
+      ProcSubset=all
+      ProtectProc=default
+      ProtectControlGroups=no
+      ProtectKernelTunables=no
+      NoNewPrivileges=no
+      PrivateNetwork=no
 
   # The reusable image contains no administrator key. The root-owned instance
   # bootstrap validates and atomically materializes the injected key roster.
@@ -804,7 +837,9 @@ files:
       qiln ALL=(ALL) NOPASSWD: ALL
 
   # Non-secret Web and embedded Worker configuration. Manual development runs
-  # export these values before starting the Host. SSH settings live separately.
+  # export these values before starting the Host. server:watch supplies the
+  # development shell credential fallback; systemd supplies a private path.
+  # SSH settings live separately.
   - path: /etc/qiln/runtime.env
     generator: dump
     uid: 0
@@ -816,7 +851,6 @@ files:
       APP_DEFINITIONS_PATH=/opt/qiln/catalog/blueprints
       VITE_HOST_DEV=localhost
       QILN_LOAD_DOTENV=false
-      QILN_HOST_CREDENTIAL_PATH=/run/qiln/qiln-host.env
       QILN_DEV_PUBLIC_ORIGIN=https://qiln.edge.ionsignal.com
 
       PGHOST=/var/run/postgresql
@@ -846,7 +880,6 @@ files:
     content: |-
       NODE_ENV=development
       QILN_LOAD_DOTENV=false
-      QILN_HOST_CREDENTIAL_PATH=/run/qiln/qiln-host.env
 
       PGHOST=/var/run/postgresql
       PGPORT=5432
@@ -873,8 +906,9 @@ files:
       QILN_SSH_GATEWAY_CHANNEL_OPEN_TIMEOUT_MS=10000
       QILN_SSH_GATEWAY_BRANCH_DIAL_TIMEOUT_MS=10000
 
-  # The standalone SSH service owns the gateway credential and its independent
-  # build/watch process. Web restarts neither rebuild nor restart SSH.
+  # The standalone SSH service imports its own private Host and gateway
+  # credentials and owns its independent build/watch process. Web restarts
+  # neither rebuild nor restart SSH.
   #
   # Like the Web development service, this remains disabled until the operator
   # prepares the source checkout, installs dependencies, and applies migrations.
@@ -896,10 +930,12 @@ files:
       Group=qiln
       WorkingDirectory=/opt/qiln
       EnvironmentFile=/etc/qiln/ssh.env
-      Environment=QILN_HOST_CREDENTIAL_PATH=/run/qiln/qiln-host.env
+      ImportCredential=qiln-host.env
+      Environment=QILN_HOST_CREDENTIAL_PATH=%d/qiln-host.env
       ImportCredential=qiln-ssh-gateway-host-key
       Environment=QILN_SSH_GATEWAY_HOST_KEY_PATH=%d/qiln-ssh-gateway-host-key
-      ExecStartPre=/bin/sh -ec 'if [ "$${QILN_SSH_GATEWAY_ENABLED:-false}" = "true" ]; then test -r "$${CREDENTIALS_DIRECTORY}/qiln-ssh-gateway-host-key"; fi'
+      ExecStartPre=/usr/bin/test -r %d/qiln-host.env
+      ExecStartPre=/usr/bin/test -r %d/qiln-ssh-gateway-host-key
       ExecStart=/usr/bin/npm run ssh:dev
       TimeoutStopSec=40s
       UMask=0077
@@ -908,6 +944,22 @@ files:
 
       [Install]
       WantedBy=multi-user.target
+
+  # Shadow the generated LXC credential resets only for this unit while
+  # preserving its six non-credential LXC settings.
+  - path: /etc/systemd/system/qiln-ssh-dev.service.d/zzz-lxc-service.conf
+    generator: dump
+    uid: 0
+    gid: 0
+    mode: '0644'
+    content: |-
+      [Service]
+      ProcSubset=all
+      ProtectProc=default
+      ProtectControlGroups=no
+      ProtectKernelTunables=no
+      NoNewPrivileges=no
+      PrivateNetwork=no
 
   # This development-only service runs the Qiln Host and embedded Worker in one
   # process. The installer must supply the validated host checkout at /opt/qiln
@@ -919,6 +971,9 @@ files:
   # The service is intentionally not enabled by the image. Enabling it remains
   # an explicit operator action after the source and writable build strategy
   # have been prepared and migrations have been applied.
+  #
+  # Its private Host credential is imported directly; the shared /run/qiln
+  # credential remains only a development shell fallback.
   - path: /etc/systemd/system/qiln-dev.service
     generator: dump
     uid: 0
@@ -937,7 +992,9 @@ files:
       Group=qiln
       WorkingDirectory=/opt/qiln
       EnvironmentFile=/etc/qiln/runtime.env
-      Environment=QILN_HOST_CREDENTIAL_PATH=/run/qiln/qiln-host.env
+      ImportCredential=qiln-host.env
+      Environment=QILN_HOST_CREDENTIAL_PATH=%d/qiln-host.env
+      ExecStartPre=/usr/bin/test -r %d/qiln-host.env
       ExecStart=/usr/bin/npm run server:dev
       TimeoutStopSec=30s
       UMask=0077
@@ -946,6 +1003,22 @@ files:
 
       [Install]
       WantedBy=multi-user.target
+
+  # Shadow the generated LXC credential resets only for this unit while
+  # preserving its six non-credential LXC settings.
+  - path: /etc/systemd/system/qiln-dev.service.d/zzz-lxc-service.conf
+    generator: dump
+    uid: 0
+    gid: 0
+    mode: '0644'
+    content: |-
+      [Service]
+      ProcSubset=all
+      ProtectProc=default
+      ProtectControlGroups=no
+      ProtectKernelTunables=no
+      NoNewPrivileges=no
+      PrivateNetwork=no
 
   # Qiln Caddy doesn't use the default Caddyfile.
   - path: /etc/caddy/Caddyfile
