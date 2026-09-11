@@ -6,6 +6,17 @@ config:
   security.idmap.isolated: 'true'
   security.nesting: 'false'
   security.privileged: 'false'
+  # Resolute's stacked peer labels can fall outside Incus's generated allowances.
+  # Permit only the observed same-container signal/send and ptrace/read operations.
+  # This preserves generated confinement; it does not address rsyslogd's denials.
+  # Validated on a standard Resolute probe; Qiln-image verification remains pending.
+  # TODO(apparmor-resolute): Reassess Ubuntu, AppArmor, and Incus/LXC updates in
+  # December 2026. Remove only after otherwise identical disposable standard and
+  # Qiln Resolute probes boot normally without these rules, remaining unprivileged,
+  # non-nested, and isolated-ID-mapped.
+  raw.apparmor: |-
+    signal (send) peer=@{profile_name}//&unconfined,
+    ptrace (read) peer=@{profile_name}//&unconfined,
 devices:
   eth0:
     name: eth0
