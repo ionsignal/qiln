@@ -16,7 +16,7 @@
     "build:alias": "tsc-alias -p ./app/server/tsconfig.json",
     "build:lib": "npm run build:mcp && npm run build -w @qiln/ssh && npm run build -w @qiln/engine && npm run build -w @qiln/worker && npm run build:cli",
     "server:dev": "npm run build:web:clean && npm run server:watch",
-    "server:watch": "set -a && . /etc/qiln/runtime.env && set +a && concurrently --kill-others-on-fail --prefix-colors 'magenta,gray,red,blue,green,cyan' --names 'CORE,AGENT,ENGINE,WORKER,SERVER,TYPES' \"npm:server:dev:core:watch\" \"npm:server:dev:agent:watch\" \"npm:server:dev:engine:watch\" \"npm:server:dev:worker:watch\" \"npm:server:dev:compile\" \"npm:server:dev:types\"",
+    "server:watch": "set -a && . /etc/qiln/runtime.env && set +a && : \"${QILN_HOST_CREDENTIAL_PATH:=/run/qiln/qiln-host.env}\" && export QILN_HOST_CREDENTIAL_PATH && concurrently --kill-others-on-fail --prefix-colors 'magenta,gray,red,blue,green,cyan' --names 'CORE,AGENT,ENGINE,WORKER,SERVER,TYPES' \"npm:server:dev:core:watch\" \"npm:server:dev:agent:watch\" \"npm:server:dev:engine:watch\" \"npm:server:dev:worker:watch\" \"npm:server:dev:compile\" \"npm:server:dev:types\"",
     "server:dev:core:watch": "npm run dev --workspace=@qiln/core",
     "server:dev:agent:watch": "node scripts/wait-for.js packages/core/dist/client.d.ts && npm run dev --workspace=@qiln/agent",
     "server:dev:engine:watch": "node scripts/wait-for.js packages/core/dist/sentinel.js && npm run dev --workspace=@qiln/engine",
