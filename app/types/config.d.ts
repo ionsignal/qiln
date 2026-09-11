@@ -52,6 +52,10 @@ type WorkerConfig = {
   embedded: boolean
 }
 
+type ObservabilityConfig = {
+  queries: boolean
+}
+
 type DatabaseConfig = NonNullable<WorkerRuntimeConfig['database']>
 type DefinitionConfig = NonNullable<WorkerRuntimeConfig['definitions']>
 type IncusConfig = NonNullable<WorkerRuntimeConfig['incus']>
@@ -79,6 +83,7 @@ type Config = WorkerHostConfig & {
   ssl: string
   development: DevelopmentConfig
   worker: WorkerConfig
+  observability: ObservabilityConfig
   cookies: CookiesConfig
   multipart: MultipartConfig
   limit: LimitConfig
@@ -125,5 +130,6 @@ export type {
   CaddyConfig,
   RoutingConfig,
   WorkerConfig,
+  ObservabilityConfig,
   FeatureConfig,
 }

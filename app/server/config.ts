@@ -92,6 +92,9 @@ export default {
   database: {
     url: process.env.DATABASE_URL ?? '',
   },
+  observability: {
+    queries: process.env.DATABASE_LOG_QUERIES === 'true',
+  },
   nats: {
     servers: process.env.NATS_SERVERS ? process.env.NATS_SERVERS.split(',') : ['nats://localhost:4222'],
     token: process.env.NATS_TOKEN || undefined,

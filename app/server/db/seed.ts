@@ -36,7 +36,9 @@ async function seed() {
   }
   // Initialize the Web database connection
   // We destructure 'close' to ensure we shut down the Postgres client properly
-  const { db, close } = createDatabase(config.database.url)
+  const { db, close } = createDatabase(config.database.url, {
+    queries: config.observability.queries,
+  })
   const isDev = process.env.NODE_ENV !== 'production'
   const credentialsLog: string[] = []
   const agentCredentialLog: string[] = []

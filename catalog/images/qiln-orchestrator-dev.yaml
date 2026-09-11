@@ -857,6 +857,7 @@ files:
       PGPORT=5432
       PGUSER=qiln
       DATABASE_URL=postgresql:///qiln
+      DATABASE_LOG_QUERIES=false
       NATS_SERVERS=nats://127.0.0.1:4222
 
       QILN_CADDY_ENDPOINT=http://127.0.0.1:2019
