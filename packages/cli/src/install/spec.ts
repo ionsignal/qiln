@@ -1,8 +1,12 @@
 const INCUS_BRIDGE_CONFIG = Object.freeze({
   'ipv4.address': '10.10.10.1/24',
+  'ipv4.dhcp': 'true',
   'ipv4.dhcp.ranges': '10.10.10.100-10.10.10.200',
+  'ipv4.firewall': 'false',
   'ipv4.nat': 'true',
+  'ipv4.routing': 'true',
   'ipv6.address': 'none',
+  'ipv6.firewall': 'false',
   'ipv6.nat': 'false',
 } as const)
 
