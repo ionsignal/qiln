@@ -121,6 +121,7 @@ const kernel = {
   },
 }
 
+const supportedUbuntuRelease = `Ubuntu ${INSTALLER_SPEC.supportedHost.versionId}`
 const minimumKernel = kernel.parse(INSTALLER_SPEC.supportedHost.minimumKernelRelease)
 if (!minimumKernel) {
   throw new Error('Installer kernel policy is invalid.')
@@ -253,7 +254,7 @@ export async function validateHostPreflight(): Promise<HostPreflight> {
       summary: 'Qiln requires a Linux host.',
       observed: `Node reports platform '${process.platform}'.`,
       reason: 'The local Incus daemon, ZFS checks, and Unix-socket installer boundary are Linux-specific.',
-      operatorAction: 'Run the installer on the supported Ubuntu 24.04 host.',
+      operatorAction: `Run the installer on the supported ${supportedUbuntuRelease} host.`,
       rerun: 'qiln doctor',
     })
   }
@@ -281,10 +282,10 @@ export async function validateHostPreflight(): Promise<HostPreflight> {
     throw new QilnInstallerError({
       code: 'UNSUPPORTED_UBUNTU_RELEASE',
       check: 'host operating-system release',
-      summary: 'The host is not the supported Ubuntu 24.04 release.',
+      summary: `The host is not the supported ${supportedUbuntuRelease} release.`,
       observed: `Detected ID='${distributionId || 'unknown'}' and VERSION_ID='${distributionVersion || 'unknown'}'.`,
-      reason: 'The MVP installer policy is intentionally limited to Ubuntu 24.04.',
-      operatorAction: 'Provision the documented Ubuntu 24.04 developer host before running Qiln.',
+      reason: `The MVP installer policy is intentionally limited to ${supportedUbuntuRelease}.`,
+      operatorAction: `Provision the documented ${supportedUbuntuRelease} developer host before running Qiln.`,
       rerun: 'qiln doctor',
     })
   }
@@ -297,7 +298,7 @@ export async function validateHostPreflight(): Promise<HostPreflight> {
       observed: `Node reports architecture '${nodeArchitecture}'.`,
       reason:
         'The initial MVP supports native AMD64 containers only and does not rely on foreign-architecture emulation.',
-      operatorAction: 'Run Qiln on an x86_64/AMD64 Ubuntu 24.04 host.',
+      operatorAction: `Run Qiln on an x86_64/AMD64 ${supportedUbuntuRelease} host.`,
       rerun: 'qiln doctor',
     })
   }

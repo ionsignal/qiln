@@ -105,7 +105,7 @@ export const INSTALLER_SPEC = Object.freeze({
   projectName: 'default',
   supportedHost: {
     distributionId: 'ubuntu',
-    versionId: '24.04',
+    versionId: '26.04',
     nodeArchitecture: 'x64',
     incusArchitecture: 'x86_64',
     minimumKernelRelease: '6.8.0-138-generic',
