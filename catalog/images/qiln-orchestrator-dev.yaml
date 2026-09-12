@@ -805,8 +805,8 @@ files:
       StrictModes yes
       AllowUsers qiln
 
+      AllowTcpForwarding local
       AllowAgentForwarding no
-      AllowTcpForwarding no
       GatewayPorts no
       PermitTunnel no
       X11Forwarding no
