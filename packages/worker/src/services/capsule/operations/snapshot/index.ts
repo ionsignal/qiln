@@ -1,6 +1,6 @@
 export * from './types'
 export * from './steps'
-export * from './plan'
+export * from './versioned'
 export * from './persistence'
 export * from './provider'
 export * from './executor'

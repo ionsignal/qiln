@@ -9,7 +9,7 @@ import {
 import { IncusError } from '../../../../errors'
 import { interpolate } from '../../../../utils/template'
 import { mergeCloudInit } from '../../resource/bootstrap/cloudinit'
-import { resolveFileTarget, type ManagedVolume } from '../../resource/bootstrap/targets'
+import { resolveFileTarget, type AttachedVolume } from '../../resource/bootstrap/targets'
 import {
   bindMountResourceKey,
   branchInstanceName,
@@ -80,7 +80,7 @@ function referenceMap(operationId: string, source: ForkSource) {
       createResources.has(resource.createResourceId) ||
       providerIdentities.has(providerIdentity)
     ) {
-      throw new IncusError('Fork source contains duplicate managed-volume restoration authority.', 'CONFLICT', {
+      throw new IncusError('Fork source contains duplicate versioned-volume restoration authority.', 'CONFLICT', {
         operationId,
         sourceSnapshotId: source.snapshotId,
         blueprintVolumeName: resource.blueprintVolumeName,
@@ -97,10 +97,11 @@ function referenceMap(operationId: string, source: ForkSource) {
 /**
  * Builds the complete target branch resource plan from one committed snapshot.
  *
- * Managed volume sources come only from committed snapshot references. Rootfs
- * reconstruction authority comes only from the snapshot's immutable resolved
- * image pin. This planner performs no SQL, provider discovery, provider reads,
- * or provider mutations.
+ * Versioned volume sources come only from committed snapshot references.
+ * Non-versioned empty volumes receive fresh branch-local identities and no
+ * source references. Rootfs reconstruction authority comes only from the
+ * snapshot's immutable resolved image pin. This planner performs no SQL,
+ * provider discovery, provider reads, or provider mutations.
  */
 export class ForkPlanner {
   public create(input: ForkPlanInput): ForkPlan {
@@ -119,7 +120,7 @@ export class ForkPlanner {
     const devices: IncusDeviceMap = {
       ...blueprint.runtime.devices,
     }
-    const managedVolumes: ManagedVolume[] = []
+    const attachedVolumes: AttachedVolume[] = []
     for (const volume of blueprint.provisioning.volumes) {
       if (volume.type === 'bind') {
         devices[volume.name] = {
@@ -151,35 +152,13 @@ export class ForkPlanner {
         })
         continue
       }
-      const reference = references.get(volume.name)
-      if (!reference) {
-        throw new IncusError('Fork managed volume has no committed snapshot authority.', 'CONFLICT', {
-          operationId: input.operationId,
-          sourceSnapshotId: input.source.snapshotId,
-          blueprintVolumeName: volume.name,
-        })
-      }
-      if (
-        reference.provider !== 'incus' ||
-        reference.kind !== 'custom_volume_snapshot' ||
-        reference.project !== namespace ||
-        reference.pool !== volume.pool
-      ) {
-        throw new IncusError('Fork managed-volume snapshot authority is contradictory.', 'CONFLICT', {
-          operationId: input.operationId,
-          sourceSnapshotId: input.source.snapshotId,
-          blueprintVolumeName: volume.name,
-          sourceProject: reference.project,
-          sourcePool: reference.pool,
-        })
-      }
       const volumeName = branchVolumeName(input.branchId, volume.name)
       const config: Record<string, string> = {}
       if (volume.shifted) {
         config['security.shifted'] = 'true'
       }
-      const planned: ForkVolumeResource = {
-        kind: 'volume',
+      const common = {
+        kind: 'volume' as const,
         deviceName: volume.name,
         pool: volume.pool,
         volumeName,
@@ -187,28 +166,79 @@ export class ForkPlanner {
         readonly: volume.readonly,
         shifted: volume.shifted,
         config,
-        source: {
-          project: reference.project,
-          pool: reference.pool,
-          volume: reference.sourceVolume,
-          snapshot: reference.snapshotName,
-        },
-        provider: 'incus',
+        provider: 'incus' as const,
         resourceType: CapsuleBranchResourceType.ZFS_VOLUME,
         resourceKey: volumeResourceKey(namespace, volume.pool, volumeName),
         blueprintVolumeName: volume.name,
         cleanupPolicy: CapsuleBranchResourceCleanupPolicy.DELETE_WITH_BRANCH,
-        metadata: {
-          namespace,
-          pool: volume.pool,
-          volumeName,
-          mountPath: volume.mount_path,
-          sourceVolume: `${reference.sourceVolume}/${reference.snapshotName}`,
-          volumeType: 'clone',
-        },
       }
-      volumes.push(planned)
-      managedVolumes.push({
+      if (volume.versioned) {
+        const reference = references.get(volume.name)
+        if (!reference) {
+          throw new IncusError('Fork versioned volume has no committed snapshot authority.', 'CONFLICT', {
+            operationId: input.operationId,
+            sourceSnapshotId: input.source.snapshotId,
+            blueprintVolumeName: volume.name,
+          })
+        }
+        if (
+          reference.provider !== 'incus' ||
+          reference.kind !== 'custom_volume_snapshot' ||
+          reference.project !== namespace ||
+          reference.pool !== volume.pool
+        ) {
+          throw new IncusError('Fork versioned-volume snapshot authority is contradictory.', 'CONFLICT', {
+            operationId: input.operationId,
+            sourceSnapshotId: input.source.snapshotId,
+            blueprintVolumeName: volume.name,
+            sourceProject: reference.project,
+            sourcePool: reference.pool,
+          })
+        }
+        volumes.push({
+          ...common,
+          mode: 'restore',
+          versioned: true,
+          source: {
+            project: reference.project,
+            pool: reference.pool,
+            volume: reference.sourceVolume,
+            snapshot: reference.snapshotName,
+          },
+          metadata: {
+            namespace,
+            pool: volume.pool,
+            volumeName,
+            mountPath: volume.mount_path,
+            sourceVolume: `${reference.sourceVolume}/${reference.snapshotName}`,
+            volumeType: 'clone',
+            versioned: true,
+          },
+        })
+      } else {
+        if (volume.type !== 'empty' || references.has(volume.name)) {
+          throw new IncusError('Fresh fork storage must be empty and have no snapshot reference.', 'CONFLICT', {
+            operationId: input.operationId,
+            sourceSnapshotId: input.source.snapshotId,
+            blueprintVolumeName: volume.name,
+          })
+        }
+        volumes.push({
+          ...common,
+          mode: 'fresh',
+          versioned: false,
+          metadata: {
+            namespace,
+            pool: volume.pool,
+            volumeName,
+            mountPath: volume.mount_path,
+            sourceVolume: null,
+            volumeType: 'empty',
+            versioned: false,
+          },
+        })
+      }
+      attachedVolumes.push({
         pool: volume.pool,
         volumeName,
         mountPath: volume.mount_path,
@@ -224,7 +254,7 @@ export class ForkPlanner {
 
     this.assertCoverage(input, volumes)
 
-    managedVolumes.sort((left, right) => right.mountPath.length - left.mountPath.length)
+    attachedVolumes.sort((left, right) => right.mountPath.length - left.mountPath.length)
 
     const instance = this.instance(
       input.branchId,
@@ -235,9 +265,9 @@ export class ForkPlanner {
       input.source.rootfsImagePin,
       namespace,
       devices,
-      managedVolumes,
+      volumes.filter(volume => volume.mode === 'fresh'),
     )
-    const files = this.files(input.branchName, input.cpu, input.memory, blueprint, namespace, instance, managedVolumes)
+    const files = this.files(input.branchName, input.cpu, input.memory, blueprint, namespace, instance, attachedVolumes)
     const resources: ForkPlannedResource[] = [
       project,
       ...binds.sort((left, right) => compare(left.resourceKey, right.resourceKey)),
@@ -421,7 +451,7 @@ export class ForkPlanner {
     rootfsImagePin: CapsuleRootfsImagePin,
     namespace: string,
     devices: IncusDeviceMap,
-    managedVolumes: ManagedVolume[],
+    freshVolumes: AttachedVolume[],
   ): ForkInstanceResource {
     const instanceName = branchInstanceName(branchId)
     const config: Record<string, string> = {
@@ -430,10 +460,12 @@ export class ForkPlanner {
       'limits.cpu': cpu,
       'limits.memory': memory,
     }
-    if (managedVolumes.length > 0) {
+    if (freshVolumes.length > 0) {
+      // Restored volume ownership is snapshot state. Only fresh storage needs
+      // Qiln-generated ownership initialization on the rebuilt instance.
       config['user.vendor-data'] = mergeCloudInit(
         config['user.vendor-data'],
-        managedVolumes.map(volume => ['chown', '1000:1000', volume.mountPath]),
+        freshVolumes.map(volume => ['chown', '1000:1000', volume.mountPath]),
       )
     }
     return {
@@ -462,7 +494,7 @@ export class ForkPlanner {
     blueprint: CapsuleBlueprint,
     namespace: string,
     instance: ForkInstanceResource,
-    managedVolumes: ManagedVolume[],
+    attachedVolumes: AttachedVolume[],
   ): ForkFileResource[] {
     const interpolation = {
       name: branchName,
@@ -476,7 +508,7 @@ export class ForkPlanner {
     }
     const files: ForkFileResource[] = []
     for (const file of blueprint.provisioning.files) {
-      const target = resolveFileTarget(file.path, managedVolumes)
+      const target = resolveFileTarget(file.path, attachedVolumes)
       if (target.target === 'volume') {
         // Cloning preserves edits and intentional deletions. Historical
         // provisioning entries do not prove individual files still exist.
@@ -548,27 +580,40 @@ export class ForkPlanner {
   }
 
   private assertCoverage(input: ForkPlanInput, volumes: readonly ForkVolumeResource[]): void {
-    const managedNames = new Set(
-      input.source.blueprint.blueprint.provisioning.volumes
-        .filter(volume => volume.type !== 'bind')
-        .map(volume => volume.name),
-    )
+    const managedVolumes = input.source.blueprint.blueprint.provisioning.volumes.filter(volume => volume.type !== 'bind')
+    const managedNames = new Set(managedVolumes.map(volume => volume.name))
+    const versionedNames = new Set(managedVolumes.filter(volume => volume.versioned).map(volume => volume.name))
     const plannedNames = new Set(volumes.map(volume => volume.blueprintVolumeName))
+    const restoredVolumes = volumes.filter(volume => volume.mode === 'restore')
+    const restoredNames = new Set(restoredVolumes.map(volume => volume.blueprintVolumeName))
     const referenceNames = new Set(input.source.resources.map(resource => resource.blueprintVolumeName))
     if (
       volumes.length !== managedNames.size ||
       plannedNames.size !== managedNames.size ||
-      input.source.resources.length !== managedNames.size ||
-      referenceNames.size !== managedNames.size ||
-      [...managedNames].some(name => !plannedNames.has(name) || !referenceNames.has(name))
-    ) {
-      throw new IncusError('Fork snapshot references do not exactly cover all managed Blueprint volumes.', 'CONFLICT', {
-        operationId: input.operationId,
-        sourceSnapshotId: input.source.snapshotId,
-        managedBlueprintVolumes: [...managedNames].sort(compare),
-        plannedBlueprintVolumes: [...plannedNames].sort(compare),
-        referencedBlueprintVolumes: [...referenceNames].sort(compare),
+      [...managedNames].some(name => !plannedNames.has(name)) ||
+      restoredVolumes.length !== versionedNames.size ||
+      restoredNames.size !== versionedNames.size ||
+      input.source.resources.length !== versionedNames.size ||
+      referenceNames.size !== versionedNames.size ||
+      [...versionedNames].some(name => !restoredNames.has(name) || !referenceNames.has(name)) ||
+      managedVolumes.some(volume => {
+        const planned = volumes.find(candidate => candidate.blueprintVolumeName === volume.name)
+        return !planned || planned.versioned !== volume.versioned
       })
+    ) {
+      throw new IncusError(
+        'Fork must plan every managed volume and restore exactly the versioned Blueprint volumes.',
+        'CONFLICT',
+        {
+          operationId: input.operationId,
+          sourceSnapshotId: input.source.snapshotId,
+          managedBlueprintVolumes: [...managedNames].sort(compare),
+          versionedBlueprintVolumes: [...versionedNames].sort(compare),
+          plannedBlueprintVolumes: [...plannedNames].sort(compare),
+          restoredBlueprintVolumes: [...restoredNames].sort(compare),
+          referencedBlueprintVolumes: [...referenceNames].sort(compare),
+        },
+      )
     }
   }
 }

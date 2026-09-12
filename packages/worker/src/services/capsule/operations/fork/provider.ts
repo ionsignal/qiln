@@ -16,8 +16,9 @@ export interface ForkProviderDependencies {
  * Performs provider mutations authorized by one immutable fork execution plan.
  *
  * Every resource is resolved from the branch resource rows accepted with the
- * operation. Managed-volume sources cannot come from provider listing,
- * discovery, adoption, or inferred ownership. The owner project remains an
+ * operation. Versioned-volume sources cannot come from provider listing,
+ * discovery, adoption, or inferred ownership. Non-versioned volumes are created
+ * empty without consulting parent storage. The owner project remains an
  * explicitly retained resource.
  */
 export class ForkProvider {
@@ -60,21 +61,30 @@ export class ForkProvider {
       try {
         await this.dependencies.resources.recordBranchResourceCreateIntent(resource.id, input.operationId)
         intentCommitted = true
-        await project.storage.cloneSnapshot(planned.pool, planned.volumeName, planned.source, planned.config)
+        if (planned.mode === 'restore') {
+          await project.storage.cloneSnapshot(planned.pool, planned.volumeName, planned.source, planned.config)
+        } else {
+          await project.storage.create(planned.pool, planned.volumeName, planned.config)
+        }
       } catch (error: unknown) {
         if (intentCommitted) {
           await this.recordCreateFailure(input.operationId, resource, error, {
             operationId: input.operationId,
             capsuleId: input.capsuleId,
             branchId: input.branchId,
-            action: 'clone_fork_snapshot_volume',
+            action: planned.mode === 'restore' ? 'clone_fork_snapshot_volume' : 'create_fork_empty_volume',
             blueprintVolumeName: planned.blueprintVolumeName,
-            sourceProject: planned.source.project,
-            sourcePool: planned.source.pool,
-            sourceVolume: planned.source.volume,
-            sourceSnapshot: planned.source.snapshot,
+            versioned: planned.versioned,
             targetPool: planned.pool,
             targetVolume: planned.volumeName,
+            ...(planned.mode === 'restore'
+              ? {
+                  sourceProject: planned.source.project,
+                  sourcePool: planned.source.pool,
+                  sourceVolume: planned.source.volume,
+                  sourceSnapshot: planned.source.snapshot,
+                }
+              : {}),
           })
         }
         throw error
@@ -111,9 +121,10 @@ export class ForkProvider {
   /**
    * Reconstructs only provisioning files on the rebuilt rootfs.
    *
-   * Managed-volume entries are excluded from the plan. Cloned contents,
+   * Volume-targeted entries are excluded from the plan. Restored contents,
    * including intentional file edits and deletions, are never overwritten or
    * represented as individually verified historical provisioning files.
+   * Fresh non-versioned volumes receive no provisioning writes.
    */
   public async files(input: ForkExecution): Promise<void> {
     for (const planned of input.plan.files) {

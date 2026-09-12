@@ -32,13 +32,13 @@ function conflict(operationId: string, message: string): never {
 }
 
 /**
- * Proves the complete source inventory and selects every managed Blueprint
- * volume without artifact roots or filesystem inspection.
+ * Proves the complete source inventory and selects only versioned Blueprint
+ * volumes without artifact roots or filesystem inspection.
  *
- * Bind records are checked as existing branch configuration, but never become
- * provider snapshot plans or committed snapshot references.
+ * Non-versioned volumes and binds remain part of branch inventory validation,
+ * but never become provider snapshot plans or committed snapshot references.
  */
-export class SnapshotPlanner {
+export class VersionedVolumeSnapshotPlanner {
   public create(input: SnapshotPlanInput): SnapshotPlan {
     const { operationId, branch, provenance, resources } = input
     const blueprint = provenance.blueprint.blueprint
@@ -106,7 +106,7 @@ export class SnapshotPlanner {
     if (volumeResources.length !== blueprint.provisioning.volumes.length) {
       conflict(operationId, 'Source volume inventory does not exactly cover the historical Blueprint.')
     }
-    const volumes: SnapshotVolume[] = []
+    const versionedVolumes: SnapshotVolume[] = []
     for (const volume of blueprint.provisioning.volumes) {
       const matches = volumeResources.filter(resource => resource.blueprintVolumeName === volume.name)
       if (matches.length !== 1) {
@@ -136,11 +136,18 @@ export class SnapshotPlanner {
         metadata.namespace !== project ||
         metadata.pool !== volume.pool ||
         metadata.mountPath !== volume.mount_path ||
+        metadata.versioned !== volume.versioned ||
         resource.resourceKey !== volumeResourceKey(project, metadata.pool, metadata.volumeName)
       ) {
         conflict(operationId, 'Source managed-volume identity disagrees with the historical Blueprint.')
       }
-      volumes.push({
+      if (!volume.versioned) {
+        if (metadata.volumeType !== 'empty' || metadata.sourceVolume !== null) {
+          conflict(operationId, 'Non-versioned storage must originate from a fresh empty volume.')
+        }
+        continue
+      }
+      versionedVolumes.push({
         blueprintVolumeName: volume.name,
         sourceBranchResourceId: resource.id,
         provider: 'incus',
@@ -151,7 +158,7 @@ export class SnapshotPlanner {
         snapshotName: `qiln-${operationId}-${volume.name}`,
       })
     }
-    volumes.sort((left, right) =>
+    versionedVolumes.sort((left, right) =>
       left.blueprintVolumeName < right.blueprintVolumeName
         ? -1
         : left.blueprintVolumeName > right.blueprintVolumeName
@@ -162,7 +169,7 @@ export class SnapshotPlanner {
       project,
       instanceName,
       inventoryDigest,
-      volumes,
+      versionedVolumes,
     }
   }
 
@@ -171,12 +178,12 @@ export class SnapshotPlanner {
    * committed restoration authority.
    */
   public assertResources(operationId: string, plan: SnapshotPlan, resources: readonly SnapshotResource[]): void {
-    if (resources.length !== plan.volumes.length) {
-      conflict(operationId, 'Snapshot accounting does not cover every accepted managed volume.')
+    if (resources.length !== plan.versionedVolumes.length) {
+      conflict(operationId, 'Snapshot accounting does not cover exactly the accepted versioned volumes.')
     }
     const seen = new Set<string>()
     for (const resource of resources) {
-      const volume = plan.volumes.find(candidate => candidate.blueprintVolumeName === resource.blueprintVolumeName)
+      const volume = plan.versionedVolumes.find(candidate => candidate.blueprintVolumeName === resource.blueprintVolumeName)
       if (
         !volume ||
         seen.has(resource.blueprintVolumeName) ||

@@ -223,16 +223,18 @@ export class CapsuleSnapshotStore<
     ) {
       conflict(snapshot.id, 'Snapshot restoration pins disagree with their accepted operation input.')
     }
-    const managed = blueprint.blueprint.provisioning.volumes.filter(volume => volume.type !== 'bind')
+    const versionedVolumes = blueprint.blueprint.provisioning.volumes.filter(
+      volume => volume.type !== 'bind' && volume.versioned,
+    )
     if (
-      (managed.length > 0 && operation.providerMutationStartedAt === null) ||
-      (managed.length === 0 && operation.providerMutationStartedAt !== null)
+      (versionedVolumes.length > 0 && operation.providerMutationStartedAt === null) ||
+      (versionedVolumes.length === 0 && operation.providerMutationStartedAt !== null)
     ) {
-      conflict(snapshot.id, 'Snapshot provider intent does not agree with its managed-volume coverage.')
+      conflict(snapshot.id, 'Snapshot provider intent does not agree with its versioned-volume coverage.')
     }
     const references = rows.flatMap(row => (row.reference === null ? [] : [row]))
-    if (references.length !== managed.length) {
-      conflict(snapshot.id, 'Snapshot does not retain exactly one reference for every managed volume.')
+    if (references.length !== versionedVolumes.length) {
+      conflict(snapshot.id, 'Snapshot must retain exactly one reference for every versioned volume and no others.')
     }
     const seen = new Set<string>()
     const resources = references.map(row => {
@@ -247,9 +249,9 @@ export class CapsuleSnapshotStore<
       ) {
         conflict(snapshot.id, 'Snapshot contains incomplete or contradictory provider-reference provenance.')
       }
-      const volume = managed.find(candidate => candidate.name === reference.blueprintVolumeName)
-      if (!volume || seen.has(volume.name)) {
-        conflict(snapshot.id, 'Snapshot contains an unknown or duplicate managed-volume reference.')
+      const volume = versionedVolumes.find(candidate => candidate.name === reference.blueprintVolumeName)
+      if (!volume || volume.type === 'bind' || !volume.versioned || seen.has(volume.name)) {
+        conflict(snapshot.id, 'Snapshot contains a duplicate reference or a reference outside versioned storage.')
       }
       seen.add(volume.name)
       if (
@@ -287,9 +289,10 @@ export class CapsuleSnapshotStore<
         metadata.pool !== reference.pool ||
         metadata.volumeName !== reference.sourceVolume ||
         metadata.mountPath !== volume.mount_path ||
+        metadata.versioned !== true ||
         source.resourceKey !== volumeResourceKey(metadata.namespace, metadata.pool, metadata.volumeName)
       ) {
-        conflict(snapshot.id, 'Snapshot provider reference does not match its managed-volume boundary.')
+        conflict(snapshot.id, 'Snapshot provider reference does not match its versioned-volume boundary.')
       }
       return CapsuleSnapshotResourceReferenceSchema.parse({
         provider: reference.provider,

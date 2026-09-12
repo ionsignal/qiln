@@ -10,10 +10,10 @@ export interface SnapshotProviderDependencies {
 }
 
 /**
- * Uses only provider identities accepted into the snapshot resource ledger.
+ * Uses only versioned provider identities accepted into the snapshot ledger.
  *
- * Filesystem APIs, provider listing, inferred baselines, and bind contents are
- * outside this boundary.
+ * Filesystem APIs, provider listing, inferred baselines, non-versioned volume
+ * contents, and bind contents are outside this boundary.
  */
 export class SnapshotProvider {
   constructor(private readonly dependencies: SnapshotProviderDependencies) {}
@@ -35,7 +35,7 @@ export class SnapshotProvider {
   }
 
   public async create(input: SnapshotExecution): Promise<void> {
-    for (const volume of input.plan.volumes) {
+    for (const volume of input.plan.versionedVolumes) {
       const resource = await this.dependencies.repository.creating(input.operationId, volume.blueprintVolumeName)
       try {
         await this.dependencies.incus

@@ -172,7 +172,7 @@ export class SnapshotExecutor {
         branchName: execution.sourceBranchName,
         stepKey,
         metadata: {
-          managedVolumeCount: execution.plan.volumes.length,
+          versionedVolumeCount: execution.plan.versionedVolumes.length,
         },
         failureContext: {
           operationType: CapsuleOperationType.SNAPSHOT_CREATE,

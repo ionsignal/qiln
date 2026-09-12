@@ -43,12 +43,14 @@ export const CapsuleBlueprintBaseVolumeSchema = z.object({
 // TODO(capsule-seed-pin): Replace this mutable seed selector with an immutable provider snapshot pin.
 export const CapsuleBlueprintCloneVolumeSchema = CapsuleBlueprintBaseVolumeSchema.extend({
   type: z.literal('clone'),
+  versioned: z.literal(true),
   pool: z.string().trim().min(1),
   source_volume: z.string().trim().min(1),
 }).strict()
 
 export const CapsuleBlueprintEmptyVolumeSchema = CapsuleBlueprintBaseVolumeSchema.extend({
   type: z.literal('empty'),
+  versioned: z.boolean(),
   pool: z.string().trim().min(1),
 }).strict()
 
@@ -66,9 +68,11 @@ export const CapsuleBlueprintVolumeDefinitionSchema = z.discriminatedUnion('type
 /**
  * Blueprint provisioning supports regular files and directories only.
  *
- * These definitions reconstruct configured files on a rebuilt rootfs.
- * Managed-volume contents are restored through provider snapshots rather than
- * interpreted or constrained by this provisioning contract.
+ * Initial creation may provision rootfs paths and versioned empty volumes. Fork
+ * reconstructs rootfs files only; versioned volume contents are restored
+ * through provider snapshots rather than rewritten from provisioning entries.
+ * Aggregate Blueprint validation excludes clone, non-versioned, and bind
+ * paths.
  */
 export const CapsuleBlueprintFileDefinitionSchema = z
   .object({

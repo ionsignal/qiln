@@ -13,7 +13,7 @@ import type {
 } from '@qiln/core/server'
 import type { IncusFilePushOptions } from '../../../../incus/client/types'
 import type { IncusDeviceMap } from '../../../../incus/client'
-import type { ManagedVolume, ProvisioningFileTarget } from '../../resource/bootstrap/targets'
+import type { AttachedVolume, ProvisioningFileTarget } from '../../resource/bootstrap/targets'
 import type { CapsuleOperationTransitionOutput } from '../shared'
 import type { CreatePhase } from './execution/phases'
 
@@ -128,6 +128,7 @@ export interface CreateCapsuleBindMountResource extends CreateCapsulePlannedReso
 export interface CreateCapsuleVolumeResource extends CreateCapsulePlannedResource {
   kind: 'volume'
   volumeType: 'empty' | 'clone'
+  versioned: boolean
   deviceName: string
   pool: string
   volumeName: string
@@ -161,7 +162,7 @@ export interface CreateCapsuleResourcePlan {
   volumes: CreateCapsuleVolumeResource[]
   instance: CreateCapsuleInstanceResource
   files: CreateCapsuleProvisioningFileResource[]
-  managedVolumes: ManagedVolume[]
+  attachedVolumes: AttachedVolume[]
 }
 
 export interface CreateCapsuleResourcePlanInput {

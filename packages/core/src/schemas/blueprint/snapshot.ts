@@ -16,8 +16,8 @@ export const CapsuleBlueprintInstanceRootfsModeSchema = z.enum(CapsuleBlueprintI
  * Declares the rootfs reconstruction boundary.
  *
  * A fork recreates the instance from the exact rootfs image pin and historical
- * Blueprint configuration. Mutable rootfs changes are not preserved; durable
- * branch state must live in Qiln-managed volumes.
+ * Blueprint configuration. Mutable rootfs changes are not preserved; branch
+ * state requiring restoration must live in versioned Qiln-managed volumes.
  */
 export const CapsuleBlueprintInstanceRootfsSchema = z
   .object({
@@ -28,9 +28,11 @@ export const CapsuleBlueprintInstanceRootfsSchema = z
 /**
  * Minimal Blueprint configuration for Create Snapshot.
  *
- * Every managed clone or empty volume is implicitly included. Bind mounts
- * remain unversioned external configuration and are reattached during fork
- * without claiming historical contents or availability.
+ * Only managed volumes declaring versioned: true participate in capture and
+ * restoration. Fork creates fresh empty volumes for non-versioned managed
+ * storage, excluding generated outputs from the restored branch state. Bind
+ * mounts remain unversioned external configuration and are reattached without
+ * claiming historical contents or availability.
  *
  * This configuration remains inside the complete historical Blueprint pin.
  * There is no separate snapshot-policy pin or digest.

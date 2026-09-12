@@ -38,7 +38,7 @@ export interface SnapshotPlan {
   project: string
   instanceName: string
   inventoryDigest: CapsuleBranchResourceInventoryDigest
-  volumes: SnapshotVolume[]
+  versionedVolumes: SnapshotVolume[]
 }
 
 export interface SnapshotExecution {

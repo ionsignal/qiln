@@ -20,7 +20,7 @@ import {
   toCapsuleLifecycleState,
   toCapsuleOperationTransition,
 } from '../../shared'
-import { SnapshotPlanner } from '../plan'
+import { VersionedVolumeSnapshotPlanner } from '../versioned'
 import type { PreviewGate } from '../../../routing/preview/gate'
 import type {
   SnapshotAcceptance,
@@ -75,7 +75,7 @@ export class SnapshotRepository<
   TTables extends CapsuleTables = CapsuleTables,
 > {
   private readonly provenance: CapsuleBranchProvenance<TDatabase, TTables>
-  private readonly planner = new SnapshotPlanner()
+  private readonly planner = new VersionedVolumeSnapshotPlanner()
   private readonly snapshots: CapsuleSnapshotStore<TDatabase, TTables>
 
   constructor(
@@ -143,11 +143,11 @@ export class SnapshotRepository<
           rootfsImagePin: pins.rootfsImagePin,
           snapshotId: null,
         })
-        if (plan.volumes.length > 0) {
+        if (plan.versionedVolumes.length > 0) {
           const inserted = await tx
             .insert(tables.capsuleSnapshotCreateResources)
             .values(
-              plan.volumes.map(volume => ({
+              plan.versionedVolumes.map(volume => ({
                 ...volume,
                 operationId: operation.id,
                 status: 'planned' as const,
@@ -158,8 +158,8 @@ export class SnapshotRepository<
             .returning({
               id: tables.capsuleSnapshotCreateResources.id,
             })
-          if (inserted.length !== plan.volumes.length) {
-            throw new IncusError('Failed to accept complete snapshot resource accounting.', 'API_ERROR')
+          if (inserted.length !== plan.versionedVolumes.length) {
+            throw new IncusError('Failed to accept complete versioned snapshot resource accounting.', 'API_ERROR')
           }
         }
         const [fenced] = await tx
@@ -403,7 +403,7 @@ export class SnapshotRepository<
         (scope.resources.length > 0 && scope.operation.providerMutationStartedAt === null) ||
         (scope.resources.length === 0 && scope.operation.providerMutationStartedAt !== null)
       ) {
-        throw new IncusError('Snapshot does not have complete successful provider evidence.', 'CONFLICT', {
+        throw new IncusError('Snapshot does not have complete successful versioned-volume evidence.', 'CONFLICT', {
           operationId,
         })
       }
@@ -453,7 +453,7 @@ export class SnapshotRepository<
             id: tables.capsuleSnapshotResourceReferences.id,
           })
         if (references.length !== scope.resources.length) {
-          throw new IncusError('Failed to commit complete managed-volume snapshot references.', 'API_ERROR', {
+          throw new IncusError('Failed to commit complete versioned-volume snapshot references.', 'API_ERROR', {
             operationId,
           })
         }
@@ -757,7 +757,7 @@ export class SnapshotRepository<
       (operation.providerMutationStartedAt === null &&
         resources.some(resource => resource.status !== 'planned' || !pristine(resource)))
     ) {
-      throw new IncusError('Snapshot provider intent contradicts its managed-volume accounting.', 'CONFLICT', {
+      throw new IncusError('Snapshot provider intent contradicts its versioned-volume accounting.', 'CONFLICT', {
         operationId: operation.id,
         resourceCount: resources.length,
         providerIntentRecorded: operation.providerMutationStartedAt !== null,

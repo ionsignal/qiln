@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-export const DEFAULT_CAPSULE_BLUEPRINT_NAME = 'n8n-comfyui-capsule'
+export const DEFAULT_CAPSULE_BLUEPRINT_NAME = 'comfyui-capsule'
 
 export const CapsuleBlueprintDigestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/, {
   message: "Capsule blueprint digests must use the format 'sha256:<64 lowercase hex characters>'.",

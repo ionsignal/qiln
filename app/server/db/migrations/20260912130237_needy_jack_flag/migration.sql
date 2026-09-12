@@ -529,7 +529,7 @@ CREATE TABLE "capsule_branches" (
 	"name" text NOT NULL,
 	"cpu" text DEFAULT '4' NOT NULL,
 	"memory" text DEFAULT '4GB' NOT NULL,
-	"blueprint_name" text DEFAULT 'n8n-comfyui-capsule' NOT NULL,
+	"blueprint_name" text DEFAULT 'comfyui-capsule' NOT NULL,
 	"blueprint_digest" text NOT NULL,
 	"resource_inventory_digest" text,
 	"status" "capsule_branch_status" DEFAULT 'provisioning'::"capsule_branch_status" NOT NULL,

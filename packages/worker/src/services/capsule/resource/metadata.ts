@@ -27,6 +27,7 @@ export const VolumeResourceMetadataSchema = z
     mountPath: NonEmptyStringSchema,
     sourceVolume: z.string().nullable(),
     volumeType: z.enum(['empty', 'clone']),
+    versioned: z.boolean(),
   })
   .strict()
 

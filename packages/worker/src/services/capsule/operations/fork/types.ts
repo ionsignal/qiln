@@ -66,7 +66,7 @@ export interface ForkBindResource extends ForkPlannedResource {
   shifted: boolean
 }
 
-export interface ForkVolumeResource extends ForkPlannedResource {
+interface ForkVolumeBase extends ForkPlannedResource {
   kind: 'volume'
   blueprintVolumeName: CapsuleBlueprintIdentifier
   deviceName: CapsuleBlueprintIdentifier
@@ -76,13 +76,30 @@ export interface ForkVolumeResource extends ForkPlannedResource {
   readonly: boolean
   shifted: boolean
   config: Record<string, string>
-  source: {
-    project: string
-    pool: string
-    volume: string
-    snapshot: string
-  }
 }
+
+/**
+ * Versioned volumes restore only from exact committed snapshot references.
+ * Fresh volumes carry no source identity, preventing parent output reuse.
+ */
+export type ForkVolumeResource = ForkVolumeBase &
+  (
+    | {
+        mode: 'restore'
+        versioned: true
+        source: {
+          project: string
+          pool: string
+          volume: string
+          snapshot: string
+        }
+      }
+    | {
+        mode: 'fresh'
+        versioned: false
+        source?: never
+      }
+  )
 
 export interface ForkInstanceResource extends ForkPlannedResource {
   kind: 'instance'
@@ -95,9 +112,10 @@ export interface ForkInstanceResource extends ForkPlannedResource {
 /**
  * Only rebuilt-rootfs provisioning creates individual file accounting.
  *
- * Managed-volume contents come from the committed snapshot, including edits and
- * deletions. Fork does not claim that historical provisioning files still exist
- * inside those volumes.
+ * Versioned-volume contents come from the committed snapshot, including edits
+ * and deletions. Non-versioned volumes remain fresh and receive no provisioning
+ * writes. Fork does not claim historical provisioning files still exist inside
+ * restored volumes.
  */
 export interface ForkFileResource extends ForkPlannedResource {
   kind: 'file'

@@ -59,14 +59,22 @@ export const CapsuleBlueprintSchema = z
       } else {
         mountIndexes.set(volume.mount_path, index)
       }
+      const workspaceRelationship = classifyAbsolutePosixPathRelationship(volume.mount_path, '/workspace')
+      if (workspaceRelationship === 'equal' || workspaceRelationship === 'ancestor') {
+        context.addIssue({
+          code: 'custom',
+          path: ['provisioning', 'volumes', index, 'mount_path'],
+          message: "Volume mounts cannot equal or contain '/workspace'; it must remain an ordinary rootfs directory.",
+        })
+      }
     }
     const managedVolumes = volumes.filter(({ volume }) => volume.type !== 'bind')
     const bindMounts = volumes.filter(({ volume }) => volume.type === 'bind')
 
     /**
-     * Managed volumes are independent restoration boundaries. Nested managed
-     * mounts would obscure which restored volume owns the visible branch
-     * state.
+     * Managed volumes are independent storage boundaries. Nested managed mounts
+     * would obscure which volume owns visible branch state and whether that
+     * state participates in snapshot restoration.
      */
     for (let leftIndex = 0; leftIndex < managedVolumes.length; leftIndex++) {
       const left = managedVolumes[leftIndex]!
@@ -103,66 +111,27 @@ export const CapsuleBlueprintSchema = z
     }
 
     /**
-     * A nested bind target must exist in the underlying managed volume before
-     * the bind is attached. Provisioning descendants would be obscured by the
-     * bind or accidentally target its unversioned external contents.
+     * Provisioning initializes rootfs paths and versioned empty volumes only.
+     * Checking every enclosing mount prevents a nested bind from inheriting the
+     * writable provisioning policy of its enclosing managed volume. Ancestor
+     * directories such as /workspace remain rootfs targets.
      */
-    for (const { volume: bind, index } of bindMounts) {
-      const nested = managedVolumes.some(
-        ({ volume }) => classifyAbsolutePosixPathRelationship(bind.mount_path, volume.mount_path) === 'descendant',
-      )
-      if (!nested) {
-        continue
-      }
-      const provisioningPaths = blueprint.provisioning.files
-        .map((file, fileIndex) => ({
-          file,
-          index: fileIndex,
-          relationship: classifyAbsolutePosixPathRelationship(file.path, bind.mount_path),
-        }))
-        .filter(candidate => candidate.relationship === 'equal' || candidate.relationship === 'descendant')
-      const directories = provisioningPaths.filter(candidate => candidate.relationship === 'equal')
-      if (directories.length === 0) {
-        context.addIssue({
-          code: 'custom',
-          path: ['provisioning', 'volumes', index, 'mount_path'],
-          message: `Bind mount '${bind.name}' requires one empty directory provisioning entry at '${bind.mount_path}'.`,
-        })
-      }
-      if (directories.length > 1) {
-        for (const candidate of directories) {
-          context.addIssue({
-            code: 'custom',
-            path: ['provisioning', 'files', candidate.index, 'path'],
-            message: `Bind mount '${bind.name}' has duplicate bootstrap directory declarations at '${bind.mount_path}'.`,
-          })
-        }
-      }
-      for (const candidate of provisioningPaths) {
-        if (candidate.relationship === 'descendant') {
-          context.addIssue({
-            code: 'custom',
-            path: ['provisioning', 'files', candidate.index, 'path'],
-            message: `Provisioning path '${candidate.file.path}' is beneath bind mount '${bind.name}'. Only the exact mount-target bootstrap directory is permitted.`,
-          })
+    blueprint.provisioning.files.forEach((file, index) => {
+      for (const { volume } of volumes) {
+        const relationship = classifyAbsolutePosixPathRelationship(file.path, volume.mount_path)
+        if (relationship !== 'equal' && relationship !== 'descendant') {
           continue
         }
-        if (candidate.file.type !== 'directory') {
-          context.addIssue({
-            code: 'custom',
-            path: ['provisioning', 'files', candidate.index, 'type'],
-            message: `Bind mount '${bind.name}' bootstrap path '${bind.mount_path}' must be a directory.`,
-          })
+        if (volume.type === 'empty' && volume.versioned) {
+          continue
         }
-        if (candidate.file.content !== undefined) {
-          context.addIssue({
-            code: 'custom',
-            path: ['provisioning', 'files', candidate.index, 'content'],
-            message: `Bind mount '${bind.name}' bootstrap directory cannot contain provisioning content.`,
-          })
-        }
+        context.addIssue({
+          code: 'custom',
+          path: ['provisioning', 'files', index, 'path'],
+          message: `Provisioning path '${file.path}' targets volume '${volume.name}'. Only rootfs paths and versioned empty volumes may receive provisioning files.`,
+        })
       }
-    }
+    })
     const applicationIndexes = new Map<string, number>()
     blueprint.applications.forEach((application, index) => {
       const existingIndex = applicationIndexes.get(application.name)

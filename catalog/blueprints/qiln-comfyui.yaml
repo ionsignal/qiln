@@ -2,22 +2,34 @@ schema_version: 1
 
 name: comfyui-capsule
 display_name: AI Workflow Capsule (ComfyUI)
-description: ComfyUI capsule blueprint with durable branch storage and read-only shared model mount.
+description: ComfyUI capsule with versioned app and data storage, fresh branch outputs, and a read-only shared model vault.
 image_alias: qiln-noble-python-node
 
 provisioning:
   volumes:
-    # The seed contains normal, commit-pinned ComfyUI Git repositories.
-    # Each branch receives its own writable ZFS clone rather than sharing source
-    # files through a bind mount.
-    - name: workspace
+    - name: app
       type: clone
+      versioned: true
       pool: is-nvme-pool
-      source_volume: qiln-n8n-c9d4de11-comfyui-306af3a8-v1
-      mount_path: /workspace
+      source_volume: qiln-comfyui-dev
+      mount_path: /workspace/app
       shifted: true
       readonly: false
-    - name: shared-models
+    - name: data
+      type: empty
+      versioned: true
+      pool: is-nvme-pool
+      mount_path: /workspace/data
+      shifted: true
+      readonly: false
+    - name: outputs
+      type: empty
+      versioned: false
+      pool: is-nvme-pool
+      mount_path: /workspace/outputs
+      shifted: true
+      readonly: false
+    - name: models
       type: bind
       host_path: /srv/qiln/shared/models
       mount_path: /workspace/models
@@ -25,66 +37,76 @@ provisioning:
       readonly: true
 
   files:
-    - path: /workspace/capsule
+    - path: /workspace
       type: directory
       uid: 1000
       gid: 1000
       mode: '0755'
 
-    - path: /workspace/models
+    - path: /workspace/data/input
       type: directory
       uid: 1000
       gid: 1000
       mode: '0755'
 
-    - path: /workspace/capsule/comfyui
+    - path: /workspace/data/user
       type: directory
       uid: 1000
       gid: 1000
       mode: '0755'
 
-    - path: /workspace/capsule/comfyui/graphs
+    - path: /workspace/data/loras
       type: directory
       uid: 1000
       gid: 1000
       mode: '0755'
 
-    - path: /workspace/capsule/comfyui/config
-      type: directory
-      uid: 1000
-      gid: 1000
-      mode: '0755'
-
-    - path: /workspace/capsule/routes
-      type: directory
-      uid: 1000
-      gid: 1000
-      mode: '0755'
-
-    - path: /workspace/capsule/tests
-      type: directory
-      uid: 1000
-      gid: 1000
-      mode: '0755'
-
-    - path: /workspace/capsule/shared
+    - path: /workspace/data/config
       type: directory
       uid: 1000
       gid: 1000
       mode: '0755'
 
     # The future ComfyUI launcher must pass this file explicitly through
-    # ComfyUI's extra-model-path configuration option.
-    - path: /workspace/capsule/comfyui/config/extra_model_paths.yaml
+    # ComfyUI's extra-model-path configuration option. Custom-node discovery
+    # must separately resolve /workspace/app/custom_nodes.
+    - path: /workspace/data/config/extra_model_paths.yaml
       uid: 1000
       gid: 1000
       mode: '0644'
       content: |
-        qiln_vault:
-          base_path: /workspace/models/comfyui
+        qiln_shared_models:
+          base_path: /workspace/models
           checkpoints: checkpoints/
           loras: loras/
           vae: vae/
+        qiln_branch_models:
+          base_path: /workspace/data
+          loras: loras/
+
+    - path: /workspace/data/capsule/workflows
+      type: directory
+      uid: 1000
+      gid: 1000
+      mode: '0755'
+
+    - path: /workspace/data/capsule/routes
+      type: directory
+      uid: 1000
+      gid: 1000
+      mode: '0755'
+
+    - path: /workspace/data/capsule/tests
+      type: directory
+      uid: 1000
+      gid: 1000
+      mode: '0755'
+
+    - path: /workspace/data/capsule/shared
+      type: directory
+      uid: 1000
+      gid: 1000
+      mode: '0755'
 
 runtime:
   config:
@@ -108,9 +130,6 @@ runtime:
 snapshot:
   policy_version: 1
 
-  # Mutable branch state must live in managed volumes. Fork reconstructs the
-  # rootfs from the exact image pin and historical Blueprint configuration.
-  # Bind mounts are reattached without preserving their contents or versions.
   instance_rootfs:
     mode: rebuildable
 
