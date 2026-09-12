@@ -6,7 +6,7 @@ image:
 
 source:
   downloader: debootstrap
-  url: http://archive.ubuntu.com/ubuntu
+  url: https://us.archive.ubuntu.com/ubuntu
   keyserver: keyserver.ubuntu.com
   keys:
     - 0xF6ECB3762474EDA9D21B7022871920D1991BC93C # Ubuntu Archive Automatic Signing Key (2018)
@@ -63,8 +63,8 @@ packages:
     # Standard Ubuntu Repositories
     - name: sources.list
       url: |-
-        deb http://archive.ubuntu.com/ubuntu {{ image.release }} main restricted universe multiverse
-        deb http://archive.ubuntu.com/ubuntu {{ image.release }}-updates main restricted universe multiverse
+        deb https://us.archive.ubuntu.com/ubuntu {{ image.release }} main restricted universe multiverse
+        deb https://us.archive.ubuntu.com/ubuntu {{ image.release }}-updates main restricted universe multiverse
         deb http://security.ubuntu.com/ubuntu {{ image.release }}-security main restricted universe multiverse
     # Python 3.13 Deadsnakes Repository
     - name: deadsnakes.list
@@ -108,10 +108,6 @@ actions:
       groupadd -g 1000 qiln
       useradd -u 1000 -g 1000 -m -s /bin/bash -d /home/qiln qiln
 
-      # Create bin/config storage paths for Qiln engine internal tasks
-      mkdir -p /opt/qiln
-      mkdir -p /opt/qiln/bin
-
       # Branch host keys are instance identity and must never be cloned from
       # the image build environment.
       rm -f /etc/ssh/ssh_host_*
@@ -122,15 +118,10 @@ actions:
       install -d -o root -g qiln -m 0710 /etc/ssh/qiln
       install -o root -g qiln -m 0640 /dev/null /etc/ssh/qiln/authorized_keys
 
-      # Bootstrap and isolate the Python 3.13 Global Virtual Environment
-      python3.13 -m venv /opt/qiln/venv
-      /opt/qiln/venv/bin/pip install --no-cache-dir --upgrade pip setuptools wheel
-
       # Bootstrap Node NPM
-      npm install --global npm@latest
+      npm install --global npm@12.0.2
 
       # Apply recursive ownership limits to the qiln unprivileged user
-      chown -R qiln:qiln /opt/qiln
       chown -R qiln:qiln /home/qiln
 
 files:
