@@ -105,14 +105,12 @@ async function seed() {
     if (isDev && credentialsLog.length > 0) {
       console.log('[Seed] Development credentials generated:')
       credentialsLog.forEach(log => console.log(log))
-      console.log('')
     } else {
       console.log('[Seed] Root users updated.')
     }
     if (agentCredentialLog.length > 0) {
       console.log('[Seed] Agent API key generated once. Store it outside Qiln:')
       agentCredentialLog.forEach(log => console.log(log))
-      console.log('')
     }
   } catch (err) {
     console.error('[Seed] Error during seeding:', err)
