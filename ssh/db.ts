@@ -28,6 +28,7 @@ export function createDatabase(connectionString: string) {
       users,
       capsules: capsuleTables.capsules,
       capsuleBranches: capsuleTables.capsuleBranches,
+      capsuleOperations: capsuleTables.capsuleOperations,
       ...sshTables,
     },
   } satisfies SshPersistence

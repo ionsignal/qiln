@@ -19,6 +19,11 @@ function createOwnerIdColumn(ownerIdColumn?: PgColumn) {
  * Destroyed, creation-failed, and cleanup-required capsules remain durable for
  * audit rather than being physically removed.
  *
+ * Destroy repositories enforce archive eligibility using persisted operation
+ * policy. Force may destroy an unarchived capsule without fabricating an
+ * archive timestamp; a capsule-local check cannot distinguish those
+ * operations.
+ *
  * TODO(capsule-naming): Add a durable user-facing capsule name/handle to this
  * aggregate. Branch names must remain scoped to a capsule and cannot serve as
  * the capsule identity once snapshot-based forks exist.
@@ -63,14 +68,6 @@ export function createCapsulesTable(ownerIdColumn?: PgColumn) {
           (${table.lifecycleStatus} = 'destroyed' AND ${table.destroyedAt} IS NOT NULL)
           OR
           (${table.lifecycleStatus} <> 'destroyed' AND ${table.destroyedAt} IS NULL)
-        )`,
-      ),
-      check(
-        'capsules_destroy_requires_archive_check',
-        sql`(
-          ${table.lifecycleStatus} NOT IN ('destroying', 'destroyed')
-          OR
-          ${table.archivedAt} IS NOT NULL
         )`,
       ),
     ],

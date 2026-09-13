@@ -1,55 +1,38 @@
 import type {
   CapsuleActorReference,
-  CapsuleBranchResourceInventoryDigest,
-  CapsuleBranchResourceStatusValue,
-  CapsuleBranchStatus,
+  CapsuleDestroyOptions,
+  CapsuleDestroyOptionsInput,
   CapsuleDestroyReceipt,
   CapsuleLifecycleState,
   CapsuleOperationRequestHash,
+  CapsuleTables,
 } from '@qiln/core/server'
-import type {
-  BindMountResourceMetadata,
-  InstanceResourceMetadata,
-  ProjectResourceMetadata,
-  ProvisioningFileResourceMetadata,
-  VolumeResourceMetadata,
-} from '../../resource/types'
 import type { CapsuleOperationTransitionOutput } from '../shared'
 
-export interface SubmitDestroyCapsuleInput {
+export type DestroyOperation = CapsuleTables['capsuleOperations']['$inferSelect']
+export type DestroyCapsule = CapsuleTables['capsules']['$inferSelect']
+export type DestroyBranch = CapsuleTables['capsuleBranches']['$inferSelect']
+export type DestroyResource = CapsuleTables['capsuleBranchResources']['$inferSelect']
+
+interface DestroyIdentity {
   ownerId: string
   actor: CapsuleActorReference
   capsuleId: string
   idempotencyKey: string
 }
 
-export interface AcceptDestroyCapsuleOperationInput extends SubmitDestroyCapsuleInput {
-  requestHash: CapsuleOperationRequestHash
-}
+export type SubmitDestroyCapsuleInput = DestroyIdentity & CapsuleDestroyOptionsInput
 
-export interface DestroyCapsuleAcceptedBranch {
-  id: string
-  capsuleId: string
-  ownerId: string
-  name: string
-  status: CapsuleBranchStatus
-  isRootBranch: boolean
-  resourceInventoryDigest: CapsuleBranchResourceInventoryDigest | null
-}
+export type AcceptDestroyCapsuleOperationInput = DestroyIdentity &
+  CapsuleDestroyOptions & {
+    requestHash: CapsuleOperationRequestHash
+  }
 
 export interface DestroyCapsuleCommittedBranch {
   id: string
   capsuleId: string
   name: string
-  status: CapsuleBranchStatus
-}
-
-export interface DestroyCapsuleRepositoryResult {
-  newlyAccepted: boolean
-  receipt: CapsuleDestroyReceipt
-  operation: CapsuleOperationTransitionOutput
-  capsule: CapsuleLifecycleState
-  branches: DestroyCapsuleCommittedBranch[]
+  status: DestroyBranch['status']
 }
 
 export interface DestroyCapsuleTerminalResult {
@@ -58,100 +41,53 @@ export interface DestroyCapsuleTerminalResult {
   branches: DestroyCapsuleCommittedBranch[]
 }
 
+export interface DestroyCapsuleRepositoryResult extends DestroyCapsuleTerminalResult {
+  newlyAccepted: boolean
+  receipt: CapsuleDestroyReceipt
+}
+
 export type DestroyCapsuleAbandonedClassificationResult = DestroyCapsuleTerminalResult | null
 
-export interface DestroyCapsuleExecutionInput {
+interface DestroyTarget {
+  id: string
+  branchId: string
+  branchName: string
+  resourceKey: string
+  namespace: string
+}
+
+export interface DestroyInstance extends DestroyTarget {
+  kind: 'instance'
+  instanceName: string
+}
+
+export interface DestroyVolume extends DestroyTarget {
+  kind: 'volume'
+  pool: string
+  volumeName: string
+}
+
+export type DestroyProviderTarget = DestroyInstance | DestroyVolume
+
+export interface DestroyFile {
+  id: string
+  branchId: string
+  backingResourceId: string
+}
+
+export interface DestroyPlan {
+  instances: DestroyInstance[]
+  volumes: DestroyVolume[]
+  files: DestroyFile[]
+  branchCount: number
+  providerRequired: boolean
+}
+
+export interface DestroyExecution {
   operationId: string
   ownerId: string
   capsuleId: string
-  branches: readonly DestroyCapsuleAcceptedBranch[]
-}
-
-export interface DestroyCapsuleOperationContext {
-  readonly operationId: string
-  readonly ownerId: string
-  readonly capsuleId: string
-  readonly branches: readonly DestroyCapsuleAcceptedBranch[]
-}
-
-export interface DestroyCapsuleProjectResource {
-  kind: 'project'
-  id: string
-  branchId: string
-  branchName: string
-  resourceKey: string
-  status: CapsuleBranchResourceStatusValue
-  metadata: ProjectResourceMetadata
-}
-
-export interface DestroyCapsuleBindMountResource {
-  kind: 'bindMount'
-  id: string
-  branchId: string
-  branchName: string
-  resourceKey: string
-  status: CapsuleBranchResourceStatusValue
-  metadata: BindMountResourceMetadata
-}
-
-export interface DestroyCapsuleInstanceTarget {
-  kind: 'instance'
-  id: string
-  branchId: string
-  branchName: string
-  resourceKey: string
-  status: CapsuleBranchResourceStatusValue
-  namespace: string
-  instanceName: string
-  metadata: InstanceResourceMetadata
-}
-
-export interface DestroyCapsuleVolumeTarget {
-  kind: 'volume'
-  id: string
-  branchId: string
-  branchName: string
-  resourceKey: string
-  status: CapsuleBranchResourceStatusValue
-  namespace: string
-  pool: string
-  volumeName: string
-  metadata: VolumeResourceMetadata
-}
-
-export interface DestroyCapsuleProvisioningFileResource {
-  kind: 'provisioningFile'
-  id: string
-  branchId: string
-  branchName: string
-  resourceKey: string
-  status: CapsuleBranchResourceStatusValue
-  backingResourceId: string
-  metadata: ProvisioningFileResourceMetadata
-}
-
-export interface DestroyCapsuleBranchPlan {
-  branch: DestroyCapsuleAcceptedBranch
-  project: DestroyCapsuleProjectResource
-  bindMounts: DestroyCapsuleBindMountResource[]
-  instance: DestroyCapsuleInstanceTarget
-  volumes: DestroyCapsuleVolumeTarget[]
-  provisioningFiles: DestroyCapsuleProvisioningFileResource[]
-}
-
-export interface DestroyCapsulePlan {
-  ownerId: string
-  capsuleId: string
-  branches: DestroyCapsuleBranchPlan[]
-  instances: DestroyCapsuleInstanceTarget[]
-  volumes: DestroyCapsuleVolumeTarget[]
-  provisioningFiles: DestroyCapsuleProvisioningFileResource[]
-  resourceIds: ReadonlySet<string>
-}
-
-export interface DestroyCapsulePlanSummary {
-  branchCount: number
-  instanceCount: number
-  volumeCount: number
-  provisioningFileCount: number
+  force: boolean
+  plan: DestroyPlan
+  withdrawPreviews: boolean
 }

@@ -20,6 +20,7 @@ import {
   type CapsuleChannel,
   type CapsuleCreateOutput,
   type CapsuleDestroyOperationOutput,
+  type CapsuleDestroyOptions,
   type CapsuleOperationFailure,
   type CapsuleOperationIdempotencyKey,
   type CapsuleOperationStatusValue,
@@ -59,6 +60,16 @@ export interface CapsuleCreateRequest {
   cpu?: string
   memory?: string
 }
+
+/**
+ * Trusted Engine destroy request after tRPC validates the Core destroy option
+ * union. Administrator authorization remains part of mutation identity because
+ * it is derived from authenticated Host context, not browser input.
+ */
+export type CapsuleDestroyRequest = {
+  capsuleId: string
+  idempotencyKey: CapsuleOperationIdempotencyKey
+} & CapsuleDestroyOptions
 
 /**
  * Public Engine boundary for durable capsule operations.
@@ -134,19 +145,39 @@ export class CapsuleOperationsService {
     return CapsuleUnarchiveOperationOutputSchema.parse(output)
   }
 
+  /**
+   * Submits normal or force capsule destruction through the durable Worker
+   * operation path.
+   *
+   * Force authorization is evaluated against Host-derived request identity.
+   * The authorization decision is intentionally not persisted as actor
+   * provenance or forwarded to the Worker; the Worker receives only the
+   * existing validated Core destroy option union.
+   */
   public async destroy(
     identity: CapsuleMutationIdentity,
-    capsuleId: string,
-    idempotencyKey: CapsuleOperationIdempotencyKey,
+    input: CapsuleDestroyRequest,
   ): Promise<CapsuleDestroyOperationOutput> {
+    if (input.force && !identity.isAdmin) {
+      throw new GlobalError('Force destroy requires administrator authorization.', GlobalErrorCode.FORBIDDEN)
+    }
     const output = await this.channel.command(CapsuleLifecycleCommandName.CAPSULE_DESTROY, {
       target: {
         type: TargetType.OWNER,
         id: identity.ownerId,
       },
       actor: identity.actor,
-      capsuleId,
-      idempotencyKey,
+      capsuleId: input.capsuleId,
+      idempotencyKey: input.idempotencyKey,
+      ...(input.force
+        ? {
+            force: true,
+            reason: input.reason,
+            acknowledged: input.acknowledged,
+          }
+        : {
+            force: false,
+          }),
     })
     return CapsuleDestroyOperationOutputSchema.parse(output)
   }

@@ -110,6 +110,30 @@ export const CapsuleOperationTimestampSchema = z.string().datetime({
 })
 
 /**
+ * Force remains an option of capsule.destroy, not a separate operation.
+ *
+ * Normal destruction cannot carry force-only audit fields. Force requires an
+ * explicit reason and acknowledgement; authenticated actor and administrator
+ * checks remain responsibilities of the command and Host boundaries.
+ */
+export const CapsuleDestroyOptionsSchema = z.discriminatedUnion('force', [
+  z
+    .object({
+      force: z.literal(false).default(false),
+      reason: z.never().optional(),
+      acknowledged: z.never().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      force: z.literal(true),
+      reason: z.string().trim().min(1).max(2_000),
+      acknowledged: z.literal(true),
+    })
+    .strict(),
+])
+
+/**
  * Client-safe operation receipt returned by mutation commands.
  *
  * A receipt proves Qiln durably accepted or replayed an operation. It does not
@@ -228,6 +252,8 @@ export const CapsuleOperationSummarySchema = z
 
 export type CapsuleOperationIdempotencyKey = z.infer<typeof CapsuleOperationIdempotencyKeySchema>
 export type CapsuleOperationRequestHash = z.infer<typeof CapsuleOperationRequestHashSchema>
+export type CapsuleDestroyOptionsInput = z.input<typeof CapsuleDestroyOptionsSchema>
+export type CapsuleDestroyOptions = z.output<typeof CapsuleDestroyOptionsSchema>
 export type CapsuleOperationReceipt = z.infer<typeof CapsuleOperationReceiptSchema>
 export type CapsuleCreateReceipt = z.infer<typeof CapsuleCreateReceiptSchema>
 export type CapsuleForkReceipt = z.infer<typeof CapsuleForkReceiptSchema>

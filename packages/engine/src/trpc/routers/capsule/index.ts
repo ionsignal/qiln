@@ -5,6 +5,7 @@ import {
   CapsuleBranchNameSchema,
   CapsuleCreateOutputSchema,
   CapsuleDestroyOperationOutputSchema,
+  CapsuleDestroyOptionsSchema,
   CapsuleOperationIdempotencyKeySchema,
   CapsuleUnarchiveOperationOutputSchema,
   DEFAULT_CAPSULE_BLUEPRINT_NAME,
@@ -16,12 +17,17 @@ import { capsuleBranchesRouter } from './branches'
 import { capsuleOperationsRouter } from './operations'
 import { capsuleSnapshotsRouter } from './snapshots'
 
-const CapsuleOperationMutationInputSchema = z
+const CapsuleLifecycleRequestSchema = z
   .object({
     capsuleId: z.uuid(),
     idempotencyKey: CapsuleOperationIdempotencyKeySchema,
   })
   .strict()
+
+const CapsuleDestroyMutationInputSchema = z.discriminatedUnion('force', [
+  CapsuleLifecycleRequestSchema.extend(CapsuleDestroyOptionsSchema.options[0].shape).strict(),
+  CapsuleLifecycleRequestSchema.extend(CapsuleDestroyOptionsSchema.options[1].shape).strict(),
+])
 
 const CapsuleCreateMutationInputSchema = z
   .object({
@@ -52,7 +58,7 @@ export const capsuleRouter = router({
     }),
 
   archive: protectedProcedure
-    .input(CapsuleOperationMutationInputSchema)
+    .input(CapsuleLifecycleRequestSchema)
     .output(CapsuleArchiveOperationOutputSchema)
     .mutation(async ({ ctx, input }) => {
       try {
@@ -64,7 +70,7 @@ export const capsuleRouter = router({
     }),
 
   unarchive: protectedProcedure
-    .input(CapsuleOperationMutationInputSchema)
+    .input(CapsuleLifecycleRequestSchema)
     .output(CapsuleUnarchiveOperationOutputSchema)
     .mutation(async ({ ctx, input }) => {
       try {
@@ -76,12 +82,12 @@ export const capsuleRouter = router({
     }),
 
   destroy: protectedProcedure
-    .input(CapsuleOperationMutationInputSchema)
+    .input(CapsuleDestroyMutationInputSchema)
     .output(CapsuleDestroyOperationOutputSchema)
     .mutation(async ({ ctx, input }) => {
       try {
         const identity = createUserMutationIdentity(ctx.user)
-        return await ctx.engine.capsuleOperations.destroy(identity, input.capsuleId, input.idempotencyKey)
+        return await ctx.engine.capsuleOperations.destroy(identity, input)
       } catch (error: unknown) {
         handleEngineError(error)
       }

@@ -1,5 +1,7 @@
 export const DestroyStepKey = {
   PLAN_DESTROY: 'plan_destroy',
+  REVOKE_SSH_ACCESS: 'revoke_ssh_access',
+  WITHDRAW_PREVIEWS: 'withdraw_previews',
   DELETE_BRANCH_INSTANCES: 'delete_branch_instances',
   DELETE_BRANCH_VOLUMES: 'delete_branch_volumes',
   FINALIZE_DERIVED_RESOURCE_OUTCOMES: 'finalize_derived_resource_outcomes',
@@ -16,6 +18,8 @@ export type DestroyStepKey = (typeof DestroyStepKey)[keyof typeof DestroyStepKey
  */
 export const DestroyStepKeys = [
   DestroyStepKey.PLAN_DESTROY,
+  DestroyStepKey.REVOKE_SSH_ACCESS,
+  DestroyStepKey.WITHDRAW_PREVIEWS,
   DestroyStepKey.DELETE_BRANCH_INSTANCES,
   DestroyStepKey.DELETE_BRANCH_VOLUMES,
   DestroyStepKey.FINALIZE_DERIVED_RESOURCE_OUTCOMES,

@@ -70,6 +70,14 @@ export function composeCapsuleService<TDatabase extends PostgresJsDatabase, TTab
   const previewEvents = new CapsulePreviewEventPublisher(options.channel)
   const routeEvents = new CapsuleRouteEventPublisher(options.channel)
   const archivalOperationLedger = new ProviderFreeArchivalOperationLedger(options.persistence, operationReader)
+  const route = composeRoutingCapability({
+    persistence: options.persistence,
+    caddy: options.caddy,
+    routing: options.routing,
+    operationEvents,
+    previewEvents,
+    routeEvents,
+  })
   const archive = composeArchiveCapability({
     persistence: options.persistence,
     supervisor: options.supervisor,
@@ -115,10 +123,11 @@ export function composeCapsuleService<TDatabase extends PostgresJsDatabase, TTab
   const destroy = composeDestroyCapability({
     persistence: options.persistence,
     incus: options.incus,
+    channel: options.channel,
+   project: options.project,
+    previews: route.preview,
     supervisor: options.supervisor,
-    operationReader,
     operationSteps,
-    resources,
     operationEvents,
     lifecycleEvents,
     branchEvents,
@@ -139,14 +148,6 @@ export function composeCapsuleService<TDatabase extends PostgresJsDatabase, TTab
     persistence: options.persistence,
   })
   const diff = new DiffService()
-  const route = composeRoutingCapability({
-    persistence: options.persistence,
-    caddy: options.caddy,
-    routing: options.routing,
-    operationEvents,
-    previewEvents,
-    routeEvents,
-  })
   const branch = composeBranchCapability({
     persistence: options.persistence,
     incus: options.incus,

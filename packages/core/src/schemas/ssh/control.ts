@@ -29,12 +29,21 @@ export const SshBranchAccessRevokeInputSchema = z
   })
   .strict()
 
-export const SshCapsuleAccessRevokeInputSchema = z
-  .object({
-    capsuleId: z.uuid(),
-    reason: SshCapsuleAccessRevocationReasonSchema,
-  })
-  .strict()
+export const SshCapsuleAccessRevokeInputSchema = z.discriminatedUnion('reason', [
+  z
+    .object({
+      capsuleId: z.uuid(),
+      reason: SshCapsuleAccessRevocationReasonSchema.extract(['capsule_archive']),
+    })
+    .strict(),
+  z
+    .object({
+      capsuleId: z.uuid(),
+      reason: SshCapsuleAccessRevocationReasonSchema.extract(['capsule_destroy']),
+      operationId: z.uuid(),
+    })
+    .strict(),
+])
 
 /**
  * Committed Host revocation and relay-closure accounting.

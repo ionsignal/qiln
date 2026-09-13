@@ -1,5 +1,17 @@
 import { sql } from 'drizzle-orm'
-import { index, jsonb, pgEnum, pgTable, text, timestamp, uniqueIndex, uuid, type PgColumn } from 'drizzle-orm/pg-core'
+import {
+  boolean,
+  check,
+  index,
+  jsonb,
+  pgEnum,
+  pgTable,
+  text,
+  timestamp,
+  uniqueIndex,
+  uuid,
+  type PgColumn,
+} from 'drizzle-orm/pg-core'
 import { CapsuleActorTypeValues, CapsuleOperationStatusValues, CapsuleOperationTypeValues } from '../../../schemas'
 
 export const capsuleActorTypeEnum = pgEnum('capsule_actor_type', CapsuleActorTypeValues)
@@ -25,9 +37,11 @@ function createCapsuleIdColumn(capsuleIdColumn?: PgColumn) {
 /**
  * Durable control-plane operation ledger.
  *
- * This table contains only fields meaningful across every capsule operation.
- * Operation-specific immutable inputs and committed-result references belong in
- * one-to-one extension tables keyed by `operation_id`.
+ * Common mutation-control fields live here. Operation-specific immutable inputs
+ * and committed-result references belong in one-to-one extension tables keyed
+ * by `operation_id`. Destroy force policy and its audit evidence remain on this
+ * row so execution and abandonment can reload them without a destroy
+ * extension.
  *
  * Acceptance precedes execution. `providerMutationStartedAt` is the operation
  * fence written before the first provider mutation, allowing a restarted Worker
@@ -54,6 +68,9 @@ export function createCapsuleOperationsTable(ownerIdColumn?: PgColumn, capsuleId
       status: capsuleOperationStatusEnum('status').notNull().default('accepted'),
       idempotencyKey: uuid('idempotency_key').notNull(),
       requestHash: text('request_hash').notNull(),
+      destroyForce: boolean('destroy_force').notNull().default(false),
+      destroyForceReason: text('destroy_force_reason'),
+      destroyForceAcknowledged: boolean('destroy_force_acknowledged').notNull().default(false),
       acceptedAt: timestamp('accepted_at', {
         withTimezone: true,
         mode: 'date',
@@ -101,6 +118,26 @@ export function createCapsuleOperationsTable(ownerIdColumn?: PgColumn, capsuleId
       uniqueIndex('capsule_operations_capsule_nonterminal_unique_idx')
         .on(table.capsuleId)
         .where(sql`${table.status} IN ('accepted', 'running')`),
+      check(
+        'capsule_operations_destroy_force_check',
+        sql`(
+          (
+            ${table.destroyForce} = false
+            AND ${table.destroyForceReason} IS NULL
+            AND ${table.destroyForceAcknowledged} = false
+          )
+          OR
+          (
+            ${table.type} = 'destroy'
+            AND ${table.actorType} = 'user'
+            AND ${table.destroyForce} = true
+            AND ${table.destroyForceReason} IS NOT NULL
+            AND length(btrim(${table.destroyForceReason})) BETWEEN 1 AND 2000
+            AND ${table.destroyForceReason} = btrim(${table.destroyForceReason})
+            AND ${table.destroyForceAcknowledged} = true
+          )
+        )`,
+      ),
     ],
   )
 }

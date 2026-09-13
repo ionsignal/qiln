@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { CapsuleActorReferenceSchema } from '../../../../schemas/capsule/actor'
 import {
   CapsuleArchiveReceiptSchema,
+  CapsuleDestroyOptionsSchema,
   CapsuleDestroyReceiptSchema,
   CapsuleOperationIdempotencyKeySchema,
   CapsuleUnarchiveReceiptSchema,
@@ -44,7 +45,20 @@ const CapsuleLifecycleCommandInputSchema = z
 
 export const CapsuleArchiveOperationInputSchema = CapsuleLifecycleCommandInputSchema
 export const CapsuleUnarchiveOperationInputSchema = CapsuleLifecycleCommandInputSchema
-export const CapsuleDestroyOperationInputSchema = CapsuleLifecycleCommandInputSchema
+export const CapsuleDestroyOperationInputSchema = z
+  .discriminatedUnion('force', [
+    CapsuleLifecycleCommandInputSchema.extend(CapsuleDestroyOptionsSchema.options[0].shape).strict(),
+    CapsuleLifecycleCommandInputSchema.extend(CapsuleDestroyOptionsSchema.options[1].shape).strict(),
+  ])
+  .superRefine((operation, context) => {
+    if (operation.force && operation.actor.type !== 'user') {
+      context.addIssue({
+        code: 'custom',
+        path: ['actor', 'type'],
+        message: 'Force destroy requires a user actor.',
+      })
+    }
+  })
 
 export const CapsuleArchiveOperationOutputSchema = CapsuleArchiveReceiptSchema
 export const CapsuleUnarchiveOperationOutputSchema = CapsuleUnarchiveReceiptSchema

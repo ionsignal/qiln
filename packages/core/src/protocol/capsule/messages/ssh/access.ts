@@ -1,3 +1,4 @@
+import { z } from 'zod'
 import {
   SshBranchAccessEnableInputSchema,
   SshBranchAccessInitializeInputSchema,
@@ -18,7 +19,8 @@ const SSH_ACCESS_CONTROL_TIMEOUT_MS = 60_000
  *
  * The SSH authority owns key registration, grants, access fences, tickets, and
  * relays. Worker callers supply only owner-targeted capsule and branch
- * identities plus the lifecycle reason represented by the command.
+ * identities plus the lifecycle reason represented by the command. Destruction
+ * additionally identifies the durable operation authorizing revocation.
  *
  * SSH handlers must independently prove branch ownership, capsule lineage,
  * access-fence state, lifecycle eligibility, and relay closure.
@@ -51,9 +53,14 @@ export const CapsuleSshBranchAccessRevokeInputSchema = SshBranchAccessRevokeInpu
   target: TargetOwnerSchema,
 }).strict()
 
-export const CapsuleSshCapsuleAccessRevokeInputSchema = SshCapsuleAccessRevokeInputSchema.extend({
-  target: TargetOwnerSchema,
-}).strict()
+export const CapsuleSshCapsuleAccessRevokeInputSchema = z.discriminatedUnion('reason', [
+  SshCapsuleAccessRevokeInputSchema.options[0].extend({
+    target: TargetOwnerSchema,
+  }).strict(),
+  SshCapsuleAccessRevokeInputSchema.options[1].extend({
+    target: TargetOwnerSchema,
+  }).strict(),
+])
 
 export const CapsuleSshBranchAccessMutationOutputSchema = SshBranchAccessMutationOutputSchema
 export const CapsuleSshCapsuleAccessRevocationOutputSchema = SshCapsuleAccessRevocationOutputSchema

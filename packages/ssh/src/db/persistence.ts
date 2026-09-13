@@ -34,7 +34,7 @@ export type SshUsersTable = PgTableWithColumns<{
 }>
 
 export type SshPersistenceTables = SshTables &
-  Pick<CapsuleTables, 'capsules' | 'capsuleBranches'> & {
+  Pick<CapsuleTables, 'capsules' | 'capsuleBranches' | 'capsuleOperations'> & {
     users: SshUsersTable
   }
 

@@ -1,7 +1,7 @@
 {
   "version": "8",
   "dialect": "postgres",
-  "id": "bf2ecc17-6fa0-4a7c-b8d4-1012e16579c0",
+  "id": "01dea7a0-ac37-4c51-95be-63b27b19838f",
   "prevIds": [
     "00000000-0000-0000-0000-000000000000"
   ],
@@ -2877,6 +2877,45 @@
       "generated": null,
       "identity": null,
       "name": "request_hash",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_operations"
+    },
+    {
+      "type": "boolean",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "false",
+      "generated": null,
+      "identity": null,
+      "name": "destroy_force",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_operations"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "destroy_force_reason",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_operations"
+    },
+    {
+      "type": "boolean",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "false",
+      "generated": null,
+      "identity": null,
+      "name": "destroy_force_acknowledged",
       "entityType": "columns",
       "schema": "public",
       "table": "capsule_operations"
@@ -9016,6 +9055,13 @@
       "table": "capsule_fork_operations"
     },
     {
+      "value": "(\n          (\n            \"destroy_force\" = false\n            AND \"destroy_force_reason\" IS NULL\n            AND \"destroy_force_acknowledged\" = false\n          )\n          OR\n          (\n            \"type\" = 'destroy'\n            AND \"actor_type\" = 'user'\n            AND \"destroy_force\" = true\n            AND \"destroy_force_reason\" IS NOT NULL\n            AND length(btrim(\"destroy_force_reason\")) BETWEEN 1 AND 2000\n            AND \"destroy_force_reason\" = btrim(\"destroy_force_reason\")\n            AND \"destroy_force_acknowledged\" = true\n          )\n        )",
+      "name": "capsule_operations_destroy_force_check",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "capsule_operations"
+    },
+    {
       "value": "(\n          length(\"host\") BETWEEN 3 AND 253\n          AND \"host\" = lower(\"host\")\n          AND \"host\" !~ '[*><@/?#]'\n          AND \"host\" !~ '\\.$'\n        )",
       "name": "capsule_route_aliases_host_check",
       "entityType": "checks",
@@ -9186,13 +9232,6 @@
     {
       "value": "(\n          (\"lifecycle_status\" = 'destroyed' AND \"destroyed_at\" IS NOT NULL)\n          OR\n          (\"lifecycle_status\" <> 'destroyed' AND \"destroyed_at\" IS NULL)\n        )",
       "name": "capsules_destroyed_timestamp_check",
-      "entityType": "checks",
-      "schema": "public",
-      "table": "capsules"
-    },
-    {
-      "value": "(\n          \"lifecycle_status\" NOT IN ('destroying', 'destroyed')\n          OR\n          \"archived_at\" IS NOT NULL\n        )",
-      "name": "capsules_destroy_requires_archive_check",
       "entityType": "checks",
       "schema": "public",
       "table": "capsules"

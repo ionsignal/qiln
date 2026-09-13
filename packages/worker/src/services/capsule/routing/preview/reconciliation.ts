@@ -1,10 +1,13 @@
+import { IncusError } from '../../../../errors'
 import type { PreviewRouteController } from './controller'
+import type { PreviewDestroy } from './destroy'
 import type { PreviewRepository } from './persistence'
 import type { PreviewRecord } from './types'
 
 export interface PreviewReconciliationDependencies {
   repository: PreviewRepository
   controller: PreviewRouteController
+  destroy: PreviewDestroy
 }
 
 /**
@@ -45,6 +48,12 @@ export class PreviewReconciliationCoordinator {
     })
   }
 
+  public async withdrawForDestroy(operationId: string): Promise<void> {
+    await this.exclusive(async () => {
+      await this.dependencies.destroy.withdraw(operationId)
+    }, true)
+  }
+
   public async resume(ownerId: string, capsuleId: string, branchId: string): Promise<void> {
     await this.exclusive(async () => {
       await this.dependencies.repository.resume(ownerId, capsuleId, branchId)
@@ -68,11 +77,14 @@ export class PreviewReconciliationCoordinator {
     return grouped
   }
 
-  private async exclusive(action: () => Promise<void>): Promise<void> {
+  private async exclusive(action: () => Promise<void>, rejectWhenStopped = false): Promise<void> {
     while (this.running) {
       await this.running
     }
     if (this.stopped) {
+      if (rejectWhenStopped) {
+        throw new IncusError('Preview coordination has stopped; force-destroy withdrawal was not performed.', 'CONFLICT')
+      }
       return
     }
     const execution = Promise.resolve().then(action)

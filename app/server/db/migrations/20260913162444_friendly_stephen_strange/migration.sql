@@ -611,6 +611,9 @@ CREATE TABLE "capsule_operations" (
 	"status" "capsule_operation_status" DEFAULT 'accepted'::"capsule_operation_status" NOT NULL,
 	"idempotency_key" uuid NOT NULL,
 	"request_hash" text NOT NULL,
+	"destroy_force" boolean DEFAULT false NOT NULL,
+	"destroy_force_reason" text,
+	"destroy_force_acknowledged" boolean DEFAULT false NOT NULL,
 	"accepted_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"execution_started_at" timestamp with time zone,
 	"provider_mutation_started_at" timestamp with time zone,
@@ -620,7 +623,24 @@ CREATE TABLE "capsule_operations" (
 	"failure_message" text,
 	"failure_details" jsonb,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
-	"updated_at" timestamp with time zone DEFAULT now() NOT NULL
+	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "capsule_operations_destroy_force_check" CHECK ((
+          (
+            "destroy_force" = false
+            AND "destroy_force_reason" IS NULL
+            AND "destroy_force_acknowledged" = false
+          )
+          OR
+          (
+            "type" = 'destroy'
+            AND "actor_type" = 'user'
+            AND "destroy_force" = true
+            AND "destroy_force_reason" IS NOT NULL
+            AND length(btrim("destroy_force_reason")) BETWEEN 1 AND 2000
+            AND "destroy_force_reason" = btrim("destroy_force_reason")
+            AND "destroy_force_acknowledged" = true
+          )
+        ))
 );
 --> statement-breakpoint
 CREATE TABLE "capsule_route_aliases" (
@@ -974,11 +994,6 @@ CREATE TABLE "capsules" (
           ("lifecycle_status" = 'destroyed' AND "destroyed_at" IS NOT NULL)
           OR
           ("lifecycle_status" <> 'destroyed' AND "destroyed_at" IS NULL)
-        )),
-	CONSTRAINT "capsules_destroy_requires_archive_check" CHECK ((
-          "lifecycle_status" NOT IN ('destroying', 'destroyed')
-          OR
-          "archived_at" IS NOT NULL
         ))
 );
 --> statement-breakpoint

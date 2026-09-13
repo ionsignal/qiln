@@ -131,6 +131,27 @@ export class IncusStorageClient {
     })
   }
 
+  /**
+   * Reads one exact custom-volume identity without listing or discovery.
+   *
+   * Destroy uses this read-only boundary to verify absence after deletion.
+   */
+  public async get(pool: string, name: string): Promise<{ name: string }> {
+    const identity = volumeIdentity(pool, name)
+    const { data } = await this.transport.read(
+      `/storage-pools/${encodeURIComponent(identity.pool)}/volumes/custom/${encodeURIComponent(identity.volume)}`,
+      'GET',
+    )
+    const parsed = z.object({ name: z.string().min(1) }).safeParse(data)
+    if (!parsed.success || parsed.data.name !== identity.volume) {
+      throw new IncusError('Incus returned invalid custom-volume identity metadata.', 'VALIDATION_ERROR', {
+        pool: identity.pool,
+        volume: identity.volume,
+      })
+    }
+    return parsed.data
+  }
+
   public async delete(pool: string, name: string): Promise<void> {
     const identity = volumeIdentity(pool, name)
     await this.transport.operation(

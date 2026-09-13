@@ -25,6 +25,10 @@ export class PreviewService {
     await this.dependencies.reconciliation.withdraw(ownerId, capsuleId, branchId)
   }
 
+  public async withdrawForDestroy(operationId: string): Promise<void> {
+    await this.dependencies.reconciliation.withdrawForDestroy(operationId)
+  }
+
   public async resumeBranch(ownerId: string, capsuleId: string, branchId: string): Promise<void> {
     await this.dependencies.reconciliation.resume(ownerId, capsuleId, branchId)
   }

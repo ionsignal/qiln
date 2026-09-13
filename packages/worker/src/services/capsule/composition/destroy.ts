@@ -2,17 +2,21 @@ import { DestroyCapsuleAbandonmentHandler } from '../operations/destroy/abandonm
 import { DestroyCapsuleExecutor } from '../operations/destroy/executor'
 import { DestroyCapsuleProvider } from '../operations/destroy/resource/provider'
 import { DestroyCapsuleOperationRepository } from '../operations/destroy/persistence/repository'
+import { DestroyResources } from '../operations/destroy/persistence/resources'
 import { DestroyCapsuleSubmissionService } from '../operations/destroy/submission'
+import { CapsuleResourceProvenance } from '../resource/provenance'
+import { CreateResourcePlanner } from '../resource/plan'
+import { RouteGate } from '../routing/gate'
 import type { OperationSupervisor } from '../../../coordination/supervisor'
 import type { IncusClient } from '../../../incus/client'
+import type { ProjectService } from '../../project'
 import type { CapsuleBranchEventPublisher } from '../events/branch'
 import type { CapsuleLifecycleEventPublisher } from '../events/lifecycle'
 import type { CapsuleOperationEventPublisher } from '../events/operation'
-import type { CapsuleOperationReader } from '../operations/shared/operationReader'
 import type { CapsuleOperationStepStore } from '../operations/shared/operationStepStore'
-import type { CapsuleBranchResourceStore } from '../resource/store'
 import type { PreviewGate } from '../routing/preview/gate'
-import type { CapsulePersistence, CapsuleTables } from '@qiln/core/server'
+import type { PreviewService } from '../routing/preview/service'
+import type { CapsuleChannel, CapsulePersistence, CapsuleTables } from '@qiln/core/server'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
 export interface ComposeDestroyCapabilityOptions<
@@ -20,10 +24,11 @@ export interface ComposeDestroyCapabilityOptions<
   TTables extends CapsuleTables = CapsuleTables,
 > {
   incus: IncusClient
+  channel: CapsuleChannel
+  project: ProjectService
+  previews: PreviewService
   supervisor: OperationSupervisor
-  operationReader: CapsuleOperationReader<TDatabase, TTables>
   operationSteps: CapsuleOperationStepStore<TDatabase, TTables>
-  resources: CapsuleBranchResourceStore<TDatabase, TTables>
   operationEvents: CapsuleOperationEventPublisher
   lifecycleEvents: CapsuleLifecycleEventPublisher
   branchEvents: CapsuleBranchEventPublisher
@@ -37,49 +42,56 @@ export interface ComposedDestroyCapability {
 }
 
 /**
- * Composes the destroy operation vertical slice.
+ * Composes destroy-owned persistence around read-only immutable create proof.
  *
- * The same resource store instance is supplied to planning/accounting and
- * provider deletion. Durable ownership verification, deletion order, provider
- * intent, and failure classification remain operation-specific.
+ * Create and destroy share deterministic planning, not resource transitions or
+ * operation policy. Fork provenance remains unsupported and fails closed.
  */
 export function composeDestroyCapability<TDatabase extends PostgresJsDatabase, TTables extends CapsuleTables>(
   options: ComposeDestroyCapabilityOptions<TDatabase, TTables>,
 ): ComposedDestroyCapability {
+  const provenance = new CapsuleResourceProvenance(
+    options.persistence,
+    new CreateResourcePlanner(),
+    options.project,
+  )
+  const resources = new DestroyResources(options.persistence, provenance)
+  const routes = new RouteGate(options.persistence)
   const repository = new DestroyCapsuleOperationRepository(
     options.persistence,
-    options.operationReader,
+    resources,
     options.previewGate,
+    routes,
   )
   const provider = new DestroyCapsuleProvider({
     incus: options.incus,
-    resources: options.resources,
+    resources,
   })
   const executor = new DestroyCapsuleExecutor({
     repository,
     steps: options.operationSteps,
-    resources: options.resources,
+    resources,
     provider,
-    operationEvents: options.operationEvents,
-    lifecycleEvents: options.lifecycleEvents,
-    branchEvents: options.branchEvents,
-  })
-  const submission = new DestroyCapsuleSubmissionService(
-    repository,
-    executor,
-    options.supervisor,
-    options.operationEvents,
-    options.lifecycleEvents,
-    options.branchEvents,
-  )
-  const abandonment = new DestroyCapsuleAbandonmentHandler({
-    repository,
+    channel: options.channel,
+    previews: options.previews,
     operationEvents: options.operationEvents,
     lifecycleEvents: options.lifecycleEvents,
     branchEvents: options.branchEvents,
   })
   return {
-    submission,
-    abandonment,
+    submission: new DestroyCapsuleSubmissionService(
+      repository,
+      executor,
+      options.supervisor,
+      options.operationEvents,
+      options.lifecycleEvents,
+      options.branchEvents,
+    ),
+    abandonment: new DestroyCapsuleAbandonmentHandler({
+      repository,
+      operationEvents: options.operationEvents,
+      lifecycleEvents: options.lifecycleEvents,
+      branchEvents: options.branchEvents,
+    }),
   }
 }

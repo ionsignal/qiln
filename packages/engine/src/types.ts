@@ -19,11 +19,16 @@ export interface EnginePluginOptions {
 
 /**
  * Context required by the QilnEngine tRPC router.
+ *
+ * The Host owns authentication and derives administrator authorization from the
+ * authenticated session. Engine receives only the minimal trusted identity and
+ * authorization fields required by capsule mutation services.
  */
 export interface EngineContext {
   user: {
     id: string
     username: string
+    isAdmin: boolean
   } | null
   engine: QilnEngineController
 }

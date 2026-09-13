@@ -41,7 +41,8 @@ export function registerSshAccessHandlers(channel: CapsuleChannel, policy: SshPo
   channel.handle(
     CapsuleSshAccessCommandName.CAPSULE_ACCESS_REVOKE,
     async input => {
-      return await policy.revokeCapsuleAccess(input.target.id, input.capsuleId, input.reason)
+      const { target, ...revocation } = input
+      return await policy.revokeCapsuleAccess(target.id, revocation)
     },
     options,
   )

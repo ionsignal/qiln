@@ -13,7 +13,9 @@ import type {
  * replay, retry, aggregate restoration, or provider mutation.
  *
  * Operation-specific immutable input and committed-result references belong to
- * extension tables loaded by operation-specific repositories.
+ * extension tables loaded by operation-specific repositories. Destroy force
+ * policy is retained directly from the base ledger for deterministic execution
+ * and abandonment classification.
  */
 export interface PersistedCapsuleOperation {
   id: string
@@ -24,6 +26,9 @@ export interface PersistedCapsuleOperation {
   status: CapsuleOperationStatusValue
   idempotencyKey: string
   requestHash: string
+  destroyForce: boolean
+  destroyForceReason: string | null
+  destroyForceAcknowledged: boolean
   acceptedAt: Date
   executionStartedAt: Date | null
   providerMutationStartedAt: Date | null

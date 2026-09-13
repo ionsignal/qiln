@@ -15,9 +15,9 @@ const NONTERMINAL_OPERATION_STATUSES = [CapsuleOperationStatus.ACCEPTED, Capsule
 /**
  * Generic read-only access to durable capsule operations.
  *
- * This reader intentionally loads only base-ledger fields that are meaningful
- * across every operation type. Operation-specific repositories are responsible
- * for joining and validating their extension rows.
+ * This reader loads base-ledger fields, including persisted destroy force
+ * policy. Operation-specific repositories are responsible for joining and
+ * validating their extension rows and applying the recorded policy.
  *
  * This reader does not make idempotency decisions, mutate durable state,
  * classify abandoned operations, or construct operation-specific receipts.
@@ -91,6 +91,9 @@ export class CapsuleOperationReader<
       status: operation.status,
       idempotencyKey: operation.idempotencyKey,
       requestHash: operation.requestHash,
+      destroyForce: operation.destroyForce,
+      destroyForceReason: operation.destroyForceReason,
+      destroyForceAcknowledged: operation.destroyForceAcknowledged,
       acceptedAt: operation.acceptedAt,
       executionStartedAt: operation.executionStartedAt,
       providerMutationStartedAt: operation.providerMutationStartedAt,

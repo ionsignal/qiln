@@ -4,8 +4,8 @@ import type {
   SshBranchAccessRevocationReason,
   SshBranchGrantSummary,
   SshCanonicalPublicKey,
+  SshCapsuleAccessRevokeInput,
   SshCapsuleAccessRevocationOutput,
-  SshCapsuleAccessRevocationReason,
   SshGatewayKeyEligibilityOutput,
   SshOpenSshConfigOutput,
   SshPublicKeyRegistration,
@@ -131,10 +131,9 @@ export class SshPolicy {
    */
   public revokeCapsuleAccess(
     ownerUserId: string,
-    capsuleId: string,
-    reason: SshCapsuleAccessRevocationReason,
+    input: SshCapsuleAccessRevokeInput,
   ): Promise<SshCapsuleAccessRevocationOutput> {
-    return this.run(() => this.access.revokeCapsule(ownerUserId, capsuleId, reason))
+    return this.run(() => this.access.revokeCapsule(ownerUserId, input))
   }
 
   public checkGatewayKeyEligibility(key: SshCanonicalPublicKey): Promise<SshGatewayKeyEligibilityOutput> {

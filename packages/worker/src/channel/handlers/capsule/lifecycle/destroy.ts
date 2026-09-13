@@ -20,6 +20,15 @@ export function registerCapsuleLifecycleDestroyHandler(worker: QilnWorkerRuntime
         actor: input.actor,
         capsuleId: input.capsuleId,
         idempotencyKey: input.idempotencyKey,
+        ...(input.force
+          ? {
+              force: true,
+              reason: input.reason,
+              acknowledged: input.acknowledged,
+            }
+          : {
+              force: false,
+            }),
       })
     },
     handlerOptions,

@@ -7,6 +7,7 @@ import type {
 } from '@qiln/core/server'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import type { PreviewAdmission, PreviewBranch, PreviewIdentity, PreviewPlan, PreviewRecord } from '../types'
+import { PreviewDestroyPersistence } from './destroy'
 import { PreviewFailurePersistence, type PreviewFailureTransition } from './failure'
 import { PreviewIdentityPersistence } from './identity'
 import { PreviewLifecyclePersistence } from './lifecycle'
@@ -25,6 +26,7 @@ export class PreviewRepository<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
   TTables extends CapsuleTables = CapsuleTables,
 > {
+  public readonly destroy: PreviewDestroyPersistence<TDatabase, TTables>
   private readonly read: PreviewReadPersistence<TDatabase, TTables>
   private readonly identity: PreviewIdentityPersistence<TDatabase, TTables>
   private readonly lifecycle: PreviewLifecyclePersistence<TDatabase, TTables>
@@ -34,6 +36,7 @@ export class PreviewRepository<
 
   constructor(persistence: CapsulePersistence<TDatabase, TTables>) {
     const locks = new PreviewLocks(persistence)
+    this.destroy = new PreviewDestroyPersistence(persistence)
     this.read = new PreviewReadPersistence(persistence)
     this.identity = new PreviewIdentityPersistence(persistence, locks)
     this.lifecycle = new PreviewLifecyclePersistence(persistence, locks)

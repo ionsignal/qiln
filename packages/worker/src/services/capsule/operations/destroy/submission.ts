@@ -1,4 +1,10 @@
-import { CapsuleOperationType, type CapsuleDestroyReceipt } from '@qiln/core/server'
+import {
+  CapsuleDestroyOperationInputSchema,
+  CapsuleOperationType,
+  TargetType,
+  type CapsuleDestroyReceipt,
+} from '@qiln/core/server'
+import { IncusError } from '../../../../errors'
 import { createOperationRequestHash } from '../shared'
 import type { OperationSupervisor } from '../../../../coordination'
 import type { CapsuleBranchEventPublisher } from '../../events/branch'
@@ -11,6 +17,9 @@ interface DestroyCapsuleRequestIdentity {
   operationType: typeof CapsuleOperationType.DESTROY
   actor: SubmitDestroyCapsuleInput['actor']
   capsuleId: string
+  force?: true
+  reason?: string
+  acknowledged?: true
 }
 
 /**
@@ -33,16 +42,47 @@ export class DestroyCapsuleSubmissionService {
   ) {}
 
   public async submit(input: SubmitDestroyCapsuleInput): Promise<CapsuleDestroyReceipt> {
+    const { ownerId, ...fields } = input
+    const parsed = CapsuleDestroyOperationInputSchema.safeParse({
+      ...fields,
+      target: {
+        type: TargetType.OWNER,
+        id: ownerId,
+      },
+    })
+    if (!parsed.success) {
+      throw new IncusError('Capsule destroy input is invalid.', 'VALIDATION_ERROR')
+    }
+    const command = parsed.data
     const requestHash = createOperationRequestHash(
       {
         operationType: CapsuleOperationType.DESTROY,
-        actor: input.actor,
-        capsuleId: input.capsuleId,
+        actor: command.actor,
+        capsuleId: command.capsuleId,
+        ...(command.force
+          ? {
+              force: true,
+              reason: command.reason,
+              acknowledged: command.acknowledged,
+            }
+          : {}),
       } satisfies DestroyCapsuleRequestIdentity,
       'capsule destroy request',
     )
     const acceptance = await this.repository.acceptOrReplay({
-      ...input,
+      ownerId: command.target.id,
+      actor: command.actor,
+      capsuleId: command.capsuleId,
+      idempotencyKey: command.idempotencyKey,
+      ...(command.force
+        ? {
+            force: true,
+            reason: command.reason,
+            acknowledged: command.acknowledged,
+          }
+        : {
+            force: false,
+          }),
       requestHash,
     })
     if (!acceptance.newlyAccepted) {
