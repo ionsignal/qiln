@@ -1,10 +1,11 @@
 import type { CreatePhase } from './phases'
-import type { CreateCapsuleVolumeResource } from '../types'
+import type { BranchResourceInput, CreateCapsuleVolumeResource } from '../../../resource/types'
 
 export interface CreateCapsuleVolumeCompensationTarget {
   kind: 'volume'
   resourceId: string
   resourceKey: string
+  resource: BranchResourceInput
   pool: string
   volumeName: string
 }
@@ -13,6 +14,7 @@ export interface CreateCapsuleInstanceCompensationTarget {
   kind: 'instance'
   resourceId: string
   resourceKey: string
+  resource: BranchResourceInput
   instanceName: string
 }
 
@@ -22,6 +24,7 @@ export type CreateCapsuleCompensationTarget =
 export interface CreateCapsuleDerivedProvisioningFile {
   resourceId: string
   resourceKey: string
+  resource: BranchResourceInput
   backingResourceId: string
 }
 
@@ -39,23 +42,29 @@ export class CreateCapsuleCompensationScope {
   private readonly createdVolumeResourceIds = new Map<string, string>()
   private createdInstanceResourceId: string | null = null
 
-  public recordCreatedVolume(resourceId: string, volume: CreateCapsuleVolumeResource): void {
+  public recordCreatedVolume(
+    resourceId: string,
+    resource: BranchResourceInput,
+    volume: CreateCapsuleVolumeResource,
+  ): void {
     this.createdVolumeResourceIds.set(volumeIdentity(volume.pool, volume.volumeName), resourceId)
     this.directTargets.push({
       kind: 'volume',
       resourceId,
       resourceKey: volume.resourceKey,
+      resource,
       pool: volume.pool,
       volumeName: volume.volumeName,
     })
   }
 
-  public recordCreatedInstance(resourceId: string, resourceKey: string, instanceName: string): void {
+  public recordCreatedInstance(resourceId: string, resource: BranchResourceInput, instanceName: string): void {
     this.createdInstanceResourceId = resourceId
     this.directTargets.push({
       kind: 'instance',
       resourceId,
-      resourceKey,
+      resourceKey: resource.resourceKey,
+      resource,
       instanceName,
     })
   }

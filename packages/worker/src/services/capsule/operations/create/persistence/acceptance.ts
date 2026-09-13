@@ -10,7 +10,7 @@ import { IncusError, isUniqueConstraintViolation } from '../../../../../errors'
 import { assertOperationReplayIdentity } from '../../shared'
 import { toCreateRepositoryResult } from './result'
 import type { CapsuleOperationReader } from '../../shared'
-import type { CreateCapsuleLineagePolicy } from '../policy/lineage'
+import type { CreateResourceLineage } from '../../../resource/lineage'
 import type { AcceptCreateCapsuleOperationInput, CreateCapsuleRepositoryResult } from '../types'
 import type { CreateCapsuleLocks } from './locks'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
@@ -30,7 +30,7 @@ export class CreateCapsuleAcceptance<
     private readonly persistence: CapsulePersistence<TDatabase, TTables>,
     private readonly reader: CapsuleOperationReader<TDatabase, TTables>,
     private readonly locks: CreateCapsuleLocks<TDatabase, TTables>,
-    private readonly lineage: CreateCapsuleLineagePolicy<TTables>,
+    private readonly lineage: CreateResourceLineage<TTables>,
   ) {}
 
   /**

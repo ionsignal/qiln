@@ -1,6 +1,5 @@
 import type {
   CapsuleActorReference,
-  CapsuleBranchResourceInventoryDigest,
   CapsuleOperationRequestHash,
   CapsuleTables,
 } from '@qiln/core/server'
@@ -62,9 +61,9 @@ export class CreateCapsuleOperationRepository<
     return this.capabilities.execution.claim(operationId)
   }
 
-  public recordInventory(operationId: string, digest: CapsuleBranchResourceInventoryDigest): Promise<void> {
-    return this.capabilities.execution.recordInventory(operationId, digest)
-  }
+  public materialize(operationId: string): Promise<void> {
+    return this.capabilities.execution.materialize(operationId)
+   }
 
   public commitProviderIntent(operationId: string): Promise<void> {
     return this.capabilities.execution.commitProviderIntent(operationId)

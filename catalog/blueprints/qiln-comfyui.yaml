@@ -29,12 +29,21 @@ provisioning:
       mount_path: /workspace/outputs
       shifted: true
       readonly: false
-    - name: models
-      type: bind
-      host_path: /srv/qiln/shared/models
-      mount_path: /workspace/models
+    - name: models-shared
+      type: clone
+      versioned: true
+      pool: is-nvme-pool
+      source_volume: is-model-vault
+      mount_path: /workspace/models/shared
       shifted: true
       readonly: true
+    - name: models-private
+      type: empty
+      versioned: true
+      pool: is-nvme-pool
+      mount_path: /workspace/models/private
+      shifted: true
+      readonly: false
 
   files:
     - path: /workspace
@@ -55,13 +64,34 @@ provisioning:
       gid: 1000
       mode: '0755'
 
-    - path: /workspace/data/loras
+    - path: /workspace/data/config
       type: directory
       uid: 1000
       gid: 1000
       mode: '0755'
 
-    - path: /workspace/data/config
+    # Parent directory on the instance rootfs. The two child paths are mount
+    # targets and are supplied by Incus disk devices.
+    - path: /workspace/models
+      type: directory
+      uid: 0
+      gid: 0
+      mode: '0755'
+
+    # These paths resolve into the writable models-private volume.
+    - path: /workspace/models/private/checkpoints
+      type: directory
+      uid: 1000
+      gid: 1000
+      mode: '0755'
+
+    - path: /workspace/models/private/loras
+      type: directory
+      uid: 1000
+      gid: 1000
+      mode: '0755'
+
+    - path: /workspace/models/private/vae
       type: directory
       uid: 1000
       gid: 1000
@@ -76,13 +106,22 @@ provisioning:
       mode: '0644'
       content: |
         qiln_shared_models:
-          base_path: /workspace/models
+          base_path: /workspace/models/shared
           checkpoints: checkpoints/
           loras: loras/
           vae: vae/
-        qiln_branch_models:
-          base_path: /workspace/data
+
+        qiln_private_models:
+          base_path: /workspace/models/private
+          checkpoints: checkpoints/
           loras: loras/
+          vae: vae/
+
+    - path: /workspace/data/capsule
+      type: directory
+      uid: 1000
+      gid: 1000
+      mode: '0755'
 
     - path: /workspace/data/capsule/workflows
       type: directory

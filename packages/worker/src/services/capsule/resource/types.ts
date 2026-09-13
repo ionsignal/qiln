@@ -1,13 +1,13 @@
 import type {
+  CapsuleBlueprint,
   CapsuleBlueprintIdentifier,
   CapsuleBranchResourceCleanupPolicyValue,
-  CapsuleBranchResourceStatusValue,
   CapsuleBranchResourceTypeValue,
   CapsuleRootfsImagePin,
 } from '@qiln/core/server'
 import type { IncusFilePushOptions } from '../../../incus/client/types'
 import type { IncusDeviceMap } from '../../../incus/client'
-import type { ProvisioningFileTarget } from './bootstrap/targets'
+import type { AttachedVolume, ProvisioningFileTarget } from './bootstrap/targets'
 
 export type {
   BindMountResourceMetadata,
@@ -18,20 +18,17 @@ export type {
 } from './metadata'
 
 /**
- * Durable input used to associate a branch resource with the operation that
- * first established its Qiln ownership record.
+ * Expected identity of one pre-materialized create resource.
  *
- * Operation-specific repositories continue to own operation acceptance and
- * aggregate transitions. This contract contains only branch resource identity,
- * cleanup policy, metadata, and creation provenance.
+ * This input authorizes no insertion. Resource transitions compare it with the
+ * locked ledger and the running create operation before provider work.
  *
  * Managed volumes and bind mounts retain their originating Blueprint volume
- * identity. Create Snapshot resolves every managed volume through this identity
- * rather than provider names, mount paths, or live provider discovery. Bind
- * mounts remain unversioned external configuration.
+ * identity. Bind mounts remain unversioned external configuration.
  */
 export interface BranchResourceInput {
   operationId: string
+  capsuleId: string
   ownerId: string
   branchId: string
   branchName: string
@@ -39,28 +36,7 @@ export interface BranchResourceInput {
   resourceKey: string
   blueprintVolumeName: CapsuleBlueprintIdentifier | null
   cleanupPolicy: CapsuleBranchResourceCleanupPolicyValue
-  provider?: string
-  metadata?: Record<string, unknown>
-}
-
-/**
- * Durable resource evidence consumed by inventory verification and fail-closed
- * destroy planning.
- */
-export interface CapsuleBranchResourceInventoryRow {
-  id: string
-  ownerId: string
-  branchId: string | null
-  branchName: string
-  provider: string
-  resourceType: CapsuleBranchResourceTypeValue
-  resourceKey: string
-  blueprintVolumeName: CapsuleBlueprintIdentifier | null
-  status: CapsuleBranchResourceStatusValue
-  cleanupPolicy: CapsuleBranchResourceCleanupPolicyValue
-  metadata: Record<string, unknown> | null
-  createdByOperationId: string | null
-  lastOperationId: string | null
+  metadata: Record<string, unknown>
 }
 
 export interface VolumeCreateInput {
@@ -89,4 +65,76 @@ export interface ProvisioningFileWriteInput {
   content: string
   target: ProvisioningFileTarget
   options: IncusFilePushOptions
+}
+
+export interface CreateCapsulePlannedResource {
+  resourceKey: string
+  resourceType: CapsuleBranchResourceTypeValue
+  blueprintVolumeName: CapsuleBlueprintIdentifier | null
+  cleanupPolicy: CapsuleBranchResourceCleanupPolicyValue
+  metadata: Record<string, unknown>
+}
+
+export interface CreateCapsuleProjectResource extends CreateCapsulePlannedResource {
+  kind: 'project'
+  namespace: string
+}
+
+export interface CreateCapsuleBindMountResource extends CreateCapsulePlannedResource {
+  kind: 'bindMount'
+  deviceName: string
+  hostPath: string
+  mountPath: string
+  readonly: boolean
+  shifted: boolean
+}
+
+export interface CreateCapsuleVolumeResource extends CreateCapsulePlannedResource {
+  kind: 'volume'
+  volumeType: 'empty' | 'clone'
+  versioned: boolean
+  deviceName: string
+  pool: string
+  volumeName: string
+  mountPath: string
+  readonly: boolean
+  shifted: boolean
+  sourceVolume: string | null
+  sourceProject?: string
+  config: Record<string, string>
+}
+
+export interface CreateCapsuleInstanceResource extends CreateCapsulePlannedResource {
+  kind: 'instance'
+  instanceName: string
+  rootfsImagePin: CapsuleRootfsImagePin
+  config: Record<string, string>
+  devices: IncusDeviceMap
+}
+
+export interface CreateCapsuleProvisioningFileResource extends CreateCapsulePlannedResource {
+  kind: 'provisioningFile'
+  path: string
+  content: string
+  target: ProvisioningFileTarget
+  options: IncusFilePushOptions
+}
+
+export interface CreateCapsuleResourcePlan {
+  project: CreateCapsuleProjectResource
+  bindMounts: CreateCapsuleBindMountResource[]
+  volumes: CreateCapsuleVolumeResource[]
+  instance: CreateCapsuleInstanceResource
+  files: CreateCapsuleProvisioningFileResource[]
+  attachedVolumes: AttachedVolume[]
+}
+
+export interface CreateCapsuleResourcePlanInput {
+  namespace: string
+  rootBranchId: string
+  rootBranchName: string
+  cpu: string
+  memory: string
+  blueprint: CapsuleBlueprint
+  rootfsImagePin: CapsuleRootfsImagePin
 }

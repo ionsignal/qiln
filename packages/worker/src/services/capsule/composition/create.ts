@@ -6,9 +6,10 @@ import { CreateCapsuleCompletion } from '../operations/create/persistence/comple
 import { CreateCapsuleExecution } from '../operations/create/persistence/execution'
 import { CreateCapsuleLocks } from '../operations/create/persistence/locks'
 import { CreateCapsuleOperationRepository } from '../operations/create/persistence/repository'
-import { CreateCapsuleLineagePolicy } from '../operations/create/policy/lineage'
+import { CreateCapsuleInventoryPolicy } from '../operations/create/policy/inventory'
+import { CreateResourceLineage } from '../resource/lineage'
 import { CreateCapsuleCompensation } from '../operations/create/resource/compensate'
-import { CreateCapsuleResourcePlanner } from '../operations/create/resource/plan'
+import { CreateResourcePlanner } from '../resource/plan'
 import { CreateCapsuleProvisioner } from '../operations/create/resource/provision'
 import { CreateCapsuleSubmissionService } from '../operations/create/submission'
 import { CapsuleResourceDriver } from '../resource/driver'
@@ -56,13 +57,14 @@ export interface ComposedCreateCapability {
 export function composeCreateCapability<TDatabase extends PostgresJsDatabase, TTables extends CapsuleTables>(
   options: ComposeCreateCapabilityOptions<TDatabase, TTables>,
 ): ComposedCreateCapability {
-  const lineage = new CreateCapsuleLineagePolicy<TTables>()
+  const lineage = new CreateResourceLineage<TTables>()
   const locks = new CreateCapsuleLocks(options.persistence)
-  const planner = new CreateCapsuleResourcePlanner()
+  const planner = new CreateResourcePlanner()
+  const inventory = new CreateCapsuleInventoryPolicy(planner, options.project)
   const acceptance = new CreateCapsuleAcceptance(options.persistence, options.operationReader, locks, lineage)
-  const execution = new CreateCapsuleExecution(options.persistence, locks, lineage)
-  const completion = new CreateCapsuleCompletion(options.persistence, locks, lineage, planner, options.project)
-  const classification = new CreateCapsuleClassification(options.persistence, locks, lineage)
+  const execution = new CreateCapsuleExecution(options.persistence, locks, lineage, inventory)
+  const completion = new CreateCapsuleCompletion(options.persistence, locks, lineage, inventory)
+  const classification = new CreateCapsuleClassification(options.persistence, locks, lineage, inventory)
   const repository = new CreateCapsuleOperationRepository({
     acceptance,
     execution,

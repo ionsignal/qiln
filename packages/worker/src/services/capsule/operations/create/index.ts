@@ -13,8 +13,7 @@ export * from './persistence/locks'
 export * from './persistence/repository'
 
 export * from './policy/failure'
-export * from './policy/lineage'
+export * from './policy/inventory'
 
 export * from './resource/compensate'
-export * from './resource/plan'
 export * from './resource/provision'

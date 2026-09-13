@@ -1,4 +1,3 @@
-import { CapsuleBranchResourceStatus } from '@qiln/core/server'
 import { IncusError } from '../../../../../errors'
 import { createCreateCapsuleCompensationFailure } from '../execution/diagnostics'
 import { CreatePhase } from '../execution/phases'
@@ -50,7 +49,7 @@ export class CreateCapsuleCompensation {
         continue
       }
       try {
-        await this.dependencies.resources.recordDerivedResourceCompensation(file.resourceId, context.operationId)
+        await this.dependencies.resources.compensated(file.resource)
       } catch (error: unknown) {
         failures.push(
           createCreateCapsuleCompensationFailure({
@@ -72,9 +71,14 @@ export class CreateCapsuleCompensation {
     context: CreateCapsuleCompensationContext,
     target: CreateCapsuleCompensationTarget,
   ): Promise<void> {
-    await this.dependencies.resources.recordBranchResourceDeleteIntent(target.resourceId, context.operationId)
-    let outcome: typeof CapsuleBranchResourceStatus.DELETED | typeof CapsuleBranchResourceStatus.MISSING =
-      CapsuleBranchResourceStatus.DELETED
+    if (target.resource.operationId !== context.operationId) {
+      throw new IncusError('Compensation target belongs to another create operation.', 'CONFLICT', {
+        operationId: context.operationId,
+        resourceId: target.resourceId,
+      })
+    }
+    await this.dependencies.resources.deleting(target.resource)
+    let outcome: 'deleted' | 'missing' = 'deleted'
     try {
       if (target.kind === 'instance') {
         await this.dependencies.driver.deleteInstance(context.namespace, target.instanceName)
@@ -86,32 +90,24 @@ export class CreateCapsuleCompensation {
       }
     } catch (error: unknown) {
       if (error instanceof IncusError && error.code === 'NOT_FOUND') {
-        outcome = CapsuleBranchResourceStatus.MISSING
+        outcome = 'missing'
       } else {
-        await this.recordDeleteFailure(context.operationId, target, error)
+        await this.recordDeleteFailure(target, error)
         throw error
       }
     }
     try {
-      await this.dependencies.resources.recordBranchResourceDeleteOutcome(
-        target.resourceId,
-        context.operationId,
-        outcome,
-      )
+      await this.dependencies.resources.deleted(target.resource, outcome)
     } catch (error: unknown) {
-      await this.recordDeleteFailure(context.operationId, target, error)
+      await this.recordDeleteFailure(target, error)
       throw error
     }
   }
 
-  private async recordDeleteFailure(
-    operationId: string,
-    target: CreateCapsuleCompensationTarget,
-    error: unknown,
-  ): Promise<void> {
+  private async recordDeleteFailure(target: CreateCapsuleCompensationTarget, error: unknown): Promise<void> {
     try {
-      await this.dependencies.resources.recordBranchResourceDeleteFailure(target.resourceId, operationId, error, {
-        operationId,
+      await this.dependencies.resources.deleteFailed(target.resource, error, {
+        operationId: target.resource.operationId,
         phase: CreatePhase.COMPENSATION,
         action: target.kind === 'instance' ? 'compensate_delete_instance' : 'compensate_delete_volume',
         resourceId: target.resourceId,

@@ -12,7 +12,7 @@ export interface CreateCapsuleFailureFacts {
   providerIntentRecorded: boolean
   providerOwnershipUncertain: boolean
   completionAttempted: boolean
-  resourceCount: number
+  inventory: 'absent' | 'untouched' | 'changed' | 'inconsistent'
   compensationProven: boolean
 }
 
@@ -20,20 +20,24 @@ export interface CreateCapsuleFailureFacts {
  * Selects a disposition from facts assembled by the locked classification
  * transaction.
  *
- * Compensation is proven only when same-process cleanup succeeded and the
- * durable partial resource ledger contains no remaining or uncertain deletion
- * obligations. Completion uncertainty always prevents ordinary failure.
+ * No provider intent is safe only with valid lineage and either no inventory
+ * evidence or a complete untouched plan. Compensation requires a complete
+ * validated ledger and positive same-process cleanup evidence.
  */
 export function classifyCreateCapsuleFailure(facts: CreateCapsuleFailureFacts): CreateCapsuleFailureDisposition {
   if (!facts.consistent || facts.providerOwnershipUncertain || facts.completionAttempted) {
     return CreateCapsuleFailureDisposition.CLEANUP_REQUIRED
   }
   if (!facts.providerIntentRecorded) {
-    return facts.resourceCount === 0
+    return facts.inventory === 'absent' || facts.inventory === 'untouched'
       ? CreateCapsuleFailureDisposition.PRE_PROVIDER
       : CreateCapsuleFailureDisposition.CLEANUP_REQUIRED
   }
-  return facts.compensationProven
-    ? CreateCapsuleFailureDisposition.COMPENSATED
-    : CreateCapsuleFailureDisposition.CLEANUP_REQUIRED
+  if (
+    (facts.inventory === 'untouched' || facts.inventory === 'changed') &&
+    facts.compensationProven
+  ) {
+    return CreateCapsuleFailureDisposition.COMPENSATED
+  }
+  return CreateCapsuleFailureDisposition.CLEANUP_REQUIRED
 }

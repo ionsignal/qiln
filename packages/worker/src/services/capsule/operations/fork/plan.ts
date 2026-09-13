@@ -239,9 +239,10 @@ export class ForkPlanner {
         })
       }
       attachedVolumes.push({
-        pool: volume.pool,
         volumeName,
+        pool: volume.pool,
         mountPath: volume.mount_path,
+        readonly: volume.readonly
       })
       devices[volume.name] = {
         type: 'disk',

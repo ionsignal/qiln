@@ -1,7 +1,6 @@
 import { and, eq, inArray } from 'drizzle-orm'
 import {
   CapsuleBranchResourceCleanupPolicy,
-  CapsuleBranchResourceInventoryDigestSchema,
   CapsuleBranchResourceStatus,
   CapsuleBranchResourceType,
   CapsuleOperationStatus,
@@ -20,7 +19,8 @@ import {
   type CreateCapsuleFailureFacts,
 } from '../policy/failure'
 import { toCreateTerminalResult } from './result'
-import type { CreateCapsuleLineagePolicy } from '../policy/lineage'
+import type { CreateResourceLineage } from '../../../resource/lineage'
+import type { CreateCapsuleInventoryPolicy } from '../policy/inventory'
 import type { CreateCapsuleFailureInput, CreateCapsuleTerminalResult } from '../types'
 import type { CreateCapsuleLocks, CreateTransaction } from './locks'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
@@ -55,7 +55,8 @@ export class CreateCapsuleClassification<
   constructor(
     private readonly persistence: CapsulePersistence<TDatabase, TTables>,
     private readonly locks: CreateCapsuleLocks<TDatabase, TTables>,
-    private readonly lineage: CreateCapsuleLineagePolicy<TTables>,
+    private readonly lineage: CreateResourceLineage<TTables>,
+    private readonly inventory: CreateCapsuleInventoryPolicy,
   ) {}
 
   public async fail(input: CreateCapsuleFailureInput): Promise<CreateCapsuleTerminalResult> {
@@ -153,15 +154,19 @@ export class CreateCapsuleClassification<
     if (providerIntentRecorded && operation.status !== CapsuleOperationStatus.RUNNING) {
       contradictions.push('provider_intent_without_running_operation')
     }
-    if (
-      rootBranch &&
-      (rootBranch.resourceInventoryDigest !== null || providerIntentRecorded) &&
-      !CapsuleBranchResourceInventoryDigestSchema.safeParse(rootBranch.resourceInventoryDigest).success
-    ) {
-      contradictions.push('root_branch_resource_inventory_proof_invalid')
+    const inventory = inspection.valid
+      ? this.inventory.inspect(operation.id, inspection.lineage, resources)
+      : {
+          kind: 'inconsistent' as const,
+          untouched: false,
+          contradictions: ['resource_inventory_lineage_invalid'],
+        }
+    contradictions.push(...inventory.contradictions)
+    if (providerIntentRecorded && inventory.kind !== 'complete') {
+      contradictions.push('provider_intent_without_complete_inventory')
     }
-    if (!providerIntentRecorded && resources.length > 0) {
-      contradictions.push('branch_resource_evidence_present_before_provider_intent')
+    if (!providerIntentRecorded && inventory.kind === 'complete' && !inventory.untouched) {
+      contradictions.push('resource_execution_evidence_before_provider_intent')
     }
     if (!providerIntentRecorded && input.compensation !== null) {
       contradictions.push('compensation_reported_without_provider_intent')
@@ -180,13 +185,19 @@ export class CreateCapsuleClassification<
       input.compensation.fullyCompensated &&
       input.compensation.failures.length === 0 &&
       rootBranch !== null &&
+      inventory.kind === 'complete' &&
       compensationContradictions.length === 0
     const facts: CreateCapsuleFailureFacts = {
       consistent: contradictions.length === 0,
       providerIntentRecorded,
       providerOwnershipUncertain: input.providerOwnershipUncertain,
       completionAttempted: input.completionAttempted || input.phase === CreatePhase.COMPLETE_CREATE,
-      resourceCount: resources.length,
+      inventory:
+        inventory.kind === 'complete'
+          ? inventory.untouched
+            ? 'untouched'
+            : 'changed'
+          : inventory.kind,
       compensationProven,
     }
     const disposition = classifyCreateCapsuleFailure(facts)

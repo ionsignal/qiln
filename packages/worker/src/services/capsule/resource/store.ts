@@ -1,71 +1,29 @@
-import { and, asc, eq, inArray } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import {
-  CapsuleBranchResourceCleanupPolicy,
-  CapsuleBranchResourceStatus,
-  CapsuleBranchResourceType,
   digestCanonicalJsonValue,
   type CapsulePersistence,
   type CapsuleTables,
 } from '@qiln/core/server'
-import { IncusError, isUniqueConstraintViolation } from '../../../errors'
+import { IncusError } from '../../../errors'
 import { createFailureDetails, failureCodeFromUnknown, failureMessageFromUnknown } from '../failures'
 import { toJsonObject } from '../persistence/json'
-import type { BranchResourceInput, CapsuleBranchResourceInventoryRow } from './types'
+import type { BranchResourceInput } from './types'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
-const DEFAULT_RESOURCE_PROVIDER = 'incus'
-const CREATE_INTENT_ELIGIBLE_RESOURCE_STATUSES = [CapsuleBranchResourceStatus.PLANNED] as const
-const DIRECT_DELETE_INTENT_ELIGIBLE_RESOURCE_STATUSES = [CapsuleBranchResourceStatus.CREATED] as const
-const DIRECT_DELETE_RESOURCE_TYPES = [
-  CapsuleBranchResourceType.INCUS_INSTANCE,
-  CapsuleBranchResourceType.ZFS_VOLUME,
-] as const
-const DIRECT_DELETE_OUTCOME_RESOURCE_STATUSES = [
-  CapsuleBranchResourceStatus.DELETED,
-  CapsuleBranchResourceStatus.MISSING,
-] as const
-const BOOTSTRAP_DERIVED_DELETE_ELIGIBLE_RESOURCE_STATUSES = [
-  CapsuleBranchResourceStatus.PLANNED,
-  CapsuleBranchResourceStatus.CREATING,
-  CapsuleBranchResourceStatus.CREATED,
-  CapsuleBranchResourceStatus.ERROR,
-] as const
-
-type DirectDeleteOutcomeResourceStatus = (typeof DIRECT_DELETE_OUTCOME_RESOURCE_STATUSES)[number]
-
-function normalizedMetadata(
-  metadata: Record<string, unknown> | null | undefined,
-  context: string,
-): Record<string, unknown> | null {
-  return metadata === null || metadata === undefined ? null : toJsonObject(metadata, context)
-}
-
-function resourceIdentityDigest(
-  provider: string,
-  blueprintVolumeName: BranchResourceInput['blueprintVolumeName'],
-  metadata: Record<string, unknown> | null,
-  context: string,
-): string {
-  return digestCanonicalJsonValue(
-    {
-      provider,
-      blueprintVolumeName,
-      metadata,
-    },
-    {
-      context,
-    },
-  )
-}
+type ResourceRow = CapsuleTables['capsuleBranchResources']['$inferSelect']
+type ResourceStatus = ResourceRow['status']
+type ResourceUpdate = Pick<
+  ResourceRow,
+  'status' | 'lastOperationId' | 'updatedAt' | 'failureCode' | 'failureMessage' | 'failureDetails'
+>
+type Transaction<TDatabase extends PostgresJsDatabase> = Parameters<Parameters<TDatabase['transaction']>[0]>[0]
 
 /**
- * Persistence boundary for branch resource ownership and provider mutation
- * fences.
+ * Transitions pre-materialized create resources without inserting identities.
  *
- * Direct provider deletion is restricted to managed resources whose durable
- * state and cleanup policy prove Qiln created and owns them. Adopted, retained,
- * external, and derived resources cannot enter the direct provider deletion
- * path.
+ * Every transition proves the running create operation, provider fence, branch
+ * ownership, immutable resource identity, and expected accounting state.
+ * Provider calls remain outside these transactions.
  */
 export class CapsuleBranchResourceStore<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
@@ -73,622 +31,243 @@ export class CapsuleBranchResourceStore<
 > {
   constructor(private readonly persistence: CapsulePersistence<TDatabase, TTables>) {}
 
-  public async findBranchResourceByOperationKey(operationId: string, resourceKey: string) {
-    const db = this.persistence.db
-    const resources = this.persistence.tables.capsuleBranchResources
-    const [resource] = await db
-      .select()
-      .from(resources)
-      .where(and(eq(resources.createdByOperationId, operationId), eq(resources.resourceKey, resourceKey)))
-      .limit(1)
-    return resource ?? null
+  public async begin(input: BranchResourceInput): Promise<string> {
+    return await this.transition(input, ['planned'], 'creating')
   }
 
-  public async findBranchResourceByBranchKey(branchId: string, resourceKey: string) {
-    const db = this.persistence.db
-    const resources = this.persistence.tables.capsuleBranchResources
-    const [resource] = await db
-      .select()
-      .from(resources)
-      .where(and(eq(resources.branchId, branchId), eq(resources.resourceKey, resourceKey)))
-      .limit(1)
-    return resource ?? null
+  public async created(input: BranchResourceInput): Promise<void> {
+    await this.transition(input, ['creating'], 'created')
   }
 
-  public async ensureBranchResource(input: BranchResourceInput): Promise<string> {
-    const existingByOperation = await this.findBranchResourceByOperationKey(input.operationId, input.resourceKey)
-    if (existingByOperation) {
-      this.assertExistingResourceIdentity(existingByOperation, input)
-      return existingByOperation.id
-    }
-    const existingByBranch = await this.findBranchResourceByBranchKey(input.branchId, input.resourceKey)
-    if (existingByBranch) {
-      this.assertExistingResourceIdentity(existingByBranch, input)
-      return existingByBranch.id
-    }
-    try {
-      return await this.createBranchResource(input)
-    } catch (error: unknown) {
-      if (!isUniqueConstraintViolation(error)) {
-        throw error
-      }
-      const racedByOperation = await this.findBranchResourceByOperationKey(input.operationId, input.resourceKey)
-      if (racedByOperation) {
-        this.assertExistingResourceIdentity(racedByOperation, input)
-        return racedByOperation.id
-      }
-      const racedByBranch = await this.findBranchResourceByBranchKey(input.branchId, input.resourceKey)
-      if (racedByBranch) {
-        this.assertExistingResourceIdentity(racedByBranch, input)
-        return racedByBranch.id
-      }
-      throw new IncusError('Capsule branch resource was created concurrently but could not be reloaded.', 'API_ERROR', {
-        operationId: input.operationId,
-        branchId: input.branchId,
+  public async adopt(input: BranchResourceInput): Promise<void> {
+    const project = input.resourceType === 'incus_project' && input.cleanupPolicy === 'retain'
+    const bind = input.resourceType === 'bind_mount' && input.cleanupPolicy === 'external'
+    if (!project && !bind) {
+      throw new IncusError('Only retained projects and external bind mounts may be adopted.', 'VALIDATION_ERROR', {
         resourceKey: input.resourceKey,
       })
     }
+    await this.transition(input, [project ? 'creating' : 'planned'], 'adopted')
   }
 
-  public async createBranchResource(input: BranchResourceInput): Promise<string> {
-    const db = this.persistence.db
-    const resources = this.persistence.tables.capsuleBranchResources
-    const provider = input.provider ?? DEFAULT_RESOURCE_PROVIDER
-    const metadata = normalizedMetadata(input.metadata, 'capsule branch resource metadata')
-    const [resource] = await db
-      .insert(resources)
-      .values({
-        createdByOperationId: input.operationId,
-        lastOperationId: input.operationId,
-        ownerId: input.ownerId,
-        branchId: input.branchId,
-        branchName: input.branchName,
-        resourceType: input.resourceType,
-        provider,
-        resourceKey: input.resourceKey,
-        blueprintVolumeName: input.blueprintVolumeName,
-        cleanupPolicy: input.cleanupPolicy,
-        status: CapsuleBranchResourceStatus.PLANNED,
-        metadata,
-        updatedAt: new Date(),
-      })
-      .returning({
-        id: resources.id,
-      })
-    if (!resource) {
-      throw new IncusError('Failed to record capsule branch resource.', 'API_ERROR', {
-        operationId: input.operationId,
-        branchId: input.branchId,
-        resourceKey: input.resourceKey,
-      })
-    }
-    return resource.id
-  }
-
-  public async recordBranchResourceAdoption(resourceId: string, operationId: string): Promise<void> {
-    const db = this.persistence.db
-    const resources = this.persistence.tables.capsuleBranchResources
-    const updatedResources = await db
-      .update(resources)
-      .set({
-        status: CapsuleBranchResourceStatus.ADOPTED,
-        lastOperationId: operationId,
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(resources.id, resourceId),
-          eq(resources.createdByOperationId, operationId),
-          inArray(resources.status, CREATE_INTENT_ELIGIBLE_RESOURCE_STATUSES),
-        ),
-      )
-      .returning({
-        id: resources.id,
-      })
-    if (updatedResources.length !== 1) {
-      throw new IncusError(
-        'Failed to persist capsule branch resource adoption. Manual review is required.',
-        'CONFLICT',
-        {
-          resourceId,
-          operationId,
-        },
-      )
-    }
-  }
-
-  public async recordBranchResourceCreateIntent(resourceId: string, operationId: string): Promise<void> {
-    const db = this.persistence.db
-    const resources = this.persistence.tables.capsuleBranchResources
-    const updatedResources = await db
-      .update(resources)
-      .set({
-        status: CapsuleBranchResourceStatus.CREATING,
-        lastOperationId: operationId,
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(resources.id, resourceId),
-          eq(resources.createdByOperationId, operationId),
-          inArray(resources.status, CREATE_INTENT_ELIGIBLE_RESOURCE_STATUSES),
-        ),
-      )
-      .returning({
-        id: resources.id,
-      })
-    if (updatedResources.length !== 1) {
-      throw new IncusError(
-        'Failed to persist capsule branch resource create intent. Manual review is required.',
-        'CONFLICT',
-        {
-          resourceId,
-          operationId,
-        },
-      )
-    }
-  }
-
-  public async recordBranchResourceCreateOutcome(resourceId: string, operationId: string): Promise<void> {
-    const db = this.persistence.db
-    const resources = this.persistence.tables.capsuleBranchResources
-    const updatedResources = await db
-      .update(resources)
-      .set({
-        status: CapsuleBranchResourceStatus.CREATED,
-        lastOperationId: operationId,
-        updatedAt: new Date(),
-        failureCode: null,
-        failureMessage: null,
-        failureDetails: null,
-      })
-      .where(
-        and(
-          eq(resources.id, resourceId),
-          eq(resources.createdByOperationId, operationId),
-          eq(resources.status, CapsuleBranchResourceStatus.CREATING),
-          eq(resources.lastOperationId, operationId),
-        ),
-      )
-      .returning({
-        id: resources.id,
-      })
-    if (updatedResources.length !== 1) {
-      throw new IncusError(
-        'Failed to persist capsule branch resource create outcome. Manual review is required.',
-        'CONFLICT',
-        {
-          resourceId,
-          operationId,
-        },
-      )
-    }
-  }
-
-  public async recordBranchResourceCreateFailure(
-    resourceId: string,
-    operationId: string,
-    error: unknown,
-    context?: Record<string, unknown>,
-  ): Promise<void> {
-    const db = this.persistence.db
-    const resources = this.persistence.tables.capsuleBranchResources
-    const details = createFailureDetails(error, context)
-    const updatedResources = await db
-      .update(resources)
-      .set({
-        status: CapsuleBranchResourceStatus.ERROR,
-        lastOperationId: operationId,
-        updatedAt: new Date(),
-        failureCode: failureCodeFromUnknown(error),
-        failureMessage: failureMessageFromUnknown(error, 'Unknown capsule branch resource create failure.'),
-        failureDetails:
-          details === undefined ? undefined : toJsonObject(details, 'capsule branch resource create failure details'),
-      })
-      .where(
-        and(
-          eq(resources.id, resourceId),
-          eq(resources.createdByOperationId, operationId),
-          eq(resources.status, CapsuleBranchResourceStatus.CREATING),
-          eq(resources.lastOperationId, operationId),
-        ),
-      )
-      .returning({
-        id: resources.id,
-      })
-    if (updatedResources.length !== 1) {
-      throw new IncusError(
-        'Failed to persist capsule branch resource create failure. Manual review is required.',
-        'CONFLICT',
-        {
-          resourceId,
-          operationId,
-        },
-      )
-    }
-  }
-
-  public async recordBranchResourceDeleteIntent(resourceId: string, operationId: string): Promise<void> {
-    const db = this.persistence.db
-    const resources = this.persistence.tables.capsuleBranchResources
-    const updatedResources = await db
-      .update(resources)
-      .set({
-        status: CapsuleBranchResourceStatus.DELETING,
-        lastOperationId: operationId,
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(resources.id, resourceId),
-          inArray(resources.status, DIRECT_DELETE_INTENT_ELIGIBLE_RESOURCE_STATUSES),
-          eq(resources.cleanupPolicy, CapsuleBranchResourceCleanupPolicy.DELETE_WITH_BRANCH),
-          inArray(resources.resourceType, DIRECT_DELETE_RESOURCE_TYPES),
-        ),
-      )
-      .returning({
-        id: resources.id,
-      })
-    if (updatedResources.length !== 1) {
-      throw new IncusError(
-        'Failed to persist capsule branch resource delete intent. Manual review is required.',
-        'CONFLICT',
-        {
-          resourceId,
-          operationId,
-        },
-      )
-    }
-  }
-
-  public async recordBranchResourceDeleteOutcome(
-    resourceId: string,
-    operationId: string,
-    outcome: DirectDeleteOutcomeResourceStatus,
-  ): Promise<void> {
-    const db = this.persistence.db
-    const resources = this.persistence.tables.capsuleBranchResources
-    const updatedResources = await db
-      .update(resources)
-      .set({
-        status: outcome,
-        lastOperationId: operationId,
-        updatedAt: new Date(),
-        failureCode: null,
-        failureMessage: null,
-        failureDetails: null,
-      })
-      .where(
-        and(
-          eq(resources.id, resourceId),
-          eq(resources.status, CapsuleBranchResourceStatus.DELETING),
-          eq(resources.lastOperationId, operationId),
-          eq(resources.cleanupPolicy, CapsuleBranchResourceCleanupPolicy.DELETE_WITH_BRANCH),
-          inArray(resources.resourceType, DIRECT_DELETE_RESOURCE_TYPES),
-        ),
-      )
-      .returning({
-        id: resources.id,
-      })
-    if (updatedResources.length !== 1) {
-      throw new IncusError(
-        'Failed to persist capsule branch resource delete outcome. Manual review is required.',
-        'CONFLICT',
-        {
-          resourceId,
-          operationId,
-          outcome,
-        },
-      )
-    }
-  }
-
-  public async recordBranchResourceDeleteFailure(
-    resourceId: string,
-    operationId: string,
-    error: unknown,
-    context?: Record<string, unknown>,
-  ): Promise<void> {
-    const db = this.persistence.db
-    const resources = this.persistence.tables.capsuleBranchResources
-    const details = createFailureDetails(error, context)
-    const updatedResources = await db
-      .update(resources)
-      .set({
-        status: CapsuleBranchResourceStatus.ERROR,
-        lastOperationId: operationId,
-        updatedAt: new Date(),
-        failureCode: failureCodeFromUnknown(error),
-        failureMessage: failureMessageFromUnknown(error, 'Unknown capsule branch resource delete failure.'),
-        failureDetails:
-          details === undefined ? undefined : toJsonObject(details, 'capsule branch resource delete failure details'),
-      })
-      .where(
-        and(
-          eq(resources.id, resourceId),
-          eq(resources.status, CapsuleBranchResourceStatus.DELETING),
-          eq(resources.lastOperationId, operationId),
-          eq(resources.cleanupPolicy, CapsuleBranchResourceCleanupPolicy.DELETE_WITH_BRANCH),
-          inArray(resources.resourceType, DIRECT_DELETE_RESOURCE_TYPES),
-        ),
-      )
-      .returning({
-        id: resources.id,
-      })
-    if (updatedResources.length !== 1) {
-      throw new IncusError(
-        'Failed to persist capsule branch resource delete failure. Manual review is required.',
-        'CONFLICT',
-        {
-          resourceId,
-          operationId,
-        },
-      )
-    }
-  }
-
-  /**
-   * Destroy-specific derived finalization.
-   *
-   * The destroy executor must first prove the provisioning file's backing
-   * resource reached a terminal direct-resource outcome.
-   */
-  public async recordDestroyDerivedResourceDeletion(resourceId: string, operationId: string): Promise<void> {
-    const db = this.persistence.db
-    const resources = this.persistence.tables.capsuleBranchResources
-    const updatedResources = await db
-      .update(resources)
-      .set({
-        status: CapsuleBranchResourceStatus.DELETED,
-        lastOperationId: operationId,
-        updatedAt: new Date(),
-        failureCode: null,
-        failureMessage: null,
-        failureDetails: null,
-      })
-      .where(
-        and(
-          eq(resources.id, resourceId),
-          eq(resources.resourceType, CapsuleBranchResourceType.PROVISIONING_FILE),
-          eq(resources.cleanupPolicy, CapsuleBranchResourceCleanupPolicy.DELETE_WITH_BRANCH),
-          eq(resources.status, CapsuleBranchResourceStatus.CREATED),
-        ),
-      )
-      .returning({
-        id: resources.id,
-      })
-    if (updatedResources.length !== 1) {
-      throw new IncusError('Failed to finalize destroy-time provisioning-file resource outcome.', 'CONFLICT', {
-        resourceId,
-        operationId,
-      })
-    }
-  }
-
-  /**
-   * Records that one provisioning file was restored as part of its positively
-   * created backing resource.
-   *
-   * This transition performs no independent provider mutation.
-   */
-  public async recordDerivedResourceRestore(resourceId: string, operationId: string): Promise<void> {
-    const db = this.persistence.db
-    const resources = this.persistence.tables.capsuleBranchResources
-    const updated = await db
-      .update(resources)
-      .set({
-        status: CapsuleBranchResourceStatus.CREATED,
-        lastOperationId: operationId,
-        updatedAt: new Date(),
-        failureCode: null,
-        failureMessage: null,
-        failureDetails: null,
-      })
-      .where(
-        and(
-          eq(resources.id, resourceId),
-          eq(resources.createdByOperationId, operationId),
-          eq(resources.lastOperationId, operationId),
-          eq(resources.resourceType, CapsuleBranchResourceType.PROVISIONING_FILE),
-          eq(resources.cleanupPolicy, CapsuleBranchResourceCleanupPolicy.DELETE_WITH_BRANCH),
-          eq(resources.status, CapsuleBranchResourceStatus.PLANNED),
-        ),
-      )
-      .returning({
-        id: resources.id,
-      })
-    if (updated.length !== 1) {
-      throw new IncusError('Failed to persist derived provisioning-file restoration.', 'CONFLICT', {
-        resourceId,
-        operationId,
-      })
-    }
-  }
-
-  /**
-   * Finalizes a derived provisioning file after its direct backing resource was
-   * positively compensated.
-   *
-   * The caller must prove the backing instance or volume reached deleted or
-   * missing state before invoking this transition.
-   */
-  public async recordDerivedResourceCompensation(resourceId: string, operationId: string): Promise<void> {
-    const db = this.persistence.db
-    const resources = this.persistence.tables.capsuleBranchResources
-    const updated = await db
-      .update(resources)
-      .set({
-        status: CapsuleBranchResourceStatus.DELETED,
-        lastOperationId: operationId,
-        updatedAt: new Date(),
-        failureCode: null,
-        failureMessage: null,
-        failureDetails: null,
-      })
-      .where(
-        and(
-          eq(resources.id, resourceId),
-          eq(resources.createdByOperationId, operationId),
-          eq(resources.resourceType, CapsuleBranchResourceType.PROVISIONING_FILE),
-          eq(resources.cleanupPolicy, CapsuleBranchResourceCleanupPolicy.DELETE_WITH_BRANCH),
-          inArray(resources.status, BOOTSTRAP_DERIVED_DELETE_ELIGIBLE_RESOURCE_STATUSES),
-        ),
-      )
-      .returning({
-        id: resources.id,
-      })
-    if (updated.length !== 1) {
-      throw new IncusError('Failed to persist derived provisioning-file compensation.', 'CONFLICT', {
-        resourceId,
-        operationId,
-      })
-    }
-  }
-
-  public async markBranchResourceError(
-    resourceId: string,
-    error: unknown,
-    context?: Record<string, unknown>,
-  ): Promise<void> {
-    const details = createFailureDetails(error, context)
-    const updateData: {
-      status: typeof CapsuleBranchResourceStatus.ERROR
-      updatedAt: Date
-      failureCode: string
-      failureMessage: string
-      failureDetails?: Record<string, unknown>
-    } = {
-      status: CapsuleBranchResourceStatus.ERROR,
-      updatedAt: new Date(),
-      failureCode: failureCodeFromUnknown(error),
-      failureMessage: failureMessageFromUnknown(error, 'Unknown capsule branch resource failure.'),
-    }
-    if (details !== undefined) {
-      updateData.failureDetails = toJsonObject(details, 'capsule branch resource failure details')
-    }
-    const db = this.persistence.db
-    const resources = this.persistence.tables.capsuleBranchResources
-    const updated = await db.update(resources).set(updateData).where(eq(resources.id, resourceId)).returning({
-      id: resources.id,
-    })
-    if (updated.length !== 1) {
-      throw new IncusError('Capsule branch resource was not found while recording its failure.', 'NOT_FOUND', {
-        resourceId,
-      })
-    }
-  }
-
-  public async listBranchResources(ownerId: string, branchName: string) {
-    const db = this.persistence.db
-    const resources = this.persistence.tables.capsuleBranchResources
-    return await db
-      .select()
-      .from(resources)
-      .where(and(eq(resources.ownerId, ownerId), eq(resources.branchName, branchName)))
-      .orderBy(asc(resources.createdAt), asc(resources.id))
-  }
-
-  public async listBranchResourceInventoryByBranchId(branchId: string): Promise<CapsuleBranchResourceInventoryRow[]> {
-    const db = this.persistence.db
-    const resources = this.persistence.tables.capsuleBranchResources
-    return await db
-      .select({
-        id: resources.id,
-        ownerId: resources.ownerId,
-        branchId: resources.branchId,
-        branchName: resources.branchName,
-        provider: resources.provider,
-        resourceType: resources.resourceType,
-        resourceKey: resources.resourceKey,
-        blueprintVolumeName: resources.blueprintVolumeName,
-        status: resources.status,
-        cleanupPolicy: resources.cleanupPolicy,
-        metadata: resources.metadata,
-        createdByOperationId: resources.createdByOperationId,
-        lastOperationId: resources.lastOperationId,
-      })
-      .from(resources)
-      .where(eq(resources.branchId, branchId))
-      .orderBy(asc(resources.createdAt), asc(resources.id))
-  }
-
-  public async listBranchResourceInventories(
-    branchIds: readonly string[],
-  ): Promise<CapsuleBranchResourceInventoryRow[]> {
-    if (branchIds.length === 0) {
-      return []
-    }
-    const db = this.persistence.db
-    const resources = this.persistence.tables.capsuleBranchResources
-    return await db
-      .select({
-        id: resources.id,
-        ownerId: resources.ownerId,
-        branchId: resources.branchId,
-        branchName: resources.branchName,
-        provider: resources.provider,
-        resourceType: resources.resourceType,
-        resourceKey: resources.resourceKey,
-        blueprintVolumeName: resources.blueprintVolumeName,
-        status: resources.status,
-        cleanupPolicy: resources.cleanupPolicy,
-        metadata: resources.metadata,
-        createdByOperationId: resources.createdByOperationId,
-        lastOperationId: resources.lastOperationId,
-      })
-      .from(resources)
-      .where(inArray(resources.branchId, [...branchIds]))
-      .orderBy(asc(resources.branchId), asc(resources.createdAt), asc(resources.id))
-  }
-
-  private assertExistingResourceIdentity(
-    existing: {
-      ownerId: string
-      branchId: string | null
-      branchName: string
-      provider: string
-      resourceType: BranchResourceInput['resourceType']
-      cleanupPolicy: BranchResourceInput['cleanupPolicy']
-      resourceKey: string
-      blueprintVolumeName: BranchResourceInput['blueprintVolumeName']
-      metadata: Record<string, unknown> | null
-    },
+  public async failed(
     input: BranchResourceInput,
-  ): void {
-    const expectedProvider = input.provider ?? DEFAULT_RESOURCE_PROVIDER
-    const expectedMetadata = normalizedMetadata(input.metadata, 'requested capsule branch resource metadata')
-    const existingIdentityDigest = resourceIdentityDigest(
-      existing.provider,
-      existing.blueprintVolumeName,
-      existing.metadata,
-      'existing capsule branch resource identity',
-    )
-    const expectedIdentityDigest = resourceIdentityDigest(
-      expectedProvider,
-      input.blueprintVolumeName,
-      expectedMetadata,
-      'requested capsule branch resource identity',
-    )
-    if (
-      existing.ownerId !== input.ownerId ||
-      existing.branchId !== input.branchId ||
-      existing.branchName !== input.branchName ||
-      existing.provider !== expectedProvider ||
-      existing.resourceType !== input.resourceType ||
-      existing.cleanupPolicy !== input.cleanupPolicy ||
-      existing.resourceKey !== input.resourceKey ||
-      existing.blueprintVolumeName !== input.blueprintVolumeName ||
-      existingIdentityDigest !== expectedIdentityDigest
-    ) {
-      throw new IncusError(
-        'Existing capsule branch resource identity does not match the requested durable inventory entry.',
-        'CONFLICT',
-        {
+    error: unknown,
+    context?: Record<string, unknown>,
+  ): Promise<void> {
+    await this.transition(input, ['creating'], 'error', error, context)
+  }
+
+  public async deleting(input: BranchResourceInput): Promise<void> {
+    this.assertDirect(input)
+    await this.transition(input, ['created'], 'deleting')
+  }
+
+  public async deleted(input: BranchResourceInput, outcome: 'deleted' | 'missing'): Promise<void> {
+    this.assertDirect(input)
+    await this.transition(input, ['deleting'], outcome)
+  }
+
+  public async deleteFailed(
+    input: BranchResourceInput,
+    error: unknown,
+    context?: Record<string, unknown>,
+  ): Promise<void> {
+    this.assertDirect(input)
+    await this.transition(input, ['deleting'], 'error', error, context)
+  }
+
+  /**
+   * The compensator must positively remove the backing resource first.
+   *
+   * A derived file has no independent provider deletion operation.
+   */
+  public async compensated(input: BranchResourceInput): Promise<void> {
+    if (input.resourceType !== 'provisioning_file' || input.cleanupPolicy !== 'delete_with_branch') {
+      throw new IncusError('Derived compensation requires a create-owned provisioning file.', 'VALIDATION_ERROR', {
+        resourceKey: input.resourceKey,
+      })
+    }
+    await this.transition(input, ['planned', 'creating', 'created', 'error'], 'deleted')
+  }
+
+  private async transition(
+    input: BranchResourceInput,
+    expected: readonly ResourceStatus[],
+    status: ResourceStatus,
+    error?: unknown,
+    context?: Record<string, unknown>,
+  ): Promise<string> {
+    return await this.persistence.db.transaction(async tx => {
+      await this.lockCreate(tx, input)
+      const resources = this.persistence.tables.capsuleBranchResources
+      const [resource] = await tx
+        .select()
+        .from(resources)
+        .where(and(eq(resources.branchId, input.branchId), eq(resources.resourceKey, input.resourceKey)))
+        .for('update')
+        .limit(1)
+      if (!resource) {
+        throw new IncusError('Required planned capsule resource was not found.', 'CONFLICT', {
           operationId: input.operationId,
           branchId: input.branchId,
           resourceKey: input.resourceKey,
-        },
-      )
+        })
+      }
+      this.assertIdentity(resource, input)
+      if (!expected.includes(resource.status)) {
+        throw new IncusError('Capsule resource is not in the expected create accounting state.', 'CONFLICT', {
+          operationId: input.operationId,
+          resourceId: resource.id,
+          resourceKey: resource.resourceKey,
+          expected,
+          actual: resource.status,
+        })
+      }
+      if (
+        resource.status !== 'error' &&
+        (resource.failureCode !== null || resource.failureMessage !== null || resource.failureDetails !== null)
+      ) {
+        throw new IncusError('Capsule resource contains contradictory failure evidence.', 'CONFLICT', {
+          operationId: input.operationId,
+          resourceId: resource.id,
+        })
+      }
+      const update: ResourceUpdate = {
+        status,
+        lastOperationId: input.operationId,
+        updatedAt: new Date(),
+        failureCode: null,
+        failureMessage: null,
+        failureDetails: null,
+      }
+      if (status === 'error') {
+        const details = createFailureDetails(error, context)
+        update.failureCode = failureCodeFromUnknown(error)
+        update.failureMessage = failureMessageFromUnknown(error, 'Capsule resource operation failed.')
+        update.failureDetails = details === undefined ? null : toJsonObject(details, 'capsule resource failure details')
+      }
+      const [updated] = await tx
+        .update(resources)
+        .set(update)
+        .where(
+          and(
+            eq(resources.id, resource.id),
+            eq(resources.status, resource.status),
+            eq(resources.createdByOperationId, input.operationId),
+            eq(resources.lastOperationId, input.operationId),
+          ),
+        )
+        .returning({
+          id: resources.id,
+        })
+      if (!updated) {
+        throw new IncusError('Capsule resource transition conflicted with durable state.', 'CONFLICT', {
+          operationId: input.operationId,
+          resourceId: resource.id,
+          status,
+        })
+      }
+      return updated.id
+    })
+  }
+
+  private async lockCreate(tx: Transaction<TDatabase>, input: BranchResourceInput): Promise<void> {
+    const { capsules, capsuleOperations, capsuleBranches, capsuleCreateOperations } = this.persistence.tables
+    const [capsule] = await tx
+      .select()
+      .from(capsules)
+      .where(and(eq(capsules.id, input.capsuleId), eq(capsules.ownerId, input.ownerId)))
+      .for('update')
+      .limit(1)
+    const [operation] = await tx
+      .select()
+      .from(capsuleOperations)
+      .where(eq(capsuleOperations.id, input.operationId))
+      .for('update')
+      .limit(1)
+    const [extension] = await tx
+      .select()
+      .from(capsuleCreateOperations)
+      .where(eq(capsuleCreateOperations.operationId, input.operationId))
+      .for('update')
+      .limit(1)
+    const [branch] = await tx
+      .select()
+      .from(capsuleBranches)
+      .where(eq(capsuleBranches.id, input.branchId))
+      .for('update')
+      .limit(1)
+    if (
+      !capsule ||
+      capsule.lifecycleStatus !== 'provisioning' ||
+      capsule.archivedAt !== null ||
+      !operation ||
+      operation.type !== 'create' ||
+      operation.status !== 'running' ||
+      operation.ownerId !== input.ownerId ||
+      operation.capsuleId !== capsule.id ||
+      operation.executionStartedAt === null ||
+      operation.providerMutationStartedAt === null ||
+      operation.completedAt !== null ||
+      operation.failedAt !== null ||
+      operation.failureCode !== null ||
+      operation.failureMessage !== null ||
+      operation.failureDetails !== null ||
+      !extension ||
+      extension.rootBranchId !== input.branchId ||
+      extension.rootBranchName !== input.branchName ||
+      !branch ||
+      branch.ownerId !== input.ownerId ||
+      branch.capsuleId !== capsule.id ||
+      branch.name !== input.branchName ||
+      !branch.isRootBranch ||
+      branch.status !== 'provisioning' ||
+      branch.resourceInventoryDigest === null
+    ) {
+      throw new IncusError('Resource transition requires a fenced running create and its provisioning root branch.', 'CONFLICT', {
+        operationId: input.operationId,
+        capsuleId: input.capsuleId,
+        branchId: input.branchId,
+      })
+    }
+  }
+
+  private assertIdentity(resource: ResourceRow, input: BranchResourceInput): void {
+    const metadataMatches =
+      digestCanonicalJsonValue(resource.metadata, { context: 'persisted create resource metadata' }) ===
+      digestCanonicalJsonValue(input.metadata, { context: 'expected create resource metadata' })
+    if (
+      resource.ownerId !== input.ownerId ||
+      resource.branchId !== input.branchId ||
+      resource.branchName !== input.branchName ||
+      resource.createdByOperationId !== input.operationId ||
+      resource.lastOperationId !== input.operationId ||
+      resource.provider !== 'incus' ||
+      resource.resourceType !== input.resourceType ||
+      resource.resourceKey !== input.resourceKey ||
+      resource.blueprintVolumeName !== input.blueprintVolumeName ||
+      resource.cleanupPolicy !== input.cleanupPolicy ||
+      !metadataMatches
+    ) {
+      throw new IncusError('Capsule resource does not match its immutable create identity.', 'CONFLICT', {
+        operationId: input.operationId,
+        branchId: input.branchId,
+        resourceId: resource.id,
+        resourceKey: input.resourceKey,
+      })
+    }
+  }
+
+  private assertDirect(input: BranchResourceInput): void {
+    if (
+      input.cleanupPolicy !== 'delete_with_branch' ||
+      (input.resourceType !== 'incus_instance' && input.resourceType !== 'zfs_volume')
+    ) {
+      throw new IncusError('Create compensation may delete only managed instances and volumes.', 'VALIDATION_ERROR', {
+        operationId: input.operationId,
+        resourceKey: input.resourceKey,
+      })
     }
   }
 }

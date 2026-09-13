@@ -8,7 +8,7 @@ export const CreatePhase = {
   CLAIM_OPERATION: 'claim_operation',
   INITIALIZE_SSH_ACCESS_FENCE: 'initialize_ssh_access_fence',
   PLAN_RESOURCES: 'plan_resources',
-  RECORD_RESOURCE_INVENTORY: 'record_resource_inventory',
+  RECORD_MATERIALIZE_RESOURCES: 'record_resource_inventory',
   VERIFY_ROOTFS_IMAGE: 'verify_rootfs_image',
   COMMIT_PROVIDER_INTENT_FENCE: 'commit_provider_intent_fence',
   ENSURE_NAMESPACE: 'ensure_namespace',

@@ -8,8 +8,8 @@ import {
   type CapsuleRootfsImagePin,
   type CapsuleTables,
 } from '@qiln/core/server'
-import { IncusError } from '../../../../../errors'
-import { readRootfs } from '../../shared'
+import { IncusError } from '../../../errors'
+import { readRootfs } from '../operations/shared/rootfs'
 
 export type CreateOperationRow<TTables extends CapsuleTables = CapsuleTables> =
   TTables['capsuleOperations']['$inferSelect']
@@ -48,7 +48,7 @@ export type CreateLineageInspection<TTables extends CapsuleTables = CapsuleTable
  * authority boundaries inspect their own durable input rather than sharing a
  * long-lived validation cache.
  */
-export class CreateCapsuleLineagePolicy<TTables extends CapsuleTables = CapsuleTables> {
+export class CreateResourceLineage<TTables extends CapsuleTables = CapsuleTables> {
   public validate(
     operation: Pick<CreateOperationRow<TTables>, 'id' | 'ownerId' | 'capsuleId' | 'type'>,
     extension: CreateExtensionRow<TTables>,

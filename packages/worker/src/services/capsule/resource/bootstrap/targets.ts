@@ -4,6 +4,7 @@ export interface AttachedVolume {
   pool: string
   volumeName: string
   mountPath: string
+  readonly: boolean
 }
 
 export type ProvisioningFileTarget =

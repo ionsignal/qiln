@@ -3,7 +3,7 @@ import { CreatePhase } from './phases'
 export const CreateCapsuleStepKey = {
   INITIALIZE_SSH_ACCESS_FENCE: CreatePhase.INITIALIZE_SSH_ACCESS_FENCE,
   PLAN_RESOURCES: CreatePhase.PLAN_RESOURCES,
-  RECORD_RESOURCE_INVENTORY: CreatePhase.RECORD_RESOURCE_INVENTORY,
+  MATERIALIZE_RESOURCES: CreatePhase.RECORD_MATERIALIZE_RESOURCES,
   VERIFY_ROOTFS_IMAGE: CreatePhase.VERIFY_ROOTFS_IMAGE,
   ENSURE_NAMESPACE: CreatePhase.ENSURE_NAMESPACE,
   RECORD_BIND_MOUNTS: CreatePhase.RECORD_BIND_MOUNTS,
@@ -22,7 +22,7 @@ export type CreateCapsuleStepKey = (typeof CreateCapsuleStepKey)[keyof typeof Cr
 export const CreateCapsuleStepKeys = [
   CreateCapsuleStepKey.INITIALIZE_SSH_ACCESS_FENCE,
   CreateCapsuleStepKey.PLAN_RESOURCES,
-  CreateCapsuleStepKey.RECORD_RESOURCE_INVENTORY,
+  CreateCapsuleStepKey.MATERIALIZE_RESOURCES,
   CreateCapsuleStepKey.VERIFY_ROOTFS_IMAGE,
   CreateCapsuleStepKey.ENSURE_NAMESPACE,
   CreateCapsuleStepKey.RECORD_BIND_MOUNTS,

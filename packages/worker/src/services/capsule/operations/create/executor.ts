@@ -9,12 +9,11 @@ import { CapsuleOperationStepRunner } from '../shared'
 import { CreatePhase } from './execution/phases'
 import { CreateCapsuleCompensationScope, type CreateCapsuleExecutionState } from './execution/state'
 import { CreateCapsuleStepKey } from './execution/steps'
-import { createResourceInventoryEntries } from './resource/plan'
-import { createCapsuleBranchResourceInventoryDigest } from '../../resource/inventory'
+import { createResourceInventoryEntries } from '../../resource/plan'
 import type { CapsuleOperationStepStore } from '../shared'
 import type { CreateCapsuleOperationRepository } from './persistence/repository'
 import type { CreateCapsuleCompensation } from './resource/compensate'
-import type { CreateCapsuleResourcePlanner } from './resource/plan'
+import type { CreateResourcePlanner } from '../../resource/plan'
 import type { CreateCapsuleProvisioner } from './resource/provision'
 import type { CapsuleBranchEventPublisher } from '../../events/branch'
 import type { CapsuleLifecycleEventPublisher, CapsuleOperationEventPublisher } from '../../events'
@@ -28,7 +27,7 @@ import type {
 export interface CreateCapsuleExecutorDependencies {
   repository: CreateCapsuleOperationRepository
   steps: CapsuleOperationStepStore
-  planner: CreateCapsuleResourcePlanner
+  planner: CreateResourcePlanner
   provisioner: CreateCapsuleProvisioner
   compensator: CreateCapsuleCompensation
   project: ProjectService
@@ -145,15 +144,11 @@ export class CreateCapsuleExecutor {
 
       const inventory = createResourceInventoryEntries(plan)
       await runStep(
-        CreateCapsuleStepKey.RECORD_RESOURCE_INVENTORY,
+        CreateCapsuleStepKey.MATERIALIZE_RESOURCES,
         {
           resourceCount: inventory.length,
         },
-        () =>
-          this.dependencies.repository.recordInventory(
-            operationId,
-            createCapsuleBranchResourceInventoryDigest(inventory, 'capsule create planned resource inventory'),
-          ),
+        () => this.dependencies.repository.materialize(operationId),
       )
 
       await runStep(

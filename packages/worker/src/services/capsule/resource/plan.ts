@@ -4,7 +4,7 @@ import {
   CapsuleBranchResourceType,
   type CapsuleBlueprint,
 } from '@qiln/core/server'
-import { interpolate } from '../../../../../utils/template'
+import { interpolate } from '../../../utils/template'
 import {
   bindMountResourceKey,
   branchInstanceName,
@@ -13,19 +13,19 @@ import {
   projectResourceKey,
   provisioningFileResourceKey,
   volumeResourceKey,
-} from '../../../resource/identity'
-import { createProvisioningFileResourceMetadata } from '../../../resource/metadata'
-import { mergeCloudInit } from '../../../resource/bootstrap/cloudinit'
-import { resolveFileTarget, type AttachedVolume } from '../../../resource/bootstrap/targets'
-import type { CapsuleBranchResourceInventoryEntry } from '../../../resource/inventory'
+} from './identity'
+import { createProvisioningFileResourceMetadata } from './metadata'
+import { mergeCloudInit } from './bootstrap/cloudinit'
+import { resolveFileTarget, type AttachedVolume } from './bootstrap/targets'
+import type { CapsuleBranchResourceInventoryEntry } from './inventory'
 import type {
   CreateCapsuleBindMountResource,
   CreateCapsuleProvisioningFileResource,
   CreateCapsuleResourcePlan,
   CreateCapsuleResourcePlanInput,
   CreateCapsuleVolumeResource,
-} from '../types'
-import type { IncusDeviceMap } from '../../../../../incus/client'
+} from './types'
+import type { IncusDeviceMap } from '../../../incus/client'
 
 const SOURCE_PROJECT = 'default'
 
@@ -36,8 +36,9 @@ const SOURCE_PROJECT = 'default'
  * Runtime resource status is deliberately excluded because the inventory proof
  * describes planned ownership identity rather than mutable provider progress.
  */
-export function createResourceInventoryEntries(plan: CreateCapsuleResourcePlan): CapsuleBranchResourceInventoryEntry[] {
-  return [plan.project, ...plan.bindMounts, ...plan.volumes, plan.instance, ...plan.files].map(resource => ({
+export function createResourceInventoryEntries(
+  plan: CreateCapsuleResourcePlan,
+): Array<CapsuleBranchResourceInventoryEntry & { metadata: Record<string, unknown> }> {  return [plan.project, ...plan.bindMounts, ...plan.volumes, plan.instance, ...plan.files].map(resource => ({
     provider: 'incus',
     resourceType: resource.resourceType,
     resourceKey: resource.resourceKey,
@@ -58,7 +59,7 @@ export function createResourceInventoryEntries(plan: CreateCapsuleResourcePlan):
  * Blueprint alias remains audit evidence only and must not be resolved during
  * provider execution.
  */
-export class CreateCapsuleResourcePlanner {
+export class CreateResourcePlanner {
   public plan(input: CreateCapsuleResourcePlanInput): CreateCapsuleResourcePlan {
     const { namespace, rootBranchId, rootBranchName, cpu, memory, rootfsImagePin } = input
     // Reuse Core's aggregate policy before resolving any provisioning target.
@@ -142,6 +143,7 @@ export class CreateCapsuleResourcePlanner {
         pool: volume.pool,
         volumeName,
         mountPath: volume.mount_path,
+        readonly: volume.readonly,
       })
     }
 
@@ -153,8 +155,9 @@ export class CreateCapsuleResourcePlanner {
       'limits.cpu': cpu,
       'limits.memory': memory,
     }
-    if (attachedVolumes.length > 0) {
-      const chownCommands = attachedVolumes.map(volume => ['chown', '1000:1000', volume.mountPath])
+    const writableVolumes = attachedVolumes.filter(volume => !volume.readonly)
+    if (writableVolumes.length > 0) {
+      const chownCommands = writableVolumes.map(volume => ['chown', '1000:1000', volume.mountPath])
       config['user.vendor-data'] = mergeCloudInit(config['user.vendor-data'], chownCommands)
     }
     const devices: IncusDeviceMap = {

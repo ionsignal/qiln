@@ -1,38 +1,30 @@
 import { IncusError } from '../../../../../errors'
 import type { CapsuleRootfsImagePin } from '@qiln/core/server'
 import type { CreateCapsuleExecutionState } from '../execution/state'
+import type { CreateCapsuleOperationContext } from '../types'
 import type {
+  BranchResourceInput,
   CreateCapsuleBindMountResource,
   CreateCapsuleInstanceResource,
-  CreateCapsuleOperationContext,
   CreateCapsulePlannedResource,
   CreateCapsuleProjectResource,
   CreateCapsuleProvisioningFileResource,
   CreateCapsuleVolumeResource,
-} from '../types'
+} from '../../../resource/types'
 import type { CapsuleResourceDriver } from '../../../resource/driver'
 import type { CapsuleBranchResourceStore } from '../../../resource/store'
-import type { BranchResourceInput } from '../../../resource/types'
 
 export interface CreateCapsuleProvisionerDependencies {
   resources: CapsuleBranchResourceStore
   driver: CapsuleResourceDriver
 }
 
-interface CreateResourceFailureInput {
-  context: CreateCapsuleOperationContext
-  state: CreateCapsuleExecutionState
-  resourceId: string
-  resourceKey: string
-  action: 'create_volume' | 'create_instance' | 'write_provisioning_file'
-  error: unknown
-}
-
 /**
  * Owns create-specific resource accounting around the injected provider driver.
  *
  * The executor retains ordering, step accounting, compensation eligibility, and
- * submission of failure evidence to classification.
+ * submission of failure evidence to classification. Missing planned rows are
+ * errors; provisioning never inserts or repairs inventory.
  */
 export class CreateCapsuleProvisioner {
   constructor(private readonly dependencies: CreateCapsuleProvisionerDependencies) {}
@@ -42,67 +34,43 @@ export class CreateCapsuleProvisioner {
   }
 
   /**
-   * Ensures the owner-scoped provider namespace and records that the namespace
-   * is an adopted, retained resource.
-   *
    * Namespace creation is idempotent at the provider boundary, but a failed
-   * provider response cannot prove whether creation reached Incus. That outcome
-   * therefore makes provider ownership uncertain for this create attempt.
+   * response cannot prove whether creation reached Incus. Projects remain
+   * retained resources and never enter destructive compensation.
    */
   public async ensureNamespace(
     context: CreateCapsuleOperationContext,
     project: CreateCapsuleProjectResource,
     state: CreateCapsuleExecutionState,
   ): Promise<void> {
-    const resourceId = await this.dependencies.resources.ensureBranchResource(this.resourceInput(context, project))
+    const resource = this.identity(context, project)
+    await this.dependencies.resources.begin(resource)
     try {
       await this.dependencies.driver.ensureNamespace(context.ownerId)
-      await this.dependencies.resources.recordBranchResourceAdoption(resourceId, context.operationId)
+      await this.dependencies.resources.adopt(resource)
     } catch (error: unknown) {
       state.providerOwnershipUncertain = true
-      try {
-        await this.dependencies.resources.markBranchResourceError(resourceId, error, {
-          ...context,
-          phase: state.phase,
-          action: 'ensure_namespace',
-          resourceId,
-          resourceKey: project.resourceKey,
-          providerIntentConfirmed: state.providerIntentConfirmed,
-          providerOwnershipUncertain: state.providerOwnershipUncertain,
-        })
-      } catch (persistenceError: unknown) {
-        console.error(
-          `[CreateCapsuleProvisioner] Failed to persist resource error for '${resourceId}'.`,
-          persistenceError,
-        )
-      }
+      await this.recordFailure(resource, state, 'ensure_namespace', error)
       throw error
     }
   }
 
   /**
-   * Records external bind mounts in the durable branch resource inventory.
-   *
-   * Bind mounts are adopted external resources. Qiln records their identity for
-   * audit and complete inventory verification but never treats them as direct
-   * provider resources eligible for create compensation or branch deletion.
+   * Bind mounts are adopted external configuration. Recording their adoption
+   * performs no provider mutation and creates no deletion obligation.
    */
   public async recordBindMounts(
     context: CreateCapsuleOperationContext,
     bindMounts: readonly CreateCapsuleBindMountResource[],
   ): Promise<void> {
     for (const bindMount of bindMounts) {
-      const resourceId = await this.dependencies.resources.ensureBranchResource(this.resourceInput(context, bindMount))
-      await this.dependencies.resources.recordBranchResourceAdoption(resourceId, context.operationId)
+      await this.dependencies.resources.adopt(this.identity(context, bindMount))
     }
   }
 
   /**
-   * Creates every managed branch volume in deterministic plan order.
-   *
-   * Each provider call is fenced by a per-resource create-intent transition. A
-   * volume enters the process-local compensation scope only after both provider
-   * creation and its durable create outcome have completed successfully.
+   * A volume enters same-process compensation only after provider creation and
+   * its durable successful outcome both complete.
    */
   public async createVolumes(
     context: CreateCapsuleOperationContext,
@@ -110,75 +78,45 @@ export class CreateCapsuleProvisioner {
     state: CreateCapsuleExecutionState,
   ): Promise<void> {
     for (const volume of volumes) {
-      const resourceId = await this.dependencies.resources.ensureBranchResource(this.resourceInput(context, volume))
-      let providerMutationAttempted = false
+      const resource = this.identity(context, volume)
+      const resourceId = await this.dependencies.resources.begin(resource)
       try {
-        await this.dependencies.resources.recordBranchResourceCreateIntent(resourceId, context.operationId)
-        providerMutationAttempted = true
         await this.dependencies.driver.createVolume(context.namespace, volume)
-        await this.dependencies.resources.recordBranchResourceCreateOutcome(resourceId, context.operationId)
-        state.compensation.recordCreatedVolume(resourceId, volume)
+        await this.dependencies.resources.created(resource)
+        state.compensation.recordCreatedVolume(resourceId, resource, volume)
       } catch (error: unknown) {
-        if (providerMutationAttempted) {
-          state.providerOwnershipUncertain = true
-          await this.recordCreateFailure({
-            context,
-            state,
-            resourceId,
-            resourceKey: volume.resourceKey,
-            action: 'create_volume',
-            error,
-          })
-        }
+        state.providerOwnershipUncertain = true
+        await this.recordFailure(resource, state, 'create_volume', error)
         throw error
       }
     }
   }
 
   /**
-   * Creates the root branch instance after all managed volumes have been
-   * created.
-   *
-   * The instance enters the compensation scope only after its successful
-   * provider creation has also been durably recorded.
+   * The instance enters compensation only after its successful provider
+   * creation has also been durably recorded.
    */
   public async createInstance(
     context: CreateCapsuleOperationContext,
     instance: CreateCapsuleInstanceResource,
     state: CreateCapsuleExecutionState,
   ): Promise<void> {
-    const resourceId = await this.dependencies.resources.ensureBranchResource(this.resourceInput(context, instance))
-    let providerMutationAttempted = false
+    const resource = this.identity(context, instance)
+    const resourceId = await this.dependencies.resources.begin(resource)
     try {
-      await this.dependencies.resources.recordBranchResourceCreateIntent(resourceId, context.operationId)
-      providerMutationAttempted = true
       await this.dependencies.driver.createInstance(context.namespace, instance)
-      await this.dependencies.resources.recordBranchResourceCreateOutcome(resourceId, context.operationId)
-      state.compensation.recordCreatedInstance(resourceId, instance.resourceKey, instance.instanceName)
+      await this.dependencies.resources.created(resource)
+      state.compensation.recordCreatedInstance(resourceId, resource, instance.instanceName)
     } catch (error: unknown) {
-      if (providerMutationAttempted) {
-        state.providerOwnershipUncertain = true
-
-        await this.recordCreateFailure({
-          context,
-          state,
-          resourceId,
-          resourceKey: instance.resourceKey,
-          action: 'create_instance',
-          error,
-        })
-      }
+      state.providerOwnershipUncertain = true
+      await this.recordFailure(resource, state, 'create_instance', error)
       throw error
     }
   }
 
   /**
-   * Writes planned provisioning files after the instance and all managed
-   * volumes have been created and durably recorded.
-   *
    * Provisioning files are derived resources. Their compensation eligibility is
-   * tied to a proven direct backing resource rather than to independent
-   * provider deletion.
+   * tied to a proven backing resource rather than independent provider deletion.
    */
   public async writeFiles(
     context: CreateCapsuleOperationContext,
@@ -199,41 +137,32 @@ export class CreateCapsuleProvisioner {
       )
     }
     for (const file of files) {
-      const resourceId = await this.dependencies.resources.ensureBranchResource(this.resourceInput(context, file))
+      const resource = this.identity(context, file)
       const backingResourceId = this.backingResourceId(file, instanceResourceId, state)
+      const resourceId = await this.dependencies.resources.begin(resource)
       state.compensation.recordDerivedProvisioningFile({
         resourceId,
         resourceKey: file.resourceKey,
         backingResourceId,
+        resource,
       })
-      let providerMutationAttempted = false
       try {
-        await this.dependencies.resources.recordBranchResourceCreateIntent(resourceId, context.operationId)
-        providerMutationAttempted = true
         await this.dependencies.driver.writeProvisioningFile(context.namespace, instanceName, file)
-        await this.dependencies.resources.recordBranchResourceCreateOutcome(resourceId, context.operationId)
+        await this.dependencies.resources.created(resource)
       } catch (error: unknown) {
-        if (providerMutationAttempted) {
-          await this.recordCreateFailure({
-            context,
-            state,
-            resourceId,
-            resourceKey: file.resourceKey,
-            action: 'write_provisioning_file',
-            error,
-          })
-        }
+        await this.recordFailure(resource, state, 'write_provisioning_file', error)
         throw error
       }
     }
   }
 
-  private resourceInput(
+  private identity(
     context: CreateCapsuleOperationContext,
     resource: CreateCapsulePlannedResource,
   ): BranchResourceInput {
     return {
       operationId: context.operationId,
+      capsuleId: context.capsuleId,
       ownerId: context.ownerId,
       branchId: context.rootBranchId,
       branchName: context.rootBranchName,
@@ -268,25 +197,26 @@ export class CreateCapsuleProvisioner {
     return resourceId
   }
 
-  private async recordCreateFailure(input: CreateResourceFailureInput): Promise<void> {
+  private async recordFailure(
+    resource: BranchResourceInput,
+    state: CreateCapsuleExecutionState,
+    action: string,
+    error: unknown,
+  ): Promise<void> {
     try {
-      await this.dependencies.resources.recordBranchResourceCreateFailure(
-        input.resourceId,
-        input.context.operationId,
-        input.error,
-        {
-          ...input.context,
-          phase: input.state.phase,
-          action: input.action,
-          resourceId: input.resourceId,
-          resourceKey: input.resourceKey,
-          providerIntentConfirmed: input.state.providerIntentConfirmed,
-          providerOwnershipUncertain: input.state.providerOwnershipUncertain,
-        },
-      )
+      await this.dependencies.resources.failed(resource, error, {
+        operationId: resource.operationId,
+        capsuleId: resource.capsuleId,
+        branchId: resource.branchId,
+        resourceKey: resource.resourceKey,
+        phase: state.phase,
+        action,
+        providerIntentConfirmed: state.providerIntentConfirmed,
+        providerOwnershipUncertain: state.providerOwnershipUncertain,
+      })
     } catch (persistenceError: unknown) {
       console.error(
-        `[CreateCapsuleProvisioner] Failed to persist create failure for resource '${input.resourceId}'.`,
+        `[CreateCapsuleProvisioner] Failed to persist resource failure for '${resource.resourceKey}'.`,
         persistenceError,
       )
     }

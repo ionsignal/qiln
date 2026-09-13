@@ -1,22 +1,23 @@
 import { and, eq, isNull } from 'drizzle-orm'
 import {
-  CapsuleBranchResourceInventoryDigestSchema,
   CapsuleOperationStatus,
   CapsuleOperationType,
-  type CapsuleBranchResourceInventoryDigest,
   type CapsulePersistence,
   type CapsuleTables,
 } from '@qiln/core/server'
 import { IncusError } from '../../../../../errors'
+import { createCapsuleBranchResourceInventoryDigest } from '../../../resource/inventory'
+import { createResourceInventoryEntries } from '../../../resource/plan'
 import { toCreateOperationTransition } from './result'
 import type { CapsuleOperationTransitionOutput } from '../../shared'
-import type { CreateCapsuleLineagePolicy } from '../policy/lineage'
+import type { CreateCapsuleInventoryPolicy } from '../policy/inventory'
+import type { CreateResourceLineage } from '../../../resource/lineage'
 import type { CreateCapsuleExecutionInput } from '../types'
 import type { CreateCapsuleLocks, CreateTransaction } from './locks'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
 /**
- * Owns durable execution input, claim, inventory proof, and provider intent.
+ * Owns durable execution input, claim, complete inventory, and provider intent.
  *
  * Each authority boundary validates its locked operation and lineage. Provider
  * execution cannot reuse a transport payload as immutable execution authority.
@@ -28,7 +29,8 @@ export class CreateCapsuleExecution<
   constructor(
     private readonly persistence: CapsulePersistence<TDatabase, TTables>,
     private readonly locks: CreateCapsuleLocks<TDatabase, TTables>,
-    private readonly lineage: CreateCapsuleLineagePolicy<TTables>,
+    private readonly lineage: CreateResourceLineage<TTables>,
+    private readonly inventory: CreateCapsuleInventoryPolicy,
   ) {}
 
   public async loadExecution(operationId: string): Promise<CreateCapsuleExecutionInput> {
@@ -81,72 +83,83 @@ export class CreateCapsuleExecution<
   }
 
   /**
-   * Records the complete planned inventory digest before provider intent.
+   * Commits every planned identity and its digest in one transaction.
    *
-   * Branch identity is derived from locked create lineage rather than supplied
-   * independently by the executor.
+   * This is initial materialization, not recovery or replay. Existing partial
+   * evidence must remain visible for conservative failure classification.
    */
-  public async recordInventory(operationId: string, digest: CapsuleBranchResourceInventoryDigest): Promise<void> {
-    const parsedDigest = CapsuleBranchResourceInventoryDigestSchema.safeParse(digest)
-    if (!parsedDigest.success) {
-      throw new IncusError('Capsule create resource inventory digest is invalid.', 'VALIDATION_ERROR', {
-        operationId,
-      })
-    }
-    const branches = this.persistence.tables.capsuleBranches
+  public async materialize(operationId: string): Promise<void> {
+    const { capsuleBranches, capsuleBranchResources } = this.persistence.tables
     await this.persistence.db.transaction(async tx => {
-      const { lineage } = await this.lockInput(tx, operationId, CapsuleOperationStatus.RUNNING)
-      if (lineage.rootBranch.resourceInventoryDigest !== null) {
-        throw new IncusError('Capsule create resource inventory proof has already been recorded.', 'CONFLICT', {
+      const { operation, lineage } = await this.lockInput(tx, operationId, CapsuleOperationStatus.RUNNING)
+      const existing = await this.locks.resources(tx, operation.id, [lineage.rootBranch.id])
+      if (lineage.rootBranch.resourceInventoryDigest !== null || existing.length > 0) {
+        throw new IncusError('Capsule create inventory already contains durable evidence.', 'CONFLICT', {
           operationId,
           rootBranchId: lineage.rootBranch.id,
+          resourceCount: existing.length,
         })
       }
-      const [updated] = await tx
-        .update(branches)
+      const plan = this.inventory.plan(lineage)
+      const entries = createResourceInventoryEntries(plan)
+      const digest = createCapsuleBranchResourceInventoryDigest(entries, 'capsule create planned resource inventory')
+      const now = new Date()
+      const [branch] = await tx
+        .update(capsuleBranches)
         .set({
-          resourceInventoryDigest: parsedDigest.data,
-          updatedAt: new Date(),
+          resourceInventoryDigest: digest,
+          updatedAt: now,
         })
         .where(
           and(
-            eq(branches.id, lineage.rootBranch.id),
-            eq(branches.status, 'provisioning'),
-            isNull(branches.resourceInventoryDigest),
+            eq(capsuleBranches.id, lineage.rootBranch.id),
+            eq(capsuleBranches.status, 'provisioning'),
+            isNull(capsuleBranches.resourceInventoryDigest),
           ),
         )
-        .returning({
-          id: branches.id,
-        })
-      if (!updated) {
+        .returning()
+      if (!branch) {
         throw new IncusError('Failed to persist the root branch resource inventory proof.', 'CONFLICT', {
           operationId,
           rootBranchId: lineage.rootBranch.id,
         })
       }
+      await tx.insert(capsuleBranchResources).values(
+        entries.map(entry => ({
+          ownerId: operation.ownerId,
+          branchId: branch.id,
+          branchName: branch.name,
+          createdByOperationId: operation.id,
+          lastOperationId: operation.id,
+          provider: entry.provider,
+          resourceType: entry.resourceType,
+          resourceKey: entry.resourceKey,
+          blueprintVolumeName: entry.blueprintVolumeName,
+          cleanupPolicy: entry.cleanupPolicy,
+          metadata: entry.metadata as Record<string, unknown>,
+          status: 'planned' as const,
+          createdAt: now,
+          updatedAt: now,
+        })),
+      )
+      const resources = await this.locks.resources(tx, operation.id, [branch.id])
+      this.inventory.assertComplete(operation.id, { ...lineage, rootBranch: branch }, resources, true)
     })
   }
 
   /**
    * Commits the operation-wide provider-intent fence.
    *
+   * The complete untouched ledger must be proven again under the same locks.
    * This write must complete before namespace creation or any other Incus
    * state-changing call.
    */
   public async commitProviderIntent(operationId: string): Promise<void> {
     const operations = this.persistence.tables.capsuleOperations
     await this.persistence.db.transaction(async tx => {
-      const { lineage } = await this.lockInput(tx, operationId, CapsuleOperationStatus.RUNNING)
-      if (!CapsuleBranchResourceInventoryDigestSchema.safeParse(lineage.rootBranch.resourceInventoryDigest).success) {
-        throw new IncusError(
-          'Capsule create requires a valid resource inventory proof before provider intent.',
-          'CONFLICT',
-          {
-            operationId,
-            rootBranchId: lineage.rootBranch.id,
-          },
-        )
-      }
+      const { operation, lineage } = await this.lockInput(tx, operationId, CapsuleOperationStatus.RUNNING)
+      const resources = await this.locks.resources(tx, operation.id, [lineage.rootBranch.id])
+      this.inventory.assertComplete(operation.id, lineage, resources, true)
       const now = new Date()
       const [updated] = await tx
         .update(operations)
@@ -183,7 +196,12 @@ export class CreateCapsuleExecution<
       operation.status !== requiredStatus ||
       operation.providerMutationStartedAt !== null ||
       operation.completedAt !== null ||
-      operation.failedAt !== null
+      operation.failedAt !== null ||
+      operation.failureCode !== null ||
+      operation.failureMessage !== null ||
+      operation.failureDetails !== null ||
+      (requiredStatus === CapsuleOperationStatus.ACCEPTED && operation.executionStartedAt !== null) ||
+      (requiredStatus === CapsuleOperationStatus.RUNNING && operation.executionStartedAt === null)
     ) {
       throw new IncusError(
         'Capsule create operation is not eligible for this pre-provider execution boundary.',
