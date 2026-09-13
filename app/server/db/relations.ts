@@ -1,6 +1,6 @@
 import { defineRelations } from 'drizzle-orm'
 import { defineCapsuleRelations, mergeRelationFragments } from '@qiln/core/server'
-import { webSchema } from '@/db/web'
+import { webSchema } from '../../db/web'
 
 /**
  * Defines Host and capsule-domain relations using the Drizzle v1 relations API.

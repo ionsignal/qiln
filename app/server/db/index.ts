@@ -1,5 +1,5 @@
 import postgres from 'postgres'
-import { capsuleTables } from '@/db/capsule'
+import { capsuleTables } from '../../db/capsule'
 import { relations } from '@server/db/relations'
 import { QueryLogger } from '@server/db/log'
 import { drizzle } from 'drizzle-orm/postgres-js'
