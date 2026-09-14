@@ -70,6 +70,53 @@ actions:
       # seed-workspace mount used to edit future capsule branch baselines.
       mkdir -p /workspace
 
+      DAGGER_VERSION='1.0.0-beta.13'
+      DAGGER_ARCHIVE="dagger_v${DAGGER_VERSION}_linux_amd64.tar.gz"
+      DAGGER_RELEASE_URL="https://dl.dagger.io/dagger/releases/${DAGGER_VERSION}"
+
+      dagger_tmpdir="$(mktemp -d)"
+      trap 'rm -rf -- "${dagger_tmpdir}"' 0
+      trap 'exit 1' HUP INT TERM
+
+      curl --fail --show-error --silent --location --proto '=https' --proto-redir '=https' --tlsv1.2 \
+        "${DAGGER_RELEASE_URL}/${DAGGER_ARCHIVE}" \
+        --output "${dagger_tmpdir}/${DAGGER_ARCHIVE}"
+
+      # Match the upstream installer's checksum source while selecting exactly
+      # one checksum for the pinned archive before extraction.
+      curl --fail --show-error --silent --location --proto '=https' --proto-redir '=https' --tlsv1.2 \
+        "${DAGGER_RELEASE_URL}/checksums.txt" \
+        --output "${dagger_tmpdir}/checksums.txt"
+
+      (
+        cd "${dagger_tmpdir}"
+
+        awk -v archive="${DAGGER_ARCHIVE}" '
+          $2 == archive || $2 == "*" archive {
+            if (length($1) != 64 || $1 ~ /[^0-9a-fA-F]/) {
+              invalid = 1
+            }
+            print $1 "  " archive
+            matches++
+          }
+          END {
+            if (matches != 1 || invalid) {
+              exit 1
+            }
+          }
+        ' checksums.txt > dagger.sha256
+
+        sha256sum --check --strict dagger.sha256
+        tar --no-same-owner -xzf "${DAGGER_ARCHIVE}" dagger
+      )
+
+      install -d -m 0755 /usr/local/bin
+      install -o root -g root -m 0755 "${dagger_tmpdir}/dagger" /usr/local/bin/dagger
+      /usr/local/bin/dagger version --quiet
+
+      rm -rf -- "${dagger_tmpdir}"
+      trap - 0 HUP INT TERM
+
 files:
   # Incus/cloud-init image templates.
   - name: meta-data
