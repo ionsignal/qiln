@@ -2,64 +2,68 @@
   "folders": [
     {
       "name": "qiln",
-      "path": ".",
+      "path": "."
     },
     {
       "name": "iondocs",
-      "path": "../iondocs",
+      "path": "../iondocs"
     },
     {
       "name": "pi-harness",
-      "path": "../pi-harness",
+      "path": "../pi-harness"
     },
     {
       "name": "caddydocs",
-      "path": "../caddydocs",
+      "path": "../caddydocs"
     },
     {
       "name": "ssh2",
-      "path": "../ssh2",
+      "path": "../ssh2"
     },
     {
       "name": "n8n",
-      "path": "../n8n",
+      "path": "../n8n"
     },
     {
       "name": "comfyui",
-      "path": "../comfyui",
+      "path": "../comfyui"
     },
     {
       "name": "drizzle-orm",
-      "path": "../drizzle-orm",
+      "path": "../drizzle-orm"
     },
     {
       "name": "trpc",
-      "path": "../trpc",
+      "path": "../trpc"
     },
     {
       "name": "vike",
-      "path": "../vike",
+      "path": "../vike"
     },
     {
       "name": "zod",
-      "path": "../zod",
+      "path": "../zod"
     },
     {
       "name": "yaml",
-      "path": "../yaml",
+      "path": "../yaml"
     },
     {
       "name": "vite",
-      "path": "../vite",
+      "path": "../vite"
+    },
+    {
+      "name": "dagger",
+      "path": "../dagger"
     },
     {
       "name": "incus",
-      "path": "../incus",
+      "path": "../incus"
     },
     {
       "name": "distrobuilder",
-      "path": "../distrobuilder",
-    },
+      "path": "../distrobuilder"
+    }
   ],
   "settings": {
     "[vue]": {
