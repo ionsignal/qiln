@@ -135,13 +135,41 @@ files:
   - name: vendor-data
     generator: cloud-init
 
-  # Prevent container machine-id overlapping
+  # Prevent cloned containers from sharing machine identity.
   - path: /etc/machine-id
     generator: dump
     content: ''
 
   - path: /var/lib/dbus/machine-id
     generator: remove
+
+  # Avoid retaining the Distrobuilder container hostname before cloud-init
+  # applies the concrete Incus instance hostname.
+  - path: /etc/hostname
+    generator: dump
+    uid: 0
+    gid: 0
+    mode: '0644'
+    content: |-
+      localhost
+
+  # Cloud-init remains available for Incus NoCloud metadata, but the image
+  # already owns its runtime user and SSH host-key lifecycle.
+  - path: /etc/cloud/cloud.cfg.d/99-qiln-capsule.cfg
+    generator: dump
+    uid: 0
+    gid: 0
+    mode: '0644'
+    content: |-
+      users: []
+      ssh_pwauth: false
+      ssh_deletekeys: false
+      ssh_genkeytypes: []
+      ssh_quiet_keygen: true
+      ssh_publish_hostkeys:
+        enabled: false
+      ssh:
+        emit_keys_to_console: false
 
   # Systemd Network configuration
   - path: /etc/netplan/10-incus.yaml
