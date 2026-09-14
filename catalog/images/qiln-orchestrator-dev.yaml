@@ -184,10 +184,8 @@ files:
       ssh_deletekeys: false
       ssh_genkeytypes: []
       ssh_quiet_keygen: true
-
       ssh_publish_hostkeys:
         enabled: false
-
       ssh:
         emit_keys_to_console: false
 

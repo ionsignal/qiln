@@ -1,5 +1,4 @@
 schema_version: 1
-
 name: comfyui-capsule
 display_name: AI Workflow Capsule (ComfyUI)
 description: ComfyUI capsule with versioned app and data storage, fresh branch outputs, and a read-only shared model vault.
@@ -97,26 +96,6 @@ provisioning:
       gid: 1000
       mode: '0755'
 
-    # The future ComfyUI launcher must pass this file explicitly through
-    # ComfyUI's extra-model-path configuration option. Custom-node discovery
-    # must separately resolve /workspace/app/custom_nodes.
-    - path: /workspace/data/config/extra_model_paths.yaml
-      uid: 1000
-      gid: 1000
-      mode: '0644'
-      content: |
-        qiln_shared_models:
-          base_path: /workspace/models/shared
-          checkpoints: checkpoints/
-          loras: loras/
-          vae: vae/
-
-        qiln_private_models:
-          base_path: /workspace/models/private
-          checkpoints: checkpoints/
-          loras: loras/
-          vae: vae/
-
     - path: /workspace/data/capsule
       type: directory
       uid: 1000
@@ -147,6 +126,26 @@ provisioning:
       gid: 1000
       mode: '0755'
 
+    # The future ComfyUI launcher must pass this file explicitly through
+    # ComfyUI's extra-model-path configuration option. Custom-node discovery
+    # must separately resolve /workspace/app/custom_nodes.
+    - path: /workspace/data/config/extra_model_paths.yaml
+      uid: 1000
+      gid: 1000
+      mode: '0644'
+      content: |
+        qiln_shared_models:
+          base_path: /workspace/models/shared
+          checkpoints: checkpoints/
+          loras: loras/
+          vae: vae/
+
+        qiln_private_models:
+          base_path: /workspace/models/private
+          checkpoints: checkpoints/
+          loras: loras/
+          vae: vae/
+
 runtime:
   config:
     security.privileged: 'false'
@@ -168,7 +167,6 @@ runtime:
 
 snapshot:
   policy_version: 1
-
   instance_rootfs:
     mode: rebuildable
 
