@@ -895,6 +895,8 @@ files:
       QILN_SSH_BRANCH_HOST_ALIAS_PREFIX=qiln
       QILN_SSH_DEFAULT_IDENTITY_FILE=~/.ssh/id_ed25519_qiln
 
+      QILN_ROUTE_BASE_DOMAIN=edge.qiln.com
+
       QILN_SSH_GATEWAY_ENABLED=true
       QILN_SSH_GATEWAY_BIND_HOST=0.0.0.0
       QILN_SSH_GATEWAY_BIND_PORT=2222
@@ -1039,6 +1041,9 @@ files:
             "servers": {
               "qiln": {
                 "listen": [":8080"],
+                "automatic_https": {
+                  "disable": true
+                },
                 "routes": [
                   {
                     "@id": "qiln-route-fallback-experimental",
@@ -1101,4 +1106,4 @@ files:
       [Service]
       ExecStart=
       ExecStart=/usr/bin/caddy run --environ --config /etc/caddy/qiln.json
-      ExecReload=
+      ExecReload=/usr/bin/caddy reload --address 127.0.0.1:2019 --config /etc/caddy/qiln.json

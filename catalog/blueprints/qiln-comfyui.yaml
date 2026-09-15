@@ -126,9 +126,8 @@ provisioning:
       gid: 1000
       mode: '0755'
 
-    # The future ComfyUI launcher must pass this file explicitly through
-    # ComfyUI's extra-model-path configuration option. Custom-node discovery
-    # must separately resolve /workspace/app/custom_nodes.
+    # The systemd launcher passes this configuration explicitly. Custom nodes
+    # and API nodes remain disabled for the initial GPU-enabled smoke path.
     - path: /workspace/data/config/extra_model_paths.yaml
       uid: 1000
       gid: 1000
@@ -139,12 +138,71 @@ provisioning:
           checkpoints: checkpoints/
           loras: loras/
           vae: vae/
-
         qiln_private_models:
           base_path: /workspace/models/private
           checkpoints: checkpoints/
           loras: loras/
           vae: vae/
+
+    # Create installs this unit offline. Cloud-init only prepares ownership;
+    # systemd owns application startup on the first and subsequent branch boots.
+    - path: /etc/systemd/system/qiln-comfyui.service
+      uid: 0
+      gid: 0
+      mode: '0644'
+      content: |
+        [Unit]
+        Description=Qiln ComfyUI branch runtime
+        RequiresMountsFor=/workspace/app /workspace/data /workspace/outputs /workspace/models/shared /workspace/models/private
+        StartLimitIntervalSec=300
+        StartLimitBurst=5
+
+        [Service]
+        Type=simple
+        User=qiln
+        Group=qiln
+        WorkingDirectory=/workspace/app
+        Environment=PYTHONUNBUFFERED=1
+        ExecStartPre=/usr/bin/mountpoint --quiet /workspace/app
+        ExecStartPre=/usr/bin/mountpoint --quiet /workspace/data
+        ExecStartPre=/usr/bin/mountpoint --quiet /workspace/outputs
+        ExecStartPre=/usr/bin/mountpoint --quiet /workspace/models/shared
+        ExecStartPre=/usr/bin/mountpoint --quiet /workspace/models/private
+        ExecStartPre=/usr/bin/test -x /workspace/app/.venv/bin/python
+        ExecStartPre=/usr/bin/test -r /workspace/app/main.py
+        ExecStartPre=/usr/bin/test -r /workspace/data/config/extra_model_paths.yaml
+        ExecStartPre=/usr/bin/test -w /workspace/data/input
+        ExecStartPre=/usr/bin/test -w /workspace/data/user
+        ExecStartPre=/usr/bin/test -w /workspace/outputs
+        ExecStart=/workspace/app/.venv/bin/python /workspace/app/main.py \
+          --listen 0.0.0.0 \
+          --port 8188 \
+          --models-directory /workspace/models/private \
+          --extra-model-paths-config /workspace/data/config/extra_model_paths.yaml \
+          --input-directory /workspace/data/input \
+          --user-directory /workspace/data/user \
+          --output-directory /workspace/outputs \
+          --temp-directory /workspace/outputs \
+          --disable-all-custom-nodes \
+          --disable-api-nodes
+        Restart=on-failure
+        RestartSec=10
+        TimeoutStopSec=60
+
+    - path: /etc/systemd/system/multi-user.target.d
+      type: directory
+      uid: 0
+      gid: 0
+      mode: '0755'
+
+    # Pull in the service without booting the container to run systemctl enable.
+    - path: /etc/systemd/system/multi-user.target.d/90-qiln-comfyui.conf
+      uid: 0
+      gid: 0
+      mode: '0644'
+      content: |
+        [Unit]
+        Wants=qiln-comfyui.service
 
 runtime:
   config:
@@ -164,6 +222,12 @@ runtime:
       type: disk
       pool: is-nvme-pool
       path: /
+    # Static assignment is not a lease or an exclusivity guarantee. Operators
+    # must keep all other ComfyUI branches using this GPU stopped.
+    gpu0:
+      type: gpu
+      gputype: physical
+      pci: '0000:03:00.0'
 
 snapshot:
   policy_version: 1
@@ -175,7 +239,7 @@ applications:
     port: 8188
     protocol: http
     entrypoint: /
-    exposure: internal
+    exposure: proxy
     endpoint:
       mode: passthrough
     verification:
