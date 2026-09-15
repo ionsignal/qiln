@@ -28,10 +28,10 @@
   },
   "dependencies": {
     "@qiln/core": "*",
-    "zod": "4.6.4"
+    "zod": "4.6.5"
   },
   "devDependencies": {
-    "@types/node": "26.5.1",
+    "@types/node": "26.6.0",
     "typescript": "6.0.3",
     "vite": "8.3.0",
     "vite-plugin-dts": "5.1.0"
