@@ -216,7 +216,7 @@ export class CapsuleBranchProvenance<
         operationId: extension.operationId,
       })
     }
-    const snapshot = await this.snapshots.read(tx, branch.ownerId, branch.capsuleId, extension.sourceSnapshotId)
+    const snapshot = await this.snapshots.evidence(tx, branch.ownerId, branch.capsuleId, extension.sourceSnapshotId)
     if (
       snapshot.blueprintName !== blueprint.name ||
       snapshot.blueprintDigest !== blueprint.digest ||

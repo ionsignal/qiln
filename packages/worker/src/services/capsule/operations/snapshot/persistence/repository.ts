@@ -969,7 +969,7 @@ export class SnapshotRepository<
       if (extension.snapshotId === null) {
         throw new IncusError('Completed Create Snapshot operation has no committed snapshot.', 'CONFLICT')
       }
-      await this.snapshots.read(tx, input.ownerId, input.capsuleId, extension.snapshotId)
+      await this.snapshots.evidence(tx, input.ownerId, input.capsuleId, extension.snapshotId)
     } else if (extension.snapshotId !== null) {
       throw new IncusError('Uncompleted Create Snapshot operation references committed history.', 'CONFLICT')
     }

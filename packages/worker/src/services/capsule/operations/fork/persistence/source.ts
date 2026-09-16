@@ -165,12 +165,10 @@ export function assertForkEvidence(
 }
 
 /**
- * Consumes the existing committed restoration reader inside the caller's
- * capsule-first transaction.
+ * Consumes committed restoration evidence inside the caller's transaction.
  *
- * Managed-volume clone authority comes only from references validated by
- * CapsuleSnapshotStore. Fork does not maintain another snapshot validator or
- * inspect provider state to repair missing restoration evidence.
+ * New admission requires an available snapshot. Historical receipt replay
+ * retains access to evidence after retirement without authorizing restoration.
  */
 export class ForkSourcePersistence<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
@@ -189,6 +187,23 @@ export class ForkSourcePersistence<
     snapshotId: string,
   ): Promise<ForkSource> {
     const snapshot = await this.snapshots.read(tx, ownerId, capsuleId, snapshotId)
+    return this.source(ownerId, snapshot)
+  }
+
+  public async evidence(
+    tx: Parameters<Parameters<TDatabase['transaction']>[0]>[0],
+    ownerId: string,
+    capsuleId: string,
+    snapshotId: string,
+  ): Promise<ForkSource> {
+    const snapshot = await this.snapshots.evidence(tx, ownerId, capsuleId, snapshotId)
+    return this.source(ownerId, snapshot)
+  }
+
+  private source(
+    ownerId: string,
+    snapshot: Awaited<ReturnType<CapsuleSnapshotStore<TDatabase, TTables>['evidence']>>,
+  ): ForkSource {
     return {
       ownerId,
       snapshotId: snapshot.id,

@@ -261,7 +261,7 @@ export class ForkAcceptancePersistence<
         operationId: scope.operation.id,
       })
     }
-    const source = await this.sources.read(
+    const source = await this.sources.evidence(
       tx,
       scope.operation.ownerId,
       scope.operation.capsuleId,

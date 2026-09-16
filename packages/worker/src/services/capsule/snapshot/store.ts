@@ -1,4 +1,4 @@
-import { and, asc, eq } from 'drizzle-orm'
+import { and, asc, eq, isNull } from 'drizzle-orm'
 import {
   CapsuleOperationStatus,
   CapsuleOperationType,
@@ -50,7 +50,7 @@ export class CapsuleSnapshotStore<
     return await this.persistence.db.transaction(
       async tx => {
         await this.assertOwner(tx, ownerId, capsuleId)
-        const rows = await this.rows(tx, ownerId, capsuleId)
+        const rows = await this.rows(tx, ownerId, capsuleId, undefined, true)
         const grouped = new Map<string, SnapshotGraphRow[]>()
         for (const row of rows) {
           const records = grouped.get(row.snapshot.id) ?? []
@@ -90,6 +90,26 @@ export class CapsuleSnapshotStore<
     capsuleId: string,
     snapshotId: string,
   ): Promise<CapsuleSnapshotRecord> {
+    const snapshot = await this.evidence(tx, ownerId, capsuleId, snapshotId)
+    if (snapshot.retiredAt !== null || snapshot.retiredByOperationId !== null) {
+      throw new IncusError('Retired snapshots are unavailable as restoration sources.', 'CONFLICT', {
+        capsuleId,
+        snapshotId,
+      })
+    }
+    return snapshot
+  }
+
+  /**
+   * Historical evidence remains readable for attribution and receipt replay.
+   * This method does not authorize a new fork or restore availability.
+   */
+  public async evidence(
+    tx: SnapshotReadTransaction<TDatabase>,
+    ownerId: string,
+    capsuleId: string,
+    snapshotId: string,
+  ): Promise<CapsuleSnapshotRecord> {
     const rows = await this.rows(tx, ownerId, capsuleId, snapshotId)
     if (rows.length === 0) {
       throw new IncusError('Committed snapshot not found or access denied.', 'NOT_FOUND', {
@@ -121,6 +141,7 @@ export class CapsuleSnapshotStore<
     ownerId: string,
     capsuleId: string,
     snapshotId?: string,
+    usableOnly = false,
   ): Promise<SnapshotGraphRow[]> {
     const tables = this.persistence.tables
     return await tx
@@ -161,6 +182,8 @@ export class CapsuleSnapshotStore<
           eq(tables.capsules.ownerId, ownerId),
           eq(tables.capsuleSnapshots.capsuleId, capsuleId),
           snapshotId === undefined ? undefined : eq(tables.capsuleSnapshots.id, snapshotId),
+          usableOnly ? isNull(tables.capsuleSnapshots.retiredAt) : undefined,
+          usableOnly ? isNull(tables.capsuleSnapshots.retiredByOperationId) : undefined,
         ),
       )
       .orderBy(
