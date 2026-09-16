@@ -1,5 +1,6 @@
 import {
   capsuleActorTypeEnum,
+  capsuleDestroyResourceStatusEnum,
   capsuleBranchResourceCleanupPolicyEnum,
   capsuleBranchResourceStatusEnum,
   capsuleBranchResourceTypeEnum,
@@ -31,6 +32,7 @@ export const capsuleTables = createCapsuleSchema(users.id)
 
 export {
   capsuleActorTypeEnum,
+  capsuleDestroyResourceStatusEnum,
   capsuleBranchResourceCleanupPolicyEnum,
   capsuleBranchResourceStatusEnum,
   capsuleBranchResourceTypeEnum,
@@ -57,6 +59,8 @@ export const {
   capsuleBranches,
   capsuleOperations,
   capsuleCreateOperations,
+  capsuleDestroyOperations,
+  capsuleDestroyResources,
   capsuleForkOperations,
   capsuleBranchRuntimeOperations,
   capsuleOperationSteps,
@@ -75,6 +79,7 @@ export const {
 
 export const capsuleSchema = {
   capsuleActorTypeEnum,
+  capsuleDestroyResourceStatusEnum,
   capsuleBranchStatusEnum,
   capsuleBranchPreviewStatusEnum,
   capsuleBranchResourceCleanupPolicyEnum,

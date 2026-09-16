@@ -8,6 +8,7 @@ export interface Helpers {
     capsuleBranches: RelationFragmentOneFn<'capsuleBranches'>
     capsuleOperations: RelationFragmentOneFn<'capsuleOperations'>
     capsuleCreateOperations: RelationFragmentOneFn<'capsuleCreateOperations'>
+    capsuleDestroyOperations: RelationFragmentOneFn<'capsuleDestroyOperations'>
     capsuleForkOperations: RelationFragmentOneFn<'capsuleForkOperations'>
     capsuleBranchRuntimeOperations: RelationFragmentOneFn<'capsuleBranchRuntimeOperations'>
     capsuleBranchResources: RelationFragmentOneFn<'capsuleBranchResources'>
@@ -23,6 +24,7 @@ export interface Helpers {
     capsuleForkOperations: RelationFragmentManyFn<'capsuleForkOperations'>
     capsuleBranchRuntimeOperations: RelationFragmentManyFn<'capsuleBranchRuntimeOperations'>
     capsuleOperationSteps: RelationFragmentManyFn<'capsuleOperationSteps'>
+    capsuleDestroyResources: RelationFragmentManyFn<'capsuleDestroyResources'>
     capsuleBranchResources: RelationFragmentManyFn<'capsuleBranchResources'>
     capsuleSnapshots: RelationFragmentManyFn<'capsuleSnapshots'>
     capsuleSnapshotCreateOperations: RelationFragmentManyFn<'capsuleSnapshotCreateOperations'>
@@ -50,6 +52,12 @@ export interface Helpers {
     operationId: RelationsBuilderColumnBase<'capsuleCreateOperations'>
     rootBranchId: RelationsBuilderColumnBase<'capsuleCreateOperations'>
   }
+  capsuleDestroyOperations: {
+    operationId: RelationsBuilderColumnBase<'capsuleDestroyOperations'>
+  }
+  capsuleDestroyResources: {
+    operationId: RelationsBuilderColumnBase<'capsuleDestroyResources'>
+  }
   capsuleForkOperations: {
     operationId: RelationsBuilderColumnBase<'capsuleForkOperations'>
     sourceSnapshotId: RelationsBuilderColumnBase<'capsuleForkOperations'>
@@ -76,6 +84,7 @@ export interface Helpers {
     id: RelationsBuilderColumnBase<'capsuleSnapshots'>
     capsuleId: RelationsBuilderColumnBase<'capsuleSnapshots'>
     sourceBranchId: RelationsBuilderColumnBase<'capsuleSnapshots'>
+    retiredByOperationId: RelationsBuilderColumnBase<'capsuleSnapshots'>
   }
   capsuleSnapshotCreateOperations: {
     operationId: RelationsBuilderColumnBase<'capsuleSnapshotCreateOperations'>
@@ -185,6 +194,15 @@ export function defineRelations(helpers: Helpers) {
         to: helpers.capsuleCreateOperations.operationId,
         optional: true,
       }),
+      destroyOperation: helpers.one.capsuleDestroyOperations({
+        from: helpers.capsuleOperations.id,
+        to: helpers.capsuleDestroyOperations.operationId,
+        optional: true,
+      }),
+      retiredSnapshots: helpers.many.capsuleSnapshots({
+        from: helpers.capsuleOperations.id,
+        to: helpers.capsuleSnapshots.retiredByOperationId,
+      }),
       forkOperation: helpers.one.capsuleForkOperations({
         from: helpers.capsuleOperations.id,
         to: helpers.capsuleForkOperations.operationId,
@@ -222,6 +240,24 @@ export function defineRelations(helpers: Helpers) {
       rootBranch: helpers.one.capsuleBranches({
         from: helpers.capsuleCreateOperations.rootBranchId,
         to: helpers.capsuleBranches.id,
+        optional: false,
+      }),
+    },
+    capsuleDestroyOperations: {
+      operation: helpers.one.capsuleOperations({
+        from: helpers.capsuleDestroyOperations.operationId,
+        to: helpers.capsuleOperations.id,
+        optional: false,
+      }),
+      resources: helpers.many.capsuleDestroyResources({
+        from: helpers.capsuleDestroyOperations.operationId,
+        to: helpers.capsuleDestroyResources.operationId,
+      }),
+    },
+    capsuleDestroyResources: {
+      operation: helpers.one.capsuleDestroyOperations({
+        from: helpers.capsuleDestroyResources.operationId,
+        to: helpers.capsuleDestroyOperations.operationId,
         optional: false,
       }),
     },
@@ -316,6 +352,11 @@ export function defineRelations(helpers: Helpers) {
         from: helpers.capsuleSnapshots.sourceBranchId,
         to: helpers.capsuleBranches.id,
         optional: false,
+      }),
+      retiredByOperation: helpers.one.capsuleOperations({
+        from: helpers.capsuleSnapshots.retiredByOperationId,
+        to: helpers.capsuleOperations.id,
+        optional: true,
       }),
       createOperation: helpers.one.capsuleSnapshotCreateOperations({
         from: helpers.capsuleSnapshots.id,

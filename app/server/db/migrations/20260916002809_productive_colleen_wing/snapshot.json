@@ -1,7 +1,7 @@
 {
   "version": "8",
   "dialect": "postgres",
-  "id": "af4f7692-4469-4e05-a8bc-3900f0e6f6e3",
+  "id": "0ea9854e-e9c2-4b7d-b86f-704202885809",
   "prevIds": [
     "00000000-0000-0000-0000-000000000000"
   ],
@@ -155,6 +155,18 @@
         "cleanup_required"
       ],
       "name": "capsule_branch_status",
+      "entityType": "enums",
+      "schema": "public"
+    },
+    {
+      "values": [
+        "planned",
+        "deleting",
+        "absent",
+        "deleted",
+        "unresolved"
+      ],
+      "name": "capsule_destroy_resource_status",
       "entityType": "enums",
       "schema": "public"
     },
@@ -395,6 +407,18 @@
     {
       "isRlsEnabled": false,
       "name": "capsule_create_operations",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "capsule_destroy_operations",
+      "entityType": "tables",
+      "schema": "public"
+    },
+    {
+      "isRlsEnabled": false,
+      "name": "capsule_destroy_resources",
       "entityType": "tables",
       "schema": "public"
     },
@@ -2398,6 +2422,266 @@
       "name": "operation_id",
       "entityType": "columns",
       "schema": "public",
+      "table": "capsule_destroy_operations"
+    },
+    {
+      "type": "integer",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "schema_version",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_destroy_operations"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "plan_digest",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_destroy_operations"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 1,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "branch_ids",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_destroy_operations"
+    },
+    {
+      "type": "integer",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "target_count",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_destroy_operations"
+    },
+    {
+      "type": "timestamp(3) with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "planned_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_destroy_operations"
+    },
+    {
+      "type": "jsonb",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "ssh_revocation",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_destroy_operations"
+    },
+    {
+      "type": "timestamp(3) with time zone",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "ssh_revoked_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_destroy_operations"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "uuidv7()",
+      "generated": null,
+      "identity": null,
+      "name": "id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_destroy_resources"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "operation_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_destroy_resources"
+    },
+    {
+      "type": "text",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "target_digest",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_destroy_resources"
+    },
+    {
+      "type": "jsonb",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "target",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_destroy_resources"
+    },
+    {
+      "type": "jsonb",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "proof",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_destroy_resources"
+    },
+    {
+      "type": "capsule_destroy_resource_status",
+      "typeSchema": "public",
+      "notNull": true,
+      "dimensions": 0,
+      "default": "'planned'",
+      "generated": null,
+      "identity": null,
+      "name": "status",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_destroy_resources"
+    },
+    {
+      "type": "jsonb",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "observation_before",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_destroy_resources"
+    },
+    {
+      "type": "jsonb",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "observation_after",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_destroy_resources"
+    },
+    {
+      "type": "timestamp(3) with time zone",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "intent_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_destroy_resources"
+    },
+    {
+      "type": "timestamp(3) with time zone",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "verified_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_destroy_resources"
+    },
+    {
+      "type": "timestamp(3) with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_destroy_resources"
+    },
+    {
+      "type": "timestamp(3) with time zone",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": "now()",
+      "generated": null,
+      "identity": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_destroy_resources"
+    },
+    {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": true,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "operation_id",
+      "entityType": "columns",
+      "schema": "public",
       "table": "capsule_fork_operations"
     },
     {
@@ -4377,6 +4661,32 @@
       "table": "capsule_snapshots"
     },
     {
+      "type": "uuid",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "retired_by_operation_id",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_snapshots"
+    },
+    {
+      "type": "timestamp(3) with time zone",
+      "typeSchema": null,
+      "notNull": false,
+      "dimensions": 0,
+      "default": null,
+      "generated": null,
+      "identity": null,
+      "name": "retired_at",
+      "entityType": "columns",
+      "schema": "public",
+      "table": "capsule_snapshots"
+    },
+    {
       "type": "timestamp(3) with time zone",
       "typeSchema": null,
       "notNull": true,
@@ -5718,6 +6028,76 @@
       "entityType": "indexes",
       "schema": "public",
       "table": "capsule_create_operations"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "operation_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "capsule_destroy_resources_operation_idx",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "capsule_destroy_resources"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "status",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "capsule_destroy_resources_status_idx",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "capsule_destroy_resources"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
+          "value": "operation_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        },
+        {
+          "value": "target_digest",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "capsule_destroy_resources_operation_target_unique_idx",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "capsule_destroy_resources"
     },
     {
       "nameExplicit": true,
@@ -7123,6 +7503,27 @@
       "nameExplicit": true,
       "columns": [
         {
+          "value": "retired_by_operation_id",
+          "isExpression": false,
+          "asc": true,
+          "nullsFirst": false,
+          "opclass": null
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "with": "",
+      "method": "btree",
+      "concurrently": false,
+      "name": "capsule_snapshots_retired_by_operation_idx",
+      "entityType": "indexes",
+      "schema": "public",
+      "table": "capsule_snapshots"
+    },
+    {
+      "nameExplicit": true,
+      "columns": [
+        {
           "value": "owner_id",
           "isExpression": false,
           "asc": true,
@@ -7762,6 +8163,40 @@
       "entityType": "fks",
       "schema": "public",
       "table": "capsule_create_operations"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "operation_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "capsule_operations",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "RESTRICT",
+      "name": "capsule_destroy_operations_leo1tnu2YDFM_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "capsule_destroy_operations"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
+        "operation_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "capsule_destroy_operations",
+      "columnsTo": [
+        "operation_id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "RESTRICT",
+      "name": "capsule_destroy_resources_ua2kIrdynkjU_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "capsule_destroy_resources"
     },
     {
       "nameExplicit": false,
@@ -8513,6 +8948,23 @@
     {
       "nameExplicit": false,
       "columns": [
+        "retired_by_operation_id"
+      ],
+      "schemaTo": "public",
+      "tableTo": "capsule_operations",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "RESTRICT",
+      "name": "capsule_snapshots_XdcXfRJAHhSY_fkey",
+      "entityType": "fks",
+      "schema": "public",
+      "table": "capsule_snapshots"
+    },
+    {
+      "nameExplicit": false,
+      "columns": [
         "owner_id"
       ],
       "schemaTo": "public",
@@ -8655,6 +9107,26 @@
       "name": "capsule_create_operations_pkey",
       "schema": "public",
       "table": "capsule_create_operations",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "operation_id"
+      ],
+      "nameExplicit": false,
+      "name": "capsule_destroy_operations_pkey",
+      "schema": "public",
+      "table": "capsule_destroy_operations",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "capsule_destroy_resources_pkey",
+      "schema": "public",
+      "table": "capsule_destroy_resources",
       "entityType": "pks"
     },
     {
@@ -9034,6 +9506,69 @@
       "table": "capsule_branches"
     },
     {
+      "value": "\"schema_version\" = 1",
+      "name": "capsule_destroy_operations_version_check",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "capsule_destroy_operations"
+    },
+    {
+      "value": "\"plan_digest\" ~ '^sha256:[a-f0-9]{64}$'",
+      "name": "capsule_destroy_operations_digest_check",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "capsule_destroy_operations"
+    },
+    {
+      "value": "cardinality(\"branch_ids\") > 0",
+      "name": "capsule_destroy_operations_branches_check",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "capsule_destroy_operations"
+    },
+    {
+      "value": "\"target_count\" >= 0",
+      "name": "capsule_destroy_operations_count_check",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "capsule_destroy_operations"
+    },
+    {
+      "value": "(\n          (\"ssh_revocation\" IS NULL AND \"ssh_revoked_at\" IS NULL)\n          OR (\n            \"ssh_revocation\" IS NOT NULL\n            AND jsonb_typeof(\"ssh_revocation\") = 'object'\n            AND \"ssh_revoked_at\" IS NOT NULL\n            AND \"ssh_revoked_at\" >= \"planned_at\"\n          )\n        )",
+      "name": "capsule_destroy_operations_ssh_check",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "capsule_destroy_operations"
+    },
+    {
+      "value": "\"target_digest\" ~ '^sha256:[a-f0-9]{64}$'",
+      "name": "capsule_destroy_resources_digest_check",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "capsule_destroy_resources"
+    },
+    {
+      "value": "(\n          jsonb_typeof(\"target\") = 'object'\n          AND jsonb_typeof(\"proof\") = 'object'\n          AND (\"observation_before\" IS NULL OR jsonb_typeof(\"observation_before\") = 'object')\n          AND (\"observation_after\" IS NULL OR jsonb_typeof(\"observation_after\") = 'object')\n        )",
+      "name": "capsule_destroy_resources_documents_check",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "capsule_destroy_resources"
+    },
+    {
+      "value": "(\n          (\n            \"status\" = 'planned'\n            AND \"intent_at\" IS NULL\n            AND \"observation_after\" IS NULL\n            AND \"verified_at\" IS NULL\n            AND (\"observation_before\" IS NULL OR (\"observation_before\"->>'state') IS NOT DISTINCT FROM 'present')\n          )\n          OR (\n            \"status\" = 'deleting'\n            AND \"observation_before\" IS NOT NULL\n            AND (\"observation_before\"->>'state') IS NOT DISTINCT FROM 'present'\n            AND \"intent_at\" IS NOT NULL\n            AND \"observation_after\" IS NULL\n            AND \"verified_at\" IS NULL\n          )\n          OR (\n            \"status\" = 'absent'\n            AND \"observation_before\" IS NOT NULL\n            AND (\"observation_before\"->>'state') IS NOT DISTINCT FROM 'absent'\n            AND \"intent_at\" IS NULL\n            AND \"observation_after\" IS NULL\n            AND \"verified_at\" IS NOT NULL\n          )\n          OR (\n            \"status\" = 'deleted'\n            AND \"observation_before\" IS NOT NULL\n            AND (\"observation_before\"->>'state') IS NOT DISTINCT FROM 'present'\n            AND \"intent_at\" IS NOT NULL\n            AND \"observation_after\" IS NOT NULL\n            AND (\"observation_after\"->>'state') IS NOT DISTINCT FROM 'absent'\n            AND \"verified_at\" IS NOT NULL\n          )\n          OR (\n            \"status\" = 'unresolved'\n            AND \"verified_at\" IS NULL\n          )\n        )",
+      "name": "capsule_destroy_resources_state_check",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "capsule_destroy_resources"
+    },
+    {
+      "value": "(\n          (\"intent_at\" IS NULL OR \"intent_at\" >= \"created_at\")\n          AND (\"observation_after\" IS NULL OR \"intent_at\" IS NOT NULL)\n          AND (\n            \"verified_at\" IS NULL\n            OR \"verified_at\" >= COALESCE(\"intent_at\", \"created_at\")\n          )\n        )",
+      "name": "capsule_destroy_resources_timeline_check",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "capsule_destroy_resources"
+    },
+    {
       "value": "\"blueprint_schema_version\" = 1",
       "name": "capsule_fork_operations_blueprint_schema_check",
       "entityType": "checks",
@@ -9207,6 +9742,13 @@
       "entityType": "checks",
       "schema": "public",
       "table": "capsule_snapshot_resource_references"
+    },
+    {
+      "value": "(\n          (\"retired_at\" IS NULL AND \"retired_by_operation_id\" IS NULL)\n          OR (\n            \"retired_at\" IS NOT NULL\n            AND \"retired_by_operation_id\" IS NOT NULL\n            AND \"retired_at\" >= \"created_at\"\n          )\n        )",
+      "name": "capsule_snapshots_retirement_check",
+      "entityType": "checks",
+      "schema": "public",
+      "table": "capsule_snapshots"
     },
     {
       "value": "\"blueprint_schema_version\" = 1",

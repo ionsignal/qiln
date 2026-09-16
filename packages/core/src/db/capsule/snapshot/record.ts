@@ -37,10 +37,21 @@ function createSourceBranchIdColumn(sourceBranchIdColumn?: PgColumn) {
  * Bind mounts remain unversioned external configuration. A snapshot does not
  * guarantee their contents or availability, mutable rootfs changes, application
  * correctness, Git history, or a detailed explanation of changes.
+ *
+ * Retirement metadata is mutable availability state, separate from immutable
+ * restoration evidence. Retirement must precede destructive provider work and
+ * does not itself prove provider deletion.
  */
-export function createCapsuleSnapshotsTable(capsuleIdColumn?: PgColumn, sourceBranchIdColumn?: PgColumn) {
+export function createCapsuleSnapshotsTable(
+  capsuleIdColumn?: PgColumn,
+  sourceBranchIdColumn?: PgColumn,
+  operationIdColumn?: PgColumn,
+) {
   const capsuleId = createCapsuleIdColumn(capsuleIdColumn)
   const sourceBranchId = createSourceBranchIdColumn(sourceBranchIdColumn)
+  const retiredByOperationId = operationIdColumn
+    ? uuid('retired_by_operation_id').references(() => operationIdColumn, { onDelete: 'restrict' })
+    : uuid('retired_by_operation_id')
 
   return pgTable(
     'capsule_snapshots',
@@ -59,6 +70,12 @@ export function createCapsuleSnapshotsTable(capsuleIdColumn?: PgColumn, sourceBr
       blueprintDigest: text('blueprint_digest').$type<CapsuleBlueprintDigest>().notNull(),
       blueprintPin: jsonb('blueprint_pin').$type<CapsuleBlueprintPin>().notNull(),
       rootfsImagePin: jsonb('rootfs_image_pin').$type<CapsuleRootfsImagePin>().notNull(),
+      retiredByOperationId,
+      retiredAt: timestamp('retired_at', {
+        withTimezone: true,
+        mode: 'date',
+        precision: 3,
+      }),
       createdAt: timestamp('created_at', {
         withTimezone: true,
         mode: 'date',
@@ -71,6 +88,18 @@ export function createCapsuleSnapshotsTable(capsuleIdColumn?: PgColumn, sourceBr
       index('capsule_snapshots_capsule_created_idx').on(table.capsuleId, table.createdAt),
       index('capsule_snapshots_source_branch_idx').on(table.sourceBranchId),
       index('capsule_snapshots_blueprint_digest_idx').on(table.blueprintDigest),
+      index('capsule_snapshots_retired_by_operation_idx').on(table.retiredByOperationId),
+      check(
+        'capsule_snapshots_retirement_check',
+        sql`(
+          (${table.retiredAt} IS NULL AND ${table.retiredByOperationId} IS NULL)
+          OR (
+            ${table.retiredAt} IS NOT NULL
+            AND ${table.retiredByOperationId} IS NOT NULL
+            AND ${table.retiredAt} >= ${table.createdAt}
+          )
+        )`,
+      ),
       check('capsule_snapshots_blueprint_schema_check', sql`${table.blueprintSchemaVersion} = 1`),
       check('capsule_snapshots_blueprint_digest_check', sql`${table.blueprintDigest} ~ '^sha256:[a-f0-9]{64}$'`),
       check(

@@ -11,6 +11,7 @@ CREATE TYPE "capsule_branch_resource_cleanup_policy" AS ENUM('delete_with_branch
 CREATE TYPE "capsule_branch_resource_status" AS ENUM('planned', 'creating', 'created', 'deleting', 'deleted', 'adopted', 'missing', 'error');--> statement-breakpoint
 CREATE TYPE "capsule_branch_resource_type" AS ENUM('incus_project', 'incus_instance', 'zfs_volume', 'bind_mount', 'provisioning_file');--> statement-breakpoint
 CREATE TYPE "capsule_branch_status" AS ENUM('provisioning', 'offline', 'snapshotting', 'starting', 'online', 'stopping', 'destroying', 'destroyed', 'error', 'cleanup_required');--> statement-breakpoint
+CREATE TYPE "capsule_destroy_resource_status" AS ENUM('planned', 'deleting', 'absent', 'deleted', 'unresolved');--> statement-breakpoint
 CREATE TYPE "capsule_lifecycle_status" AS ENUM('provisioning', 'active', 'archiving', 'unarchiving', 'destroying', 'destroyed', 'creation_failed', 'cleanup_required');--> statement-breakpoint
 CREATE TYPE "capsule_operation_status" AS ENUM('accepted', 'running', 'completed', 'failed', 'cleanup_required');--> statement-breakpoint
 CREATE TYPE "capsule_operation_step_status" AS ENUM('pending', 'running', 'completed', 'failed');--> statement-breakpoint
@@ -563,6 +564,98 @@ CREATE TABLE "capsule_create_operations" (
 	"memory" text NOT NULL
 );
 --> statement-breakpoint
+CREATE TABLE "capsule_destroy_operations" (
+	"operation_id" uuid PRIMARY KEY,
+	"schema_version" integer NOT NULL,
+	"plan_digest" text NOT NULL,
+	"branch_ids" uuid[] NOT NULL,
+	"target_count" integer NOT NULL,
+	"planned_at" timestamp(3) with time zone DEFAULT now() NOT NULL,
+	"ssh_revocation" jsonb,
+	"ssh_revoked_at" timestamp(3) with time zone,
+	CONSTRAINT "capsule_destroy_operations_version_check" CHECK ("schema_version" = 1),
+	CONSTRAINT "capsule_destroy_operations_digest_check" CHECK ("plan_digest" ~ '^sha256:[a-f0-9]{64}$'),
+	CONSTRAINT "capsule_destroy_operations_branches_check" CHECK (cardinality("branch_ids") > 0),
+	CONSTRAINT "capsule_destroy_operations_count_check" CHECK ("target_count" >= 0),
+	CONSTRAINT "capsule_destroy_operations_ssh_check" CHECK ((
+          ("ssh_revocation" IS NULL AND "ssh_revoked_at" IS NULL)
+          OR (
+            "ssh_revocation" IS NOT NULL
+            AND jsonb_typeof("ssh_revocation") = 'object'
+            AND "ssh_revoked_at" IS NOT NULL
+            AND "ssh_revoked_at" >= "planned_at"
+          )
+        ))
+);
+--> statement-breakpoint
+CREATE TABLE "capsule_destroy_resources" (
+	"id" uuid PRIMARY KEY DEFAULT uuidv7(),
+	"operation_id" uuid NOT NULL,
+	"target_digest" text NOT NULL,
+	"target" jsonb NOT NULL,
+	"proof" jsonb NOT NULL,
+	"status" "capsule_destroy_resource_status" DEFAULT 'planned'::"capsule_destroy_resource_status" NOT NULL,
+	"observation_before" jsonb,
+	"observation_after" jsonb,
+	"intent_at" timestamp(3) with time zone,
+	"verified_at" timestamp(3) with time zone,
+	"created_at" timestamp(3) with time zone DEFAULT now() NOT NULL,
+	"updated_at" timestamp(3) with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "capsule_destroy_resources_digest_check" CHECK ("target_digest" ~ '^sha256:[a-f0-9]{64}$'),
+	CONSTRAINT "capsule_destroy_resources_documents_check" CHECK ((
+          jsonb_typeof("target") = 'object'
+          AND jsonb_typeof("proof") = 'object'
+          AND ("observation_before" IS NULL OR jsonb_typeof("observation_before") = 'object')
+          AND ("observation_after" IS NULL OR jsonb_typeof("observation_after") = 'object')
+        )),
+	CONSTRAINT "capsule_destroy_resources_state_check" CHECK ((
+          (
+            "status" = 'planned'
+            AND "intent_at" IS NULL
+            AND "observation_after" IS NULL
+            AND "verified_at" IS NULL
+            AND ("observation_before" IS NULL OR ("observation_before"->>'state') IS NOT DISTINCT FROM 'present')
+          )
+          OR (
+            "status" = 'deleting'
+            AND "observation_before" IS NOT NULL
+            AND ("observation_before"->>'state') IS NOT DISTINCT FROM 'present'
+            AND "intent_at" IS NOT NULL
+            AND "observation_after" IS NULL
+            AND "verified_at" IS NULL
+          )
+          OR (
+            "status" = 'absent'
+            AND "observation_before" IS NOT NULL
+            AND ("observation_before"->>'state') IS NOT DISTINCT FROM 'absent'
+            AND "intent_at" IS NULL
+            AND "observation_after" IS NULL
+            AND "verified_at" IS NOT NULL
+          )
+          OR (
+            "status" = 'deleted'
+            AND "observation_before" IS NOT NULL
+            AND ("observation_before"->>'state') IS NOT DISTINCT FROM 'present'
+            AND "intent_at" IS NOT NULL
+            AND "observation_after" IS NOT NULL
+            AND ("observation_after"->>'state') IS NOT DISTINCT FROM 'absent'
+            AND "verified_at" IS NOT NULL
+          )
+          OR (
+            "status" = 'unresolved'
+            AND "verified_at" IS NULL
+          )
+        )),
+	CONSTRAINT "capsule_destroy_resources_timeline_check" CHECK ((
+          ("intent_at" IS NULL OR "intent_at" >= "created_at")
+          AND ("observation_after" IS NULL OR "intent_at" IS NOT NULL)
+          AND (
+            "verified_at" IS NULL
+            OR "verified_at" >= COALESCE("intent_at", "created_at")
+          )
+        ))
+);
+--> statement-breakpoint
 CREATE TABLE "capsule_fork_operations" (
 	"operation_id" uuid PRIMARY KEY,
 	"source_snapshot_id" uuid NOT NULL,
@@ -976,7 +1069,17 @@ CREATE TABLE "capsule_snapshots" (
 	"blueprint_digest" text NOT NULL,
 	"blueprint_pin" jsonb NOT NULL,
 	"rootfs_image_pin" jsonb NOT NULL,
+	"retired_by_operation_id" uuid,
+	"retired_at" timestamp(3) with time zone,
 	"created_at" timestamp(3) with time zone DEFAULT now() NOT NULL,
+	CONSTRAINT "capsule_snapshots_retirement_check" CHECK ((
+          ("retired_at" IS NULL AND "retired_by_operation_id" IS NULL)
+          OR (
+            "retired_at" IS NOT NULL
+            AND "retired_by_operation_id" IS NOT NULL
+            AND "retired_at" >= "created_at"
+          )
+        )),
 	CONSTRAINT "capsule_snapshots_blueprint_schema_check" CHECK ("blueprint_schema_version" = 1),
 	CONSTRAINT "capsule_snapshots_blueprint_digest_check" CHECK ("blueprint_digest" ~ '^sha256:[a-f0-9]{64}$'),
 	CONSTRAINT "capsule_snapshots_inventory_digest_check" CHECK ("source_branch_resource_inventory_digest" ~ '^sha256:[a-f0-9]{64}$')
@@ -1052,6 +1155,9 @@ CREATE INDEX "capsule_branches_owner_runtime_status_idx" ON "capsule_branches" (
 CREATE UNIQUE INDEX "capsule_branches_capsule_runtime_name_unique_idx" ON "capsule_branches" ("capsule_id","name") WHERE "status" <> 'destroyed';--> statement-breakpoint
 CREATE UNIQUE INDEX "capsule_branches_capsule_root_unique_idx" ON "capsule_branches" ("capsule_id") WHERE "is_root_branch" = true;--> statement-breakpoint
 CREATE UNIQUE INDEX "capsule_create_operations_root_branch_unique_idx" ON "capsule_create_operations" ("root_branch_id");--> statement-breakpoint
+CREATE INDEX "capsule_destroy_resources_operation_idx" ON "capsule_destroy_resources" ("operation_id");--> statement-breakpoint
+CREATE INDEX "capsule_destroy_resources_status_idx" ON "capsule_destroy_resources" ("status");--> statement-breakpoint
+CREATE UNIQUE INDEX "capsule_destroy_resources_operation_target_unique_idx" ON "capsule_destroy_resources" ("operation_id","target_digest");--> statement-breakpoint
 CREATE INDEX "capsule_fork_operations_source_snapshot_idx" ON "capsule_fork_operations" ("source_snapshot_id");--> statement-breakpoint
 CREATE INDEX "capsule_fork_operations_blueprint_digest_idx" ON "capsule_fork_operations" ("blueprint_digest");--> statement-breakpoint
 CREATE UNIQUE INDEX "capsule_fork_operations_target_branch_unique_idx" ON "capsule_fork_operations" ("target_branch_id");--> statement-breakpoint
@@ -1110,6 +1216,7 @@ CREATE UNIQUE INDEX "capsule_snap_resource_ref_provider_identity_unique_idx" ON 
 CREATE INDEX "capsule_snapshots_capsule_created_idx" ON "capsule_snapshots" ("capsule_id","created_at");--> statement-breakpoint
 CREATE INDEX "capsule_snapshots_source_branch_idx" ON "capsule_snapshots" ("source_branch_id");--> statement-breakpoint
 CREATE INDEX "capsule_snapshots_blueprint_digest_idx" ON "capsule_snapshots" ("blueprint_digest");--> statement-breakpoint
+CREATE INDEX "capsule_snapshots_retired_by_operation_idx" ON "capsule_snapshots" ("retired_by_operation_id");--> statement-breakpoint
 CREATE INDEX "capsules_owner_idx" ON "capsules" ("owner_id");--> statement-breakpoint
 CREATE INDEX "capsules_owner_lifecycle_status_idx" ON "capsules" ("owner_id","lifecycle_status");--> statement-breakpoint
 ALTER TABLE "agent_credentials" ADD CONSTRAINT "agent_credentials_requested_by_user_id_users_id_fkey" FOREIGN KEY ("requested_by_user_id") REFERENCES "users"("id") ON DELETE CASCADE;--> statement-breakpoint
@@ -1147,6 +1254,8 @@ ALTER TABLE "capsule_branches" ADD CONSTRAINT "capsule_branches_owner_id_users_i
 ALTER TABLE "capsule_branches" ADD CONSTRAINT "capsule_branches_capsule_id_capsules_id_fkey" FOREIGN KEY ("capsule_id") REFERENCES "capsules"("id") ON DELETE CASCADE;--> statement-breakpoint
 ALTER TABLE "capsule_create_operations" ADD CONSTRAINT "capsule_create_operations_kBDKOqhsMbzu_fkey" FOREIGN KEY ("operation_id") REFERENCES "capsule_operations"("id") ON DELETE CASCADE;--> statement-breakpoint
 ALTER TABLE "capsule_create_operations" ADD CONSTRAINT "capsule_create_operations_GXQTF2XIoGx4_fkey" FOREIGN KEY ("root_branch_id") REFERENCES "capsule_branches"("id");--> statement-breakpoint
+ALTER TABLE "capsule_destroy_operations" ADD CONSTRAINT "capsule_destroy_operations_leo1tnu2YDFM_fkey" FOREIGN KEY ("operation_id") REFERENCES "capsule_operations"("id") ON DELETE RESTRICT;--> statement-breakpoint
+ALTER TABLE "capsule_destroy_resources" ADD CONSTRAINT "capsule_destroy_resources_ua2kIrdynkjU_fkey" FOREIGN KEY ("operation_id") REFERENCES "capsule_destroy_operations"("operation_id") ON DELETE RESTRICT;--> statement-breakpoint
 ALTER TABLE "capsule_fork_operations" ADD CONSTRAINT "capsule_fork_operations_operation_id_capsule_operations_id_fkey" FOREIGN KEY ("operation_id") REFERENCES "capsule_operations"("id") ON DELETE RESTRICT;--> statement-breakpoint
 ALTER TABLE "capsule_fork_operations" ADD CONSTRAINT "capsule_fork_operations_iK4qCJ0SYYhG_fkey" FOREIGN KEY ("source_snapshot_id") REFERENCES "capsule_snapshots"("id") ON DELETE RESTRICT;--> statement-breakpoint
 ALTER TABLE "capsule_fork_operations" ADD CONSTRAINT "capsule_fork_operations_tBkJl4feiIQn_fkey" FOREIGN KEY ("target_branch_id") REFERENCES "capsule_branches"("id") ON DELETE RESTRICT;--> statement-breakpoint
@@ -1190,4 +1299,5 @@ ALTER TABLE "capsule_snapshot_resource_references" ADD CONSTRAINT "capsule_snaps
 ALTER TABLE "capsule_snapshot_resource_references" ADD CONSTRAINT "capsule_snapshot_resource_references_fcgRO47y8C1i_fkey" FOREIGN KEY ("create_resource_id") REFERENCES "capsule_snapshot_create_resources"("id") ON DELETE RESTRICT;--> statement-breakpoint
 ALTER TABLE "capsule_snapshots" ADD CONSTRAINT "capsule_snapshots_capsule_id_capsules_id_fkey" FOREIGN KEY ("capsule_id") REFERENCES "capsules"("id") ON DELETE RESTRICT;--> statement-breakpoint
 ALTER TABLE "capsule_snapshots" ADD CONSTRAINT "capsule_snapshots_source_branch_id_capsule_branches_id_fkey" FOREIGN KEY ("source_branch_id") REFERENCES "capsule_branches"("id") ON DELETE RESTRICT;--> statement-breakpoint
+ALTER TABLE "capsule_snapshots" ADD CONSTRAINT "capsule_snapshots_XdcXfRJAHhSY_fkey" FOREIGN KEY ("retired_by_operation_id") REFERENCES "capsule_operations"("id") ON DELETE RESTRICT;--> statement-breakpoint
 ALTER TABLE "capsules" ADD CONSTRAINT "capsules_owner_id_users_id_fkey" FOREIGN KEY ("owner_id") REFERENCES "users"("id") ON DELETE CASCADE;

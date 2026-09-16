@@ -7,6 +7,7 @@ import {
   createCapsuleSnapshotCreateResourcesTable,
 } from '../operation/snapshot'
 import { createCapsuleCreateOperationsTable } from '../operation/create'
+import { createCapsuleDestroyOperationsTable, createCapsuleDestroyResourcesTable } from '../operation/destroy'
 import { createCapsuleForkOperationsTable } from '../operation/fork'
 import { createCapsuleOperationsTable } from '../operation/record'
 import { createCapsuleOperationStepsTable } from '../operation/step'
@@ -25,6 +26,8 @@ export function createSchema<TUserIdColumn extends PgColumn>(userIdColumn: TUser
   const capsules = createCapsulesTable(userIdColumn)
   const capsuleBranches = createCapsuleBranchesTable(userIdColumn, capsules.id)
   const capsuleOperations = createCapsuleOperationsTable(userIdColumn, capsules.id)
+  const capsuleDestroyOperations = createCapsuleDestroyOperationsTable(capsuleOperations.id)
+  const capsuleDestroyResources = createCapsuleDestroyResourcesTable(capsuleDestroyOperations.operationId)
   const capsuleBranchRuntimeOperations = createCapsuleBranchRuntimeOperationsTable(
     capsuleOperations.id,
     capsuleBranches.id,
@@ -41,7 +44,7 @@ export function createSchema<TUserIdColumn extends PgColumn>(userIdColumn: TUser
     capsuleOperations.id,
     capsuleBranches.id,
   )
-  const capsuleSnapshots = createCapsuleSnapshotsTable(capsules.id, capsuleBranches.id)
+  const capsuleSnapshots = createCapsuleSnapshotsTable(capsules.id, capsuleBranches.id, capsuleOperations.id)
   const capsuleForkOperations = createCapsuleForkOperationsTable(
     capsuleOperations.id,
     capsuleSnapshots.id,
@@ -66,6 +69,8 @@ export function createSchema<TUserIdColumn extends PgColumn>(userIdColumn: TUser
     capsuleBranches,
     capsuleOperations,
     capsuleCreateOperations,
+   capsuleDestroyOperations,
+    capsuleDestroyResources,
     capsuleForkOperations,
     capsuleBranchRuntimeOperations,
     capsuleOperationSteps,

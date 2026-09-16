@@ -1,5 +1,6 @@
 export * from './record'
 export * from './create'
+export * from './destroy'
 export * from './fork'
 export * from './snapshot'
 export * from './runtime'

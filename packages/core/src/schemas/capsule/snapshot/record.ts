@@ -8,6 +8,19 @@ export const CapsuleSnapshotTimestampSchema = z.string().datetime({
 })
 
 /**
+ * Withdrawal of restoration availability, not proof of physical deletion.
+ *
+ * The retiring operation retains independent provider-deletion accounting.
+ * Consumers must not treat a retired snapshot as an eligible fork source.
+ */
+export const CapsuleSnapshotRetirementSchema = z
+  .object({
+    operationId: z.uuid(),
+    retiredAt: CapsuleSnapshotTimestampSchema,
+  })
+  .strict()
+
+/**
  * Client-safe committed snapshot summary.
  *
  * A returned row proves that Qiln committed the snapshot through Create
@@ -34,5 +47,6 @@ export const CapsuleSnapshotSummarySchema = z
 export const CapsuleSnapshotListOutputSchema = z.array(CapsuleSnapshotSummarySchema)
 
 export type CapsuleSnapshotTimestamp = z.infer<typeof CapsuleSnapshotTimestampSchema>
+export type CapsuleSnapshotRetirement = z.infer<typeof CapsuleSnapshotRetirementSchema>
 export type CapsuleSnapshotSummary = z.infer<typeof CapsuleSnapshotSummarySchema>
 export type CapsuleSnapshotListOutput = z.infer<typeof CapsuleSnapshotListOutputSchema>
