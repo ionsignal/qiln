@@ -1,8 +1,11 @@
 import type {
   CapsuleActorReference,
+  CapsuleBlueprintPin,
   CapsuleDestroyOptions,
   CapsuleDestroyOptionsInput,
+  CapsuleDestroyPlan,
   CapsuleDestroyReceipt,
+  CapsuleDestroyResourcePlan,
   CapsuleLifecycleState,
   CapsuleOperationRequestHash,
   CapsuleTables,
@@ -13,6 +16,16 @@ export type DestroyOperation = CapsuleTables['capsuleOperations']['$inferSelect'
 export type DestroyCapsule = CapsuleTables['capsules']['$inferSelect']
 export type DestroyBranch = CapsuleTables['capsuleBranches']['$inferSelect']
 export type DestroyResource = CapsuleTables['capsuleBranchResources']['$inferSelect']
+export type DestroyTarget = CapsuleTables['capsuleDestroyResources']['$inferSelect']
+export type DestroySnapshot = CapsuleTables['capsuleSnapshots']['$inferSelect']
+export type DestroySnapshotOperation = CapsuleTables['capsuleSnapshotCreateOperations']['$inferSelect']
+export type DestroySnapshotResource = CapsuleTables['capsuleSnapshotCreateResources']['$inferSelect']
+export type DestroySnapshotReference = CapsuleTables['capsuleSnapshotResourceReferences']['$inferSelect']
+export type DestroyAlias = CapsuleTables['capsuleRouteAliases']['$inferSelect']
+export type DestroyRevision = CapsuleTables['capsuleRouteRevisions']['$inferSelect']
+export type DestroyRouteOperation = CapsuleTables['capsuleRouteOperations']['$inferSelect']
+export type DestroyRouteProvider = CapsuleTables['capsuleRouteProviderApplications']['$inferSelect']
+export type DestroyPreview = CapsuleTables['capsuleBranchPreviews']['$inferSelect']
 
 interface DestroyIdentity {
   ownerId: string
@@ -48,39 +61,24 @@ export interface DestroyCapsuleRepositoryResult extends DestroyCapsuleTerminalRe
 
 export type DestroyCapsuleAbandonedClassificationResult = DestroyCapsuleTerminalResult | null
 
-interface DestroyTarget {
-  id: string
-  branchId: string
-  branchName: string
-  resourceKey: string
-  namespace: string
+/**
+ * Immutable branch provenance establishes the managed footprint independently
+ * from the success or failure of the operation that attempted to create it.
+ */
+export interface DestroyBranchProof {
+  branch: DestroyBranch
+  origin: DestroyOperation
+  blueprint: CapsuleBlueprintPin
+  sourceSnapshotId: string | null
 }
 
-export interface DestroyInstance extends DestroyTarget {
-  kind: 'instance'
-  instanceName: string
-}
-
-export interface DestroyVolume extends DestroyTarget {
-  kind: 'volume'
-  pool: string
-  volumeName: string
-}
-
-export type DestroyProviderTarget = DestroyInstance | DestroyVolume
-
-export interface DestroyFile {
-  id: string
-  branchId: string
-  backingResourceId: string
-}
-
+/**
+ * Ordering is derived from immutable fork dependencies during this invocation.
+ * The durable plan independently binds the complete, unordered target set.
+ */
 export interface DestroyPlan {
-  instances: DestroyInstance[]
-  volumes: DestroyVolume[]
-  files: DestroyFile[]
-  branchCount: number
-  providerRequired: boolean
+  document: CapsuleDestroyPlan
+  ordered: CapsuleDestroyResourcePlan[]
 }
 
 export interface DestroyExecution {
@@ -88,6 +86,5 @@ export interface DestroyExecution {
   ownerId: string
   capsuleId: string
   force: boolean
-  plan: DestroyPlan
-  withdrawPreviews: boolean
+  targets: DestroyTarget[]
 }

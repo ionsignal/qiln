@@ -40,6 +40,7 @@ export interface ComposeCapsuleServiceOptions<
   channel: CapsuleChannel
   project: ProjectService
   caddy: CaddyClient
+  caddyServer: string
   routing: WorkerRoutingConfig
   blueprints: CapsuleBlueprintRegistry
   supervisor: OperationSupervisor
@@ -123,15 +124,16 @@ export function composeCapsuleService<TDatabase extends PostgresJsDatabase, TTab
   const destroy = composeDestroyCapability({
     persistence: options.persistence,
     incus: options.incus,
+
+    caddy: options.caddy,
+    caddyServer: options.caddyServer,
     channel: options.channel,
-   project: options.project,
-    previews: route.preview,
+    project: options.project,
     supervisor: options.supervisor,
     operationSteps,
     operationEvents,
     lifecycleEvents,
     branchEvents,
-    previewGate,
   })
   const createSnapshot = composeCreateSnapshotCapability({
     persistence: options.persistence,

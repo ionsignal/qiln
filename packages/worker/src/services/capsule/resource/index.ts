@@ -5,7 +5,6 @@ export * from './inventory'
 export * from './lineage'
 export * from './metadata'
 export * from './plan'
-export * from './provenance'
 export * from './bootstrap/cloudinit'
 export * from './bootstrap/targets'
 

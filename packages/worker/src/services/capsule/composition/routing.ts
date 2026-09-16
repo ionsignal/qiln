@@ -2,7 +2,6 @@ import { CapsuleBranchProvenance } from '../branch/provenance'
 import { CommittedRouteService } from '../routing/service'
 import { CommittedRouteStore } from '../routing/store'
 import { PreviewRouteController } from '../routing/preview/controller'
-import { PreviewDestroy } from '../routing/preview/destroy'
 import { PreviewHost } from '../routing/preview/host'
 import { PreviewPlanner } from '../routing/preview/plan'
 import { PreviewProbe } from '../routing/preview/probe'
@@ -63,16 +62,9 @@ export function composeRoutingCapability<TDatabase extends PostgresJsDatabase, T
     caddy: options.caddy,
     events: options.previewEvents,
   })
-  const destroy = new PreviewDestroy({
-    persistence: repository.destroy,
-    caddy: options.caddy,
-    host,
-    events: options.previewEvents,
-  })
   const reconciliation = new PreviewReconciliationCoordinator({
     repository,
     controller,
-    destroy,
   })
   const preview = new PreviewService({
     repository,

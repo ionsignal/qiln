@@ -139,6 +139,7 @@ export class QilnWorkerRuntime<
     this.capsule = composeCapsuleService({
       incus: this.incus,
       caddy: this.caddy,
+      caddyServer: this.config.caddy.server,
       channel: this.channel,
       project: this.project,
       blueprints: this.blueprints,
@@ -209,8 +210,9 @@ export class QilnWorkerRuntime<
       /**
        * Caddy startup validation is deliberately read-only. The Worker must
        * refuse command intake when the infrastructure-owned route array cannot
-       * prove its expected server, Qiln-only route shapes, and terminal
-       * fallback boundary.
+       * prove its expected server, unambiguous route IDs, and terminal fallback
+       * boundary. Unsupported route shapes remain available to explicit
+       * recovery; ordinary routing still validates its stricter schemas.
        */
       await this.caddy.init()
       this.throwIfFailStopped()

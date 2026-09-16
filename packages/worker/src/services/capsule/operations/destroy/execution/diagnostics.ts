@@ -21,12 +21,7 @@ export function destroyDiagnostics(
       : {
           capsuleId: execution.capsuleId,
           force: execution.force,
-          branchCount: execution.plan.branchCount,
-          instanceCount: execution.plan.instances.length,
-          volumeCount: execution.plan.volumes.length,
-          provisioningFileCount: execution.plan.files.length,
-          providerRequired: execution.plan.providerRequired,
-          withdrawPreviews: execution.withdrawPreviews,
+          targetCount: execution.targets.length,
         }),
   }
 }
