@@ -34,7 +34,7 @@
     "@nats-io/transport-node": "3.4.0",
     "@trpc/server": "11.18.0",
     "@trpc/client": "11.18.0",
-    "@types/node": "26.6.0",
+    "@types/node": "22.20.3",
     "@vitejs/plugin-vue": "6.0.9",
     "drizzle-orm": "1.0.0-rc.4",
     "naive-ui": "2.45.3",

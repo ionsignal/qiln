@@ -23,7 +23,7 @@
     "drizzle-orm": "1.0.0-rc.4"
   },
   "devDependencies": {
-    "@types/node": "26.6.0",
+    "@types/node": "22.20.3",
     "@types/ssh2": "1.15.6",
     "drizzle-orm": "1.0.0-rc.4",
     "typescript": "6.0.3",
