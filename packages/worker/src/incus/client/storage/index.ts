@@ -4,9 +4,11 @@ import {
   IncusVolumeCreatePayloadSchema,
   IncusVolumeClonePayloadSchema,
   IncusVolumeSnapshotClonePayloadSchema,
+  IncusCustomVolumeSchema,
   type IncusVolumeCreatePayload,
   type IncusVolumeClonePayload,
   type IncusVolumeSnapshotClonePayload,
+  type IncusCustomVolume,
 } from '../schemas/storage'
 import { IncusStorageFilesClient } from './files'
 import { snapshotIdentity, volumeIdentity } from './identity'
@@ -136,13 +138,13 @@ export class IncusStorageClient {
    *
    * Destroy uses this read-only boundary to verify absence after deletion.
    */
-  public async get(pool: string, name: string): Promise<{ name: string }> {
+  public async get(pool: string, name: string): Promise<IncusCustomVolume> {
     const identity = volumeIdentity(pool, name)
     const { data } = await this.transport.read(
       `/storage-pools/${encodeURIComponent(identity.pool)}/volumes/custom/${encodeURIComponent(identity.volume)}`,
       'GET',
     )
-    const parsed = z.object({ name: z.string().min(1) }).safeParse(data)
+    const parsed = IncusCustomVolumeSchema.safeParse(data)
     if (!parsed.success || parsed.data.name !== identity.volume) {
       throw new IncusError('Incus returned invalid custom-volume identity metadata.', 'VALIDATION_ERROR', {
         pool: identity.pool,

@@ -2,6 +2,30 @@ import { z } from 'zod'
 
 export const IncusVolumeConfigSchema = z.record(z.string(), z.string())
 
+/**
+ * Exact custom-volume metadata used by ownership and deletion proof.
+ *
+ * Additional Incus fields remain available without expanding mutation inputs.
+ */
+export const IncusCustomVolumeSchema = z
+  .object({
+    name: z.string().min(1),
+    type: z.literal('custom'),
+    content_type: z.literal('filesystem'),
+    config: IncusVolumeConfigSchema,
+  })
+  .loose()
+
+/**
+ * Metadata for one explicitly addressed custom-volume snapshot.
+ */
+export const IncusCustomVolumeSnapshotSchema = z
+  .object({
+    name: z.string().min(1),
+    config: IncusVolumeConfigSchema,
+  })
+  .loose()
+
 export const IncusVolumeSourceSchema = z
   .object({
     name: z.string(),
@@ -81,6 +105,8 @@ export const IncusFileDirectoryResponseSchema = z.object({
 })
 
 export type IncusVolumeCreatePayload = z.infer<typeof IncusVolumeCreatePayloadSchema>
+export type IncusCustomVolume = z.infer<typeof IncusCustomVolumeSchema>
+export type IncusCustomVolumeSnapshot = z.infer<typeof IncusCustomVolumeSnapshotSchema>
 export type IncusVolumeClonePayload = z.infer<typeof IncusVolumeClonePayloadSchema>
 export type IncusVolumeSnapshotClonePayload = z.infer<typeof IncusVolumeSnapshotClonePayloadSchema>
 export type IncusCustomVolumeSnapshotCreatePayload = z.infer<typeof IncusCustomVolumeSnapshotCreatePayloadSchema>

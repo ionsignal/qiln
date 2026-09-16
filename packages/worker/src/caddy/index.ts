@@ -1,4 +1,5 @@
 export { CaddyClient } from './client'
+export { CaddyRecoveryClient } from './recovery'
 
 export { CaddyError, CaddyErrorCode, CaddyMutationOutcome, caddyErrorDetailsFromUnknown, isCaddyError } from './error'
 
@@ -24,6 +25,8 @@ export {
   CaddyRequestTimeoutMsSchema,
   CaddyRouteArraySchema,
   CaddyRoutesStateSchema,
+  CaddyRecoveryBindingSchema,
+  CaddyRecoveryStateSchema,
   CaddyServerNameSchema,
   CaddyStaticPrivateUpstreamSchema,
   DEFAULT_CADDY_REQUEST_TIMEOUT_MS,
@@ -39,5 +42,7 @@ export type {
   CaddyManagedRouteEntry,
   CaddyPreviewRoute,
   CaddyRoutesState,
+  CaddyRecoveryBinding,
+  CaddyRecoveryState,
   ResolvedCaddyClientOptions,
 } from './types'

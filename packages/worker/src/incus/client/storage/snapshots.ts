@@ -2,7 +2,9 @@ import { z } from 'zod'
 import { IncusError } from '../../../errors'
 import {
   IncusCustomVolumeSnapshotCreatePayloadSchema,
+  IncusCustomVolumeSnapshotSchema,
   type IncusCustomVolumeSnapshotCreatePayload,
+  type IncusCustomVolumeSnapshot,
 } from '../schemas/storage'
 import { snapshotIdentity } from './identity'
 import type { IIncusTransport } from '../types'
@@ -19,6 +21,29 @@ import type { IIncusTransport } from '../types'
  */
 export class IncusStorageSnapshotsClient {
   constructor(private readonly transport: IIncusTransport) {}
+
+  /**
+   * Reads one exact snapshot endpoint without listing or discovery.
+   *
+   * Callers may classify absence only from a validated Incus resource-not-found
+   * response, never from a missing asynchronous-operation record.
+   */
+  public async get(pool: string, volume: string, snapshot: string): Promise<IncusCustomVolumeSnapshot> {
+    const identity = snapshotIdentity(pool, volume, snapshot)
+    const { data } = await this.transport.read(
+      `/storage-pools/${encodeURIComponent(identity.pool)}/volumes/custom/${encodeURIComponent(identity.sourceVolume)}/snapshots/${encodeURIComponent(identity.snapshotName)}`,
+      'GET',
+    )
+    const parsed = IncusCustomVolumeSnapshotSchema.safeParse(data)
+    if (!parsed.success || parsed.data.name !== identity.snapshotName) {
+      throw new IncusError('Incus returned invalid custom-volume snapshot identity metadata.', 'VALIDATION_ERROR', {
+        pool: identity.pool,
+        volume: identity.sourceVolume,
+        snapshot: identity.snapshotName,
+      })
+    }
+    return parsed.data
+  }
 
   public async create(pool: string, volume: string, snapshot: string): Promise<void> {
     const identity = snapshotIdentity(pool, volume, snapshot)

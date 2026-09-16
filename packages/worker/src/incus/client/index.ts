@@ -3,6 +3,7 @@ import { ProjectTransport } from './transport/project'
 import { IncusFilesClient } from './files'
 import { IncusImagesClient } from './images'
 import { IncusInstancesClient } from './instances'
+import { IncusOperationsClient } from './operations'
 import { IncusProjectsClient } from './projects'
 import { IncusStorageClient } from './storage/index'
 import type { WorkerIncusConfig } from '../../types'
@@ -62,6 +63,7 @@ export class IncusClient {
     const transport = new ProjectTransport(this.transport, project)
     return {
       instances: new IncusInstancesClient(transport),
+      operations: new IncusOperationsClient(transport),
       files: new IncusFilesClient(transport),
       storage: new IncusStorageClient(transport),
     }

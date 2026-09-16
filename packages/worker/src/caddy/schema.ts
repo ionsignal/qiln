@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { isIP } from 'node:net'
+import { CapsuleDestroyResourcePlanSchema } from '@qiln/core/server'
 import { parseCaddyAdminEndpoint } from '../endpoint'
 
 export const DEFAULT_CADDY_REQUEST_TIMEOUT_MS = 15_000
@@ -282,6 +283,40 @@ export const CaddyFallbackRouteSchema = z
   .strict()
 
 export const CaddyRouteArraySchema = z.array(z.unknown()).min(1)
+
+/**
+ * Recovery retains configuration verbatim instead of interpreting it as an
+ * ordinary supported Qiln route. The final fallback is validated separately.
+ */
+export const CaddyRecoveryStateSchema = z
+  .object({
+    etag: CaddyEtagSchema,
+    routes: z.array(z.record(z.string(), z.unknown())).min(1),
+    observedAt: z.string().datetime({ offset: true }),
+  })
+  .strict()
+
+/**
+ * A binding supplied by the verified operation-scoped deletion ledger.
+ *
+ * This contract is not publisher authentication or independent ownership proof.
+ */
+export const CaddyRecoveryBindingSchema = z
+  .object({
+    operationId: z.uuid(),
+    resourceId: z.uuid(),
+    resource: CapsuleDestroyResourcePlanSchema,
+  })
+  .strict()
+  .superRefine((binding, context) => {
+    if (binding.resource.target.kind !== 'route') {
+      context.addIssue({
+        code: 'custom',
+        path: ['resource', 'target'],
+        message: 'Caddy recovery requires an exact route deletion target.',
+      })
+    }
+  })
 
 export const CaddyManagedRouteEntrySchema = z
   .object({

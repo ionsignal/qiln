@@ -6,6 +6,8 @@ import type {
   CaddyManagedRouteSchema,
   CaddyPreviewRouteSchema,
   CaddyRoutesStateSchema,
+  CaddyRecoveryBindingSchema,
+  CaddyRecoveryStateSchema,
 } from './schema'
 
 export type CaddyClientOptions = input<typeof CaddyClientOptionsSchema>
@@ -16,6 +18,8 @@ export type CaddyPreviewRoute = output<typeof CaddyPreviewRouteSchema>
 export type CaddyManagedRoute = output<typeof CaddyManagedRouteSchema>
 export type CaddyManagedRouteEntry = output<typeof CaddyManagedRouteEntrySchema>
 export type CaddyRoutesState = output<typeof CaddyRoutesStateSchema>
+export type CaddyRecoveryBinding = output<typeof CaddyRecoveryBindingSchema>
+export type CaddyRecoveryState = output<typeof CaddyRecoveryStateSchema>
 
 export type CaddyConfigMutationMethod = 'PUT' | 'PATCH' | 'DELETE'
 

@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { parseCaddyAdminEndpoint } from '../endpoint'
 import { CaddyError, CaddyErrorCode, CaddyMutationOutcome } from './error'
 import { CaddyRoutesClient } from './routes'
+import { CaddyRecoveryClient } from './recovery'
 import { CaddyClientOptionsSchema } from './schema'
 import { CaddyHttp } from './transport'
 import type { CaddyClientOptions, ResolvedCaddyClientOptions } from './types'
@@ -14,6 +15,7 @@ import type { CaddyClientOptions, ResolvedCaddyClientOptions } from './types'
  */
 export class CaddyClient {
   public readonly routes: CaddyRoutesClient
+  public readonly recovery: CaddyRecoveryClient
 
   private readonly transport: CaddyHttp
   private readonly options: ResolvedCaddyClientOptions
@@ -40,6 +42,10 @@ export class CaddyClient {
       server: this.options.server,
       fallbackId: this.options.fallbackId,
     })
+    this.recovery = new CaddyRecoveryClient(this.transport, {
+      server: this.options.server,
+      fallbackId: this.options.fallbackId,
+    })
   }
 
   /**
@@ -47,7 +53,7 @@ export class CaddyClient {
    * infrastructure-owned Caddy configuration.
    */
   public async init(): Promise<void> {
-    await this.routes.read()
+    await this.recovery.read()
   }
 
   public destroy(): void {
