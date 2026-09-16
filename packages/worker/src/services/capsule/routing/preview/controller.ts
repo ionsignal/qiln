@@ -11,13 +11,13 @@ import {
   type CaddyRoutesState,
 } from '../../../../caddy'
 import { IncusError } from '../../../../errors'
+import { recoverApply, recoverRemoval } from './recovery'
 import type { CapsuleBranchProvenance } from '../../branch/provenance'
 import type { CapsulePreviewEventPublisher } from '../../events'
-import type { PreviewHost } from './host'
+import { previewRouteId, type PreviewHost } from './host'
 import type { PreviewPlanner } from './plan'
 import type { PreviewProbe } from './probe'
 import type { PreviewRepository } from './persistence'
-import { recoverApply, recoverRemoval } from './recovery'
 import type { PreviewBranch, PreviewPlan, PreviewRecord } from './types'
 
 interface ApplyRecoveryResult {
@@ -72,6 +72,7 @@ export class PreviewRouteController {
           continue
         }
         desiredApplications.add(application.name)
+        const existingPreview = existing.find(candidate => candidate.applicationName === application.name)
         let preview: PreviewRecord | undefined
         try {
           const applicationPin = createCapsuleRouteApplicationPin({
@@ -79,15 +80,21 @@ export class PreviewRouteController {
             blueprint: createCapsuleBlueprintReference(pins.blueprint),
             application,
           })
-          const identity = this.dependencies.host.create(branch.id, application.name)
-          const admission = await this.dependencies.repository.ensure(branch, applicationPin, identity)
+          const identity =
+            existingPreview === undefined
+              ? this.dependencies.host.create(branch.id, application.name)
+              : {
+                  host: existingPreview.host,
+                  providerRouteId: previewRouteId(branch.id, application.name),
+                }
+         const admission = await this.dependencies.repository.ensure(branch, applicationPin, identity)
           if (admission.kind === 'skipped') {
             return
           }
           preview = admission.preview
           await this.apply(preview, branch.runtimeIp!)
         } catch (error: unknown) {
-          const persistedPreview = preview ?? existing.find(candidate => candidate.applicationName === application.name)
+          const persistedPreview = preview ?? existingPreview
           if (persistedPreview) {
             await this.cleanup(persistedPreview, error, {
               phase: 'plan_preview',
