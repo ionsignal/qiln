@@ -88,7 +88,6 @@
     mdiCog,
     mdiConsoleLine,
     mdiCubeOutline,
-    mdiHome,
     mdiLogout,
     mdiMagnify,
   } from '@mdi/js'
@@ -119,6 +118,8 @@
     type DropdownOption,
   } from 'naive-ui'
   import { Icon } from '@/components/Icon'
+  import { usePageContext } from '@/composables/usePageContext'
+  import { useTRPC } from '@/composables/useTRPC'
   import { transitionBus } from '@/renderer/utils/transitions'
   import { adminThemeOverrides } from '@/renderer/layout/adminThemeOverrides'
   import QilnRail from '@/components/admin/QilnRail.vue'
@@ -148,6 +149,8 @@
     },
   })
 
+  const pageContext = usePageContext()
+  const trpc = useTRPC(pageContext.value)
   const searchRef = ref<AutoCompleteInst | null>(null)
   const searchShortcut = ref('Ctrl+K')
   const searchValue = ref('')
@@ -240,27 +243,28 @@
       key: 'd1',
     },
     {
-      label: 'Exit Admin',
-      key: 'exit',
-      icon: renderIcon(mdiHome),
-    },
-    {
-      label: 'Logout',
+      label: 'Log out',
       key: 'logout',
       icon: renderIcon(mdiLogout),
     },
   ]
 
-  function handleUserMenuSelect(key: string | number) {
+  async function logout(): Promise<void> {
+    try {
+      await trpc.auth.logout.mutate()
+      window.location.assign('/login')
+    } catch (error: unknown) {
+      console.error('[Auth] Logout failed.', error)
+    }
+  }
+
+  function handleUserMenuSelect(key: string | number): void {
     switch (key) {
-      case 'exit':
-        window.location.href = '/'
-        break
       case 'settings':
         console.log('Settings clicked (stub)')
         break
       case 'logout':
-        console.log('Logout clicked (stub) - ready for trpc.auth.logout.mutate()')
+        void logout()
         break
     }
   }

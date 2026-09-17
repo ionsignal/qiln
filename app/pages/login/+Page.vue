@@ -1,9 +1,8 @@
 <template>
-  <main class="login-container" aria-labelledby="login-title">
+  <main class="login-container">
     <n-card class="login-card" :bordered="false" size="large" content-style="padding: 32px;">
       <div class="header">
-        <img class="login-logo" src="/images/qiln-logo-login.png" alt="Qiln" width="64" height="64" />
-        <h1 id="login-title" class="login-title">Sign in to Qiln</h1>
+        <img class="login-logo" src="/images/qiln-logo-login.png" alt="Qiln" width="128" height="128" />
         <n-text depth="3" class="login-description">Your AI workflows. Safely versioned.</n-text>
       </div>
       <n-form ref="formRef" :model="form" :rules="rules" :disabled="isSubmitting" novalidate @submit.prevent="login">
@@ -100,7 +99,7 @@
 <style scoped>
   .login-container {
     width: 100%;
-    max-width: 440px;
+    max-width: 376px;
     margin: auto;
     box-sizing: border-box;
   }
@@ -124,17 +123,10 @@
     object-fit: contain;
   }
 
-  .login-title {
-    margin: 0;
-    font-size: 24px;
-    font-weight: 600;
-    line-height: 1.3;
-  }
-
   .login-description {
     display: block;
     margin-top: 8px;
-    font-size: 13px;
+    font-size: 14px;
   }
 
   .login-button {

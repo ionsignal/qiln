@@ -1,8 +1,9 @@
+// app/server/trpc/routers/auth.ts
 import bcrypt from 'bcrypt'
 import { z } from 'zod'
 import { TRPCError } from '@trpc/server'
 import { users } from '../../../db/users'
-import { publicProcedure, router } from '@server/trpc/procedures'
+import { protectedProcedure, publicProcedure, router } from '@server/trpc/procedures'
 
 export const authRouter = router({
   signup: publicProcedure
@@ -62,7 +63,7 @@ export const authRouter = router({
       return { success: true }
     }),
 
-  logout: publicProcedure.mutation(async ({ ctx }) => {
+  logout: protectedProcedure.mutation(async ({ ctx }) => {
     // Use session plugin to destroy session
     await ctx.fastify.req.session.destroy()
     return { success: true }
