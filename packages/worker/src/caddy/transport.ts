@@ -1,4 +1,4 @@
-import { Agent, fetch, type Response } from 'undici'
+import { Agent, fetch, Headers, type Response } from 'undici'
 import { CaddyError, CaddyErrorCode, CaddyMutationOutcome, caddyErrorDetailsFromUnknown } from './error'
 import type { CaddyAdminEndpoint } from '../endpoint'
 import type { CaddyConfigMutationMethod, CaddyHttpJsonResponse, CaddyHttpMutationResponse } from './types'

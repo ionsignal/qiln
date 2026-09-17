@@ -1,5 +1,5 @@
 import fs from 'node:fs'
-import { Agent, fetch, type Response } from 'undici'
+import { Agent, fetch, Headers, type Response } from 'undici'
 import { IncusError } from '../../../errors'
 import { parseIncusEndpoint } from '../../../endpoint'
 import { detailsFromUnknown, messageFromUnknown } from './error'
