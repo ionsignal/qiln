@@ -20,14 +20,16 @@ const onRenderHtml = async (pageContext: PageContextServer) => {
       font-size: 14px;
       font-family: v-sans, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol';
       line-height: 1.6;
-      transition: color 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+      transition: color 0.3s cubic-bezier(0.4, 0, 0.2, 1);
       color: rgba(255, 255, 255, 0.82);
       -webkit-text-size-adjust: 100%;
       -webkit-tap-highlight-color: transparent;
   }`
   const documentHtml = escapeInject`<!DOCTYPE html>
-    <html>
+    <html lang="en">
       <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
         <title>${title}</title>
         <link rel="icon" type="image/x-icon" href="/favicon.ico">
         ${dangerouslySkipEscape(styles)}

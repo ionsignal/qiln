@@ -2,7 +2,7 @@
   <n-config-provider :theme="darkTheme" :locale="enUS" :date-locale="dateEnUS" :theme-overrides="adminThemeOverrides">
     <n-global-style />
     <n-message-provider>
-      <n-layout position="absolute" class="login-layout">
+      <n-layout position="absolute" class="login-layout" content-style="display: flex; padding: 24px;">
         <slot />
       </n-layout>
     </n-message-provider>
@@ -18,10 +18,8 @@
 
 <style scoped>
   .login-layout {
-    min-height: 100vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    height: 100vh;
+    height: 100dvh;
     background-color: rgb(16, 16, 20);
   }
 </style>

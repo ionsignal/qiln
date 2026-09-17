@@ -3,7 +3,7 @@ import type { GlobalThemeOverrides } from 'naive-ui'
 const bodyColor = 'rgb(16, 16, 20)'
 const floatingSurfaceColor = 'rgb(22, 22, 26)'
 const floatingBoxShadow = '0 0 0 1px rgba(255, 255, 255, 0.08), 0 8px 24px -4px rgba(0, 0, 0, 0.5)'
-const floatingBorderRadius = '6px'
+const floatingBorderRadius = '3px'
 const floatingOptionHoverColor = 'rgba(255, 255, 255, 0.08)'
 const cardColor = 'rgb(24, 24, 28)'
 
@@ -54,7 +54,7 @@ export const adminThemeOverrides: GlobalThemeOverrides = {
     color: 'rgba(255, 255, 255, 0.05)',
     colorFocus: 'rgba(255, 255, 255, 0.1)',
     border: '1px solid transparent',
-    borderRadius: '10px',
+    borderRadius: '4px',
     borderHover: '1px solid rgba(255, 255, 255, 0.15)',
     borderFocus: '1px solid rgba(255, 255, 255, 0.2)',
     boxShadowFocus: 'none',
