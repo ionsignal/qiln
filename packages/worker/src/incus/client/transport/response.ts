@@ -16,9 +16,9 @@ export interface IncusResponseParseOptions {
    * Marks malformed or unsupported response evidence as an uncertain provider
    * mutation outcome.
    *
-   * Only a valid Incus error envelope is positively observed terminal provider
-   * failure evidence. HTTP status alone does not prove a mutation was rejected
-   * before it took effect.
+   * Only a valid Incus error envelope agreeing with its HTTP error status is
+   * positively observed terminal provider failure evidence. HTTP status alone
+   * does not prove a mutation was rejected before it took effect.
    */
   mutation?: boolean
 }
@@ -70,15 +70,25 @@ function unexpectedStatusDetails(
   }
 }
 
-function readHttpError(response: Response, options: IncusResponseParseOptions, message?: string): IncusError {
-  return new IncusError(
-    message ?? `Incus request failed with HTTP status ${response.status}.`,
-    providerErrorCode(response.status),
-    {
-      ...unexpectedStatusDetails(response, options),
-      uncertainProviderOutcome: false,
-    },
-  )
+function assertHttpAgreement(
+  response: Response,
+  envelope: IncusResponse,
+  options: IncusResponseParseOptions,
+): void {
+  const status = response.status
+  const agrees =
+    envelope.type === 'sync'
+      ? response.ok && status !== 202
+      : envelope.type === 'async'
+        ? status === 202
+        : status >= 400 && status <= 599 && envelope.error_code === status
+  if (agrees) {
+    return
+  }
+  throw new IncusError('Incus response envelope does not agree with its HTTP status.', 'VALIDATION_ERROR', {
+    ...unexpectedStatusDetails(response, options, envelope.type),
+    ...(envelope.type === 'error' ? { errorCode: envelope.error_code } : {}),
+  })
 }
 
 /**
@@ -99,9 +109,9 @@ export function isObservedTerminalProviderFailure(error: unknown): error is Incu
 /**
  * Parses and validates one Incus universal response envelope.
  *
- * `sync` and `async` envelopes are accepted only on successful HTTP responses.
- * A valid Incus `error` envelope remains a positively observed terminal
- * provider failure regardless of HTTP status.
+ * A sync envelope requires successful HTTP status other than 202. An async
+ * envelope requires HTTP 202. An error envelope requires HTTP 4xx or 5xx with
+ * an identical error_code before it can establish provider failure evidence.
  *
  * A malformed or non-Incus mutation response never becomes definite provider
  * failure evidence. It is marked uncertain and normalized by the transport
@@ -115,18 +125,12 @@ export async function parseIncusResponse(
   try {
     raw = await response.json()
   } catch (error: unknown) {
-    if (!response.ok && options.mutation !== true) {
-      throw readHttpError(response, options)
-    }
     throw new IncusError('Failed to parse Incus response JSON.', 'VALIDATION_ERROR', {
       ...parseFailureDetails(response, options, error),
     })
   }
   const envelope = IncusResponseSchema.safeParse(raw)
   if (!envelope.success) {
-    if (!response.ok && options.mutation !== true) {
-      throw readHttpError(response, options)
-    }
     throw new IncusError('Malformed Incus Response Envelope', 'VALIDATION_ERROR', {
       path: options.path,
       method: options.method,
@@ -136,20 +140,7 @@ export async function parseIncusResponse(
       terminalProviderStateObserved: false,
     })
   }
-  if (envelope.data.type !== 'error' && !response.ok) {
-    if (options.mutation !== true) {
-      throw readHttpError(
-        response,
-        options,
-        `Incus returned a '${envelope.data.type}' envelope with non-success HTTP status ${response.status}.`,
-      )
-    }
-    throw new IncusError(
-      `Incus returned a '${envelope.data.type}' envelope with non-success HTTP status ${response.status}.`,
-      'VALIDATION_ERROR',
-      unexpectedStatusDetails(response, options, envelope.data.type),
-    )
-  }
+  assertHttpAgreement(response, envelope.data, options)
   return {
     envelope: envelope.data,
     etag: response.headers.get('etag') ?? undefined,
@@ -160,9 +151,9 @@ export async function parseIncusResponse(
  * Returns synchronous Incus response metadata or throws a classified provider
  * error.
  *
- * A valid Incus error envelope is positively observed terminal provider failure
- * evidence. An async envelope is not accepted by a synchronous request
- * boundary.
+ * An Incus error envelope whose HTTP agreement was validated by the parser is
+ * positively observed terminal provider failure evidence. An async envelope is
+ * not accepted by a synchronous request boundary.
  */
 export function data(
   parsed: IncusParsedResponse,
@@ -239,37 +230,26 @@ export function operation(
  * otherwise ambiguous responses fail closed.
  */
 export async function readError(response: Response, path: string, method: string): Promise<IncusError> {
-  let message = `HTTP Error ${response.status}`
-  let errorCode = response.status
-  let observedIncusError = false
-  const text = await response.text().catch(() => '')
-  if (text) {
-    try {
-      const raw: unknown = JSON.parse(text)
-      const envelope = IncusResponseSchema.safeParse(raw)
-      if (envelope.success && envelope.data.type === 'error') {
-        message = envelope.data.error
-        errorCode = envelope.data.error_code
-        observedIncusError = true
-      } else {
-        message = text
-      }
-    } catch {
-      message = text
-    }
-  }
-  if (observedIncusError) {
-    return providerError(message, errorCode, {
-      path,
-      method,
-    })
-  }
-  return new IncusError(message, providerErrorCode(errorCode), {
+  const options = {
     path,
     method,
-    code: errorCode,
-    terminalProviderStateObserved: false,
-    uncertainProviderOutcome: false,
+  }
+  let parsed: IncusParsedResponse
+  try {
+    parsed = await parseIncusResponse(response, options)
+  } catch (error: unknown) {
+    if (error instanceof IncusError) {
+      return error
+    }
+    return new IncusError('Failed to validate Incus raw read error response.', 'VALIDATION_ERROR', {
+      ...parseFailureDetails(response, options, error),
+    })
+  }
+  if (parsed.envelope.type === 'error') {
+    return providerError(parsed.envelope.error, parsed.envelope.error_code, options)
+  }
+  return new IncusError('Expected an Incus error envelope for a failed raw read.', 'VALIDATION_ERROR', {
+    ...unexpectedStatusDetails(response, options, parsed.envelope.type),
   })
 }
 

@@ -1,5 +1,6 @@
 import { WebSocket, type ClientOptions, type RawData } from 'ws'
 import { IncusEventSchema } from '../schemas/response'
+import { resolveTls, type IncusTlsOptions } from './tls'
 import type { WorkerIncusConfig } from '../../../types'
 import type { IncusEndpoints, OperationObserver } from './types'
 
@@ -22,7 +23,7 @@ export interface IncusEventsOptions {
 export class IncusEvents {
   private readonly config: WorkerIncusConfig
   private readonly eventUrl: string
-  private readonly usesSocket: boolean
+  private readonly tls: IncusTlsOptions | null
   private readonly observe: OperationObserver
   private readonly reconcile: () => Promise<void>
 
@@ -34,7 +35,7 @@ export class IncusEvents {
   constructor(options: IncusEventsOptions) {
     this.config = options.config
     this.eventUrl = options.endpoints.eventUrl
-    this.usesSocket = options.endpoints.socketPath !== undefined
+    this.tls = options.endpoints.socketPath === undefined ? resolveTls(options.config) : null
     this.observe = options.observe
     this.reconcile = options.reconcile
   }
@@ -144,18 +145,18 @@ export class IncusEvents {
   }
 
   private options(): ClientOptions {
-    const options: ClientOptions = {
-      headers: {},
+    const headers: Record<string, string> = {}
+    if (this.tls === null) {
+      return {
+        headers,
+      }
     }
-    if (this.usesSocket) {
-      return options
-    }
-    options.rejectUnauthorized = this.config.rejectUnauthorized ?? false
-    options.cert = this.config.cert
-    options.key = this.config.key
     if (this.config.basicAuth) {
-      options.headers!['Authorization'] = `Basic ${Buffer.from(this.config.basicAuth).toString('base64')}`
+      headers.Authorization = `Basic ${Buffer.from(this.config.basicAuth).toString('base64')}`
     }
-    return options
+    return {
+      ...this.tls,
+      headers,
+    }
   }
 }

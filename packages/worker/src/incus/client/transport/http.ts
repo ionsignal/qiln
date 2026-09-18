@@ -3,6 +3,7 @@ import { Agent, fetch, Headers, type Response } from 'undici'
 import { IncusError } from '../../../errors'
 import { parseIncusEndpoint } from '../../../endpoint'
 import { detailsFromUnknown, messageFromUnknown } from './error'
+import { resolveTls } from './tls'
 import type { WorkerIncusConfig } from '../../../types'
 import type { IncusMutationOptions, IncusRawMutationOptions, IncusRequestOptions } from '../types'
 import type { IncusEndpoints } from './types'
@@ -73,15 +74,7 @@ export class IncusHttp {
       return
     }
     this.agent = new Agent({
-      connect: {
-        rejectUnauthorized: config.rejectUnauthorized ?? true,
-        ...(config.cert && config.key
-          ? {
-              cert: config.cert,
-              key: config.key,
-            }
-          : {}),
-      },
+      connect: resolveTls(config),
       connections: DEFAULT_CONNECTIONS,
       pipelining: DEFAULT_PIPELINING,
     })

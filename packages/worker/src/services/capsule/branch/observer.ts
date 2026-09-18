@@ -1,4 +1,5 @@
 import { extractIpv4 } from '../../../incus/utils'
+import { isObservedTerminalProviderFailure } from '../../../incus/client/transport/response'
 import { branchInstanceName } from '../resource/identity'
 import type { IncusClient } from '../../../incus/client/index'
 import type { ProjectService } from '../../project'
@@ -45,7 +46,7 @@ export class CapsuleBranchRuntimeObserver {
         providerStatus: data.status,
       }
     } catch (error: unknown) {
-      if (this.isNotFound(error)) {
+      if (isObservedTerminalProviderFailure(error) && error.code === 'NOT_FOUND') {
         return {
           kind: 'missing',
         }
@@ -55,12 +56,5 @@ export class CapsuleBranchRuntimeObserver {
         error,
       }
     }
-  }
-
-  private isNotFound(error: unknown): boolean {
-    if (typeof error !== 'object' || error === null || !('code' in error)) {
-      return false
-    }
-    return error.code === 'NOT_FOUND'
   }
 }
