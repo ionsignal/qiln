@@ -4,7 +4,6 @@ import type { CapsuleNatsChannel } from '@qiln/core/server'
 import type {
   QilnWorkerRuntime,
   WorkerRuntimeConfig,
-  WorkerFeatureConfig,
   WorkerCaddyConfig,
   WorkerRoutingConfig,
 } from '@qiln/worker/server'
@@ -62,11 +61,8 @@ type IncusConfig = NonNullable<WorkerRuntimeConfig['incus']>
 type NatsConfig = NonNullable<WorkerRuntimeConfig['nats']>
 type CaddyConfig = WorkerCaddyConfig
 type RoutingConfig = WorkerRoutingConfig
-type FeatureConfig = Required<WorkerFeatureConfig>
 
-type WorkerHostConfig = Omit<Required<WorkerRuntimeConfig>, 'features'> & {
-  features: FeatureConfig
-}
+type WorkerHostConfig = Required<WorkerRuntimeConfig>
 
 type Server = {
   server: FastifyInstance
@@ -131,5 +127,4 @@ export type {
   RoutingConfig,
   WorkerConfig,
   ObservabilityConfig,
-  FeatureConfig,
 }

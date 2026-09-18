@@ -53,9 +53,6 @@ export default {
   worker: {
     embedded: process.env.QILN_EMBEDDED_WORKER_ENABLED === 'true',
   },
-  features: {
-    experimentalSnapshots: process.env.QILN_EXPERIMENTAL_SNAPSHOTS_ENABLED === 'true',
-  },
   cookies: {
     name: process.env.COOKIE_NAME ?? 'runemind_session',
     secret: process.env.FASTIFY_COOKIE_SECRET,
@@ -104,7 +101,7 @@ export default {
     cert: decodeBase64(process.env.INCUS_CLIENT_CERT_B64),
     key: decodeBase64(process.env.INCUS_CLIENT_KEY_B64),
     basicAuth: process.env.INCUS_BASIC_AUTH,
-    rejectUnauthorized: process.env.INCUS_REJECT_UNAUTHORIZED === 'true',
+    rejectUnauthorized: process.env.INCUS_REJECT_UNAUTHORIZED !== 'false',
     project: process.env.INCUS_PROJECT || undefined,
   },
   caddy: {
