@@ -38,6 +38,8 @@ packages:
         - rsync
         - cloud-init
         - openssh-server
+        - bash-completion
+        - eza
         # Toolchains & Compilers
         - build-essential
         - g++
@@ -107,6 +109,17 @@ actions:
       # Provision the unprivileged qiln system runtime user (UID/GID 1000)
       groupadd -g 1000 qiln
       useradd -u 1000 -g 1000 -m -s /bin/bash -d /home/qiln qiln
+
+      cat >> /home/qiln/.bashrc <<'EOF'
+      # Qiln interactive shell conveniences.
+      if [[ $- == *i* ]]; then
+        if [[ -z ${BASH_COMPLETION_VERSINFO:-} ]] && [[ -r /usr/share/bash-completion/bash_completion ]]; then
+          . /usr/share/bash-completion/bash_completion
+        fi
+        alias ll='eza -lah --group-directories-first'
+        alias lt='eza -lah --sort=modified --group-directories-first'
+      fi
+      EOF
 
       # Branch host keys are instance identity and must never be cloned from
       # the image build environment.
