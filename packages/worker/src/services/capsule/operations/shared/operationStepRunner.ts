@@ -1,4 +1,6 @@
 import { IncusError } from '../../../../errors'
+import type { CapsuleTables } from '@qiln/core/server'
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import type { CapsuleOperationStepStore } from './operationStepStore'
 
 export interface CapsuleOperationStepRunInput<TStepKey extends string = string> {
@@ -15,7 +17,7 @@ export interface CapsuleOperationStepRunInput<TStepKey extends string = string> 
 /**
  * Executes one action within a durable operation-step accounting boundary.
  *
- * Operation steps are inspection records only. This runner never skips,
+ * Step rows are inspection records only. This runner never skips,
  * resumes, retries, replays, or otherwise authorizes operation work based on an
  * existing step row.
  *
@@ -26,8 +28,11 @@ export interface CapsuleOperationStepRunInput<TStepKey extends string = string> 
  * - Tracking its process-local failure phase;
  * - Deciding compensation and terminal aggregate policy.
  */
-export class CapsuleOperationStepRunner {
-  constructor(private readonly steps: CapsuleOperationStepStore) {}
+export class CapsuleOperationStepRunner<
+  TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
+  TTables extends CapsuleTables = CapsuleTables,
+> {
+  constructor(private readonly steps: CapsuleOperationStepStore<TDatabase, TTables>) {}
 
   public async run<TResult, TStepKey extends string>(
     input: CapsuleOperationStepRunInput<TStepKey>,

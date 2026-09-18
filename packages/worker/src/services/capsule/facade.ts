@@ -1,3 +1,5 @@
+import type { CapsuleTables } from '@qiln/core/server'
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import type { CapsuleBranchRuntimeService } from './branch/service'
 import type { DiffService } from './diff/service'
 import type { CapsuleRuntimeReconciliationCoordinator } from './reconciliation'
@@ -5,7 +7,7 @@ import type { CapsuleOperationAbandonmentCoordinator } from './operations/abando
 import type { CapsuleArchiveSubmissionService } from './operations/archival/archive/submission'
 import type { CapsuleUnarchiveSubmissionService } from './operations/archival/unarchive/submission'
 import type { BranchSubmission } from './operations/branch/submission'
-import type { CreateCapsuleSubmissionService } from './operations/create/submission'
+import type { CapsuleCreateSubmissionService } from './operations/create/submission'
 import type { DestroyCapsuleSubmissionService } from './operations/destroy/submission'
 import type { ForkSubmission } from './operations/fork/submission'
 import type { SnapshotSubmission } from './operations/snapshot/submission'
@@ -20,8 +22,11 @@ import type { PreviewService } from './routing/preview/service'
  * capabilities and contains no infrastructure wiring, persistence access,
  * provider access, handler registration, or lifecycle policy.
  */
-export interface CapsuleServiceCapabilities {
-  create: CreateCapsuleSubmissionService
+export interface CapsuleServiceCapabilities<
+  TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
+  TTables extends CapsuleTables = CapsuleTables,
+> {
+  create: CapsuleCreateSubmissionService<TDatabase, TTables>
   fork: ForkSubmission
   archive: CapsuleArchiveSubmissionService
   unarchive: CapsuleUnarchiveSubmissionService
@@ -45,8 +50,11 @@ export interface CapsuleServiceCapabilities {
  * This facade only exposes those capabilities and delegates startup abandonment
  * classification to the shared coordinator.
  */
-export class CapsuleService {
-  public readonly create: CreateCapsuleSubmissionService
+export class CapsuleService<
+  TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
+  TTables extends CapsuleTables = CapsuleTables,
+> {
+  public readonly create: CapsuleCreateSubmissionService<TDatabase, TTables>
   public readonly fork: ForkSubmission
   public readonly archive: CapsuleArchiveSubmissionService
   public readonly unarchive: CapsuleUnarchiveSubmissionService
@@ -63,7 +71,7 @@ export class CapsuleService {
 
   private readonly abandonment: CapsuleOperationAbandonmentCoordinator
 
-  constructor(capabilities: CapsuleServiceCapabilities) {
+  constructor(capabilities: CapsuleServiceCapabilities<TDatabase, TTables>) {
     this.create = capabilities.create
     this.fork = capabilities.fork
     this.archive = capabilities.archive

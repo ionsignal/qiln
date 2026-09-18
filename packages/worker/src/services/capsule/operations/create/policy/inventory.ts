@@ -1,17 +1,14 @@
-import {
-  CapsuleBranchResourceStatus,
-  type CapsuleTables,
-} from '@qiln/core/server'
+import { CapsuleBranchResourceStatus, type CapsuleTables } from '@qiln/core/server'
 import { IncusError } from '../../../../../errors'
 import { assertCapsuleBranchResourceInventoryMatches } from '../../../resource/inventory'
-import { createResourceInventoryEntries } from '../../../resource/plan'
+import { createResourceInventoryEntries } from '../resource/plan'
 import type { ProjectService } from '../../../../project'
-import type { CreateResourcePlanner } from '../../../resource/plan'
-import type { ValidatedCreateLineage } from '../../../resource/lineage'
+import type { CapsuleCreateResourcePlanner } from '../resource/plan'
+import type { ValidatedCapsuleCreateLineage } from '../resource/lineage'
 
-type ResourceRow = CapsuleTables['capsuleBranchResources']['$inferSelect']
+type ResourceRow<TTables extends CapsuleTables> = TTables['capsuleBranchResources']['$inferSelect']
 
-export interface CreateInventoryInspection {
+export interface CapsuleCreateInventoryInspection {
   kind: 'absent' | 'complete' | 'inconsistent'
   untouched: boolean
   contradictions: string[]
@@ -23,29 +20,29 @@ export interface CreateInventoryInspection {
  * The recorded digest is evidence to verify, never a value to replace when
  * current planning rules no longer reproduce historical identities.
  */
-export class CreateCapsuleInventoryPolicy {
+export class CapsuleCreateInventoryPolicy<TTables extends CapsuleTables = CapsuleTables> {
   constructor(
-    private readonly planner: CreateResourcePlanner,
+    private readonly planner: CapsuleCreateResourcePlanner,
     private readonly projects: ProjectService,
   ) {}
 
-  public plan(lineage: ValidatedCreateLineage) {
+  public plan(lineage: ValidatedCapsuleCreateLineage<TTables>) {
     return this.planner.plan({
       namespace: this.projects.getNamespace(lineage.rootBranch.ownerId),
       rootBranchId: lineage.rootBranch.id,
       rootBranchName: lineage.extension.rootBranchName,
       cpu: lineage.extension.cpu,
       memory: lineage.extension.memory,
-      blueprint: lineage.blueprint,
+      blueprintPin: lineage.blueprintPin,
       rootfsImagePin: lineage.rootfsImagePin,
     })
   }
 
   public inspect(
     operationId: string,
-    lineage: ValidatedCreateLineage,
-    resources: readonly ResourceRow[],
-  ): CreateInventoryInspection {
+    lineage: ValidatedCapsuleCreateLineage<TTables>,
+    resources: readonly ResourceRow<TTables>[],
+  ): CapsuleCreateInventoryInspection {
     const branch = lineage.rootBranch
     if (branch.resourceInventoryDigest === null && resources.length === 0) {
       return {
@@ -113,8 +110,8 @@ export class CreateCapsuleInventoryPolicy {
 
   public assertComplete(
     operationId: string,
-    lineage: ValidatedCreateLineage,
-    resources: readonly ResourceRow[],
+    lineage: ValidatedCapsuleCreateLineage<TTables>,
+    resources: readonly ResourceRow<TTables>[],
     requireUntouched = false,
   ): void {
     const inspection = this.inspect(operationId, lineage, resources)

@@ -1,30 +1,26 @@
-import type {
-  CapsuleActorReference,
-  CapsuleOperationRequestHash,
-  CapsuleTables,
-} from '@qiln/core/server'
+import type { CapsuleActorReference, CapsuleOperationRequestHash, CapsuleTables } from '@qiln/core/server'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import type { CapsuleOperationTransitionOutput } from '../../shared'
 import type {
-  AcceptCreateCapsuleOperationInput,
-  CreateCapsuleExecutionInput,
-  CreateCapsuleFailureInput,
-  CreateCapsuleRepositoryResult,
-  CreateCapsuleTerminalResult,
+  CapsuleCreateAcceptanceInput,
+  CapsuleCreateExecutionInput,
+  CapsuleCreateFailureInput,
+  CapsuleCreateAcceptanceResult,
+  CapsuleCreateTerminalResult,
 } from '../types'
-import type { CreateCapsuleAcceptance } from './acceptance'
-import type { CreateCapsuleClassification } from './classification'
-import type { CreateCapsuleCompletion } from './completion'
-import type { CreateCapsuleExecution } from './execution'
+import type { CapsuleCreateAcceptance } from './acceptance'
+import type { CapsuleCreateClassification } from './classification'
+import type { CapsuleCreateCompletion } from './completion'
+import type { CapsuleCreateExecution } from './execution'
 
-export interface CreateCapsuleRepositoryCapabilities<
+export interface CapsuleCreateRepositoryCapabilities<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
   TTables extends CapsuleTables = CapsuleTables,
 > {
-  acceptance: CreateCapsuleAcceptance<TDatabase, TTables>
-  execution: CreateCapsuleExecution<TDatabase, TTables>
-  completion: CreateCapsuleCompletion<TDatabase, TTables>
-  classification: CreateCapsuleClassification<TDatabase, TTables>
+  acceptance: CapsuleCreateAcceptance<TDatabase, TTables>
+  execution: CapsuleCreateExecution<TDatabase, TTables>
+  completion: CapsuleCreateCompletion<TDatabase, TTables>
+  classification: CapsuleCreateClassification<TDatabase, TTables>
 }
 
 /**
@@ -34,26 +30,26 @@ export interface CreateCapsuleRepositoryCapabilities<
  * Transactions, validation, and failure policy belong to the injected
  * capabilities. This facade performs direct delegation only.
  */
-export class CreateCapsuleOperationRepository<
+export class CapsuleCreateRepository<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
   TTables extends CapsuleTables = CapsuleTables,
 > {
-  constructor(private readonly capabilities: CreateCapsuleRepositoryCapabilities<TDatabase, TTables>) {}
+  constructor(private readonly capabilities: CapsuleCreateRepositoryCapabilities<TDatabase, TTables>) {}
 
   public findReplay(
     ownerId: string,
     actor: CapsuleActorReference,
     idempotencyKey: string,
     requestHash: CapsuleOperationRequestHash,
-  ): Promise<CreateCapsuleRepositoryResult | null> {
+  ): Promise<CapsuleCreateAcceptanceResult | null> {
     return this.capabilities.acceptance.findReplay(ownerId, actor, idempotencyKey, requestHash)
   }
 
-  public accept(input: AcceptCreateCapsuleOperationInput): Promise<CreateCapsuleRepositoryResult> {
+  public accept(input: CapsuleCreateAcceptanceInput): Promise<CapsuleCreateAcceptanceResult> {
     return this.capabilities.acceptance.accept(input)
   }
 
-  public loadExecution(operationId: string): Promise<CreateCapsuleExecutionInput> {
+  public loadExecution(operationId: string): Promise<CapsuleCreateExecutionInput> {
     return this.capabilities.execution.loadExecution(operationId)
   }
 
@@ -63,21 +59,21 @@ export class CreateCapsuleOperationRepository<
 
   public materialize(operationId: string): Promise<void> {
     return this.capabilities.execution.materialize(operationId)
-   }
+  }
 
   public commitProviderIntent(operationId: string): Promise<void> {
     return this.capabilities.execution.commitProviderIntent(operationId)
   }
 
-  public complete(operationId: string): Promise<CreateCapsuleTerminalResult> {
+  public complete(operationId: string): Promise<CapsuleCreateTerminalResult> {
     return this.capabilities.completion.complete(operationId)
   }
 
-  public fail(input: CreateCapsuleFailureInput): Promise<CreateCapsuleTerminalResult> {
+  public fail(input: CapsuleCreateFailureInput): Promise<CapsuleCreateTerminalResult> {
     return this.capabilities.classification.fail(input)
   }
 
-  public classifyAbandoned(operationId: string): Promise<CreateCapsuleTerminalResult | null> {
+  public classifyAbandoned(operationId: string): Promise<CapsuleCreateTerminalResult | null> {
     return this.capabilities.classification.classifyAbandoned(operationId)
   }
 }

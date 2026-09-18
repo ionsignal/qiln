@@ -11,32 +11,32 @@ import {
 import { IncusError } from '../../../../../errors'
 import { createFailureDetails, failureCodeFromUnknown, failureMessageFromUnknown } from '../../../failures'
 import { toJsonObject } from '../../../persistence/json'
-import { createCreateCapsuleFailureContext } from '../execution/diagnostics'
-import { CreatePhase } from '../execution/phases'
+import { createCapsuleCreateFailureContext } from '../execution/diagnostics'
+import { CapsuleCreatePhase } from '../execution/phases'
 import {
-  classifyCreateCapsuleFailure,
-  CreateCapsuleFailureDisposition,
-  type CreateCapsuleFailureFacts,
+  classifyCapsuleCreateFailure,
+  CapsuleCreateFailureDisposition,
+  type CapsuleCreateFailureFacts,
 } from '../policy/failure'
 import { toCreateTerminalResult } from './result'
-import type { CreateResourceLineage } from '../../../resource/lineage'
-import type { CreateCapsuleInventoryPolicy } from '../policy/inventory'
-import type { CreateCapsuleFailureInput, CreateCapsuleTerminalResult } from '../types'
-import type { CreateCapsuleLocks, CreateTransaction } from './locks'
+import type { CapsuleCreateResourceLineage } from '../resource/lineage'
+import type { CapsuleCreateInventoryPolicy } from '../policy/inventory'
+import type { CapsuleCreateFailureInput, CapsuleCreateTerminalResult } from '../types'
+import type { CapsuleCreateLocks, CreateTransaction } from './locks'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
 const NONTERMINAL_CREATE_STATUSES = [CapsuleOperationStatus.ACCEPTED, CapsuleOperationStatus.RUNNING] as const
 
-type OperationRow = CapsuleTables['capsuleOperations']['$inferSelect']
-type CapsuleRow = CapsuleTables['capsules']['$inferSelect']
-type BranchRow = CapsuleTables['capsuleBranches']['$inferSelect']
-type ResourceRow = CapsuleTables['capsuleBranchResources']['$inferSelect']
+type OperationRow<TTables extends CapsuleTables> = TTables['capsuleOperations']['$inferSelect']
+type CapsuleRow<TTables extends CapsuleTables> = TTables['capsules']['$inferSelect']
+type BranchRow<TTables extends CapsuleTables> = TTables['capsuleBranches']['$inferSelect']
+type ResourceRow<TTables extends CapsuleTables> = TTables['capsuleBranchResources']['$inferSelect']
 
-interface ClassificationInput extends CreateCapsuleFailureInput {
+interface CapsuleCreateClassificationInput extends CapsuleCreateFailureInput {
   abandoned: boolean
 }
 
-function isNonterminal(status: OperationRow['status']): boolean {
+function isNonterminal<TTables extends CapsuleTables>(status: OperationRow<TTables>['status']): boolean {
   return status === CapsuleOperationStatus.ACCEPTED || status === CapsuleOperationStatus.RUNNING
 }
 
@@ -48,21 +48,21 @@ function isNonterminal(status: OperationRow['status']): boolean {
  * discovers resources, calls Incus, retries a mutation, or resumes an abandoned
  * operation.
  */
-export class CreateCapsuleClassification<
+export class CapsuleCreateClassification<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
   TTables extends CapsuleTables = CapsuleTables,
 > {
   constructor(
     private readonly persistence: CapsulePersistence<TDatabase, TTables>,
-    private readonly locks: CreateCapsuleLocks<TDatabase, TTables>,
-    private readonly lineage: CreateResourceLineage<TTables>,
-    private readonly inventory: CreateCapsuleInventoryPolicy,
+    private readonly locks: CapsuleCreateLocks<TDatabase, TTables>,
+    private readonly lineage: CapsuleCreateResourceLineage<TTables>,
+    private readonly inventory: CapsuleCreateInventoryPolicy<TTables>,
   ) {}
 
-  public async fail(input: CreateCapsuleFailureInput): Promise<CreateCapsuleTerminalResult> {
+  public async fail(input: CapsuleCreateFailureInput): Promise<CapsuleCreateTerminalResult> {
     return await this.persistence.db.transaction(async tx => {
       const operation = await this.locks.operation(tx, input.operationId)
-      if (!isNonterminal(operation.status)) {
+      if (!isNonterminal<TTables>(operation.status)) {
         throw new IncusError('Capsule create operation is already terminal.', 'CONFLICT', {
           operationId: operation.id,
           operationStatus: operation.status,
@@ -82,10 +82,10 @@ export class CreateCapsuleClassification<
    * No same-process compensation evidence survives restart. Recorded provider
    * intent therefore prevents an ordinary failed outcome.
    */
-  public async classifyAbandoned(operationId: string): Promise<CreateCapsuleTerminalResult | null> {
+  public async classifyAbandoned(operationId: string): Promise<CapsuleCreateTerminalResult | null> {
     return await this.persistence.db.transaction(async tx => {
       const operation = await this.locks.optionalOperation(tx, operationId)
-      if (!operation || !isNonterminal(operation.status)) {
+      if (!operation || !isNonterminal<TTables>(operation.status)) {
         return null
       }
       return await this.classify(tx, operation, {
@@ -95,7 +95,7 @@ export class CreateCapsuleClassification<
           providerMutationStartedAt: operation.providerMutationStartedAt,
           policy: 'no_provider_mutation_after_restart',
         }),
-        phase: CreatePhase.CLASSIFY_ABANDONED,
+        phase: CapsuleCreatePhase.CLASSIFY_ABANDONED,
         providerIntentConfirmed: false,
         providerOwnershipUncertain: operation.providerMutationStartedAt !== null,
         completionAttempted: false,
@@ -107,9 +107,9 @@ export class CreateCapsuleClassification<
 
   private async classify(
     tx: CreateTransaction<TDatabase>,
-    operation: OperationRow,
-    input: ClassificationInput,
-  ): Promise<CreateCapsuleTerminalResult> {
+    operation: OperationRow<TTables>,
+    input: CapsuleCreateClassificationInput,
+  ): Promise<CapsuleCreateTerminalResult> {
     const extension = await this.locks.optionalExtension(tx, operation.id)
     const capsule = await this.locks.capsule(tx, operation.ownerId, operation.capsuleId)
     const branches = await this.locks.rootBranches(tx, operation.capsuleId, extension?.rootBranchId ?? null)
@@ -187,28 +187,23 @@ export class CreateCapsuleClassification<
       rootBranch !== null &&
       inventory.kind === 'complete' &&
       compensationContradictions.length === 0
-    const facts: CreateCapsuleFailureFacts = {
+    const facts: CapsuleCreateFailureFacts = {
       consistent: contradictions.length === 0,
       providerIntentRecorded,
       providerOwnershipUncertain: input.providerOwnershipUncertain,
-      completionAttempted: input.completionAttempted || input.phase === CreatePhase.COMPLETE_CREATE,
-      inventory:
-        inventory.kind === 'complete'
-          ? inventory.untouched
-            ? 'untouched'
-            : 'changed'
-          : inventory.kind,
+      completionAttempted: input.completionAttempted || input.phase === CapsuleCreatePhase.COMPLETE_CREATE,
+      inventory: inventory.kind === 'complete' ? (inventory.untouched ? 'untouched' : 'changed') : inventory.kind,
       compensationProven,
     }
-    const disposition = classifyCreateCapsuleFailure(facts)
+    const disposition = classifyCapsuleCreateFailure(facts)
     const phase = input.abandoned
-      ? CreatePhase.CLASSIFY_ABANDONED
-      : disposition === CreateCapsuleFailureDisposition.PRE_PROVIDER
-        ? CreatePhase.FAIL_BEFORE_PROVIDER_MUTATION
-        : disposition === CreateCapsuleFailureDisposition.COMPENSATED
-          ? CreatePhase.FAIL_AFTER_SUCCESSFUL_COMPENSATION
-          : CreatePhase.MARK_CLEANUP_REQUIRED
-    const context = createCreateCapsuleFailureContext({
+      ? CapsuleCreatePhase.CLASSIFY_ABANDONED
+      : disposition === CapsuleCreateFailureDisposition.PRE_PROVIDER
+        ? CapsuleCreatePhase.FAIL_BEFORE_PROVIDER_MUTATION
+        : disposition === CapsuleCreateFailureDisposition.COMPENSATED
+          ? CapsuleCreatePhase.FAIL_AFTER_SUCCESSFUL_COMPENSATION
+          : CapsuleCreatePhase.MARK_CLEANUP_REQUIRED
+    const context = createCapsuleCreateFailureContext({
       identity: {
         operationId: operation.id,
         capsuleId: operation.capsuleId,
@@ -240,9 +235,9 @@ export class CreateCapsuleClassification<
    * deleting, and error states on direct resources cannot prove cleanup.
    */
   private inspectCompensationLedger(
-    operation: OperationRow,
-    rootBranch: BranchRow,
-    resources: readonly ResourceRow[],
+    operation: OperationRow<TTables>,
+    rootBranch: BranchRow<TTables>,
+    resources: readonly ResourceRow<TTables>[],
   ): string[] {
     const contradictions: string[] = []
     for (const resource of resources) {
@@ -256,6 +251,7 @@ export class CreateCapsuleClassification<
       ) {
         contradictions.push(`resource_attribution_mismatch:${resource.id}`)
       }
+
       if (resource.failureCode !== null || resource.failureMessage !== null || resource.failureDetails !== null) {
         contradictions.push(`resource_failure_evidence_remaining:${resource.id}`)
       }
@@ -309,10 +305,10 @@ export class CreateCapsuleClassification<
    * cleanup.
    */
   private selectRootBranch(
-    operation: OperationRow,
-    branches: readonly BranchRow[],
+    operation: OperationRow<TTables>,
+    branches: readonly BranchRow<TTables>[],
     referencedBranchId: string | null,
-  ): BranchRow | null {
+  ): BranchRow<TTables> | null {
     const ownedRoots = branches.filter(
       branch => branch.ownerId === operation.ownerId && branch.capsuleId === operation.capsuleId && branch.isRootBranch,
     )
@@ -327,16 +323,16 @@ export class CreateCapsuleClassification<
   private async persist(
     tx: CreateTransaction<TDatabase>,
     input: {
-      operation: OperationRow
-      capsule: CapsuleRow
-      rootBranch: BranchRow | null
-      disposition: CreateCapsuleFailureDisposition
+      operation: OperationRow<TTables>
+      capsule: CapsuleRow<TTables>
+      rootBranch: BranchRow<TTables> | null
+      disposition: CapsuleCreateFailureDisposition
       error: unknown
       context: Record<string, unknown>
     },
-  ): Promise<CreateCapsuleTerminalResult> {
+  ): Promise<CapsuleCreateTerminalResult> {
     const { operation, capsule, rootBranch, disposition, error, context } = input
-    const cleanupRequired = disposition === CreateCapsuleFailureDisposition.CLEANUP_REQUIRED
+    const cleanupRequired = disposition === CapsuleCreateFailureDisposition.CLEANUP_REQUIRED
     if (!cleanupRequired && rootBranch === null) {
       throw new IncusError('Ordinary capsule create failure requires a verified root branch.', 'CONFLICT', {
         operationId: operation.id,
@@ -381,7 +377,7 @@ export class CreateCapsuleClassification<
         ),
       )
       .returning()
-    let classifiedBranch: BranchRow | null = rootBranch
+    let classifiedBranch: BranchRow<TTables> | null = rootBranch
     if (rootBranch && rootBranch.status !== 'destroyed') {
       // Preserve the durable root ID required by create receipt replay.
       const [updatedBranch] = await tx
@@ -415,6 +411,6 @@ export class CreateCapsuleClassification<
         disposition,
       })
     }
-    return toCreateTerminalResult(classifiedOperation, classifiedCapsule, classifiedBranch)
+    return toCreateTerminalResult<TTables>(classifiedOperation, classifiedCapsule, classifiedBranch)
   }
 }

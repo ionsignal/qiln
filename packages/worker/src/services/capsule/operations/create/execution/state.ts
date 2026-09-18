@@ -1,30 +1,31 @@
-import type { CreatePhase } from './phases'
-import type { BranchResourceInput, CreateCapsuleVolumeResource } from '../../../resource/types'
+import type { CapsuleCreatePhase } from './phases'
+import type { CapsuleCreateResourceInput, CapsuleCreateVolumeResource } from '../resource/types'
 
-export interface CreateCapsuleVolumeCompensationTarget {
+export interface CapsuleCreateVolumeCompensationTarget {
   kind: 'volume'
   resourceId: string
   resourceKey: string
-  resource: BranchResourceInput
+  resource: CapsuleCreateResourceInput
   pool: string
   volumeName: string
 }
 
-export interface CreateCapsuleInstanceCompensationTarget {
+export interface CapsuleCreateInstanceCompensationTarget {
   kind: 'instance'
   resourceId: string
   resourceKey: string
-  resource: BranchResourceInput
+  resource: CapsuleCreateResourceInput
   instanceName: string
 }
 
-export type CreateCapsuleCompensationTarget =
-  CreateCapsuleVolumeCompensationTarget | CreateCapsuleInstanceCompensationTarget
+export type CapsuleCreateCompensationTarget =
+  | CapsuleCreateVolumeCompensationTarget
+  | CapsuleCreateInstanceCompensationTarget
 
-export interface CreateCapsuleDerivedProvisioningFile {
+export interface CapsuleCreateDerivedProvisioningFile {
   resourceId: string
   resourceKey: string
-  resource: BranchResourceInput
+  resource: CapsuleCreateResourceInput
   backingResourceId: string
 }
 
@@ -36,16 +37,16 @@ function volumeIdentity(pool: string, volumeName: string): string {
  * Same-process compensation scope containing only direct resources whose
  * successful provider creation has also been durably recorded.
  */
-export class CreateCapsuleCompensationScope {
-  private readonly directTargets: CreateCapsuleCompensationTarget[] = []
-  private readonly derivedFiles: CreateCapsuleDerivedProvisioningFile[] = []
+export class CapsuleCreateCompensationScope {
+  private readonly directTargets: CapsuleCreateCompensationTarget[] = []
+  private readonly derivedFiles: CapsuleCreateDerivedProvisioningFile[] = []
   private readonly createdVolumeResourceIds = new Map<string, string>()
   private createdInstanceResourceId: string | null = null
 
   public recordCreatedVolume(
     resourceId: string,
-    resource: BranchResourceInput,
-    volume: CreateCapsuleVolumeResource,
+    resource: CapsuleCreateResourceInput,
+    volume: CapsuleCreateVolumeResource,
   ): void {
     this.createdVolumeResourceIds.set(volumeIdentity(volume.pool, volume.volumeName), resourceId)
     this.directTargets.push({
@@ -58,7 +59,7 @@ export class CreateCapsuleCompensationScope {
     })
   }
 
-  public recordCreatedInstance(resourceId: string, resource: BranchResourceInput, instanceName: string): void {
+  public recordCreatedInstance(resourceId: string, resource: CapsuleCreateResourceInput, instanceName: string): void {
     this.createdInstanceResourceId = resourceId
     this.directTargets.push({
       kind: 'instance',
@@ -69,7 +70,7 @@ export class CreateCapsuleCompensationScope {
     })
   }
 
-  public recordDerivedProvisioningFile(file: CreateCapsuleDerivedProvisioningFile): void {
+  public recordDerivedProvisioningFile(file: CapsuleCreateDerivedProvisioningFile): void {
     this.derivedFiles.push(file)
   }
 
@@ -81,11 +82,11 @@ export class CreateCapsuleCompensationScope {
     return this.createdVolumeResourceIds.get(volumeIdentity(pool, volumeName))
   }
 
-  public listDirectTargetsInCompensationOrder(): readonly CreateCapsuleCompensationTarget[] {
+  public listDirectTargetsInCompensationOrder(): readonly CapsuleCreateCompensationTarget[] {
     return [...this.directTargets].reverse()
   }
 
-  public listDerivedProvisioningFiles(): readonly CreateCapsuleDerivedProvisioningFile[] {
+  public listDerivedProvisioningFiles(): readonly CapsuleCreateDerivedProvisioningFile[] {
     return [...this.derivedFiles]
   }
 }
@@ -96,9 +97,9 @@ export class CreateCapsuleCompensationScope {
  * This state has no serialization, recovery, replay, or resume behavior.
  * PostgreSQL remains the durable source of truth.
  */
-export interface CreateCapsuleExecutionState {
-  readonly compensation: CreateCapsuleCompensationScope
-  phase: CreatePhase
+export interface CapsuleCreateExecutionState {
+  readonly compensation: CapsuleCreateCompensationScope
+  phase: CapsuleCreatePhase
   providerIntentConfirmed: boolean
   providerOwnershipUncertain: boolean
   completionAttempted: boolean

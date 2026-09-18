@@ -1,13 +1,13 @@
-export const CreateCapsuleFailureDisposition = {
+export const CapsuleCreateFailureDisposition = {
   PRE_PROVIDER: 'pre_provider',
   COMPENSATED: 'compensated',
   CLEANUP_REQUIRED: 'cleanup_required',
 } as const
 
-export type CreateCapsuleFailureDisposition =
-  (typeof CreateCapsuleFailureDisposition)[keyof typeof CreateCapsuleFailureDisposition]
+export type CapsuleCreateFailureDisposition =
+  (typeof CapsuleCreateFailureDisposition)[keyof typeof CapsuleCreateFailureDisposition]
 
-export interface CreateCapsuleFailureFacts {
+export interface CapsuleCreateFailureFacts {
   consistent: boolean
   providerIntentRecorded: boolean
   providerOwnershipUncertain: boolean
@@ -24,20 +24,17 @@ export interface CreateCapsuleFailureFacts {
  * evidence or a complete untouched plan. Compensation requires a complete
  * validated ledger and positive same-process cleanup evidence.
  */
-export function classifyCreateCapsuleFailure(facts: CreateCapsuleFailureFacts): CreateCapsuleFailureDisposition {
+export function classifyCapsuleCreateFailure(facts: CapsuleCreateFailureFacts): CapsuleCreateFailureDisposition {
   if (!facts.consistent || facts.providerOwnershipUncertain || facts.completionAttempted) {
-    return CreateCapsuleFailureDisposition.CLEANUP_REQUIRED
+    return CapsuleCreateFailureDisposition.CLEANUP_REQUIRED
   }
   if (!facts.providerIntentRecorded) {
     return facts.inventory === 'absent' || facts.inventory === 'untouched'
-      ? CreateCapsuleFailureDisposition.PRE_PROVIDER
-      : CreateCapsuleFailureDisposition.CLEANUP_REQUIRED
+      ? CapsuleCreateFailureDisposition.PRE_PROVIDER
+      : CapsuleCreateFailureDisposition.CLEANUP_REQUIRED
   }
-  if (
-    (facts.inventory === 'untouched' || facts.inventory === 'changed') &&
-    facts.compensationProven
-  ) {
-    return CreateCapsuleFailureDisposition.COMPENSATED
+  if ((facts.inventory === 'untouched' || facts.inventory === 'changed') && facts.compensationProven) {
+    return CapsuleCreateFailureDisposition.COMPENSATED
   }
-  return CreateCapsuleFailureDisposition.CLEANUP_REQUIRED
+  return CapsuleCreateFailureDisposition.CLEANUP_REQUIRED
 }

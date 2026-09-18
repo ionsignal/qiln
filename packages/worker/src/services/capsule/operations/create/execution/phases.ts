@@ -3,7 +3,7 @@
  * row. Existing values remain unchanged because they also identify historical
  * diagnostics and accounting records.
  */
-export const CreatePhase = {
+export const CapsuleCreatePhase = {
   LOAD_EXECUTION_INPUT: 'load_execution_input',
   CLAIM_OPERATION: 'claim_operation',
   INITIALIZE_SSH_ACCESS_FENCE: 'initialize_ssh_access_fence',
@@ -24,4 +24,4 @@ export const CreatePhase = {
   CLASSIFY_ABANDONED: 'startup_abandoned_operation_classification',
 } as const
 
-export type CreatePhase = (typeof CreatePhase)[keyof typeof CreatePhase]
+export type CapsuleCreatePhase = (typeof CapsuleCreatePhase)[keyof typeof CapsuleCreatePhase]

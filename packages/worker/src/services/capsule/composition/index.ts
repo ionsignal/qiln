@@ -11,11 +11,10 @@ import { CapsuleOperationAbandonmentHandlerRegistry } from '../operations/abando
 import { ProviderFreeArchivalOperationLedger } from '../operations/archival/shared/operationLedger'
 import { CapsuleOperationReader } from '../operations/shared/operationReader'
 import { CapsuleOperationStepStore } from '../operations/shared/operationStepStore'
-import { CapsuleBranchResourceStore } from '../resource/store'
 import { PreviewGate } from '../routing/preview/gate'
 import { composeArchiveCapability } from './archive'
 import { composeBranchCapability } from './branch'
-import { composeCreateCapability } from './create'
+import { composeCapsuleCreateCapability } from './create'
 import { composeDestroyCapability } from './destroy'
 import { composeForkCapability } from './fork'
 import { composeRoutingCapability } from './routing'
@@ -60,10 +59,9 @@ export interface ComposeCapsuleServiceOptions<
  */
 export function composeCapsuleService<TDatabase extends PostgresJsDatabase, TTables extends CapsuleTables>(
   options: ComposeCapsuleServiceOptions<TDatabase, TTables>,
-): CapsuleService {
+): CapsuleService<TDatabase, TTables> {
   const operationReader = new CapsuleOperationReader(options.persistence)
   const operationSteps = new CapsuleOperationStepStore(options.persistence)
-  const resources = new CapsuleBranchResourceStore(options.persistence)
   const previewGate = new PreviewGate(options.persistence)
   const operationEvents = new CapsuleOperationEventPublisher(options.channel)
   const lifecycleEvents = new CapsuleLifecycleEventPublisher(options.channel)
@@ -94,7 +92,7 @@ export function composeCapsuleService<TDatabase extends PostgresJsDatabase, TTab
     operationEvents,
     lifecycleEvents,
   })
-  const create = composeCreateCapability({
+  const create = composeCapsuleCreateCapability({
     persistence: options.persistence,
     incus: options.incus,
     channel: options.channel,
@@ -103,20 +101,16 @@ export function composeCapsuleService<TDatabase extends PostgresJsDatabase, TTab
     supervisor: options.supervisor,
     operationReader,
     operationSteps,
-    resources,
     operationEvents,
     lifecycleEvents,
     branchEvents,
   })
   const fork = composeForkCapability({
     persistence: options.persistence,
-    incus: options.incus,
     channel: options.channel,
-    project: options.project,
     supervisor: options.supervisor,
     operationReader,
     operationSteps,
-    resources,
     operationEvents,
     lifecycleEvents,
     branchEvents,
@@ -124,7 +118,6 @@ export function composeCapsuleService<TDatabase extends PostgresJsDatabase, TTab
   const destroy = composeDestroyCapability({
     persistence: options.persistence,
     incus: options.incus,
-
     caddy: options.caddy,
     caddyServer: options.caddyServer,
     channel: options.channel,

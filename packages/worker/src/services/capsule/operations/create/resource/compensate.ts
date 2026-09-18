@@ -1,17 +1,22 @@
 import { IncusError } from '../../../../../errors'
-import { createCreateCapsuleCompensationFailure } from '../execution/diagnostics'
-import { CreatePhase } from '../execution/phases'
-import type { CreateCapsuleCompensationScope, CreateCapsuleCompensationTarget } from '../execution/state'
-import type { CreateCapsuleCompensationFailure, CreateCapsuleCompensationResult } from '../types'
+import type { CapsuleTables } from '@qiln/core/server'
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
+import { createCapsuleCreateCompensationFailure } from '../execution/diagnostics'
+import { CapsuleCreatePhase } from '../execution/phases'
+import type { CapsuleCreateCompensationScope, CapsuleCreateCompensationTarget } from '../execution/state'
+import type { CapsuleCreateCompensationFailure, CapsuleCreateCompensationResult } from '../types'
 import type { CapsuleResourceDriver } from '../../../resource/driver'
-import type { CapsuleBranchResourceStore } from '../../../resource/store'
+import type { CapsuleCreateResourceStore } from './store'
 
-export interface CreateCapsuleCompensationDependencies {
-  resources: CapsuleBranchResourceStore
+export interface CapsuleCreateCompensationDependencies<
+  TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
+  TTables extends CapsuleTables = CapsuleTables,
+> {
+  resources: CapsuleCreateResourceStore<TDatabase, TTables>
   driver: CapsuleResourceDriver
 }
 
-export interface CreateCapsuleCompensationContext {
+export interface CapsuleCreateCompensationContext {
   operationId: string
   namespace: string
 }
@@ -20,14 +25,17 @@ export interface CreateCapsuleCompensationContext {
  * Compensates only direct provider resources with a durable successful-create
  * outcome recorded by this process.
  */
-export class CreateCapsuleCompensation {
-  constructor(private readonly dependencies: CreateCapsuleCompensationDependencies) {}
+export class CapsuleCreateCompensation<
+  TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
+  TTables extends CapsuleTables = CapsuleTables,
+> {
+  constructor(private readonly dependencies: CapsuleCreateCompensationDependencies<TDatabase, TTables>) {}
 
   public async compensate(
-    context: CreateCapsuleCompensationContext,
-    scope: CreateCapsuleCompensationScope,
-  ): Promise<CreateCapsuleCompensationResult> {
-    const failures: CreateCapsuleCompensationFailure[] = []
+    context: CapsuleCreateCompensationContext,
+    scope: CapsuleCreateCompensationScope,
+  ): Promise<CapsuleCreateCompensationResult> {
+    const failures: CapsuleCreateCompensationFailure[] = []
     const terminalBackingResourceIds = new Set<string>()
     for (const target of scope.listDirectTargetsInCompensationOrder()) {
       try {
@@ -35,7 +43,7 @@ export class CreateCapsuleCompensation {
         terminalBackingResourceIds.add(target.resourceId)
       } catch (error: unknown) {
         failures.push(
-          createCreateCapsuleCompensationFailure({
+          createCapsuleCreateCompensationFailure({
             action: target.kind === 'instance' ? 'compensate_delete_instance' : 'compensate_delete_volume',
             resourceId: target.resourceId,
             resourceKey: target.resourceKey,
@@ -52,7 +60,7 @@ export class CreateCapsuleCompensation {
         await this.dependencies.resources.compensated(file.resource)
       } catch (error: unknown) {
         failures.push(
-          createCreateCapsuleCompensationFailure({
+          createCapsuleCreateCompensationFailure({
             action: 'finalize_compensated_provisioning_file',
             resourceId: file.resourceId,
             resourceKey: file.resourceKey,
@@ -68,8 +76,8 @@ export class CreateCapsuleCompensation {
   }
 
   private async compensateTarget(
-    context: CreateCapsuleCompensationContext,
-    target: CreateCapsuleCompensationTarget,
+    context: CapsuleCreateCompensationContext,
+    target: CapsuleCreateCompensationTarget,
   ): Promise<void> {
     if (target.resource.operationId !== context.operationId) {
       throw new IncusError('Compensation target belongs to another create operation.', 'CONFLICT', {
@@ -104,18 +112,18 @@ export class CreateCapsuleCompensation {
     }
   }
 
-  private async recordDeleteFailure(target: CreateCapsuleCompensationTarget, error: unknown): Promise<void> {
+  private async recordDeleteFailure(target: CapsuleCreateCompensationTarget, error: unknown): Promise<void> {
     try {
       await this.dependencies.resources.deleteFailed(target.resource, error, {
         operationId: target.resource.operationId,
-        phase: CreatePhase.COMPENSATION,
+        phase: CapsuleCreatePhase.COMPENSATION,
         action: target.kind === 'instance' ? 'compensate_delete_instance' : 'compensate_delete_volume',
         resourceId: target.resourceId,
         resourceKey: target.resourceKey,
       })
     } catch (persistenceError: unknown) {
       console.error(
-        `[CreateCapsuleCompensation] Failed to persist compensation failure for resource '${target.resourceId}'.`,
+        `[CapsuleCreateCompensation] Failed to persist compensation failure for resource '${target.resourceId}'.`,
         persistenceError,
       )
     }

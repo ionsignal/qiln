@@ -4,17 +4,13 @@ import { ForkExecutor } from '../operations/fork/executor'
 import { ForkProvider } from '../operations/fork/provider'
 import { ForkRepository } from '../operations/fork/persistence'
 import { ForkSubmission } from '../operations/fork/submission'
-import { CapsuleResourceDriver } from '../resource/driver'
 import type { OperationSupervisor } from '../../../coordination'
-import type { IncusClient } from '../../../incus/client'
-import type { ProjectService } from '../../project'
 import type {
   CapsuleBranchEventPublisher,
   CapsuleLifecycleEventPublisher,
   CapsuleOperationEventPublisher,
 } from '../events'
 import type { CapsuleOperationReader, CapsuleOperationStepStore } from '../operations/shared'
-import type { CapsuleBranchResourceStore } from '../resource'
 import type { CapsuleChannel, CapsulePersistence, CapsuleTables } from '@qiln/core/server'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
@@ -23,13 +19,10 @@ export interface ComposeForkCapabilityOptions<
   TTables extends CapsuleTables = CapsuleTables,
 > {
   persistence: CapsulePersistence<TDatabase, TTables>
-  incus: IncusClient
   channel: CapsuleChannel
-  project: ProjectService
   supervisor: OperationSupervisor
   operationReader: CapsuleOperationReader<TDatabase, TTables>
   operationSteps: CapsuleOperationStepStore<TDatabase, TTables>
-  resources: CapsuleBranchResourceStore<TDatabase, TTables>
   operationEvents: CapsuleOperationEventPublisher
   lifecycleEvents: CapsuleLifecycleEventPublisher
   branchEvents: CapsuleBranchEventPublisher
@@ -44,25 +37,15 @@ export interface ComposedForkCapability {
  * Composes the snapshot-fork vertical slice.
  *
  * Construction performs no SQL, provider mutation, scheduling, event
- * publication, or command registration. The channel delegates SSH fence
- * initialization to Host policy rather than introducing Worker authorization.
+ * publication, or command registration. Fork provider execution remains
+ * unavailable until it has independently safe resource accounting.
  */
 export function composeForkCapability<TDatabase extends PostgresJsDatabase, TTables extends CapsuleTables>(
   options: ComposeForkCapabilityOptions<TDatabase, TTables>,
 ): ComposedForkCapability {
   const repository = new ForkRepository(options.persistence, options.operationReader)
-  const driver = new CapsuleResourceDriver(options.incus, options.project)
-  const provider = new ForkProvider({
-    incus: options.incus,
-    project: options.project,
-    resources: options.resources,
-    driver,
-  })
-  const compensation = new ForkCompensation({
-    incus: options.incus,
-    resources: options.resources,
-    repository,
-  })
+  const provider = new ForkProvider()
+  const compensation = new ForkCompensation()
   const executor = new ForkExecutor({
     repository,
     steps: options.operationSteps,

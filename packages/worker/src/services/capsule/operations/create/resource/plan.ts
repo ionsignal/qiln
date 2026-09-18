@@ -1,10 +1,9 @@
 import {
-  CapsuleBlueprintSchema,
+  verifyCapsuleBlueprintPin,
   CapsuleBranchResourceCleanupPolicy,
   CapsuleBranchResourceType,
-  type CapsuleBlueprint,
 } from '@qiln/core/server'
-import { interpolate } from '../../../utils/template'
+import { interpolate } from '../../../../../utils/template'
 import {
   bindMountResourceKey,
   branchInstanceName,
@@ -13,19 +12,20 @@ import {
   projectResourceKey,
   provisioningFileResourceKey,
   volumeResourceKey,
-} from './identity'
-import { createProvisioningFileResourceMetadata } from './metadata'
-import { mergeCloudInit } from './bootstrap/cloudinit'
-import { resolveFileTarget, type AttachedVolume } from './bootstrap/targets'
-import type { CapsuleBranchResourceInventoryEntry } from './inventory'
+} from '../../../resource/identity'
+import { createProvisioningFileResourceMetadata } from '../../../resource/metadata'
+import { mergeCloudInit } from '../../../resource/bootstrap/cloudinit'
+import { resolveFileTarget, type AttachedVolume, type ProvisioningFileTarget } from '../../../resource/bootstrap/targets'
+import { IncusError } from '../../../../../errors'
+import type { CapsuleBranchResourceInventoryEntry } from '../../../resource/inventory'
 import type {
-  CreateCapsuleBindMountResource,
-  CreateCapsuleProvisioningFileResource,
-  CreateCapsuleResourcePlan,
-  CreateCapsuleResourcePlanInput,
-  CreateCapsuleVolumeResource,
+  CapsuleCreateBindMountResource,
+  CapsuleCreateProvisioningFileResource,
+  CapsuleCreateResourcePlan,
+  CapsuleCreateResourcePlanInput,
+  CapsuleCreateVolumeResource,
 } from './types'
-import type { IncusDeviceMap } from '../../../incus/client'
+import type { IncusDeviceMap } from '../../../../../incus/client'
 
 const SOURCE_PROJECT = 'default'
 
@@ -37,8 +37,9 @@ const SOURCE_PROJECT = 'default'
  * describes planned ownership identity rather than mutable provider progress.
  */
 export function createResourceInventoryEntries(
-  plan: CreateCapsuleResourcePlan,
-): Array<CapsuleBranchResourceInventoryEntry & { metadata: Record<string, unknown> }> {  return [plan.project, ...plan.bindMounts, ...plan.volumes, plan.instance, ...plan.files].map(resource => ({
+  plan: CapsuleCreateResourcePlan,
+): Array<CapsuleBranchResourceInventoryEntry & { metadata: Record<string, unknown> }> {
+  return [plan.project, ...plan.bindMounts, ...plan.volumes, plan.instance, ...plan.files].map(resource => ({
     provider: 'incus',
     resourceType: resource.resourceType,
     resourceKey: resource.resourceKey,
@@ -60,15 +61,16 @@ export function createResourceInventoryEntries(
  * provider execution.
  */
 export class CreateResourcePlanner {
-  public plan(input: CreateCapsuleResourcePlanInput): CreateCapsuleResourcePlan {
+  public plan(input: CapsuleCreateResourcePlanInput): CapsuleCreateResourcePlan {
     const { namespace, rootBranchId, rootBranchName, cpu, memory, rootfsImagePin } = input
-    // Reuse Core's aggregate policy before resolving any provisioning target.
-    // Clone, non-versioned, and bind paths must never become planned writes.
-    const blueprint = CapsuleBlueprintSchema.parse(input.blueprint)
+    // Reuse the verified immutable Blueprint pin before resolving any
+    // provisioning target. Clone, non-versioned, and bind paths must never
+    // become planned writes.
+    const blueprint = verifyCapsuleBlueprintPin(input.blueprintPin).blueprint
     const instanceName = branchInstanceName(rootBranchId)
     const dynamicDevices: IncusDeviceMap = {}
-    const bindMounts: CreateCapsuleBindMountResource[] = []
-    const volumes: CreateCapsuleVolumeResource[] = []
+    const bindMounts: CapsuleCreateBindMountResource[] = []
+    const volumes: CapsuleCreateVolumeResource[] = []
     const attachedVolumes: AttachedVolume[] = []
     for (const volume of blueprint.provisioning.volumes) {
       const volumeName = branchVolumeName(rootBranchId, volume.name)
@@ -208,7 +210,7 @@ export class CreateResourcePlanner {
   }
 
   private planProvisioningFiles(
-    blueprint: CapsuleBlueprint,
+    blueprint: ReturnType<typeof verifyCapsuleBlueprintPin>['blueprint'],
     input: {
       namespace: string
       rootBranchName: string
@@ -218,7 +220,7 @@ export class CreateResourcePlanner {
       memory: string
       attachedVolumes: AttachedVolume[]
     },
-  ): CreateCapsuleProvisioningFileResource[] {
+  ): CapsuleCreateProvisioningFileResource[] {
     const interpolationContext = {
       name: input.rootBranchName,
       env: input.config,
@@ -229,9 +231,13 @@ export class CreateResourcePlanner {
         },
       },
     }
+
     return blueprint.provisioning.files.map(file => {
-      const content = file.content === undefined ? '' : interpolate(file.content, interpolationContext)
       const target = resolveFileTarget(file.path, input.attachedVolumes)
+      
+      this.assertWritableProvisioningTarget(file.path, target, input.attachedVolumes)
+      
+      const content = file.content === undefined ? '' : interpolate(file.content, interpolationContext)
       return {
         kind: 'provisioningFile',
         path: file.path,
@@ -256,5 +262,38 @@ export class CreateResourcePlanner {
         ),
       }
     })
+  }
+  
+  /**
+   * Historical blueprint pins may predate the catalog validation invariant.
+   * Do not redirect a write beneath a readonly mount to rootfs: the mounted
+   * volume would still mask that path at runtime.
+   */
+  private assertWritableProvisioningTarget(
+    filePath: string,
+    target: ProvisioningFileTarget,
+    attachedVolumes: readonly AttachedVolume[],
+  ): void {
+    if (target.target !== 'volume') {
+      return
+    }
+    const volume = attachedVolumes.find(
+      candidate => candidate.pool === target.pool && candidate.volumeName === target.volumeName,
+    )
+    if (!volume) {
+      throw new IncusError('Provisioning file target does not match a planned attached volume.', 'CONFLICT', {
+        filePath,
+        pool: target.pool,
+        volumeName: target.volumeName,
+      })
+    }
+    if (volume.readonly) {
+      throw new IncusError('Provisioning files cannot target a readonly managed volume.', 'CONFLICT', {
+        filePath,
+        pool: volume.pool,
+        volumeName: volume.volumeName,
+        mountPath: volume.mountPath,
+      })
+    }
   }
 }

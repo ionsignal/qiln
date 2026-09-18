@@ -111,7 +111,7 @@ export const CapsuleBlueprintSchema = z
     }
 
     /**
-     * Provisioning initializes rootfs paths and versioned empty volumes only.
+     * Provisioning initializes rootfs paths and writable versioned empty volumes only.
      * Checking every enclosing mount prevents a nested bind from inheriting the
      * writable provisioning policy of its enclosing managed volume. Ancestor
      * directories such as /workspace remain rootfs targets.
@@ -123,6 +123,13 @@ export const CapsuleBlueprintSchema = z
           continue
         }
         if (volume.type === 'empty' && volume.versioned) {
+          if (volume.readonly) {
+            context.addIssue({
+              code: 'custom',
+              path: ['provisioning', 'files', index, 'path'],
+              message: `Provisioning path '${file.path}' targets readonly versioned volume '${volume.name}'. Provisioning files require a writable target.`,
+            })
+          }
           continue
         }
         context.addIssue({

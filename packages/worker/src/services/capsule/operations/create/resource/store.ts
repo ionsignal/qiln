@@ -1,22 +1,20 @@
 import { and, eq } from 'drizzle-orm'
-import {
-  digestCanonicalJsonValue,
-  type CapsulePersistence,
-  type CapsuleTables,
-} from '@qiln/core/server'
-import { IncusError } from '../../../errors'
-import { createFailureDetails, failureCodeFromUnknown, failureMessageFromUnknown } from '../failures'
-import { toJsonObject } from '../persistence/json'
-import type { BranchResourceInput } from './types'
+import { digestCanonicalJsonValue, type CapsulePersistence, type CapsuleTables } from '@qiln/core/server'
+import { IncusError } from '../../../../../errors'
+import { createFailureDetails, failureCodeFromUnknown, failureMessageFromUnknown } from '../../../failures'
+import { toJsonObject } from '../../../persistence/json'
+import type { CapsuleCreateResourceInput } from './types'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
-type ResourceRow = CapsuleTables['capsuleBranchResources']['$inferSelect']
-type ResourceStatus = ResourceRow['status']
-type ResourceUpdate = Pick<
-  ResourceRow,
+type CapsuleCreateResourceRow<TTables extends CapsuleTables> = TTables['capsuleBranchResources']['$inferSelect']
+type CapsuleCreateResourceStatus<TTables extends CapsuleTables> = CapsuleCreateResourceRow<TTables>['status']
+type CapsuleCreateResourceUpdate<TTables extends CapsuleTables> = Pick<
+  CapsuleCreateResourceRow<TTables>,
   'status' | 'lastOperationId' | 'updatedAt' | 'failureCode' | 'failureMessage' | 'failureDetails'
 >
-type Transaction<TDatabase extends PostgresJsDatabase> = Parameters<Parameters<TDatabase['transaction']>[0]>[0]
+type CapsuleCreateTransaction<TDatabase extends PostgresJsDatabase> = Parameters<
+  Parameters<TDatabase['transaction']>[0]
+>[0]
 
 /**
  * Transitions pre-materialized create resources without inserting identities.
@@ -25,21 +23,21 @@ type Transaction<TDatabase extends PostgresJsDatabase> = Parameters<Parameters<T
  * ownership, immutable resource identity, and expected accounting state.
  * Provider calls remain outside these transactions.
  */
-export class CapsuleBranchResourceStore<
+export class CapsuleCreateResourceStore<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
   TTables extends CapsuleTables = CapsuleTables,
 > {
   constructor(private readonly persistence: CapsulePersistence<TDatabase, TTables>) {}
 
-  public async begin(input: BranchResourceInput): Promise<string> {
+  public async begin(input: CapsuleCreateResourceInput): Promise<string> {
     return await this.transition(input, ['planned'], 'creating')
   }
 
-  public async created(input: BranchResourceInput): Promise<void> {
+  public async created(input: CapsuleCreateResourceInput): Promise<void> {
     await this.transition(input, ['creating'], 'created')
   }
 
-  public async adopt(input: BranchResourceInput): Promise<void> {
+  public async adopt(input: CapsuleCreateResourceInput): Promise<void> {
     const project = input.resourceType === 'incus_project' && input.cleanupPolicy === 'retain'
     const bind = input.resourceType === 'bind_mount' && input.cleanupPolicy === 'external'
     if (!project && !bind) {
@@ -51,25 +49,25 @@ export class CapsuleBranchResourceStore<
   }
 
   public async failed(
-    input: BranchResourceInput,
+    input: CapsuleCreateResourceInput,
     error: unknown,
     context?: Record<string, unknown>,
   ): Promise<void> {
     await this.transition(input, ['creating'], 'error', error, context)
   }
 
-  public async deleting(input: BranchResourceInput): Promise<void> {
+  public async deleting(input: CapsuleCreateResourceInput): Promise<void> {
     this.assertDirect(input)
     await this.transition(input, ['created'], 'deleting')
   }
 
-  public async deleted(input: BranchResourceInput, outcome: 'deleted' | 'missing'): Promise<void> {
+  public async deleted(input: CapsuleCreateResourceInput, outcome: 'deleted' | 'missing'): Promise<void> {
     this.assertDirect(input)
     await this.transition(input, ['deleting'], outcome)
   }
 
   public async deleteFailed(
-    input: BranchResourceInput,
+    input: CapsuleCreateResourceInput,
     error: unknown,
     context?: Record<string, unknown>,
   ): Promise<void> {
@@ -82,7 +80,7 @@ export class CapsuleBranchResourceStore<
    *
    * A derived file has no independent provider deletion operation.
    */
-  public async compensated(input: BranchResourceInput): Promise<void> {
+  public async compensated(input: CapsuleCreateResourceInput): Promise<void> {
     if (input.resourceType !== 'provisioning_file' || input.cleanupPolicy !== 'delete_with_branch') {
       throw new IncusError('Derived compensation requires a create-owned provisioning file.', 'VALIDATION_ERROR', {
         resourceKey: input.resourceKey,
@@ -92,9 +90,9 @@ export class CapsuleBranchResourceStore<
   }
 
   private async transition(
-    input: BranchResourceInput,
-    expected: readonly ResourceStatus[],
-    status: ResourceStatus,
+    input: CapsuleCreateResourceInput,
+    expected: readonly CapsuleCreateResourceStatus<TTables>[],
+    status: CapsuleCreateResourceStatus<TTables>,
     error?: unknown,
     context?: Record<string, unknown>,
   ): Promise<string> {
@@ -133,7 +131,7 @@ export class CapsuleBranchResourceStore<
           resourceId: resource.id,
         })
       }
-      const update: ResourceUpdate = {
+      const update: CapsuleCreateResourceUpdate<TTables> = {
         status,
         lastOperationId: input.operationId,
         updatedAt: new Date(),
@@ -172,7 +170,10 @@ export class CapsuleBranchResourceStore<
     })
   }
 
-  private async lockCreate(tx: Transaction<TDatabase>, input: BranchResourceInput): Promise<void> {
+  private async lockCreate(
+    tx: CapsuleCreateTransaction<TDatabase>,
+    input: CapsuleCreateResourceInput,
+  ): Promise<void> {
     const { capsules, capsuleOperations, capsuleBranches, capsuleCreateOperations } = this.persistence.tables
     const [capsule] = await tx
       .select()
@@ -225,15 +226,22 @@ export class CapsuleBranchResourceStore<
       branch.status !== 'provisioning' ||
       branch.resourceInventoryDigest === null
     ) {
-      throw new IncusError('Resource transition requires a fenced running create and its provisioning root branch.', 'CONFLICT', {
-        operationId: input.operationId,
-        capsuleId: input.capsuleId,
-        branchId: input.branchId,
-      })
+      throw new IncusError(
+        'Resource transition requires a fenced running create and its provisioning root branch.',
+        'CONFLICT',
+        {
+          operationId: input.operationId,
+          capsuleId: input.capsuleId,
+          branchId: input.branchId,
+        },
+      )
     }
   }
 
-  private assertIdentity(resource: ResourceRow, input: BranchResourceInput): void {
+  private assertIdentity(
+    resource: CapsuleCreateResourceRow<TTables>,
+    input: CapsuleCreateResourceInput,
+  ): void {
     const metadataMatches =
       digestCanonicalJsonValue(resource.metadata, { context: 'persisted create resource metadata' }) ===
       digestCanonicalJsonValue(input.metadata, { context: 'expected create resource metadata' })
@@ -259,7 +267,7 @@ export class CapsuleBranchResourceStore<
     }
   }
 
-  private assertDirect(input: BranchResourceInput): void {
+  private assertDirect(input: CapsuleCreateResourceInput): void {
     if (
       input.cleanupPolicy !== 'delete_with_branch' ||
       (input.resourceType !== 'incus_instance' && input.resourceType !== 'zfs_volume')

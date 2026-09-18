@@ -1,7 +1,7 @@
 import { jsonb, pgTable, text, uniqueIndex, uuid, type PgColumn } from 'drizzle-orm/pg-core'
 import type {
-  CapsuleBlueprint,
   CapsuleBlueprintDigest,
+  CapsuleBlueprintPin,
   CapsuleBranchName,
   CapsuleRootfsImagePin,
 } from '../../../schemas'
@@ -55,7 +55,7 @@ export function createCapsuleCreateOperationsTable(operationIdColumn?: PgColumn,
       rootBranchName: text('root_branch_name').$type<CapsuleBranchName>().notNull(),
       blueprintName: text('blueprint_name').notNull(),
       blueprintDigest: text('blueprint_digest').$type<CapsuleBlueprintDigest>().notNull(),
-      blueprintSnapshot: jsonb('blueprint_snapshot').$type<CapsuleBlueprint>().notNull(),
+      blueprintPin: jsonb('blueprint_pin').$type<CapsuleBlueprintPin>().notNull(),
       rootfsImagePin: jsonb('rootfs_image_pin').$type<CapsuleRootfsImagePin>().notNull(),
       cpu: text('cpu').notNull(),
       memory: text('memory').notNull(),

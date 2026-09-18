@@ -173,11 +173,17 @@ export class CapsuleBranchProvenance<
         operationId: extension.operationId,
       })
     }
-    const blueprint = verifyCapsuleBlueprintPin({
-      name: extension.blueprintName,
-      digest: extension.blueprintDigest,
-      blueprint: extension.blueprintSnapshot,
-    })
+    const blueprint = verifyCapsuleBlueprintPin(extension.blueprintPin)
+    if (blueprint.name !== extension.blueprintName || blueprint.digest !== extension.blueprintDigest) {
+      throw new IncusError('Create provenance Blueprint pin does not match its immutable identity.', 'CONFLICT', {
+        branchId: branch.id,
+        operationId: extension.operationId,
+        blueprintName: extension.blueprintName,
+        blueprintDigest: extension.blueprintDigest,
+        pinnedBlueprintName: blueprint.name,
+        pinnedBlueprintDigest: blueprint.digest,
+      })
+    }
     return {
       operationId: extension.operationId,
       blueprint,

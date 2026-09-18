@@ -1,6 +1,7 @@
 import {
   CapsuleOperationStatus,
   CapsuleOperationType,
+  verifyCapsuleBlueprintPin,
   type CapsuleActorReference,
   type CapsuleOperationRequestHash,
   type CapsulePersistence,
@@ -10,9 +11,9 @@ import { IncusError, isUniqueConstraintViolation } from '../../../../../errors'
 import { assertOperationReplayIdentity } from '../../shared'
 import { toCreateRepositoryResult } from './result'
 import type { CapsuleOperationReader } from '../../shared'
-import type { CreateResourceLineage } from '../../../resource/lineage'
-import type { AcceptCreateCapsuleOperationInput, CreateCapsuleRepositoryResult } from '../types'
-import type { CreateCapsuleLocks } from './locks'
+import type { CapsuleCreateResourceLineage } from '../resource/lineage'
+import type { CapsuleCreateAcceptanceInput, CapsuleCreateAcceptanceResult } from '../types'
+import type { CapsuleCreateLocks } from './locks'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
 /**
@@ -22,15 +23,15 @@ import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
  * and repeated here before acceptance. The unique idempotency constraint closes
  * the remaining race between concurrent requests.
  */
-export class CreateCapsuleAcceptance<
+export class CapsuleCreateAcceptance<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
   TTables extends CapsuleTables = CapsuleTables,
 > {
   constructor(
     private readonly persistence: CapsulePersistence<TDatabase, TTables>,
     private readonly reader: CapsuleOperationReader<TDatabase, TTables>,
-    private readonly locks: CreateCapsuleLocks<TDatabase, TTables>,
-    private readonly lineage: CreateResourceLineage<TTables>,
+    private readonly locks: CapsuleCreateLocks<TDatabase, TTables>,
+    private readonly lineage: CapsuleCreateResourceLineage<TTables>,
   ) {}
 
   /**
@@ -45,7 +46,7 @@ export class CreateCapsuleAcceptance<
     actor: CapsuleActorReference,
     idempotencyKey: string,
     requestHash: CapsuleOperationRequestHash,
-  ): Promise<CreateCapsuleRepositoryResult | null> {
+  ): Promise<CapsuleCreateAcceptanceResult | null> {
     const existing = await this.reader.loadByOwnerAndIdempotencyKey(ownerId, idempotencyKey)
     if (!existing) {
       return null
@@ -100,15 +101,17 @@ export class CreateCapsuleAcceptance<
    * branch are committed together. Validation runs against the rows returned by
    * that transaction before acceptance can commit.
    */
-  public async accept(input: AcceptCreateCapsuleOperationInput): Promise<CreateCapsuleRepositoryResult> {
+  public async accept(input: CapsuleCreateAcceptanceInput): Promise<CapsuleCreateAcceptanceResult> {
     const replay = await this.findReplay(input.ownerId, input.actor, input.idempotencyKey, input.requestHash)
     if (replay) {
       return replay
     }
+    const blueprintPin = verifyCapsuleBlueprintPin(input.blueprintPin)
     const { capsules, capsuleOperations, capsuleBranches, capsuleCreateOperations } = this.persistence.tables
     try {
       return await this.persistence.db.transaction(async tx => {
         const now = new Date()
+
         const [capsule] = await tx
           .insert(capsules)
           .values({
@@ -148,8 +151,8 @@ export class CreateCapsuleAcceptance<
             name: input.rootBranchName,
             cpu: input.cpu,
             memory: input.memory,
-            blueprintName: input.blueprintName,
-            blueprintDigest: input.blueprintDigest,
+            blueprintName: blueprintPin.name,
+            blueprintDigest: blueprintPin.digest,
             status: 'provisioning',
             isRootBranch: true,
             createdAt: now,
@@ -165,9 +168,9 @@ export class CreateCapsuleAcceptance<
             operationId: operation.id,
             rootBranchId: rootBranch.id,
             rootBranchName: input.rootBranchName,
-            blueprintName: input.blueprintName,
-            blueprintDigest: input.blueprintDigest,
-            blueprintSnapshot: input.blueprintSnapshot,
+            blueprintName: blueprintPin.name,
+            blueprintDigest: blueprintPin.digest,
+            blueprintPin,
             rootfsImagePin: input.rootfsImagePin,
             cpu: input.cpu,
             memory: input.memory,

@@ -1,21 +1,25 @@
 import { IncusError } from '../../../../../errors'
-import type { CapsuleRootfsImagePin } from '@qiln/core/server'
-import type { CreateCapsuleExecutionState } from '../execution/state'
-import type { CreateCapsuleOperationContext } from '../types'
+import type { CapsuleRootfsImagePin, CapsuleTables } from '@qiln/core/server'
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
+import type { CapsuleCreateExecutionState } from '../execution/state'
+import type { CapsuleCreateOperationContext } from '../types'
 import type {
-  BranchResourceInput,
-  CreateCapsuleBindMountResource,
-  CreateCapsuleInstanceResource,
-  CreateCapsulePlannedResource,
-  CreateCapsuleProjectResource,
-  CreateCapsuleProvisioningFileResource,
-  CreateCapsuleVolumeResource,
-} from '../../../resource/types'
+  CapsuleCreateResourceInput,
+  CapsuleCreateBindMountResource,
+  CapsuleCreateInstanceResource,
+  CapsuleCreatePlannedResource,
+  CapsuleCreateProjectResource,
+  CapsuleCreateProvisioningFileResource,
+  CapsuleCreateVolumeResource,
+} from './types'
 import type { CapsuleResourceDriver } from '../../../resource/driver'
-import type { CapsuleBranchResourceStore } from '../../../resource/store'
+import type { CapsuleCreateResourceStore } from './store'
 
-export interface CreateCapsuleProvisionerDependencies {
-  resources: CapsuleBranchResourceStore
+export interface CapsuleCreateProvisionerDependencies<
+  TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
+  TTables extends CapsuleTables = CapsuleTables,
+> {
+  resources: CapsuleCreateResourceStore<TDatabase, TTables>
   driver: CapsuleResourceDriver
 }
 
@@ -26,8 +30,11 @@ export interface CreateCapsuleProvisionerDependencies {
  * submission of failure evidence to classification. Missing planned rows are
  * errors; provisioning never inserts or repairs inventory.
  */
-export class CreateCapsuleProvisioner {
-  constructor(private readonly dependencies: CreateCapsuleProvisionerDependencies) {}
+export class CapsuleCreateProvisioner<
+  TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
+  TTables extends CapsuleTables = CapsuleTables,
+> {
+  constructor(private readonly dependencies: CapsuleCreateProvisionerDependencies<TDatabase, TTables>) {}
 
   public verifyRootfs(pin: CapsuleRootfsImagePin): Promise<void> {
     return this.dependencies.driver.verifyRootfs(pin)
@@ -39,12 +46,13 @@ export class CreateCapsuleProvisioner {
    * retained resources and never enter destructive compensation.
    */
   public async ensureNamespace(
-    context: CreateCapsuleOperationContext,
-    project: CreateCapsuleProjectResource,
-    state: CreateCapsuleExecutionState,
+    context: CapsuleCreateOperationContext,
+    project: CapsuleCreateProjectResource,
+    state: CapsuleCreateExecutionState,
   ): Promise<void> {
     const resource = this.identity(context, project)
     await this.dependencies.resources.begin(resource)
+
     try {
       await this.dependencies.driver.ensureNamespace(context.ownerId)
       await this.dependencies.resources.adopt(resource)
@@ -60,8 +68,8 @@ export class CreateCapsuleProvisioner {
    * performs no provider mutation and creates no deletion obligation.
    */
   public async recordBindMounts(
-    context: CreateCapsuleOperationContext,
-    bindMounts: readonly CreateCapsuleBindMountResource[],
+    context: CapsuleCreateOperationContext,
+    bindMounts: readonly CapsuleCreateBindMountResource[],
   ): Promise<void> {
     for (const bindMount of bindMounts) {
       await this.dependencies.resources.adopt(this.identity(context, bindMount))
@@ -73,9 +81,9 @@ export class CreateCapsuleProvisioner {
    * its durable successful outcome both complete.
    */
   public async createVolumes(
-    context: CreateCapsuleOperationContext,
-    volumes: readonly CreateCapsuleVolumeResource[],
-    state: CreateCapsuleExecutionState,
+    context: CapsuleCreateOperationContext,
+    volumes: readonly CapsuleCreateVolumeResource[],
+    state: CapsuleCreateExecutionState,
   ): Promise<void> {
     for (const volume of volumes) {
       const resource = this.identity(context, volume)
@@ -97,9 +105,9 @@ export class CreateCapsuleProvisioner {
    * creation has also been durably recorded.
    */
   public async createInstance(
-    context: CreateCapsuleOperationContext,
-    instance: CreateCapsuleInstanceResource,
-    state: CreateCapsuleExecutionState,
+    context: CapsuleCreateOperationContext,
+    instance: CapsuleCreateInstanceResource,
+    state: CapsuleCreateExecutionState,
   ): Promise<void> {
     const resource = this.identity(context, instance)
     const resourceId = await this.dependencies.resources.begin(resource)
@@ -116,13 +124,14 @@ export class CreateCapsuleProvisioner {
 
   /**
    * Provisioning files are derived resources. Their compensation eligibility is
-   * tied to a proven backing resource rather than independent provider deletion.
+   * tied to a proven backing resource rather than independent provider
+   * deletion.
    */
   public async writeFiles(
-    context: CreateCapsuleOperationContext,
+    context: CapsuleCreateOperationContext,
     instanceName: string,
-    files: readonly CreateCapsuleProvisioningFileResource[],
-    state: CreateCapsuleExecutionState,
+    files: readonly CapsuleCreateProvisioningFileResource[],
+    state: CapsuleCreateExecutionState,
   ): Promise<void> {
     const instanceResourceId = state.compensation.getCreatedInstanceResourceId()
     if (!instanceResourceId) {
@@ -157,9 +166,9 @@ export class CreateCapsuleProvisioner {
   }
 
   private identity(
-    context: CreateCapsuleOperationContext,
-    resource: CreateCapsulePlannedResource,
-  ): BranchResourceInput {
+    context: CapsuleCreateOperationContext,
+    resource: CapsuleCreatePlannedResource,
+  ): CapsuleCreateResourceInput {
     return {
       operationId: context.operationId,
       capsuleId: context.capsuleId,
@@ -175,9 +184,9 @@ export class CreateCapsuleProvisioner {
   }
 
   private backingResourceId(
-    file: CreateCapsuleProvisioningFileResource,
+    file: CapsuleCreateProvisioningFileResource,
     instanceResourceId: string,
-    state: CreateCapsuleExecutionState,
+    state: CapsuleCreateExecutionState,
   ): string {
     if (file.target.target === 'instance') {
       return instanceResourceId
@@ -198,8 +207,8 @@ export class CreateCapsuleProvisioner {
   }
 
   private async recordFailure(
-    resource: BranchResourceInput,
-    state: CreateCapsuleExecutionState,
+    resource: CapsuleCreateResourceInput,
+    state: CapsuleCreateExecutionState,
     action: string,
     error: unknown,
   ): Promise<void> {
@@ -216,7 +225,7 @@ export class CreateCapsuleProvisioner {
       })
     } catch (persistenceError: unknown) {
       console.error(
-        `[CreateCapsuleProvisioner] Failed to persist resource failure for '${resource.resourceKey}'.`,
+        `[CapsuleCreateProvisioner] Failed to persist resource failure for '${resource.resourceKey}'.`,
         persistenceError,
       )
     }

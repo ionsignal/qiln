@@ -1,4 +1,5 @@
-import { CapsuleOperationType } from '@qiln/core/server'
+import { CapsuleOperationType, type CapsuleTables } from '@qiln/core/server'
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import {
   assertAbandonedOperationTransitionIdentity,
   assertAbandonedOperationTransitionTerminal,
@@ -12,20 +13,23 @@ import type {
   CapsuleOperationEventPublisher,
 } from '../../events'
 import type { PersistedCapsuleOperation } from '../shared'
-import type { CreateCapsuleOperationRepository } from './persistence/repository'
-import type { CreateCapsuleTerminalResult } from './types'
+import type { CapsuleCreateRepository } from './persistence/repository'
+import type { CapsuleCreateTerminalResult } from './types'
 
-export interface CreateCapsuleAbandonmentHandlerDependencies {
-  repository: CreateCapsuleOperationRepository
+export interface CapsuleCreateAbandonmentHandlerDependencies<
+  TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
+  TTables extends CapsuleTables = CapsuleTables,
+> {
+  repository: CapsuleCreateRepository<TDatabase, TTables>
   operationEvents: CapsuleOperationEventPublisher
   lifecycleEvents: CapsuleLifecycleEventPublisher
   branchEvents: CapsuleBranchEventPublisher
 }
 
-function assertCreateAbandonmentRelationships(result: CreateCapsuleTerminalResult): void {
+function assertCapsuleCreateAbandonmentRelationships(result: CapsuleCreateTerminalResult): void {
   if (result.capsule.capsuleId !== result.operation.capsuleId) {
     throw new Error(
-      `[CreateCapsuleAbandonmentHandler] Lifecycle result belongs to capsule '${result.capsule.capsuleId}', but operation '${result.operation.operationId}' belongs to capsule '${result.operation.capsuleId}'.`,
+      `[CapsuleCreateAbandonmentHandler] Lifecycle result belongs to capsule '${result.capsule.capsuleId}', but operation '${result.operation.operationId}' belongs to capsule '${result.operation.capsuleId}'.`,
     )
   }
   if (!result.branch) {
@@ -33,7 +37,7 @@ function assertCreateAbandonmentRelationships(result: CreateCapsuleTerminalResul
   }
   if (result.branch.capsuleId !== result.operation.capsuleId) {
     throw new Error(
-      `[CreateCapsuleAbandonmentHandler] Branch '${result.branch.id}' belongs to capsule '${result.branch.capsuleId}', but operation '${result.operation.operationId}' belongs to capsule '${result.operation.capsuleId}'.`,
+      `[CapsuleCreateAbandonmentHandler] Branch '${result.branch.id}' belongs to capsule '${result.branch.capsuleId}', but operation '${result.operation.operationId}' belongs to capsule '${result.operation.capsuleId}'.`,
     )
   }
 }
@@ -47,10 +51,13 @@ function assertCreateAbandonmentRelationships(result: CreateCapsuleTerminalResul
  * prove a safe pre-provider failure or require manual cleanup. This adapter
  * publishes invalidations only from the committed classification result.
  */
-export class CreateCapsuleAbandonmentHandler implements CapsuleOperationAbandonmentHandler {
+export class CapsuleCreateAbandonmentHandler<
+  TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
+  TTables extends CapsuleTables = CapsuleTables,
+> implements CapsuleOperationAbandonmentHandler {
   public readonly operationType = CapsuleOperationType.CREATE
 
-  constructor(private readonly dependencies: CreateCapsuleAbandonmentHandlerDependencies) {}
+  constructor(private readonly dependencies: CapsuleCreateAbandonmentHandlerDependencies<TDatabase, TTables>) {}
 
   public async classify(
     operation: PersistedCapsuleOperation,
@@ -66,7 +73,7 @@ export class CreateCapsuleAbandonmentHandler implements CapsuleOperationAbandonm
 
     assertAbandonedOperationTransitionIdentity(operation, result.operation)
     assertAbandonedOperationTransitionTerminal(result.operation)
-    assertCreateAbandonmentRelationships(result)
+    assertCapsuleCreateAbandonmentRelationships(result)
 
     this.dependencies.operationEvents.publishChanged(result.operation)
     this.dependencies.lifecycleEvents.publishChanged(result.operation.ownerId, result.capsule)

@@ -1,25 +1,30 @@
 import { CapsuleCreateReceiptSchema, CapsuleOperationType, type CapsuleTables } from '@qiln/core/server'
 import { toCapsuleLifecycleState, toCapsuleOperationTransition } from '../../shared'
 import type { CapsuleOperationTransitionOutput } from '../../shared'
-import type { CreateCapsuleCommittedBranch, CreateCapsuleRepositoryResult, CreateCapsuleTerminalResult } from '../types'
+import type { CapsuleCreateBranchState, CapsuleCreateAcceptanceResult, CapsuleCreateTerminalResult } from '../types'
 
-type OperationResultRow = Pick<
-  CapsuleTables['capsuleOperations']['$inferSelect'],
+type OperationResultRow<TTables extends CapsuleTables> = Pick<
+  TTables['capsuleOperations']['$inferSelect'],
   'id' | 'ownerId' | 'capsuleId' | 'status'
 >
 
-type CapsuleResultRow = Pick<
-  CapsuleTables['capsules']['$inferSelect'],
+type CapsuleResultRow<TTables extends CapsuleTables> = Pick<
+  TTables['capsules']['$inferSelect'],
   'id' | 'lifecycleStatus' | 'archivedAt' | 'destroyedAt'
 >
 
-type BranchResultRow = Pick<CapsuleTables['capsuleBranches']['$inferSelect'], 'id' | 'capsuleId' | 'name' | 'status'>
+type BranchResultRow<TTables extends CapsuleTables> = Pick<
+  TTables['capsuleBranches']['$inferSelect'],
+  'id' | 'capsuleId' | 'name' | 'status'
+>
 
 /**
  * Maps already-validated durable create rows without deciding eligibility,
  * opening transactions, or reconstructing state from executor assumptions.
  */
-export function toCreateOperationTransition(operation: OperationResultRow): CapsuleOperationTransitionOutput {
+export function toCreateOperationTransition<TTables extends CapsuleTables>(
+  operation: OperationResultRow<TTables>,
+): CapsuleOperationTransitionOutput {
   return toCapsuleOperationTransition({
     ownerId: operation.ownerId,
     operationId: operation.id,
@@ -29,7 +34,9 @@ export function toCreateOperationTransition(operation: OperationResultRow): Caps
   })
 }
 
-export function toCreateBranchResult(branch: BranchResultRow): CreateCapsuleCommittedBranch {
+export function toCreateBranchResult<TTables extends CapsuleTables>(
+  branch: BranchResultRow<TTables>,
+): CapsuleCreateBranchState {
   return {
     id: branch.id,
     capsuleId: branch.capsuleId,
@@ -38,35 +45,35 @@ export function toCreateBranchResult(branch: BranchResultRow): CreateCapsuleComm
   }
 }
 
-export function toCreateTerminalResult(
-  operation: OperationResultRow,
-  capsule: CapsuleResultRow,
-  branch: BranchResultRow | null,
-): CreateCapsuleTerminalResult {
+export function toCreateTerminalResult<TTables extends CapsuleTables>(
+  operation: OperationResultRow<TTables>,
+  capsule: CapsuleResultRow<TTables>,
+  branch: BranchResultRow<TTables> | null,
+): CapsuleCreateTerminalResult {
   return {
-    operation: toCreateOperationTransition(operation),
+    operation: toCreateOperationTransition<TTables>(operation),
     capsule: toCapsuleLifecycleState({
       capsuleId: capsule.id,
       lifecycleStatus: capsule.lifecycleStatus,
       archivedAt: capsule.archivedAt,
       destroyedAt: capsule.destroyedAt,
     }),
-    branch: branch === null ? null : toCreateBranchResult(branch),
+    branch: branch === null ? null : toCreateBranchResult<TTables>(branch),
   }
 }
 
-export function toCreateRepositoryResult(
-  operation: OperationResultRow,
-  capsule: CapsuleResultRow,
-  branch: BranchResultRow,
+export function toCreateRepositoryResult<TTables extends CapsuleTables>(
+  operation: OperationResultRow<TTables>,
+  capsule: CapsuleResultRow<TTables>,
+  branch: BranchResultRow<TTables>,
   options: {
     newlyAccepted: boolean
     replayed: boolean
   },
-): CreateCapsuleRepositoryResult {
+): CapsuleCreateAcceptanceResult {
   return {
-    ...toCreateTerminalResult(operation, capsule, branch),
-    branch: toCreateBranchResult(branch),
+    ...toCreateTerminalResult<TTables>(operation, capsule, branch),
+    branch: toCreateBranchResult<TTables>(branch),
     newlyAccepted: options.newlyAccepted,
     receipt: CapsuleCreateReceiptSchema.parse({
       operationId: operation.id,

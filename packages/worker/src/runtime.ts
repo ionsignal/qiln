@@ -91,7 +91,7 @@ export class QilnWorkerRuntime<
   TTables extends CapsuleTables = CapsuleTables,
 > {
   public readonly project: ProjectService
-  public readonly capsule: CapsuleService
+  public readonly capsule: CapsuleService<TDatabase, TTables>
   public readonly incus: IncusClient
   public readonly caddy: CaddyClient
   public readonly channel: CapsuleNatsChannel
@@ -178,7 +178,6 @@ export class QilnWorkerRuntime<
       try {
         await this.booting
       } catch {
-        // Failed startup owns its cleanup path and disposes the runtime.
         return
       }
     }

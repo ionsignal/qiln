@@ -37,17 +37,17 @@ export function proveBranch(
     origin.status === 'accepted' ||
     origin.status === 'running'
   ) {
-    throw new IncusError('Branch deletion provenance does not resolve an owned terminal origin operation.', 'CONFLICT', {
-      branchId: branch.id,
-      operationId: extension.operationId,
-    })
+    throw new IncusError(
+      'Branch deletion provenance does not resolve an owned terminal origin operation.',
+      'CONFLICT',
+      {
+        branchId: branch.id,
+        operationId: extension.operationId,
+      },
+    )
   }
   const blueprint = branch.isRootBranch
-    ? verifyCapsuleBlueprintPin({
-        name: create[0]!.blueprintName,
-        digest: create[0]!.blueprintDigest,
-        blueprint: create[0]!.blueprintSnapshot,
-      })
+    ? verifyCapsuleBlueprintPin(create[0]!.blueprintPin)
     : verifyCapsuleBlueprintPin(fork[0]!.blueprintPin)
   if (
     blueprint.name !== extension.blueprintName ||

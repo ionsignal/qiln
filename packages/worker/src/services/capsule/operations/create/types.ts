@@ -1,7 +1,7 @@
 import type {
   CapsuleActorReference,
-  CapsuleBlueprint,
   CapsuleBlueprintDigest,
+  CapsuleBlueprintPin,
   CapsuleBranchStatus,
   CapsuleCreateReceipt,
   CapsuleLifecycleState,
@@ -9,9 +9,9 @@ import type {
   CapsuleOperationRequestHash,
 } from '@qiln/core/server'
 import type { CapsuleOperationTransitionOutput } from '../shared'
-import type { CreatePhase } from './execution/phases'
+import type { CapsuleCreatePhase } from './execution/phases'
 
-export interface SubmitCreateCapsuleInput {
+export interface CapsuleCreateSubmissionInput {
   ownerId: string
   actor: CapsuleActorReference
   rootBranchName: string
@@ -22,48 +22,46 @@ export interface SubmitCreateCapsuleInput {
   memory: string
 }
 
-export interface AcceptCreateCapsuleOperationInput extends SubmitCreateCapsuleInput {
+export interface CapsuleCreateAcceptanceInput extends CapsuleCreateSubmissionInput {
   requestHash: CapsuleOperationRequestHash
-  blueprintSnapshot: CapsuleBlueprint
+  blueprintPin: CapsuleBlueprintPin
   rootfsImagePin: CapsuleRootfsImagePin
 }
 
-export interface CreateCapsuleRepositoryResult {
+export interface CapsuleCreateAcceptanceResult {
   newlyAccepted: boolean
   receipt: CapsuleCreateReceipt
   operation: CapsuleOperationTransitionOutput
   capsule: CapsuleLifecycleState
-  branch: CreateCapsuleCommittedBranch
+  branch: CapsuleCreateBranchState
 }
 
-export interface CreateCapsuleCommittedBranch {
+export interface CapsuleCreateBranchState {
   id: string
   capsuleId: string
   name: string
   status: CapsuleBranchStatus
 }
 
-export interface CreateCapsuleTerminalResult {
+export interface CapsuleCreateTerminalResult {
   operation: CapsuleOperationTransitionOutput
   capsule: CapsuleLifecycleState
-  branch: CreateCapsuleCommittedBranch | null
+  branch: CapsuleCreateBranchState | null
 }
 
-export interface CreateCapsuleExecutionInput {
+export interface CapsuleCreateExecutionInput {
   operationId: string
   capsuleId: string
   ownerId: string
   rootBranchId: string
   rootBranchName: string
-  blueprintName: string
-  blueprintDigest: CapsuleBlueprintDigest
-  blueprintSnapshot: CapsuleBlueprint
+  blueprintPin: CapsuleBlueprintPin
   rootfsImagePin: CapsuleRootfsImagePin
   cpu: string
   memory: string
 }
 
-export interface CreateCapsuleOperationContext {
+export interface CapsuleCreateOperationContext {
   readonly operationId: string
   readonly capsuleId: string
   readonly ownerId: string
@@ -72,8 +70,8 @@ export interface CreateCapsuleOperationContext {
   readonly namespace: string
 }
 
-export interface CreateCapsuleCompensationFailure {
-  phase: typeof CreatePhase.COMPENSATION
+export interface CapsuleCreateCompensationFailure {
+  phase: typeof CapsuleCreatePhase.COMPENSATION
   action: string
   code: string
   message: string
@@ -82,17 +80,17 @@ export interface CreateCapsuleCompensationFailure {
   details?: Record<string, unknown>
 }
 
-export interface CreateCapsuleCompensationResult {
+export interface CapsuleCreateCompensationResult {
   fullyCompensated: boolean
-  failures: CreateCapsuleCompensationFailure[]
+  failures: CapsuleCreateCompensationFailure[]
 }
 
-export interface CreateCapsuleFailureInput {
+export interface CapsuleCreateFailureInput {
   operationId: string
   error: unknown
-  phase: CreatePhase
+  phase: CapsuleCreatePhase
   providerIntentConfirmed: boolean
   providerOwnershipUncertain: boolean
   completionAttempted: boolean
-  compensation: CreateCapsuleCompensationResult | null
+  compensation: CapsuleCreateCompensationResult | null
 }

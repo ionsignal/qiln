@@ -4,32 +4,37 @@ import {
   SshBranchAccessBlockReason,
   TargetType,
   type CapsuleChannel,
+  type CapsuleTables,
 } from '@qiln/core/server'
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import { CapsuleOperationStepRunner } from '../shared'
-import { CreatePhase } from './execution/phases'
-import { CreateCapsuleCompensationScope, type CreateCapsuleExecutionState } from './execution/state'
-import { CreateCapsuleStepKey } from './execution/steps'
-import { createResourceInventoryEntries } from '../../resource/plan'
+import { CapsuleCreatePhase } from './execution/phases'
+import { CapsuleCreateCompensationScope, type CapsuleCreateExecutionState } from './execution/state'
+import { CapsuleCreateStepKey } from './execution/steps'
+import { createResourceInventoryEntries } from './resource/plan'
 import type { CapsuleOperationStepStore } from '../shared'
-import type { CreateCapsuleOperationRepository } from './persistence/repository'
-import type { CreateCapsuleCompensation } from './resource/compensate'
-import type { CreateResourcePlanner } from '../../resource/plan'
-import type { CreateCapsuleProvisioner } from './resource/provision'
+import type { CapsuleCreateRepository } from './persistence/repository'
+import type { CapsuleCreateCompensation } from './resource/compensate'
+import type { CapsuleCreateResourcePlanner } from './resource/plan'
+import type { CapsuleCreateProvisioner } from './resource/provision'
 import type { CapsuleBranchEventPublisher } from '../../events/branch'
 import type { CapsuleLifecycleEventPublisher, CapsuleOperationEventPublisher } from '../../events'
 import type { ProjectService } from '../../../project'
 import type {
-  CreateCapsuleCompensationResult,
-  CreateCapsuleOperationContext,
-  CreateCapsuleTerminalResult,
+  CapsuleCreateCompensationResult,
+  CapsuleCreateOperationContext,
+  CapsuleCreateTerminalResult,
 } from './types'
 
-export interface CreateCapsuleExecutorDependencies {
-  repository: CreateCapsuleOperationRepository
-  steps: CapsuleOperationStepStore
-  planner: CreateResourcePlanner
-  provisioner: CreateCapsuleProvisioner
-  compensator: CreateCapsuleCompensation
+export interface CapsuleCreateExecutorDependencies<
+  TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
+  TTables extends CapsuleTables = CapsuleTables,
+> {
+  repository: CapsuleCreateRepository<TDatabase, TTables>
+  steps: CapsuleOperationStepStore<TDatabase, TTables>
+  planner: CapsuleCreateResourcePlanner
+  provisioner: CapsuleCreateProvisioner<TDatabase, TTables>
+  compensator: CapsuleCreateCompensation<TDatabase, TTables>
   project: ProjectService
   channel: CapsuleChannel
   operationEvents: CapsuleOperationEventPublisher
@@ -47,27 +52,30 @@ export interface CreateCapsuleExecutorDependencies {
  * per-resource mechanics but cannot reorder, skip, resume, retry, or
  * independently terminalize the create operation.
  */
-export class CreateCapsuleExecutor {
-  private readonly stepRunner: CapsuleOperationStepRunner
+export class CapsuleCreateExecutor<
+  TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
+  TTables extends CapsuleTables = CapsuleTables,
+> {
+  private readonly stepRunner: CapsuleOperationStepRunner<TDatabase, TTables>
 
-  constructor(private readonly dependencies: CreateCapsuleExecutorDependencies) {
-    this.stepRunner = new CapsuleOperationStepRunner(dependencies.steps)
+  constructor(private readonly dependencies: CapsuleCreateExecutorDependencies<TDatabase, TTables>) {
+    this.stepRunner = new CapsuleOperationStepRunner<TDatabase, TTables>(dependencies.steps)
   }
 
   public async execute(operationId: string): Promise<void> {
-    const state: CreateCapsuleExecutionState = {
-      compensation: new CreateCapsuleCompensationScope(),
-      phase: CreatePhase.LOAD_EXECUTION_INPUT,
+    const state: CapsuleCreateExecutionState = {
+      compensation: new CapsuleCreateCompensationScope(),
+      phase: CapsuleCreatePhase.LOAD_EXECUTION_INPUT,
       providerIntentConfirmed: false,
       providerOwnershipUncertain: false,
       completionAttempted: false,
       completionConfirmed: false,
     }
-    let context: CreateCapsuleOperationContext | null = null
+    let context: CapsuleCreateOperationContext | null = null
 
     try {
       const input = await this.dependencies.repository.loadExecution(operationId)
-      const executionContext: CreateCapsuleOperationContext = {
+      const executionContext: CapsuleCreateOperationContext = {
         operationId: input.operationId,
         capsuleId: input.capsuleId,
         ownerId: input.ownerId,
@@ -78,7 +86,7 @@ export class CreateCapsuleExecutor {
       context = executionContext
 
       const runStep = <TResult>(
-        stepKey: CreateCapsuleStepKey,
+        stepKey: CapsuleCreateStepKey,
         metadata: Record<string, unknown>,
         action: () => Promise<TResult> | TResult,
       ): Promise<TResult> => {
@@ -101,12 +109,12 @@ export class CreateCapsuleExecutor {
         )
       }
 
-      state.phase = CreatePhase.CLAIM_OPERATION
+      state.phase = CapsuleCreatePhase.CLAIM_OPERATION
 
       const runningOperation = await this.dependencies.repository.claim(operationId)
       this.dependencies.operationEvents.publishChanged(runningOperation)
       await runStep(
-        CreateCapsuleStepKey.INITIALIZE_SSH_ACCESS_FENCE,
+        CapsuleCreateStepKey.INITIALIZE_SSH_ACCESS_FENCE,
         {
           reason: SshBranchAccessBlockReason.BRANCH_CREATED,
         },
@@ -123,12 +131,12 @@ export class CreateCapsuleExecutor {
         },
       )
       const plan = await runStep(
-        CreateCapsuleStepKey.PLAN_RESOURCES,
+        CapsuleCreateStepKey.PLAN_RESOURCES,
         {
-          blueprintName: input.blueprintName,
-          blueprintDigest: input.blueprintDigest,
-          volumeDefinitionCount: input.blueprintSnapshot.provisioning.volumes.length,
-          provisioningFileDefinitionCount: input.blueprintSnapshot.provisioning.files.length,
+          blueprintName: input.blueprintPin.name,
+          blueprintDigest: input.blueprintPin.digest,
+          volumeDefinitionCount: input.blueprintPin.blueprint.provisioning.volumes.length,
+          provisioningFileDefinitionCount: input.blueprintPin.blueprint.provisioning.files.length,
         },
         () =>
           this.dependencies.planner.plan({
@@ -137,14 +145,14 @@ export class CreateCapsuleExecutor {
             rootBranchName: executionContext.rootBranchName,
             cpu: input.cpu,
             memory: input.memory,
-            blueprint: input.blueprintSnapshot,
+            blueprintPin: input.blueprintPin,
             rootfsImagePin: input.rootfsImagePin,
           }),
       )
 
       const inventory = createResourceInventoryEntries(plan)
       await runStep(
-        CreateCapsuleStepKey.MATERIALIZE_RESOURCES,
+        CapsuleCreateStepKey.MATERIALIZE_RESOURCES,
         {
           resourceCount: inventory.length,
         },
@@ -152,7 +160,7 @@ export class CreateCapsuleExecutor {
       )
 
       await runStep(
-        CreateCapsuleStepKey.VERIFY_ROOTFS_IMAGE,
+        CapsuleCreateStepKey.VERIFY_ROOTFS_IMAGE,
         {
           provider: input.rootfsImagePin.provider,
           project: input.rootfsImagePin.project,
@@ -161,7 +169,7 @@ export class CreateCapsuleExecutor {
         () => this.dependencies.provisioner.verifyRootfs(input.rootfsImagePin),
       )
 
-      state.phase = CreatePhase.COMMIT_PROVIDER_INTENT_FENCE
+      state.phase = CapsuleCreatePhase.COMMIT_PROVIDER_INTENT_FENCE
 
       // The operation-wide fence must commit before ensureNamespace or any
       // other Incus state-changing call.
@@ -169,7 +177,7 @@ export class CreateCapsuleExecutor {
       state.providerIntentConfirmed = true
 
       await runStep(
-        CreateCapsuleStepKey.ENSURE_NAMESPACE,
+        CapsuleCreateStepKey.ENSURE_NAMESPACE,
         {
           namespace: executionContext.namespace,
           resourceKey: plan.project.resourceKey,
@@ -178,7 +186,7 @@ export class CreateCapsuleExecutor {
       )
 
       await runStep(
-        CreateCapsuleStepKey.RECORD_BIND_MOUNTS,
+        CapsuleCreateStepKey.RECORD_BIND_MOUNTS,
         {
           count: plan.bindMounts.length,
         },
@@ -186,7 +194,7 @@ export class CreateCapsuleExecutor {
       )
 
       await runStep(
-        CreateCapsuleStepKey.CREATE_VOLUMES,
+        CapsuleCreateStepKey.CREATE_VOLUMES,
         {
           count: plan.volumes.length,
         },
@@ -194,7 +202,7 @@ export class CreateCapsuleExecutor {
       )
 
       await runStep(
-        CreateCapsuleStepKey.CREATE_INSTANCE,
+        CapsuleCreateStepKey.CREATE_INSTANCE,
         {
           instanceName: plan.instance.instanceName,
           imageProject: plan.instance.rootfsImagePin.project,
@@ -205,7 +213,7 @@ export class CreateCapsuleExecutor {
       )
 
       await runStep(
-        CreateCapsuleStepKey.WRITE_PROVISIONING_FILES,
+        CapsuleCreateStepKey.WRITE_PROVISIONING_FILES,
         {
           count: plan.files.length,
         },
@@ -216,7 +224,7 @@ export class CreateCapsuleExecutor {
       // completion-step accounting fails before its transaction can run.
       state.completionAttempted = true
       await runStep(
-        CreateCapsuleStepKey.COMPLETE_CREATE,
+        CapsuleCreateStepKey.COMPLETE_CREATE,
         {
           capsuleStatus: 'active',
           rootBranchStatus: 'offline',
@@ -232,12 +240,12 @@ export class CreateCapsuleExecutor {
         // Aggregate completion already committed. Step-accounting or
         // post-commit invalidation failure cannot reverse the completed create.
         console.error(
-          `[CreateCapsuleExecutor] Capsule create '${operationId}' completed, but post-commit accounting failed.`,
+          `[CapsuleCreateExecutor] Capsule create '${operationId}' completed, but post-commit accounting failed.`,
           error,
         )
         return
       }
-      let compensation: CreateCapsuleCompensationResult | null = null
+      let compensation: CapsuleCreateCompensationResult | null = null
       if (state.providerIntentConfirmed && !state.completionAttempted && context !== null) {
         compensation = await this.dependencies.compensator.compensate(context, state.compensation)
       }
@@ -255,7 +263,7 @@ export class CreateCapsuleExecutor {
     }
   }
 
-  private publishTerminalResult(result: CreateCapsuleTerminalResult): void {
+  private publishTerminalResult(result: CapsuleCreateTerminalResult): void {
     this.dependencies.operationEvents.publishChanged(result.operation)
     this.dependencies.lifecycleEvents.publishChanged(result.operation.ownerId, result.capsule)
     if (result.branch) {

@@ -1,16 +1,22 @@
-import { CapsuleOperationType, type CapsuleBlueprintRegistry, type CapsuleCreateReceipt } from '@qiln/core/server'
+import {
+  CapsuleOperationType,
+  type CapsuleBlueprintRegistry,
+  type CapsuleCreateReceipt,
+  type CapsuleTables,
+} from '@qiln/core/server'
+import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import { createOperationRequestHash } from '../shared'
 import type { OperationSupervisor } from '../../../../coordination'
 import type { IncusImagesClient } from '../../../../incus/client/images'
 import type { CapsuleBranchEventPublisher } from '../../events/branch'
 import type { CapsuleLifecycleEventPublisher, CapsuleOperationEventPublisher } from '../../events'
-import type { CreateCapsuleExecutor } from './executor'
-import type { CreateCapsuleOperationRepository } from './persistence/repository'
-import type { SubmitCreateCapsuleInput } from './types'
+import type { CapsuleCreateExecutor } from './executor'
+import type { CapsuleCreateRepository } from './persistence/repository'
+import type { CapsuleCreateSubmissionInput } from './types'
 
-interface CreateCapsuleRequestIdentity {
+interface CapsuleCreateRequestIdentity {
   operationType: typeof CapsuleOperationType.CREATE
-  actor: SubmitCreateCapsuleInput['actor']
+  actor: CapsuleCreateSubmissionInput['actor']
   rootBranchName: string
   blueprintName: string
   blueprintDigest: string
@@ -23,12 +29,15 @@ interface CreateCapsuleRequestIdentity {
  *
  * Mutable blueprint catalog state is consulted only after the repository has
  * confirmed that no durable idempotent replay exists. Once accepted, the
- * executor reloads the immutable blueprint snapshot from PostgreSQL.
+ * executor reloads the immutable blueprint pin from PostgreSQL.
  */
-export class CreateCapsuleSubmissionService {
+export class CapsuleCreateSubmissionService<
+  TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
+  TTables extends CapsuleTables = CapsuleTables,
+> {
   constructor(
-    private readonly repository: CreateCapsuleOperationRepository,
-    private readonly executor: CreateCapsuleExecutor,
+    private readonly repository: CapsuleCreateRepository<TDatabase, TTables>,
+    private readonly executor: CapsuleCreateExecutor<TDatabase, TTables>,
     private readonly supervisor: OperationSupervisor,
     private readonly blueprints: CapsuleBlueprintRegistry,
     private readonly images: IncusImagesClient,
@@ -37,7 +46,7 @@ export class CreateCapsuleSubmissionService {
     private readonly branchEvents: CapsuleBranchEventPublisher,
   ) {}
 
-  public async submit(input: SubmitCreateCapsuleInput): Promise<CapsuleCreateReceipt> {
+  public async submit(input: CapsuleCreateSubmissionInput): Promise<CapsuleCreateReceipt> {
     const requestHash = createOperationRequestHash(
       {
         operationType: CapsuleOperationType.CREATE,
@@ -47,7 +56,7 @@ export class CreateCapsuleSubmissionService {
         blueprintDigest: input.blueprintDigest,
         cpu: input.cpu,
         memory: input.memory,
-      } satisfies CreateCapsuleRequestIdentity,
+      } satisfies CapsuleCreateRequestIdentity,
       'capsule create request',
     )
 
@@ -70,9 +79,7 @@ export class CreateCapsuleSubmissionService {
     const acceptance = await this.repository.accept({
       ...input,
       requestHash,
-      blueprintName: blueprintPin.name,
-      blueprintDigest: blueprintPin.digest,
-      blueprintSnapshot: blueprintPin.blueprint,
+      blueprintPin,
       rootfsImagePin,
     })
     if (!acceptance.newlyAccepted) {

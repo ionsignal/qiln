@@ -7,13 +7,13 @@ import {
 } from '@qiln/core/server'
 import { IncusError } from '../../../../../errors'
 import { createCapsuleBranchResourceInventoryDigest } from '../../../resource/inventory'
-import { createResourceInventoryEntries } from '../../../resource/plan'
+import { createResourceInventoryEntries } from '../resource/plan'
 import { toCreateOperationTransition } from './result'
 import type { CapsuleOperationTransitionOutput } from '../../shared'
-import type { CreateCapsuleInventoryPolicy } from '../policy/inventory'
-import type { CreateResourceLineage } from '../../../resource/lineage'
-import type { CreateCapsuleExecutionInput } from '../types'
-import type { CreateCapsuleLocks, CreateTransaction } from './locks'
+import type { CapsuleCreateInventoryPolicy } from '../policy/inventory'
+import type { CapsuleCreateResourceLineage } from '../resource/lineage'
+import type { CapsuleCreateExecutionInput } from '../types'
+import type { CapsuleCreateLocks, CreateTransaction } from './locks'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
 /**
@@ -22,18 +22,18 @@ import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
  * Each authority boundary validates its locked operation and lineage. Provider
  * execution cannot reuse a transport payload as immutable execution authority.
  */
-export class CreateCapsuleExecution<
+export class CapsuleCreateExecution<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
   TTables extends CapsuleTables = CapsuleTables,
 > {
   constructor(
     private readonly persistence: CapsulePersistence<TDatabase, TTables>,
-    private readonly locks: CreateCapsuleLocks<TDatabase, TTables>,
-    private readonly lineage: CreateResourceLineage<TTables>,
-    private readonly inventory: CreateCapsuleInventoryPolicy,
+    private readonly locks: CapsuleCreateLocks<TDatabase, TTables>,
+    private readonly lineage: CapsuleCreateResourceLineage<TTables>,
+    private readonly inventory: CapsuleCreateInventoryPolicy<TTables>,
   ) {}
 
-  public async loadExecution(operationId: string): Promise<CreateCapsuleExecutionInput> {
+  public async loadExecution(operationId: string): Promise<CapsuleCreateExecutionInput> {
     return await this.persistence.db.transaction(async tx => {
       const { operation, lineage } = await this.lockInput(tx, operationId, CapsuleOperationStatus.ACCEPTED)
       return {
@@ -42,9 +42,7 @@ export class CreateCapsuleExecution<
         ownerId: operation.ownerId,
         rootBranchId: lineage.rootBranch.id,
         rootBranchName: lineage.extension.rootBranchName,
-        blueprintName: lineage.extension.blueprintName,
-        blueprintDigest: lineage.blueprintDigest,
-        blueprintSnapshot: lineage.blueprint,
+        blueprintPin: lineage.blueprintPin,
         rootfsImagePin: lineage.rootfsImagePin,
         cpu: lineage.extension.cpu,
         memory: lineage.extension.memory,
@@ -78,7 +76,7 @@ export class CreateCapsuleExecution<
           operationId,
         })
       }
-      return toCreateOperationTransition(claimed)
+      return toCreateOperationTransition<TTables>(claimed)
     })
   }
 

@@ -1,36 +1,33 @@
 import {
-  CapsuleBlueprintDigestSchema,
-  CapsuleBlueprintSchema,
   CapsuleOperationType,
-  digestCanonicalJsonValue,
-  type CapsuleBlueprint,
-  type CapsuleBlueprintDigest,
+  verifyCapsuleBlueprintPin,
+  type CapsuleBlueprintPin,
   type CapsuleRootfsImagePin,
   type CapsuleTables,
 } from '@qiln/core/server'
-import { IncusError } from '../../../errors'
-import { readRootfs } from '../operations/shared/rootfs'
+import { IncusError } from '../../../../../errors'
+import { readRootfs } from '../../shared/rootfs'
 
-export type CreateOperationRow<TTables extends CapsuleTables = CapsuleTables> =
+export type CapsuleCreateOperationRow<TTables extends CapsuleTables = CapsuleTables> =
   TTables['capsuleOperations']['$inferSelect']
 
-export type CreateExtensionRow<TTables extends CapsuleTables = CapsuleTables> =
+export type CapsuleCreateExtensionRow<TTables extends CapsuleTables = CapsuleTables> =
   TTables['capsuleCreateOperations']['$inferSelect']
 
-export type CreateBranchRow<TTables extends CapsuleTables = CapsuleTables> = TTables['capsuleBranches']['$inferSelect']
+export type CapsuleCreateBranchRow<TTables extends CapsuleTables = CapsuleTables> =
+  TTables['capsuleBranches']['$inferSelect']
 
-export interface ValidatedCreateLineage<TTables extends CapsuleTables = CapsuleTables> {
-  extension: CreateExtensionRow<TTables>
-  rootBranch: CreateBranchRow<TTables>
-  blueprintDigest: CapsuleBlueprintDigest
-  blueprint: CapsuleBlueprint
+export interface ValidatedCapsuleCreateLineage<TTables extends CapsuleTables = CapsuleTables> {
+  extension: CapsuleCreateExtensionRow<TTables>
+  rootBranch: CapsuleCreateBranchRow<TTables>
+  blueprintPin: CapsuleBlueprintPin
   rootfsImagePin: CapsuleRootfsImagePin
 }
 
-export type CreateLineageInspection<TTables extends CapsuleTables = CapsuleTables> =
+export type CapsuleCreateLineageInspection<TTables extends CapsuleTables = CapsuleTables> =
   | {
       valid: true
-      lineage: ValidatedCreateLineage<TTables>
+      lineage: ValidatedCapsuleCreateLineage<TTables>
     }
   | {
       valid: false
@@ -44,16 +41,16 @@ export type CreateLineageInspection<TTables extends CapsuleTables = CapsuleTable
  * PostgreSQL foreign keys prove row references but cannot prove that the base
  * operation discriminator, root branch, Blueprint pin, and rootfs pin agree.
  *
- * Each inspection parses and hashes its pins once. Callers at independent
- * authority boundaries inspect their own durable input rather than sharing a
- * long-lived validation cache.
+ * Each inspection verifies its pins once. Callers at independent authority
+ * boundaries inspect their own durable input rather than sharing a long-lived
+ * validation cache.
  */
-export class CreateResourceLineage<TTables extends CapsuleTables = CapsuleTables> {
+export class CapsuleCreateResourceLineage<TTables extends CapsuleTables = CapsuleTables> {
   public validate(
-    operation: Pick<CreateOperationRow<TTables>, 'id' | 'ownerId' | 'capsuleId' | 'type'>,
-    extension: CreateExtensionRow<TTables>,
-    rootBranches: readonly CreateBranchRow<TTables>[],
-  ): ValidatedCreateLineage<TTables> {
+    operation: Pick<CapsuleCreateOperationRow<TTables>, 'id' | 'ownerId' | 'capsuleId' | 'type'>,
+    extension: CapsuleCreateExtensionRow<TTables>,
+    rootBranches: readonly CapsuleCreateBranchRow<TTables>[],
+  ): ValidatedCapsuleCreateLineage<TTables> {
     const inspection = this.inspect(operation, extension, rootBranches)
     if (!inspection.valid) {
       throw new IncusError(
@@ -75,10 +72,10 @@ export class CreateResourceLineage<TTables extends CapsuleTables = CapsuleTables
    * classification can conservatively retain cleanup-required state.
    */
   public inspect(
-    operation: Pick<CreateOperationRow<TTables>, 'id' | 'ownerId' | 'capsuleId' | 'type'>,
-    extension: CreateExtensionRow<TTables> | null,
-    rootBranches: readonly CreateBranchRow<TTables>[],
-  ): CreateLineageInspection<TTables> {
+    operation: Pick<CapsuleCreateOperationRow<TTables>, 'id' | 'ownerId' | 'capsuleId' | 'type'>,
+    extension: CapsuleCreateExtensionRow<TTables> | null,
+    rootBranches: readonly CapsuleCreateBranchRow<TTables>[],
+  ): CapsuleCreateLineageInspection<TTables> {
     const contradictions: string[] = []
     if (operation.type !== CapsuleOperationType.CREATE) {
       contradictions.push('base_operation_type_is_not_create')
@@ -141,8 +138,7 @@ export class CreateResourceLineage<TTables extends CapsuleTables = CapsuleTables
         lineage: {
           extension,
           rootBranch,
-          blueprintDigest: pin.blueprintDigest,
-          blueprint: pin.blueprint,
+          blueprintPin: pin.blueprintPin,
           rootfsImagePin: pin.rootfsImagePin,
         },
       }
@@ -154,47 +150,23 @@ export class CreateResourceLineage<TTables extends CapsuleTables = CapsuleTables
     }
   }
 
-  private pin(extension: CreateExtensionRow<TTables>): {
-    blueprintDigest: CapsuleBlueprintDigest
-    blueprint: CapsuleBlueprint
+  private pin(extension: CapsuleCreateExtensionRow<TTables>): {
+    blueprintPin: CapsuleBlueprintPin
     rootfsImagePin: CapsuleRootfsImagePin
   } {
-    const blueprintDigest = CapsuleBlueprintDigestSchema.safeParse(extension.blueprintDigest)
-    if (!blueprintDigest.success) {
-      throw new IncusError('Capsule create operation contains an invalid Blueprint digest.', 'CONFLICT', {
+    const blueprintPin = verifyCapsuleBlueprintPin(extension.blueprintPin)
+    if (blueprintPin.name !== extension.blueprintName || blueprintPin.digest !== extension.blueprintDigest) {
+      throw new IncusError('Pinned Blueprint does not match the immutable create identity.', 'CONFLICT', {
         operationId: extension.operationId,
+        blueprintName: extension.blueprintName,
         blueprintDigest: extension.blueprintDigest,
-      })
-    }
-    const blueprint = CapsuleBlueprintSchema.safeParse(extension.blueprintSnapshot)
-    if (!blueprint.success) {
-      throw new IncusError('Capsule create operation contains an invalid pinned Blueprint snapshot.', 'CONFLICT', {
-        operationId: extension.operationId,
-        blueprintName: extension.blueprintName,
-      })
-    }
-    if (blueprint.data.name !== extension.blueprintName) {
-      throw new IncusError('Pinned Blueprint name does not match the immutable create identity.', 'CONFLICT', {
-        operationId: extension.operationId,
-        blueprintName: extension.blueprintName,
-        pinnedBlueprintName: blueprint.data.name,
-      })
-    }
-    const actualDigest = digestCanonicalJsonValue(blueprint.data, {
-      context: `capsule create operation '${extension.operationId}' pinned Blueprint`,
-    })
-    if (actualDigest !== blueprintDigest.data) {
-      throw new IncusError('Pinned Blueprint does not match its immutable digest.', 'CONFLICT', {
-        operationId: extension.operationId,
-        blueprintName: extension.blueprintName,
-        expectedDigest: blueprintDigest.data,
-        actualDigest,
+        pinnedBlueprintName: blueprintPin.name,
+        pinnedBlueprintDigest: blueprintPin.digest,
       })
     }
     return {
-      blueprintDigest: blueprintDigest.data,
-      blueprint: blueprint.data,
-      rootfsImagePin: readRootfs(extension.rootfsImagePin, blueprint.data.image_alias, {
+      blueprintPin,
+      rootfsImagePin: readRootfs(extension.rootfsImagePin, blueprintPin.blueprint.image_alias, {
         operationId: extension.operationId,
         blueprintName: extension.blueprintName,
         blueprintDigest: extension.blueprintDigest,

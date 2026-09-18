@@ -16,7 +16,7 @@ export type CreateTransaction<TDatabase extends PostgresJsDatabase> = Parameters
  * Reloading the already-locked capsule does not change this parent-first
  * order.
  */
-export class CreateCapsuleLocks<
+export class CapsuleCreateLocks<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
   TTables extends CapsuleTables = CapsuleTables,
 > {

@@ -9,10 +9,10 @@ import {
 } from '@qiln/core/server'
 import { IncusError } from '../../../../../errors'
 import { toCreateTerminalResult } from './result'
-import type { CreateCapsuleTerminalResult } from '../types'
-import type { CreateCapsuleInventoryPolicy } from '../policy/inventory'
-import type { CreateResourceLineage } from '../../../resource/lineage'
-import type { CreateCapsuleLocks } from './locks'
+import type { CapsuleCreateTerminalResult } from '../types'
+import type { CapsuleCreateInventoryPolicy } from '../policy/inventory'
+import type { CapsuleCreateResourceLineage } from '../resource/lineage'
+import type { CapsuleCreateLocks } from './locks'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 
 /**
@@ -23,18 +23,18 @@ import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
  * This boundary performs no live Incus discovery. Provider state that cannot be
  * proven from the durable ledger must be classified cleanup-required instead.
  */
-export class CreateCapsuleCompletion<
+export class CapsuleCreateCompletion<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
   TTables extends CapsuleTables = CapsuleTables,
 > {
   constructor(
     private readonly persistence: CapsulePersistence<TDatabase, TTables>,
-    private readonly locks: CreateCapsuleLocks<TDatabase, TTables>,
-    private readonly lineage: CreateResourceLineage<TTables>,
-    private readonly inventory: CreateCapsuleInventoryPolicy,
+    private readonly locks: CapsuleCreateLocks<TDatabase, TTables>,
+    private readonly lineage: CapsuleCreateResourceLineage<TTables>,
+    private readonly inventory: CapsuleCreateInventoryPolicy<TTables>,
   ) {}
 
-  public async complete(operationId: string): Promise<CreateCapsuleTerminalResult> {
+  public async complete(operationId: string): Promise<CapsuleCreateTerminalResult> {
     const { capsuleOperations, capsules, capsuleBranches } = this.persistence.tables
     return await this.persistence.db.transaction(async tx => {
       const operation = await this.locks.operation(tx, operationId)
@@ -150,7 +150,7 @@ export class CreateCapsuleCompletion<
           operationId,
         })
       }
-      return toCreateTerminalResult(completedOperation, activeCapsule, offlineBranch)
+      return toCreateTerminalResult<TTables>(completedOperation, activeCapsule, offlineBranch)
     })
   }
 }

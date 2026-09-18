@@ -1,6 +1,11 @@
 import { z } from 'zod'
-import { CapsuleBlueprintDigestSchema, DEFAULT_CAPSULE_BLUEPRINT_NAME } from '../../../schemas/blueprint/catalog'
+import {
+  CapsuleBlueprintDigestSchema,
+  CapsuleBlueprintIdentifierSchema,
+  DEFAULT_CAPSULE_BLUEPRINT_NAME,
+} from '../../../schemas/blueprint'
 import { CapsuleActorReferenceSchema } from '../../../schemas/capsule/actor'
+import { CapsuleBranchNameSchema } from '../../../schemas/capsule/branch'
 import { CapsuleCreateReceiptSchema, CapsuleOperationIdempotencyKeySchema } from '../../../schemas/capsule/operations'
 import { TargetOwnerSchema, TargetType } from '../targets'
 import { defineCapsuleCommand } from '../definitions'
@@ -30,20 +35,9 @@ export const CapsuleCreateInputSchema = z
   .object({
     target: TargetOwnerSchema,
     actor: CapsuleActorReferenceSchema,
-    rootBranchName: z
-      .string()
-      .min(1)
-      .max(50)
-      .regex(
-        /^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,48}[a-zA-Z0-9])?$/,
-        'Capsule branch name must be alphanumeric, can contain hyphens, but cannot start or end with a hyphen.',
-      ),
+    rootBranchName: CapsuleBranchNameSchema,
     idempotencyKey: CapsuleOperationIdempotencyKeySchema,
-    blueprintName: z
-      .string()
-      .trim()
-      .min(1, 'Capsule blueprint name cannot be empty.')
-      .default(DEFAULT_CAPSULE_BLUEPRINT_NAME),
+    blueprintName: CapsuleBlueprintIdentifierSchema.default(DEFAULT_CAPSULE_BLUEPRINT_NAME),
     blueprintDigest: CapsuleBlueprintDigestSchema,
     cpu: z.string().trim().min(1, 'CPU limit cannot be empty.').default('4'),
     memory: z.string().trim().min(1, 'Memory limit cannot be empty.').default('4GB'),

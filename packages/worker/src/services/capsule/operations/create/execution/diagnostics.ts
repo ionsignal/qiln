@@ -1,22 +1,22 @@
 import { failureCodeFromUnknown, failureMessageFromUnknown, normalizeFailureDetails } from '../../../failures'
-import { CreatePhase } from './phases'
-import type { CreateCapsuleFailureDisposition, CreateCapsuleFailureFacts } from '../policy/failure'
-import type { CreateCapsuleCompensationFailure, CreateCapsuleCompensationResult } from '../types'
+import { CapsuleCreatePhase } from './phases'
+import type { CapsuleCreateFailureDisposition, CapsuleCreateFailureFacts } from '../policy/failure'
+import type { CapsuleCreateCompensationFailure, CapsuleCreateCompensationResult } from '../types'
 
-export interface CreateCapsuleFailureIdentity {
+export interface CapsuleCreateFailureIdentity {
   operationId: string
   capsuleId: string
   rootBranchId: string | null
   rootBranchName: string | null
 }
 
-export interface CreateCapsuleFailureContextInput {
-  identity: CreateCapsuleFailureIdentity
-  phase: CreatePhase
-  failedPhase?: CreatePhase
-  disposition: CreateCapsuleFailureDisposition
-  facts: CreateCapsuleFailureFacts
-  compensation: CreateCapsuleCompensationResult | null
+export interface CapsuleCreateFailureContextInput {
+  identity: CapsuleCreateFailureIdentity
+  phase: CapsuleCreatePhase
+  failedPhase?: CapsuleCreatePhase
+  disposition: CapsuleCreateFailureDisposition
+  facts: CapsuleCreateFailureFacts
+  compensation: CapsuleCreateCompensationResult | null
   contradictions: readonly string[]
 }
 
@@ -25,7 +25,7 @@ export interface CreateCapsuleFailureContextInput {
  * one diagnostic envelope rather than forwarding positional execution facts
  * through several terminalization helpers.
  */
-export function createCreateCapsuleFailureContext(input: CreateCapsuleFailureContextInput): Record<string, unknown> {
+export function createCapsuleCreateFailureContext(input: CapsuleCreateFailureContextInput): Record<string, unknown> {
   return {
     phase: input.phase,
     disposition: input.disposition,
@@ -37,14 +37,14 @@ export function createCreateCapsuleFailureContext(input: CreateCapsuleFailureCon
   }
 }
 
-export function createCreateCapsuleCompensationFailure(input: {
+export function createCapsuleCreateCompensationFailure(input: {
   action: string
   error: unknown
   resourceId: string
   resourceKey: string
-}): CreateCapsuleCompensationFailure {
-  const failure: CreateCapsuleCompensationFailure = {
-    phase: CreatePhase.COMPENSATION,
+}): CapsuleCreateCompensationFailure {
+  const failure: CapsuleCreateCompensationFailure = {
+    phase: CapsuleCreatePhase.COMPENSATION,
     action: input.action,
     code: failureCodeFromUnknown(input.error),
     message: failureMessageFromUnknown(input.error, 'Unknown capsule create compensation failure.'),
