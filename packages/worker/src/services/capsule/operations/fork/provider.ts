@@ -1,24 +1,11 @@
 import { IncusError } from '../../../../errors'
-import type { IncusClient } from '../../../../incus/client'
-import type { ProjectService } from '../../../project'
-import type { CapsuleBranchResourceStore } from '../../resource'
-import type { CapsuleResourceDriver } from '../../resource/driver'
 import type { ForkExecution } from './types'
-
-export interface ForkProviderDependencies {
-  incus: IncusClient
-  project: ProjectService
-  resources: CapsuleBranchResourceStore
-  driver: CapsuleResourceDriver
-}
 
 /**
  * Fork provider execution remains unavailable while fork accounting is being
  * reworked to match the current create and destroy evidence model.
  */
 export class ForkProvider {
-  constructor(_dependencies: ForkProviderDependencies) {}
-
   public async rootfs(_input: ForkExecution): Promise<void> {
     this.unavailable()
   }
