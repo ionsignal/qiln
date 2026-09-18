@@ -60,7 +60,7 @@ export function createResourceInventoryEntries(
  * Blueprint alias remains audit evidence only and must not be resolved during
  * provider execution.
  */
-export class CreateResourcePlanner {
+export class CapsuleCreateResourcePlanner {
   public plan(input: CapsuleCreateResourcePlanInput): CapsuleCreateResourcePlan {
     const { namespace, rootBranchId, rootBranchName, cpu, memory, rootfsImagePin } = input
     // Reuse the verified immutable Blueprint pin before resolving any
