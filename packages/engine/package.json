@@ -21,19 +21,19 @@
   },
   "peerDependencies": {
     "@nats-io/transport-node": "3.4.0",
-    "@trpc/server": "11.18.0",
-    "@trpc/client": "11.18.0",
+    "@trpc/server": "11.19.0",
+    "@trpc/client": "11.19.0",
     "drizzle-orm": "1.0.0-rc.4",
-    "fastify": "5.12.4",
+    "fastify": "5.12.5",
     "fastify-plugin": "6.0.0",
     "naive-ui": "2.45.3",
-    "vue": "3.5.42",
+    "vue": "3.5.43",
     "zod": "4.6.5"
   },
   "devDependencies": {
     "@nats-io/transport-node": "3.4.0",
-    "@trpc/server": "11.18.0",
-    "@trpc/client": "11.18.0",
+    "@trpc/server": "11.19.0",
+    "@trpc/client": "11.19.0",
     "@types/node": "22.20.3",
     "@vitejs/plugin-vue": "6.0.9",
     "drizzle-orm": "1.0.0-rc.4",
@@ -41,7 +41,7 @@
     "typescript": "6.0.3",
     "vite": "8.3.0",
     "vite-plugin-dts": "5.1.0",
-    "vue": "3.5.42",
+    "vue": "3.5.43",
     "@vue-flow/core": "1.48.2"
   },
   "dependencies": {
