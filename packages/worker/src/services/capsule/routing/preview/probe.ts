@@ -1,7 +1,7 @@
-import { fetch } from 'undici'
 import { CapsuleRouteVerificationEvidenceSchema, type CapsuleRouteVerificationEvidence } from '@qiln/core/server'
 import { IncusError } from '../../../../errors'
 import { parseRoutingIngressEndpoint } from '../../../../endpoint'
+import { RoutingHttpProbe } from '../http'
 import type { PreviewPlan } from './types'
 
 export interface PreviewProbeOptions {
@@ -11,11 +11,11 @@ export interface PreviewProbeOptions {
 
 export class PreviewProbe {
   private readonly ingressBaseUrl: string
-  private readonly timeoutMs: number
+  private readonly http: RoutingHttpProbe
 
   constructor(options: PreviewProbeOptions) {
     this.ingressBaseUrl = parseRoutingIngressEndpoint(options.ingressEndpoint).baseUrl
-    this.timeoutMs = options.timeoutMs
+    this.http = new RoutingHttpProbe(options.timeoutMs)
   }
 
   public async upstream(plan: PreviewPlan): Promise<void> {
@@ -43,70 +43,50 @@ export class PreviewProbe {
   }
 
   private async request(url: string, plan: PreviewPlan, ingress: boolean): Promise<void> {
-    const controller = new AbortController()
-    const timeout = setTimeout(() => {
-      controller.abort()
-    }, this.timeoutMs)
-    timeout.unref()
-    try {
-      const response = await fetch(url, {
-        method: plan.verificationMethod,
-        headers: ingress
-          ? {
-              Host: plan.host,
-            }
-          : undefined,
-        redirect: 'manual',
-        signal: controller.signal,
-      })
-      try {
-        if (!plan.expectedStatuses.includes(response.status)) {
-          throw new IncusError(
-            ingress
-              ? 'Preview route verification returned an unexpected status.'
-              : 'Preview upstream verification returned an unexpected status.',
-            'CONFLICT',
-            {
-              previewId: plan.previewId,
-              branchId: plan.branchId,
-              applicationName: plan.applicationName,
-              status: response.status,
-              expectedStatuses: plan.expectedStatuses,
-              ingress,
-            },
-          )
-        }
-      } finally {
-        if (response.body) {
-          await response.body.cancel().catch(() => {})
-        }
-      }
-    } catch (error: unknown) {
-      if (error instanceof IncusError) {
-        throw error
-      }
+    const result = await this.http.request({
+      url,
+      method: plan.verificationMethod,
+      expectedStatuses: plan.expectedStatuses,
+      ...(ingress ? { virtualHost: plan.host } : {}),
+    })
+    if (result.kind === 'success') {
+      return
+    }
+    if (result.kind === 'unexpected_status') {
       throw new IncusError(
-        ingress ? 'Preview route verification failed.' : 'Preview upstream verification failed.',
-        'TRANSPORT_ERROR',
+        ingress
+          ? 'Preview route verification returned an unexpected status.'
+          : 'Preview upstream verification returned an unexpected status.',
+        'CONFLICT',
         {
           previewId: plan.previewId,
           branchId: plan.branchId,
           applicationName: plan.applicationName,
+          status: result.status,
+          expectedStatuses: plan.expectedStatuses,
           ingress,
-          timedOut: controller.signal.aborted,
-          error:
-            error instanceof Error
-              ? {
-                  name: error.name,
-                  message: error.message,
-                }
-              : {
-                  value: error,
-                },
         },
       )
-    } finally {
-      clearTimeout(timeout)
     }
+    throw new IncusError(
+      ingress ? 'Preview route verification failed.' : 'Preview upstream verification failed.',
+      'TRANSPORT_ERROR',
+      {
+        previewId: plan.previewId,
+        branchId: plan.branchId,
+        applicationName: plan.applicationName,
+        ingress,
+        timedOut: result.kind === 'timeout',
+        error:
+          result.error instanceof Error
+            ? {
+                name: result.error.name,
+                message: result.error.message,
+              }
+            : {
+                value: result.error,
+              },
+      },
+    )
   }
 }

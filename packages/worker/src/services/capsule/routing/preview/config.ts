@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { CapsuleRouteHostSchema } from '@qiln/core/server'
-import { parseRoutingIngressEndpoint } from '../../../../endpoint'
+import { parseRoutingIngressEndpoint, parseRoutingPublicOrigin } from '../../../../endpoint'
 import { IncusError } from '../../../../errors'
 import type { WorkerRoutingConfig } from '../../../../types'
 
@@ -38,6 +38,15 @@ export function validatePreviewConfig(config: WorkerRoutingConfig): void {
       {
         ingressEndpoint: config.ingressEndpoint,
       },
+    )
+  }
+
+  try {
+    parseRoutingPublicOrigin(config.publicOrigin)
+  } catch (error: unknown) {
+    throw new IncusError(
+      error instanceof Error ? error.message : 'Preview routing public origin is invalid.',
+      'VALIDATION_ERROR',
     )
   }
 

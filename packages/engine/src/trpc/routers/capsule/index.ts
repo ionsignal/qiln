@@ -10,11 +10,12 @@ import {
   CapsuleUnarchiveOperationOutputSchema,
   DEFAULT_CAPSULE_BLUEPRINT_NAME,
 } from '@qiln/core/server'
-import { protectedProcedure, router } from '../../init'
+import { protectedProcedure, router, t } from '../../init'
 import { createUserMutationIdentity } from '../../identity'
 import { handleEngineError } from '../../utils'
 import { capsuleBranchesRouter } from './branches'
 import { capsuleOperationsRouter } from './operations'
+import { capsuleReadRouter } from './read'
 import { capsuleSnapshotsRouter } from './snapshots'
 
 const CapsuleLifecycleRequestSchema = z
@@ -44,7 +45,7 @@ const CapsuleCreateMutationInputSchema = z
   })
   .strict()
 
-export const capsuleRouter = router({
+const capsuleOperationsAndBranchesRouter = router({
   create: protectedProcedure
     .input(CapsuleCreateMutationInputSchema)
     .output(CapsuleCreateOutputSchema)
@@ -97,3 +98,4 @@ export const capsuleRouter = router({
   operations: capsuleOperationsRouter,
   snapshots: capsuleSnapshotsRouter,
 })
+export const capsuleRouter = t.mergeRouters(capsuleReadRouter, capsuleOperationsAndBranchesRouter)

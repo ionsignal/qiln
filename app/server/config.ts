@@ -25,7 +25,8 @@ const defaultIncusEndpoint = 'unix:///run/qiln-incus.sock'
 const defaultCaddyEndpoint = 'unix:///run/qiln-caddy/admin.sock'
 const defaultCaddyServer = 'qiln'
 const defaultCaddyFallbackId = 'qiln-route-fallback-experimental'
-const defaultRouteBaseDomain = 'edge.ionsignal.com'
+const defaultRouteBaseDomain = 'edge.qiln.com'
+const defaultRoutingPublicOrigin = 'https://edge.qiln.com'
 const defaultRoutingIngressEndpoint = 'http://127.0.0.1:8080'
 
 // Helper to get the application path
@@ -112,6 +113,7 @@ export default {
   },
   routing: {
     baseDomain: process.env.QILN_ROUTE_BASE_DOMAIN || defaultRouteBaseDomain,
+    publicOrigin: process.env.QILN_ROUTING_PUBLIC_ORIGIN ?? defaultRoutingPublicOrigin,
     ingressEndpoint: process.env.QILN_ROUTING_INGRESS_ENDPOINT || defaultRoutingIngressEndpoint,
     reconcileIntervalMs: parseInt(process.env.QILN_PREVIEW_RECONCILE_INTERVAL_MS ?? '15000', 10),
     verificationTimeoutMs: parseInt(process.env.QILN_PREVIEW_VERIFICATION_TIMEOUT_MS ?? '10000', 10),

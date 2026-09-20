@@ -2,6 +2,7 @@ import type { CapsuleTables } from '@qiln/core/server'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import type { CapsuleBranchRuntimeService } from './branch/service'
 import type { DiffService } from './diff/service'
+import type { CapsuleReadService } from './read/service'
 import type { CapsuleRuntimeReconciliationCoordinator } from './reconciliation'
 import type { CapsuleOperationAbandonmentCoordinator } from './operations/abandonment/coordinator'
 import type { CapsuleArchiveSubmissionService } from './operations/archival/archive/submission'
@@ -35,6 +36,7 @@ export interface CapsuleServiceCapabilities<
   start: BranchSubmission<'branch_start'>
   stop: BranchSubmission<'branch_stop'>
   branch: CapsuleBranchRuntimeService
+  read: CapsuleReadService<TDatabase, TTables>
   snapshot: CapsuleSnapshotService
   diff: DiffService
   route: CommittedRouteService
@@ -63,6 +65,7 @@ export class CapsuleService<
   public readonly start: BranchSubmission<'branch_start'>
   public readonly stop: BranchSubmission<'branch_stop'>
   public readonly branch: CapsuleBranchRuntimeService
+  public readonly read: CapsuleReadService<TDatabase, TTables>
   public readonly snapshot: CapsuleSnapshotService
   public readonly diff: DiffService
   public readonly route: CommittedRouteService
@@ -81,6 +84,7 @@ export class CapsuleService<
     this.start = capabilities.start
     this.stop = capabilities.stop
     this.branch = capabilities.branch
+    this.read = capabilities.read
     this.snapshot = capabilities.snapshot
     this.diff = capabilities.diff
     this.route = capabilities.route

@@ -3,6 +3,7 @@ import { CapsuleEventHub } from './events/capsule'
 import { CapsuleBlueprintService } from './services/blueprints'
 import { CapsuleBranchesService } from './services/capsule/branches'
 import { CapsuleOperationsService } from './services/capsule/operations'
+import { CapsuleReadService } from './services/capsule/read'
 import { CapsuleSnapshotsService } from './services/capsule/snapshots'
 import type { EnginePersistence } from './persistence'
 import type { EngineConfig } from './types'
@@ -16,6 +17,7 @@ export class QilnEngineController {
   public readonly blueprints: CapsuleBlueprintService
   public readonly capsuleOperations: CapsuleOperationsService
   public readonly capsuleBranches: CapsuleBranchesService
+  public readonly capsuleRead: CapsuleReadService
   public readonly capsuleSnapshots: CapsuleSnapshotsService
 
   private started = false
@@ -34,6 +36,7 @@ export class QilnEngineController {
     this.blueprints = new CapsuleBlueprintService(this.channel)
     this.capsuleOperations = new CapsuleOperationsService(persistence, this.channel)
     this.capsuleBranches = new CapsuleBranchesService(persistence, this.channel)
+    this.capsuleRead = new CapsuleReadService(this.channel)
     this.capsuleSnapshots = new CapsuleSnapshotsService(persistence, this.channel)
   }
 

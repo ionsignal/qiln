@@ -3,6 +3,7 @@ import { registerCapsuleBlueprintHandlers } from './handlers/blueprint'
 import { registerCapsuleBranchHandlers } from './handlers/capsule/branch'
 import { registerCapsuleCreateHandler } from './handlers/capsule/create'
 import { registerCapsuleForkHandler } from './handlers/capsule/fork'
+import { registerCapsuleReadHandlers } from './handlers/capsule/read'
 import { registerCapsuleRouteHandlers } from './handlers/capsule/routing'
 import { registerCapsuleSnapshotHandlers } from './handlers/capsule/snapshot'
 import { registerCapsulePreviewHandlers } from './handlers/capsule/preview'
@@ -23,6 +24,7 @@ export function registerCapsuleChannelHandlers(worker: QilnWorkerRuntime): void 
   registerCapsuleCreateHandler(worker)
   registerCapsuleForkHandler(worker)
   registerCapsuleBranchHandlers(worker)
+  registerCapsuleReadHandlers(worker)
   registerCapsuleSnapshotHandlers(worker)
   registerCapsulePreviewHandlers(worker)
   registerCapsuleRouteHandlers(worker)

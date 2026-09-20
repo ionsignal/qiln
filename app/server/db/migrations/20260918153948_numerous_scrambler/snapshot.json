@@ -1,7 +1,7 @@
 {
   "version": "8",
   "dialect": "postgres",
-  "id": "0ea9854e-e9c2-4b7d-b86f-704202885809",
+  "id": "9067259d-464b-4a5c-bdde-8b2febf52043",
   "prevIds": [
     "00000000-0000-0000-0000-000000000000"
   ],
@@ -2367,7 +2367,7 @@
       "default": null,
       "generated": null,
       "identity": null,
-      "name": "blueprint_snapshot",
+      "name": "blueprint_pin",
       "entityType": "columns",
       "schema": "public",
       "table": "capsule_create_operations"

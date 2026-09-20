@@ -59,38 +59,57 @@ export class CapsuleBranchProvenance<
     })
   }
 
+  /**
+   * Dashboard reads use their existing consistent transaction without taking
+   * mutation locks. The caller supplies a branch read in that transaction.
+   */
+  public async read(
+    tx: Transaction<TDatabase>,
+    branch: CapsuleBranchProvenanceBranch,
+  ): Promise<CapsuleBranchProvenancePins> {
+    return await this.resolve(tx, branch, false)
+  }
+
   public async lock(
     tx: Transaction<TDatabase>,
     branch: CapsuleBranchProvenanceBranch,
   ): Promise<CapsuleBranchProvenancePins> {
     const current = await this.lockBranch(tx, branch)
+    return await this.resolve(tx, current, true)
+  }
+
+  private async resolve(
+    tx: Transaction<TDatabase>,
+    branch: CapsuleBranchProvenanceBranch,
+    locked: boolean,
+  ): Promise<CapsuleBranchProvenancePins> {
     const tables = this.persistence.tables
-    const creates = await tx
+    const createQuery = tx
       .select()
       .from(tables.capsuleCreateOperations)
-      .where(eq(tables.capsuleCreateOperations.rootBranchId, current.id))
+      .where(eq(tables.capsuleCreateOperations.rootBranchId, branch.id))
       .limit(2)
-      .for('update')
-    const forks = await tx
+    const forkQuery = tx
       .select()
       .from(tables.capsuleForkOperations)
-      .where(eq(tables.capsuleForkOperations.targetBranchId, current.id))
+      .where(eq(tables.capsuleForkOperations.targetBranchId, branch.id))
       .limit(2)
-      .for('update')
-    if (current.isRootBranch) {
+    const creates = await (locked ? createQuery.for('update') : createQuery)
+    const forks = await (locked ? forkQuery.for('update') : forkQuery)
+    if (branch.isRootBranch) {
       if (creates.length !== 1 || forks.length !== 0) {
         throw new IncusError('Root branch does not have exactly one create provenance record.', 'CONFLICT', {
-          branchId: current.id,
+          branchId: branch.id,
         })
       }
-      return await this.fromCreate(tx, current, creates[0]!)
+      return await this.fromCreate(tx, branch, creates[0]!, locked)
     }
     if (creates.length !== 0 || forks.length !== 1) {
       throw new IncusError('Forked branch does not have exactly one fork provenance record.', 'CONFLICT', {
-        branchId: current.id,
+        branchId: branch.id,
       })
     }
-    return await this.fromFork(tx, current, forks[0]!)
+    return await this.fromFork(tx, branch, forks[0]!, locked)
   }
 
   /**
@@ -158,8 +177,9 @@ export class CapsuleBranchProvenance<
     tx: Transaction<TDatabase>,
     branch: CapsuleBranchProvenanceBranch,
     extension: CapsuleTables['capsuleCreateOperations']['$inferSelect'],
+    locked: boolean,
   ): Promise<CapsuleBranchProvenancePins> {
-    await this.assertOperation(tx, extension.operationId, 'create', branch)
+    await this.assertOperation(tx, extension.operationId, 'create', branch, locked)
     if (
       extension.rootBranchId !== branch.id ||
       extension.rootBranchName !== branch.name ||
@@ -198,8 +218,9 @@ export class CapsuleBranchProvenance<
     tx: Transaction<TDatabase>,
     branch: CapsuleBranchProvenanceBranch,
     extension: CapsuleTables['capsuleForkOperations']['$inferSelect'],
+    locked: boolean,
   ): Promise<CapsuleBranchProvenancePins> {
-    await this.assertOperation(tx, extension.operationId, 'fork', branch)
+    await this.assertOperation(tx, extension.operationId, 'fork', branch, locked)
     const blueprint = verifyCapsuleBlueprintPin(extension.blueprintPin)
     const rootfsImagePin = readRootfs(extension.rootfsImagePin, blueprint.blueprint.image_alias, {
       branchId: branch.id,
@@ -246,9 +267,10 @@ export class CapsuleBranchProvenance<
     operationId: string,
     type: typeof CapsuleOperationType.CREATE | typeof CapsuleOperationType.FORK,
     branch: CapsuleBranchProvenanceBranch,
+    locked: boolean,
   ): Promise<void> {
     const operations = this.persistence.tables.capsuleOperations
-    const [operation] = await tx
+    const query = tx
       .select()
       .from(operations)
       .where(
@@ -258,8 +280,8 @@ export class CapsuleBranchProvenance<
           eq(operations.capsuleId, branch.capsuleId),
         ),
       )
-      .for('update')
       .limit(1)
+    const [operation] = await (locked ? query.for('update') : query)
     if (
       !operation ||
       operation.type !== type ||

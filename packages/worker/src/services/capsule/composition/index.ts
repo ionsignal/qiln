@@ -1,5 +1,6 @@
 import { CapsuleService } from '../facade'
 import { CapsuleRuntimeReconciliationCoordinator } from '../reconciliation'
+import { CapsuleBranchProvenance } from '../branch/provenance'
 import { DiffService } from '../diff/service'
 import { CapsuleBranchEventPublisher } from '../events/branch'
 import { CapsuleLifecycleEventPublisher } from '../events/lifecycle'
@@ -11,6 +12,9 @@ import { CapsuleOperationAbandonmentHandlerRegistry } from '../operations/abando
 import { ProviderFreeArchivalOperationLedger } from '../operations/archival/shared/operationLedger'
 import { CapsuleOperationReader } from '../operations/shared/operationReader'
 import { CapsuleOperationStepStore } from '../operations/shared/operationStepStore'
+import { CapsuleReadService } from '../read/service'
+import { CapsuleReadStore } from '../read/store'
+import { PreviewUrl } from '../read/url'
 import { PreviewGate } from '../routing/preview/gate'
 import { composeArchiveCapability } from './archive'
 import { composeBranchCapability } from './branch'
@@ -68,6 +72,11 @@ export function composeCapsuleService<TDatabase extends PostgresJsDatabase, TTab
   const branchEvents = new CapsuleBranchEventPublisher(options.channel)
   const previewEvents = new CapsulePreviewEventPublisher(options.channel)
   const routeEvents = new CapsuleRouteEventPublisher(options.channel)
+  const read = new CapsuleReadService(
+    new CapsuleReadStore(options.persistence),
+    new CapsuleBranchProvenance(options.persistence),
+    new PreviewUrl(options.routing.publicOrigin),
+  )
   const archivalOperationLedger = new ProviderFreeArchivalOperationLedger(options.persistence, operationReader)
   const route = composeRoutingCapability({
     persistence: options.persistence,
@@ -187,6 +196,7 @@ export function composeCapsuleService<TDatabase extends PostgresJsDatabase, TTab
     start: branch.start,
     stop: branch.stop,
     branch: branch.service,
+    read,
     snapshot,
     diff,
     preview: route.preview,

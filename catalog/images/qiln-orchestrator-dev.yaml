@@ -166,6 +166,41 @@ actions:
       systemctl disable qiln-ssh-dev.service
 
 files:
+  # Keep login guidance local and static so MOTD generation never reads
+  # credentials, contacts services, or delays login on infrastructure probes.
+  - path: /etc/update-motd.d/99-qiln
+    generator: dump
+    uid: 0
+    gid: 0
+    mode: '0755'
+    content: |-
+      #!/bin/sh
+      cat <<'EOF'
+
+      ▄█████▄ ██ ██     ███  ██
+      ██   ██ ██ ██     ██ ▀▄██
+      ▀█████▀ ██ ██████ ██   ██
+        ▀▀▀ 
+
+      Qiln · Development Orchestrator
+      Versioned AI workflow capsules
+
+      Paths
+        Checkout       /opt/qiln
+        Web config     /etc/qiln/runtime.env
+        SSH config     /etc/qiln/ssh.env
+
+      Services
+        Status         systemctl status qiln-dev qiln-ssh-dev
+        Logs           journalctl -u qiln-dev -u qiln-ssh-dev -f
+
+      Manual development (from /opt/qiln, in separate terminals)
+        Web + Worker   npm run server:dev
+        SSH authority  npm run ssh:dev
+
+      Development only image
+      EOF
+
   # Incus/cloud-init image templates.
   - name: meta-data
     generator: cloud-init
@@ -874,6 +909,8 @@ files:
       QILN_CADDY_ENDPOINT=http://127.0.0.1:2019
       QILN_CADDY_SERVER=qiln
       QILN_CADDY_FALLBACK_ID=qiln-route-fallback-experimental
+      QILN_ROUTE_BASE_DOMAIN=edge.qiln.com
+      QILN_ROUTING_PUBLIC_ORIGIN=https://edge.qiln.com
       QILN_ROUTING_INGRESS_ENDPOINT=http://127.0.0.1:8080
       QILN_EMBEDDED_WORKER_ENABLED=true
 
@@ -907,8 +944,6 @@ files:
       QILN_SSH_GATEWAY_HOST_ALIAS=qiln-gateway
       QILN_SSH_BRANCH_HOST_ALIAS_PREFIX=qiln
       QILN_SSH_DEFAULT_IDENTITY_FILE=~/.ssh/id_ed25519_qiln
-
-      QILN_ROUTE_BASE_DOMAIN=edge.qiln.com
 
       QILN_SSH_GATEWAY_ENABLED=true
       QILN_SSH_GATEWAY_BIND_HOST=0.0.0.0

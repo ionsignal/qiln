@@ -32,6 +32,7 @@ export interface WorkerCaddyConfig {
 
 export interface WorkerRoutingConfig {
   baseDomain: string
+  publicOrigin: string
   ingressEndpoint: string
   reconcileIntervalMs?: number
   verificationTimeoutMs?: number

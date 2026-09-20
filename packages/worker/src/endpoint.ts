@@ -15,6 +15,7 @@ export interface HttpEndpoint {
 export type IncusEndpoint = UnixSocketEndpoint | HttpEndpoint
 export type CaddyAdminEndpoint = UnixSocketEndpoint | HttpEndpoint
 export type RoutingIngressEndpoint = HttpEndpoint
+export type RoutingPublicOrigin = HttpEndpoint
 
 export class EndpointValidationError extends Error {
   constructor(message: string) {
@@ -159,4 +160,42 @@ export function parseRoutingIngressEndpoint(value: string): RoutingIngressEndpoi
     throw new EndpointValidationError('Routing ingress verification must use a loopback HTTP endpoint.')
   }
   return endpoint
+}
+
+/**
+ * Public routing contributes only the browser scheme and optional port. Its
+ * hostname is replaced by the validated durable preview hostname.
+ */
+export function parseRoutingPublicOrigin(value: string): RoutingPublicOrigin {
+  const label = 'Routing public origin'
+  if (typeof value !== 'string') {
+    throw new EndpointValidationError(`${label} is required.`)
+  }
+
+  assertRawEndpoint(value, label)
+
+  if (!/^https?:\/\/[^/?#\\\s]+\/?$/.test(value)) {
+    throw new EndpointValidationError(
+      `${label} must be an HTTP(S) origin without a non-root path, query string, fragment, or unsafe characters.`,
+    )
+  }
+  const url = parseUrl(value, label)
+
+  assertNoCredentials(url, label)
+  
+  if (
+    (url.protocol !== 'http:' && url.protocol !== 'https:') ||
+    url.hostname === '' ||
+    url.hostname.includes('*') ||
+    url.port === '0' ||
+    url.pathname !== '/' ||
+    url.search !== '' ||
+    url.hash !== ''
+  ) {
+    throw new EndpointValidationError(`${label} must identify one concrete HTTP(S) origin.`)
+  }
+  return {
+    transport: 'http',
+    baseUrl: url.origin,
+  }
 }

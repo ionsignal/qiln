@@ -40,6 +40,11 @@ import {
   CapsulePreviewEventSchemas,
 } from './preview'
 import {
+  CapsuleReadCommandDefinitions,
+  CapsuleReadCommandName,
+  CapsuleReadCommandNameValues,
+} from './read'
+import {
   CapsuleRouteCommandDefinitions,
   CapsuleRouteCommandName,
   CapsuleRouteCommandNameValues,
@@ -71,6 +76,7 @@ export * from './fork'
 export * from './lifecycle'
 export * from './operation'
 export * from './preview'
+export * from './read'
 export * from './routing'
 export * from './snapshot'
 export * from './ssh/index'
@@ -81,6 +87,7 @@ export const CapsuleCommandName = {
   ...CapsuleBranchCommandName,
   ...CapsuleLifecycleCommandName,
   ...CapsulePreviewCommandName,
+  ...CapsuleReadCommandName,
   ...CapsuleRouteCommandName,
   ...CapsuleSnapshotCommandName,
   ...CapsuleSshAccessCommandName,
@@ -96,6 +103,7 @@ export const CapsuleCommandNameValues = [
   ...CapsuleBranchCommandNameValues,
   ...CapsuleLifecycleCommandNameValues,
   ...CapsulePreviewCommandNameValues,
+  ...CapsuleReadCommandNameValues,
   ...CapsuleRouteCommandNameValues,
   ...CapsuleSnapshotCommandNameValues,
   ...CapsuleSshAccessCommandNameValues,
@@ -131,6 +139,7 @@ export const CapsuleCommandDefinitions = {
   ...CapsuleBranchCommandDefinitions,
   ...CapsuleLifecycleCommandDefinitions,
   ...CapsulePreviewCommandDefinitions,
+  ...CapsuleReadCommandDefinitions,
   ...CapsuleRouteCommandDefinitions,
   ...CapsuleSnapshotCommandDefinitions,
   ...CapsuleSshAccessCommandDefinitions,

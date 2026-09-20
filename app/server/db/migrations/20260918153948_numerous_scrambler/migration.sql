@@ -558,7 +558,7 @@ CREATE TABLE "capsule_create_operations" (
 	"root_branch_name" text NOT NULL,
 	"blueprint_name" text NOT NULL,
 	"blueprint_digest" text NOT NULL,
-	"blueprint_snapshot" jsonb NOT NULL,
+	"blueprint_pin" jsonb NOT NULL,
 	"rootfs_image_pin" jsonb NOT NULL,
 	"cpu" text NOT NULL,
 	"memory" text NOT NULL
