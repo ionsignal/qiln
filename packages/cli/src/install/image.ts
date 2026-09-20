@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import { QilnInstallerError } from '../error'
+import { InstallerError } from '../diagnostic/error'
 import { validateContainerImage, validateImagePreflight } from '../checks/image'
 import { toInstallerError } from '../incus/errors'
 import { withStage, type StagedFile } from './files'
@@ -74,26 +74,18 @@ async function validateAliasTarget(
   alias: IncusImageAlias,
 ): Promise<{ fingerprint: string; image: IncusImage }> {
   if (!FULL_FINGERPRINT_PATTERN.test(alias.target)) {
-    throw new QilnInstallerError({
+    throw new InstallerError({
       code: 'MANAGED_IMAGE_ALIAS_TARGET_INVALID',
-      check: 'managed orchestrator image alias',
-      summary: 'The managed image alias does not target a canonical full fingerprint.',
-      observed: `Alias '${alias.name}' targets '${alias.target}'.`,
-      reason: 'The destructive replacement path must identify the exact old provider image before deleting it.',
-      operatorAction: 'Inspect and repair the managed Incus image alias manually before retrying.',
-      rerun: RERUN,
+      facts: [['Observed', `Alias '${alias.name}' targets '${alias.target}'.`]],
+      retry: RERUN,
     })
   }
   const image = await getImage(client, alias.target)
   if (!image || image.fingerprint !== alias.target) {
-    throw new QilnInstallerError({
+    throw new InstallerError({
       code: 'MANAGED_IMAGE_ALIAS_TARGET_MISSING',
-      check: 'managed orchestrator image alias',
-      summary: 'The managed image alias target cannot be retrieved exactly.',
-      observed: `Alias '${alias.name}' targets '${alias.target}', but that full image could not be validated.`,
-      reason: 'Qiln will not delete an unverified or ambiguous image target.',
-      operatorAction: 'Inspect the local Incus image and alias state manually before retrying.',
-      rerun: RERUN,
+      facts: [['Observed', `Alias '${alias.name}' targets '${alias.target}', but that full image could not be validated.`]],
+      retry: RERUN,
     })
   }
   return {
@@ -120,14 +112,10 @@ async function ensureAlias(client: LocalIncusClient, fingerprint: string): Promi
   const existing = await getAlias(client)
   if (existing) {
     if (existing.target !== fingerprint) {
-      throw new QilnInstallerError({
+      throw new InstallerError({
         code: 'MANAGED_IMAGE_ALIAS_CONFLICT',
-        check: 'managed orchestrator image alias',
-        summary: 'The managed image alias points to an unexpected image after replacement cleanup.',
-        observed: `Alias target='${existing.target}', required target='${fingerprint}'.`,
-        reason: 'Qiln does not retarget an unexpected surviving alias implicitly.',
-        operatorAction: 'Inspect the actual Incus image and alias state manually, then rerun qiln up.',
-        rerun: RERUN,
+        facts: [['Observed', `Alias target='${existing.target}', required target='${fingerprint}'.`]],
+        retry: RERUN,
       })
     }
     return existing
@@ -143,14 +131,10 @@ async function ensureAlias(client: LocalIncusClient, fingerprint: string): Promi
   }
   const created = await getAlias(client)
   if (!created || created.name !== INSTALLER_SPEC.orchestrator.imageAlias || created.target !== fingerprint) {
-    throw new QilnInstallerError({
+    throw new InstallerError({
       code: 'MANAGED_IMAGE_ALIAS_VERIFICATION_FAILED',
-      check: 'managed orchestrator image alias',
-      summary: 'The managed image alias could not be verified after creation.',
-      observed: `The required alias did not resolve to '${fingerprint}'.`,
-      reason: 'Qiln commits installation state only after provider image and alias state are both verified.',
-      operatorAction: 'Inspect the local Incus image aliases manually, then rerun qiln up.',
-      rerun: RERUN,
+      facts: [['Observed', `The required alias did not resolve to '${fingerprint}'.`]],
+      retry: RERUN,
     })
   }
   return created
@@ -187,27 +171,19 @@ async function verifySplitResult(
 ): Promise<{ image: IncusImage; alias: IncusImageAlias }> {
   const image = await getImage(client, fingerprint)
   if (!image) {
-    throw new QilnInstallerError({
+    throw new InstallerError({
       code: 'IMPORTED_IMAGE_NOT_FOUND',
-      check: 'split orchestrator image verification',
-      summary: 'The computed image fingerprint is absent after convergence.',
-      observed: `Incus did not return image '${fingerprint}'.`,
-      reason: 'The installer cannot commit an image pin that does not resolve to an exact provider image.',
-      operatorAction: 'Inspect the local Incus image operations and image store, then rerun qiln up.',
-      rerun: RERUN,
+      facts: [['Observed', `Incus did not return image '${fingerprint}'.`]],
+      retry: RERUN,
     })
   }
   validateContainerImage(image, fingerprint)
   const alias = await getAlias(client)
   if (!alias || alias.name !== INSTALLER_SPEC.orchestrator.imageAlias || alias.target !== fingerprint) {
-    throw new QilnInstallerError({
+    throw new InstallerError({
       code: 'MANAGED_IMAGE_ALIAS_VERIFICATION_FAILED',
-      check: 'split orchestrator image verification',
-      summary: 'The managed image alias does not identify the computed imported image.',
-      observed: `Required alias target='${fingerprint}', actual target='${alias?.target ?? 'absent'}'.`,
-      reason: 'Both the content-addressed image and managed development alias must converge before state is committed.',
-      operatorAction: 'Inspect the local Incus image and alias state manually, then rerun qiln up.',
-      rerun: RERUN,
+      facts: [['Observed', `Required alias target='${fingerprint}', actual target='${alias?.target ?? 'absent'}'.`]],
+      retry: RERUN,
     })
   }
   return {
@@ -257,14 +233,10 @@ async function convergeSplit(
       } else {
         const unexpectedAlias = await getAlias(client)
         if (unexpectedAlias) {
-          throw new QilnInstallerError({
+          throw new InstallerError({
             code: 'MANAGED_IMAGE_ALIAS_CONFLICT',
-            check: 'managed orchestrator image alias',
-            summary: 'The managed image alias unexpectedly survived image replacement cleanup.',
-            observed: `Alias target='${unexpectedAlias.target}', pending import fingerprint='${fingerprint}'.`,
-            reason: 'Importing with the managed alias would produce ambiguous or conflicting provider state.',
-            operatorAction: 'Inspect the local Incus image and alias state manually, then rerun qiln up.',
-            rerun: RERUN,
+            facts: [['Observed', `Alias target='${unexpectedAlias.target}', pending import fingerprint='${fingerprint}'.`]],
+            retry: RERUN,
           })
         }
         await importImage(client, fingerprint, metadata, rootfs)

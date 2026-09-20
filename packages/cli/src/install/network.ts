@@ -1,4 +1,4 @@
-import { QilnInstallerError } from '../error'
+import { InstallerError } from '../diagnostic/error'
 import { isIncusApiStatus, toInstallerError } from '../incus/errors'
 import { INSTALLER_SPEC } from './spec'
 import type { LocalIncusClient } from '../incus/client'
@@ -41,15 +41,10 @@ export function assertNetwork(network: IncusNetwork): void {
   if (compatible) {
     return
   }
-  throw new QilnInstallerError({
+  throw new InstallerError({
     code: 'INCOMPATIBLE_INCUS_NETWORK',
-    check: `existing ${INSTALLER_SPEC.network.name} compatibility`,
-    summary: `The existing network '${INSTALLER_SPEC.network.name}' conflicts with the Qiln installer specification.`,
-    observed: `Incus reports type='${network.type}', managed=${network.managed}, status='${network.status || 'unknown'}', description='${network.description}', and project='${network.project || INSTALLER_SPEC.projectName}'; missing or mismatched expected keys: ${differences.missing.join(', ') || 'none'}; unexpected non-volatile keys: ${differences.unexpected.join(', ') || 'none'}.`,
-    reason:
-      'Qiln does not overwrite or partially repair an existing network with conflicting ownership or configuration.',
-    operatorAction: `Inspect '${INSTALLER_SPEC.network.name}' manually. Preserve unrelated workloads and resolve the naming or address conflict outside Qiln.`,
-    rerun: 'qiln doctor',
+    facts: [['Observed', `Incus reports type='${network.type}', managed=${network.managed}, status='${network.status || 'unknown'}', description='${network.description}', and project='${network.project || INSTALLER_SPEC.projectName}'; missing or mismatched expected keys: ${differences.missing.join(', ') || 'none'}; unexpected non-volatile keys: ${differences.unexpected.join(', ') || 'none'}.`]],
+    retry: 'qiln doctor',
   })
 }
 
@@ -109,14 +104,10 @@ export async function convergeNetwork(client: LocalIncusClient): Promise<Network
         rerun: RERUN,
       })
     }
-    throw new QilnInstallerError({
+    throw new InstallerError({
       code: 'INCUS_NETWORK_VERIFICATION_FAILED',
-      check: 'managed Incus network convergence',
-      summary: 'The managed bridge network is absent after creation.',
-      observed: `Incus did not return '${INSTALLER_SPEC.network.name}' after accepting its synchronous creation request.`,
-      reason: 'Qiln cannot create the orchestrator against an unverified network.',
-      operatorAction: 'Inspect the local Incus network inventory and daemon logs manually before retrying.',
-      rerun: RERUN,
+      facts: [['Observed', `Incus did not return '${INSTALLER_SPEC.network.name}' after accepting its synchronous creation request.`]],
+      retry: RERUN,
     })
   }
   assertNetwork(network)

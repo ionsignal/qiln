@@ -42,7 +42,7 @@ export default defineConfig(() => {
         checks: {
           pluginTimings: false,
         },
-        external: [/^node:/],
+        external: [/^node:/, 'commander'],
         output: {
           preserveModules: false,
           exports: 'named',

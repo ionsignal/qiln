@@ -1,4 +1,4 @@
-import { QilnInstallerError } from '../error'
+import { InstallerError } from '../diagnostic/error'
 import { convergeImage, type InstallerImageSelection } from '../install/image'
 import { convergeInstance } from '../install/instance'
 import { acquireInstallerLock } from '../install/lock'
@@ -16,7 +16,7 @@ import { INSTALLER_SPEC } from '../install/spec'
 import { validateSourcePreflight } from '../checks/source'
 import { doctor } from './doctor'
 import type { FileSnapshot } from '../install/files'
-import type { Reporter } from '../reporter'
+import type { Reporter } from '../terminal/reporter'
 
 export interface UpCommandOptions {
   sourcePath: string
@@ -29,15 +29,10 @@ function requireIncusExtensions(extensions: readonly string[]): void {
   if (missing.length === 0) {
     return
   }
-  throw new QilnInstallerError({
+  throw new InstallerError({
     code: 'INCUS_CAPABILITY_MISSING',
-    check: 'required Incus installer capabilities',
-    summary: 'The running Incus daemon is missing a required installer capability.',
-    observed: `Missing API extensions: ${missing.join(', ')}.`,
-    reason:
-      'Qiln requires shifted container source disks, guarded systemd credential delivery, and verified terminal operation results before performing installer mutations.',
-    operatorAction: 'Install and run a supported Incus 7.x daemon that exposes the required API extensions.',
-    rerun: 'qiln doctor',
+    facts: [['Missing extensions', missing.join(', ')]],
+    retry: 'qiln doctor',
   })
 }
 

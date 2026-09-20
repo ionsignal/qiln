@@ -1,4 +1,4 @@
-import { QilnInstallerError } from '../error'
+import { InstallerError } from '../diagnostic/error'
 import { INSTALLER_SPEC } from '../install/spec'
 import { assertVolume } from '../install/storage'
 import { runProcess } from '../process'
@@ -25,26 +25,18 @@ export async function validateStoragePreflight(
     INSTALLER_SPEC.storage.poolName,
   ])
   if (hostPool.exitCode !== 0) {
-    throw new QilnInstallerError({
+    throw new InstallerError({
       code: 'HOST_ZFS_POOL_MISSING',
-      check: 'existing host ZFS pool',
-      summary: `The required host ZFS pool '${INSTALLER_SPEC.storage.poolName}' is unavailable.`,
-      observed: `zpool list could not find or inspect '${INSTALLER_SPEC.storage.poolName}'.`,
-      reason: 'Qiln does not create, import, format, repair, or reconfigure host ZFS pools.',
-      operatorAction: `Have the operator create or import and review the host ZFS pool '${INSTALLER_SPEC.storage.poolName}' manually, then confirm it is healthy with 'sudo zpool status ${INSTALLER_SPEC.storage.poolName}'.`,
-      rerun: 'qiln doctor',
+      facts: [['Observed', `zpool list could not find or inspect '${INSTALLER_SPEC.storage.poolName}'.`]],
+      retry: 'qiln doctor',
     })
   }
   const [hostPoolName, hostPoolHealth] = hostPool.stdout.trim().split(/\s+/)
   if (hostPoolName !== INSTALLER_SPEC.storage.poolName || hostPoolHealth !== 'ONLINE') {
-    throw new QilnInstallerError({
+    throw new InstallerError({
       code: 'HOST_ZFS_POOL_UNHEALTHY',
-      check: 'host ZFS pool health',
-      summary: `The required host ZFS pool '${INSTALLER_SPEC.storage.poolName}' is not healthy.`,
-      observed: `zpool reports name='${hostPoolName || 'unknown'}' and health='${hostPoolHealth || 'unknown'}'.`,
-      reason: 'Qiln must not place persistent PostgreSQL data onto a degraded or incompatible host pool.',
-      operatorAction: `Review 'sudo zpool status ${INSTALLER_SPEC.storage.poolName}' and repair the pool manually. Qiln will not attempt a repair.`,
-      rerun: 'qiln doctor',
+      facts: [['Observed', `zpool reports name='${hostPoolName || 'unknown'}' and health='${hostPoolHealth || 'unknown'}'.`]],
+      retry: 'qiln doctor',
     })
   }
   const hostDataset = await runProcess(host.commandPaths.zfs, [
@@ -55,15 +47,10 @@ export async function validateStoragePreflight(
     INSTALLER_SPEC.storage.poolName,
   ])
   if (hostDataset.exitCode !== 0 || hostDataset.stdout.trim() !== INSTALLER_SPEC.storage.poolName) {
-    throw new QilnInstallerError({
+    throw new InstallerError({
       code: 'HOST_ZFS_DATASET_UNAVAILABLE',
-      check: 'host ZFS root dataset',
-      summary: `The root dataset for '${INSTALLER_SPEC.storage.poolName}' is unavailable.`,
-      observed: `zfs list did not return the expected '${INSTALLER_SPEC.storage.poolName}' dataset.`,
-      reason: 'The existing Incus ZFS pool must be backed by the documented host zpool.',
-      operatorAction:
-        'Inspect the host ZFS pool and dataset hierarchy manually without asking Qiln to import or reconfigure it.',
-      rerun: 'qiln doctor',
+      facts: [['Observed', `zfs list did not return the expected '${INSTALLER_SPEC.storage.poolName}' dataset.`]],
+      retry: 'qiln doctor',
     })
   }
   let incusPool: IncusStoragePool | null
@@ -77,14 +64,10 @@ export async function validateStoragePreflight(
     })
   }
   if (!incusPool) {
-    throw new QilnInstallerError({
+    throw new InstallerError({
       code: 'INCUS_STORAGE_POOL_MISSING',
-      check: 'existing Incus storage pool',
-      summary: `The required Incus storage pool '${INSTALLER_SPEC.storage.poolName}' does not exist.`,
-      observed: `GET /1.0/storage-pools/${INSTALLER_SPEC.storage.poolName} returned not found.`,
-      reason: 'The MVP requires an existing reviewed Incus ZFS storage pool and does not modify host ZFS resources.',
-      operatorAction: `After reviewing the host pool, an authorized operator may manually run 'incus storage create ${INSTALLER_SPEC.storage.poolName} zfs source=${INSTALLER_SPEC.storage.poolName}'.`,
-      rerun: 'qiln doctor',
+      facts: [['Observed', `GET /1.0/storage-pools/${INSTALLER_SPEC.storage.poolName} returned not found.`]],
+      retry: 'qiln doctor',
     })
   }
   const incusPoolCompatible =
@@ -93,16 +76,10 @@ export async function validateStoragePreflight(
     incusPool.status === 'Created' &&
     incusPool.config.source === INSTALLER_SPEC.storage.poolName
   if (!incusPoolCompatible) {
-    throw new QilnInstallerError({
+    throw new InstallerError({
       code: 'INCOMPATIBLE_INCUS_STORAGE_POOL',
-      check: 'Incus storage-pool compatibility',
-      summary: `The existing Incus storage pool '${INSTALLER_SPEC.storage.poolName}' is incompatible.`,
-      observed: `Incus reports driver='${incusPool.driver}', status='${incusPool.status || 'unknown'}', and source='${incusPool.config.source ?? 'unset'}'.`,
-      reason:
-        'Qiln will not replace, import, repair, or reconfigure an existing storage pool with conflicting provider state.',
-      operatorAction:
-        'Inspect the existing Incus storage pool and host zpool manually. Resolve the conflict without deleting persistent data.',
-      rerun: 'qiln doctor',
+      facts: [['Observed', `Incus reports driver='${incusPool.driver}', status='${incusPool.status || 'unknown'}', and source='${incusPool.config.source ?? 'unset'}'.`]],
+      retry: 'qiln doctor',
     })
   }
   let existingPostgresVolume: IncusStorageVolume | null

@@ -1,6 +1,6 @@
 import nodeOs from 'node:os'
 import { readFile } from 'node:fs/promises'
-import { QilnInstallerError } from '../error'
+import { InstallerError } from '../diagnostic/error'
 import { findExecutable, runProcess } from '../process'
 import { INSTALLER_SPEC } from '../install/spec'
 
@@ -133,14 +133,10 @@ const tools = {
     if (executable) {
       return executable
     }
-    throw new QilnInstallerError({
+    throw new InstallerError({
       code: 'MISSING_HOST_TOOL',
-      check: `required host tool '${tool.name}'`,
-      summary: `The required host tool '${tool.name}' is not available.`,
-      observed: `No executable named '${tool.name}' was found in the invoking developer's PATH.`,
-      reason: 'Qiln does not install host packages or invoke privilege escalation.',
-      operatorAction: `Review and run 'sudo apt update && sudo apt install ${tool.packageName}' manually, then return to a normal unprivileged developer session.`,
-      rerun: 'qiln doctor',
+      facts: [['Tool', tool.name], ['Package', tool.packageName]],
+      retry: 'qiln doctor',
     })
   },
 
@@ -160,15 +156,10 @@ const deb = {
       return null
     }
     if (result.exitCode !== 0) {
-      throw new QilnInstallerError({
+      throw new InstallerError({
         code: 'PACKAGE_QUERY_FAILED',
-        check: `installed package '${name}'`,
-        summary: `The installed package '${name}' could not be inspected safely.`,
-        observed: `dpkg-query returned exit code ${result.exitCode ?? 'unknown'} while inspecting '${name}'.`,
-        reason: 'Qiln cannot determine whether the required local package is installed and compatible.',
-        operatorAction:
-          'Inspect and repair the local dpkg package database manually. Qiln will not modify package-management state.',
-        rerun: 'qiln doctor',
+        facts: [['Observed', `dpkg-query returned exit code ${result.exitCode ?? 'unknown'} while inspecting '${name}'.`]],
+        retry: 'qiln doctor',
       })
     }
     const [packageName, status, version] = result.stdout.trim().split('\t')
@@ -189,14 +180,10 @@ const deb = {
     if (result.exitCode === 1) {
       return false
     }
-    throw new QilnInstallerError({
+    throw new InstallerError({
       code: 'PACKAGE_VERSION_CHECK_FAILED',
-      check: 'Incus package version',
-      summary: 'The installed Incus package version could not be compared safely.',
-      observed: `dpkg returned exit code ${result.exitCode ?? 'unknown'} while comparing the installed package.`,
-      reason: 'Qiln cannot determine whether the installed Incus release is within the supported major-version range.',
-      operatorAction: 'Inspect the local dpkg installation and repair package-management metadata manually.',
-      rerun: 'qiln doctor',
+      facts: [['Observed', `dpkg returned exit code ${result.exitCode ?? 'unknown'} while comparing the installed package.`]],
+      retry: 'qiln doctor',
     })
   },
 
@@ -214,15 +201,10 @@ const deb = {
       await Promise.all([deb.package(dpkgQuery, 'incus'), deb.package(dpkgQuery, 'incus-base')])
     ).filter((candidate): candidate is InstalledPackage => candidate !== null)
     if (candidates.length === 0) {
-      throw new QilnInstallerError({
+      throw new InstallerError({
         code: 'INCUS_PACKAGE_MISSING',
-        check: 'Incus package installation',
-        summary: 'No supported Incus server package is installed.',
-        observed: "Neither the 'incus' nor 'incus-base' package is installed according to dpkg.",
-        reason: 'Qiln does not install or upgrade Incus and cannot bootstrap the host daemon.',
-        operatorAction:
-          'Install Incus manually using the reviewed Ubuntu or Zabbly installation procedure at https://github.com/zabbly/incus, enable the service, and return to a new developer login session if group membership changes.',
-        rerun: 'qiln doctor',
+        facts: [['Observed', "Neither the 'incus' nor 'incus-base' package is installed according to dpkg."]],
+        retry: 'qiln doctor',
       })
     }
     for (const candidate of candidates) {
@@ -233,44 +215,30 @@ const deb = {
         return candidate
       }
     }
-    throw new QilnInstallerError({
+    throw new InstallerError({
       code: 'UNSUPPORTED_INCUS_PACKAGE_VERSION',
-      check: 'Incus package version',
-      summary: 'The installed Incus package is outside the supported version range.',
-      observed: `Installed package versions: ${candidates.map(candidate => `${candidate.name}=${candidate.version}`).join(', ')}.`,
-      reason: `Batch 1 requires Incus >= ${INSTALLER_SPEC.supportedHost.minimumIncusVersion} and < ${INSTALLER_SPEC.supportedHost.maximumIncusVersionExclusive} within the package version epoch. Package version alone does not establish Ubuntu or Zabbly publisher provenance.`,
-      operatorAction:
-        'Review the approved Incus installation source and manually install a supported Incus 7.x package. Qiln will not perform the upgrade.',
-      rerun: 'qiln doctor',
+      facts: [['Observed', `Installed package versions: ${candidates.map(candidate => `${candidate.name}=${candidate.version}`).join(', ')}.`]],
+      retry: 'qiln doctor',
     })
   },
 }
 
 export async function validateHostPreflight(): Promise<HostPreflight> {
   if (process.platform !== 'linux') {
-    throw new QilnInstallerError({
+    throw new InstallerError({
       code: 'UNSUPPORTED_HOST_PLATFORM',
-      check: 'host operating system',
-      summary: 'Qiln requires a Linux host.',
-      observed: `Node reports platform '${process.platform}'.`,
-      reason: 'The local Incus daemon, ZFS checks, and Unix-socket installer boundary are Linux-specific.',
-      operatorAction: `Run the installer on the supported ${supportedUbuntuRelease} host.`,
-      rerun: 'qiln doctor',
+      facts: [['Observed', `Node reports platform '${process.platform}'.`]],
+      retry: 'qiln doctor',
     })
   }
   let release: { id: string; version: string }
   try {
     release = os.parse(await readFile('/etc/os-release', 'utf8'))
   } catch (error: unknown) {
-    throw new QilnInstallerError({
+    throw new InstallerError({
       code: 'HOST_RELEASE_UNAVAILABLE',
-      check: 'host operating-system release',
-      summary: 'The Ubuntu host release could not be identified.',
-      observed: '/etc/os-release could not be read or contains malformed required ID or VERSION_ID fields.',
-      reason: 'Qiln must prove that it is running on the supported Ubuntu release before dependent checks.',
-      operatorAction: 'Run Qiln on a normal Ubuntu 24.04 installation with readable operating-system release metadata.',
-      rerun: 'qiln doctor',
-      cause: error,
+      facts: [['Observed', '/etc/os-release could not be read or contains malformed required ID or VERSION_ID fields.']],
+      retry: 'qiln doctor',
     })
   }
   const distributionId = release.id.toLowerCase()
@@ -279,41 +247,27 @@ export async function validateHostPreflight(): Promise<HostPreflight> {
     distributionId !== INSTALLER_SPEC.supportedHost.distributionId ||
     distributionVersion !== INSTALLER_SPEC.supportedHost.versionId
   ) {
-    throw new QilnInstallerError({
+    throw new InstallerError({
       code: 'UNSUPPORTED_UBUNTU_RELEASE',
-      check: 'host operating-system release',
-      summary: `The host is not the supported ${supportedUbuntuRelease} release.`,
-      observed: `Detected ID='${distributionId || 'unknown'}' and VERSION_ID='${distributionVersion || 'unknown'}'.`,
-      reason: `The MVP installer policy is intentionally limited to ${supportedUbuntuRelease}.`,
-      operatorAction: `Provision the documented ${supportedUbuntuRelease} developer host before running Qiln.`,
-      rerun: 'qiln doctor',
+      facts: [['Detected release', `${distributionId} ${distributionVersion}`], ['Required release', supportedUbuntuRelease]],
+      retry: 'qiln doctor',
     })
   }
   const nodeArchitecture = process.arch
   if (nodeArchitecture !== INSTALLER_SPEC.supportedHost.nodeArchitecture) {
-    throw new QilnInstallerError({
+    throw new InstallerError({
       code: 'UNSUPPORTED_HOST_ARCHITECTURE',
-      check: 'host architecture',
-      summary: 'The host architecture is not supported by the initial Qiln installer.',
-      observed: `Node reports architecture '${nodeArchitecture}'.`,
-      reason:
-        'The initial MVP supports native AMD64 containers only and does not rely on foreign-architecture emulation.',
-      operatorAction: `Run Qiln on an x86_64/AMD64 ${supportedUbuntuRelease} host.`,
-      rerun: 'qiln doctor',
+      facts: [['Detected architecture', nodeArchitecture], ['Required architecture', INSTALLER_SPEC.supportedHost.nodeArchitecture]],
+      retry: 'qiln doctor',
     })
   }
   const kernelRelease = nodeOs.release()
   const kernelVersion = kernel.parse(kernelRelease)
   if (!kernelVersion || !minimumKernel || !kernel.meets(kernelVersion, minimumKernel)) {
-    throw new QilnInstallerError({
+    throw new InstallerError({
       code: 'UNSUPPORTED_KERNEL_VERSION',
-      check: 'running Linux kernel',
-      summary: 'The running Linux kernel does not meet the Qiln policy.',
-      observed: `Detected kernel '${kernelRelease}'; required kernel is >= ${INSTALLER_SPEC.supportedHost.minimumKernelRelease}.`,
-      reason: 'The selected Incus release and Qiln installation policy require the documented modern kernel baseline.',
-      operatorAction:
-        'Install and boot an approved Ubuntu kernel that meets the requirement. Qiln will not install or activate a kernel.',
-      rerun: 'qiln doctor',
+      facts: [['Running kernel', kernelRelease], ['Minimum kernel', INSTALLER_SPEC.supportedHost.minimumKernelRelease]],
+      retry: 'qiln doctor',
     })
   }
   const commandPaths = await tools.all()

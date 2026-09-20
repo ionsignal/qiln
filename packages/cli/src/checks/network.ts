@@ -1,4 +1,4 @@
-import { QilnInstallerError } from '../error'
+import { InstallerError } from '../diagnostic/error'
 import { INSTALLER_SPEC } from '../install/spec'
 import { assertNetwork } from '../install/network'
 import { runProcess } from '../process'
@@ -84,25 +84,17 @@ function parseJsonArray(value: string, source: string): unknown[] {
   try {
     parsed = JSON.parse(value) as unknown
   } catch {
-    throw new QilnInstallerError({
+    throw new InstallerError({
       code: 'HOST_NETWORK_INSPECTION_FAILED',
-      check: 'host network routes and addresses',
-      summary: 'The host IP configuration could not be decoded.',
-      observed: `${source} returned invalid JSON.`,
-      reason: `Qiln cannot prove that ${INSTALLER_SPEC.network.ipv4Subnet} is free of host routing and address conflicts.`,
-      operatorAction: 'Inspect and repair the local iproute2 installation manually.',
-      rerun: 'qiln doctor',
+      facts: [['Observed', `${source} returned invalid JSON.`]],
+      retry: 'qiln doctor',
     })
   }
   if (!Array.isArray(parsed)) {
-    throw new QilnInstallerError({
+    throw new InstallerError({
       code: 'HOST_NETWORK_INSPECTION_FAILED',
-      check: 'host network routes and addresses',
-      summary: 'The host IP configuration has an unexpected shape.',
-      observed: `${source} did not return a JSON array.`,
-      reason: 'Qiln cannot safely compare the planned development subnet against host networking.',
-      operatorAction: 'Inspect and repair the local iproute2 installation manually.',
-      rerun: 'qiln doctor',
+      facts: [['Observed', `${source} did not return a JSON array.`]],
+      retry: 'qiln doctor',
     })
   }
   return parsed
@@ -123,15 +115,10 @@ function assertNoIncusNetworkConflict(
     }
     const candidate = parseIpv4Cidr(configuredAddress)
     if (candidate && cidrsOverlap(target, candidate)) {
-      throw new QilnInstallerError({
+      throw new InstallerError({
         code: 'INCUS_NETWORK_RANGE_CONFLICT',
-        check: 'Incus network address ranges',
-        summary: 'The planned Qiln IPv4 subnet overlaps another Incus network.',
-        observed: `Network '${network.name}' uses '${configuredAddress}', which overlaps '${INSTALLER_SPEC.network.ipv4Subnet}'.`,
-        reason: 'Creating the installer-owned bridge would introduce conflicting routing or address allocation.',
-        operatorAction:
-          'Move the unrelated Incus network to a non-overlapping range or choose a future explicitly configurable Qiln range. Qiln will not modify the network.',
-        rerun: 'qiln doctor',
+        facts: [['Observed', `Network '${network.name}' uses '${configuredAddress}', which overlaps '${INSTALLER_SPEC.network.ipv4Subnet}'.`]],
+        retry: 'qiln doctor',
       })
     }
   }
@@ -144,14 +131,10 @@ async function assertNoHostRouteConflict(
   const target = parseIpv4Cidr(INSTALLER_SPEC.network.ipv4Subnet)!
   const routeResult = await runProcess(host.commandPaths.ip, ['-j', '-4', 'route', 'show', 'table', 'all'])
   if (routeResult.exitCode !== 0) {
-    throw new QilnInstallerError({
+    throw new InstallerError({
       code: 'HOST_ROUTE_INSPECTION_FAILED',
-      check: 'host IPv4 routes',
-      summary: 'The host IPv4 routing table could not be inspected.',
-      observed: `ip returned exit code ${routeResult.exitCode ?? 'unknown'}.`,
-      reason: `Qiln cannot prove that the planned ${INSTALLER_SPEC.network.ipv4Subnet} bridge range is conflict-free.`,
-      operatorAction: 'Inspect the host networking and iproute2 installation manually.',
-      rerun: 'qiln doctor',
+      facts: [['Observed', `ip returned exit code ${routeResult.exitCode ?? 'unknown'}.`]],
+      retry: 'qiln doctor',
     })
   }
   for (const rawRoute of parseJsonArray(routeResult.stdout, 'ip route')) {
@@ -170,27 +153,18 @@ async function assertNoHostRouteConflict(
     if (existingTargetNetwork !== null && device === INSTALLER_SPEC.network.name) {
       continue
     }
-    throw new QilnInstallerError({
+    throw new InstallerError({
       code: 'HOST_ROUTE_RANGE_CONFLICT',
-      check: 'host IPv4 routes',
-      summary: 'The planned Qiln IPv4 subnet overlaps an existing host route.',
-      observed: `Host route '${route.dst}' on interface '${device || 'unknown'}' overlaps '${INSTALLER_SPEC.network.ipv4Subnet}'.`,
-      reason: 'The installer-owned Incus bridge would conflict with existing host routing.',
-      operatorAction:
-        'Review the host route and network ownership manually. Qiln will not alter host routes or choose another range implicitly.',
-      rerun: 'qiln doctor',
+      facts: [['Observed', `Host route '${route.dst}' on interface '${device || 'unknown'}' overlaps '${INSTALLER_SPEC.network.ipv4Subnet}'.`]],
+      retry: 'qiln doctor',
     })
   }
   const addressResult = await runProcess(host.commandPaths.ip, ['-j', '-4', 'address', 'show'])
   if (addressResult.exitCode !== 0) {
-    throw new QilnInstallerError({
+    throw new InstallerError({
       code: 'HOST_ADDRESS_INSPECTION_FAILED',
-      check: 'host IPv4 addresses',
-      summary: 'The host IPv4 addresses could not be inspected.',
-      observed: `ip returned exit code ${addressResult.exitCode ?? 'unknown'}.`,
-      reason: 'Qiln cannot prove that the planned bridge gateway and subnet are conflict-free.',
-      operatorAction: 'Inspect the host networking and iproute2 installation manually.',
-      rerun: 'qiln doctor',
+      facts: [['Observed', `ip returned exit code ${addressResult.exitCode ?? 'unknown'}.`]],
+      retry: 'qiln doctor',
     })
   }
   for (const rawInterface of parseJsonArray(addressResult.stdout, 'ip address')) {
@@ -218,15 +192,10 @@ async function assertNoHostRouteConflict(
       if (existingTargetNetwork !== null && interfaceName === INSTALLER_SPEC.network.name) {
         continue
       }
-      throw new QilnInstallerError({
+      throw new InstallerError({
         code: 'HOST_ADDRESS_RANGE_CONFLICT',
-        check: 'host IPv4 addresses',
-        summary: 'The planned Qiln IPv4 subnet overlaps an existing host address.',
-        observed: `Interface '${interfaceName || 'unknown'}' has '${local}/${prefixLength}', overlapping '${INSTALLER_SPEC.network.ipv4Subnet}'.`,
-        reason: 'The installer-owned bridge gateway and DHCP range must not collide with another host network.',
-        operatorAction:
-          'Review and reconfigure the conflicting host network manually. Qiln will not modify host interfaces or addresses.',
-        rerun: 'qiln doctor',
+        facts: [['Observed', `Interface '${interfaceName || 'unknown'}' has '${local}/${prefixLength}', overlapping '${INSTALLER_SPEC.network.ipv4Subnet}'.`]],
+        retry: 'qiln doctor',
       })
     }
   }

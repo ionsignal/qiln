@@ -1,4 +1,4 @@
-import { QilnInstallerError } from '../error'
+import { InstallerError } from '../diagnostic/error'
 import { isIncusApiStatus, toInstallerError } from '../incus/errors'
 import { INSTALLER_SPEC } from './spec'
 import type { LocalIncusClient } from '../incus/client'
@@ -37,14 +37,10 @@ export function assertVolume(volume: IncusStorageVolume): void {
   if (compatible) {
     return
   }
-  throw new QilnInstallerError({
+  throw new InstallerError({
     code: 'INCOMPATIBLE_POSTGRES_VOLUME',
-    check: 'existing Qiln PostgreSQL storage volume',
-    summary: 'The existing Qiln PostgreSQL volume conflicts with the installer specification.',
-    observed: `Volume '${volume.name}' reports type='${volume.type}', content_type='${volume.contentType}', description='${volume.description}', and project='${volume.project || INSTALLER_SPEC.projectName}'; missing or mismatched expected keys: ${differences.missing.join(', ') || 'none'}; unexpected non-volatile keys: ${differences.unexpected.join(', ') || 'none'}.`,
-    reason: 'Qiln never replaces or modifies an incompatible persistent data volume automatically.',
-    operatorAction: `Inspect '${INSTALLER_SPEC.storage.volumeName}' in pool '${INSTALLER_SPEC.storage.poolName}' manually. Preserve its data and resolve the naming conflict outside Qiln.`,
-    rerun: 'qiln doctor',
+    facts: [['Observed', `Volume '${volume.name}' reports type='${volume.type}', content_type='${volume.contentType}', description='${volume.description}', and project='${volume.project || INSTALLER_SPEC.projectName}'; missing or mismatched expected keys: ${differences.missing.join(', ') || 'none'}; unexpected non-volatile keys: ${differences.unexpected.join(', ') || 'none'}.`]],
+    retry: 'qiln doctor',
   })
 }
 
@@ -113,15 +109,10 @@ export async function convergeStorage(client: LocalIncusClient): Promise<Storage
           'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
       })
     }
-    throw new QilnInstallerError({
+    throw new InstallerError({
       code: 'POSTGRES_VOLUME_VERIFICATION_FAILED',
-      check: 'Qiln PostgreSQL volume convergence',
-      summary: 'The PostgreSQL volume is absent after creation.',
-      observed: `Incus did not return '${INSTALLER_SPEC.storage.volumeName}' after accepting its synchronous creation request.`,
-      reason: 'Qiln cannot attach an unverified persistent storage volume to the orchestrator.',
-      operatorAction: 'Inspect the local Incus storage volume inventory and daemon logs manually before retrying.',
-      rerun:
-        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      facts: [['Observed', `Incus did not return '${INSTALLER_SPEC.storage.volumeName}' after accepting its synchronous creation request.`]],
+      retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
     })
   }
   assertVolume(volume)

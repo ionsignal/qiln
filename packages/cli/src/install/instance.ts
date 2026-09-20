@@ -1,5 +1,5 @@
 import { isAbsolute } from 'node:path'
-import { QilnInstallerError } from '../error'
+import { InstallerError } from '../diagnostic/error'
 import { isIncusApiStatus, toInstallerError } from '../incus/errors'
 import { INSTALLER_SPEC } from './spec'
 import type { InstallationState } from './state'
@@ -22,15 +22,10 @@ function validateSourceRoot(sourceRoot: string): void {
     sourceRoot === '/' ||
     CONTROL_CHARACTER_PATTERN.test(sourceRoot)
   ) {
-    throw new QilnInstallerError({
+    throw new InstallerError({
       code: 'INVALID_SOURCE_ROOT',
-      check: 'orchestrator source-device path',
-      summary: 'The validated Qiln source root cannot be used as an Incus source device.',
-      observed: 'The source root is not a canonical absolute non-root path.',
-      reason: 'The installer must bind exactly one validated host checkout into the development orchestrator.',
-      operatorAction: 'Rerun with the canonical Qiln Git checkout root through --source.',
-      rerun:
-        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      facts: [['Observed', 'The source root is not a canonical absolute non-root path.']],
+      retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
     })
   }
 }
@@ -142,16 +137,10 @@ export function assertInstance(instance: IncusInstance, imageFingerprint: string
   if (compatible) {
     return
   }
-  throw new QilnInstallerError({
+  throw new InstallerError({
     code: 'INCOMPATIBLE_ORCHESTRATOR_INSTANCE',
-    check: 'existing development orchestrator instance',
-    summary: 'The existing development orchestrator conflicts with the installer-owned definition.',
-    observed: `Instance '${instance.name}' reports architecture='${instance.architecture}', type='${instance.type}', status='${instance.status}', status_code=${instance.statusCode}, project='${instance.project || INSTALLER_SPEC.projectName}', ephemeral=${instance.ephemeral}, stateful=${instance.stateful}, and profiles='${instance.profiles.join(',') || 'none'}'; volatile.base_image expected '${imageFingerprint}' but was '${config.baseImage || 'unset'}'; missing or mismatched config keys: ${config.missing.join(', ') || 'none'}; unexpected non-volatile, non-image config keys: ${config.unexpected.join(', ') || 'none'}; missing devices: ${devices.missing.join(', ') || 'none'}; mismatched devices: ${devices.mismatched.join(', ') || 'none'}; unexpected devices: ${devices.unexpected.join(', ') || 'none'}.`,
-    reason:
-      'Qiln will not retain an instance created from a different image pin or source checkout, or start, stop, rebuild, delete, or partially repair an incompatible retained orchestrator instance.',
-    operatorAction: `Delete only the stopped '${INSTALLER_SPEC.orchestrator.name}' instance manually while preserving '${INSTALLER_SPEC.storage.volumeName}', then rerun qiln up with the intended canonical --source checkout and selected image.`,
-    rerun:
-      'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+    facts: [['Observed', `Instance '${instance.name}' reports architecture='${instance.architecture}', type='${instance.type}', status='${instance.status}', status_code=${instance.statusCode}, project='${instance.project || INSTALLER_SPEC.projectName}', ephemeral=${instance.ephemeral}, stateful=${instance.stateful}, and profiles='${instance.profiles.join(',') || 'none'}'; volatile.base_image expected '${imageFingerprint}' but was '${config.baseImage || 'unset'}'; missing or mismatched config keys: ${config.missing.join(', ') || 'none'}; unexpected non-volatile, non-image config keys: ${config.unexpected.join(', ') || 'none'}; missing devices: ${devices.missing.join(', ') || 'none'}; mismatched devices: ${devices.mismatched.join(', ') || 'none'}; unexpected devices: ${devices.unexpected.join(', ') || 'none'}.`]],
+    retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
   })
 }
 
@@ -162,16 +151,10 @@ function validateState(state: InstallationState): void {
     state.instanceName !== INSTALLER_SPEC.orchestrator.name ||
     !FULL_FINGERPRINT_PATTERN.test(state.imageFingerprint)
   ) {
-    throw new QilnInstallerError({
+    throw new InstallerError({
       code: 'INVALID_INSTALLATION_STATE',
-      check: 'persisted orchestrator image pin',
-      summary: 'The persisted installation state cannot be used for instance creation.',
-      observed:
-        'The state does not contain the required version, project, instance name, and full lowercase image fingerprint.',
-      reason: 'The orchestrator may be created only from an image fingerprint already persisted by the installer.',
-      operatorAction: 'Reconcile the selected image and installation state before retrying.',
-      rerun:
-        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      facts: [['Observed', 'The state does not contain the required version, project, instance name, and full lowercase image fingerprint.']],
+      retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
     })
   }
 }
@@ -253,15 +236,10 @@ export async function convergeInstance(
           'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
       })
     }
-    throw new QilnInstallerError({
+    throw new InstallerError({
       code: 'ORCHESTRATOR_INSTANCE_VERIFICATION_FAILED',
-      check: 'development orchestrator instance convergence',
-      summary: 'The orchestrator instance is absent after creation.',
-      observed: `Incus did not return '${INSTALLER_SPEC.orchestrator.name}' after its creation operation completed successfully.`,
-      reason: 'Qiln cannot report a configured installation without re-reading the exact stopped instance.',
-      operatorAction: 'Inspect the local Incus instance inventory and operation history manually before retrying.',
-      rerun:
-        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      facts: [['Observed', `Incus did not return '${INSTALLER_SPEC.orchestrator.name}' after its creation operation completed successfully.`]],
+      retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
     })
   }
   assertInstance(instance, state.imageFingerprint, sourceRoot)

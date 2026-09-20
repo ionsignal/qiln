@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { chmod, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { TextDecoder, TextEncoder } from 'node:util'
-import { QilnInstallerError } from '../error'
+import { InstallerError } from '../diagnostic/error'
 import { IncusApiError } from '../incus/client'
 import { isIncusApiStatus, toInstallerError } from '../incus/errors'
 import { runProcess } from '../process'
@@ -51,14 +51,10 @@ export interface CredentialConvergence {
 
 function currentUserId(): number {
   if (typeof process.geteuid !== 'function') {
-    throw new QilnInstallerError({
+    throw new InstallerError({
       code: 'UNSUPPORTED_PLATFORM',
-      check: 'credential ownership',
-      summary: 'Qiln cannot determine the invoking effective user ID.',
-      observed: `Node platform '${process.platform}' does not expose process.geteuid().`,
-      reason: 'Installer-owned credentials must belong to the invoking unprivileged developer.',
-      operatorAction: 'Run Qiln on the supported Ubuntu host as the invoking developer.',
-      rerun: 'qiln doctor',
+      facts: [['Observed', `Node platform '${process.platform}' does not expose process.geteuid().`]],
+      retry: 'qiln doctor',
     })
   }
   return process.geteuid()
@@ -71,7 +67,7 @@ function snapshot(bytes: Uint8Array): FileSnapshot {
   })
 }
 
-function text(snapshotValue: FileSnapshot, label: string): string {
+function text(snapshotValue: FileSnapshot, _: string): string {
   try {
     const value = new TextDecoder('utf-8', {
       fatal: true,
@@ -81,16 +77,10 @@ function text(snapshotValue: FileSnapshot, label: string): string {
     }
     return value
   } catch (error: unknown) {
-    throw new QilnInstallerError({
+    throw new InstallerError({
       code: 'INVALID_LOCAL_CREDENTIAL',
-      check: `${label} credential content`,
-      summary: `The retained ${label} credential is malformed.`,
-      observed: 'The credential is not valid supported UTF-8 text.',
-      reason: 'Qiln never regenerates over malformed retained credentials.',
-      operatorAction: 'Inspect and recover the complete local credential set manually before retrying.',
-      rerun:
-        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
-      cause: error,
+      facts: [['Observed', 'The credential is not valid supported UTF-8 text.']],
+      retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
     })
   }
 }
@@ -107,15 +97,10 @@ function parseNats(value: string): string {
   )
   const match = pattern.exec(value)
   if (!match || match[1] === undefined) {
-    throw new QilnInstallerError({
+    throw new InstallerError({
       code: 'INVALID_NATS_CREDENTIAL',
-      check: 'retained NATS credential configuration',
-      summary: 'The retained NATS credential configuration is invalid.',
-      observed: 'nats-server.conf does not match the installer-owned configuration schema.',
-      reason: 'Qiln cannot safely reuse or silently replace malformed NATS authentication state.',
-      operatorAction: 'Inspect and recover the complete local credential set manually before retrying.',
-      rerun:
-        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      facts: [['Observed', 'nats-server.conf does not match the installer-owned configuration schema.']],
+      retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
     })
   }
   return match[1]
@@ -126,15 +111,10 @@ function parseHost(value: string): { natsToken: string; cookieSecret: string } {
   const pattern = new RegExp(`^NATS_TOKEN=([a-f0-9]{${length}})\\nFASTIFY_COOKIE_SECRET=([a-f0-9]{${length}})\\n$`)
   const match = pattern.exec(value)
   if (!match || match[1] === undefined || match[2] === undefined) {
-    throw new QilnInstallerError({
+    throw new InstallerError({
       code: 'INVALID_HOST_CREDENTIAL',
-      check: 'retained Host credential environment',
-      summary: 'The retained Host credential environment is invalid.',
-      observed: 'qiln-host.env contains missing, duplicate, malformed, or unsupported fields.',
-      reason: 'Qiln cannot safely reuse or silently replace malformed Host authentication state.',
-      operatorAction: 'Inspect and recover the complete local credential set manually before retrying.',
-      rerun:
-        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      facts: [['Observed', 'qiln-host.env contains missing, duplicate, malformed, or unsupported fields.']],
+      retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
     })
   }
   return {
@@ -150,15 +130,10 @@ async function validateGatewayKey(privateKey: FileSnapshot, sshKeygen: string): 
     }),
   )
   if (derivedPublicKey.exitCode !== 0) {
-    throw new QilnInstallerError({
+    throw new InstallerError({
       code: 'INVALID_GATEWAY_HOST_KEY',
-      check: 'retained SSH gateway host key',
-      summary: 'The retained SSH gateway host key is invalid or encrypted.',
-      observed: 'ssh-keygen could not derive a public key using an empty passphrase.',
-      reason: 'The gateway requires one retained unencrypted Ed25519 OpenSSH private host key.',
-      operatorAction: 'Inspect and recover the complete local credential set manually before retrying.',
-      rerun:
-        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      facts: [['Observed', 'ssh-keygen could not derive a public key using an empty passphrase.']],
+      retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
     })
   }
   const publicKey = derivedPublicKey.stdout.trim()
@@ -171,20 +146,15 @@ async function validateGatewayKey(privateKey: FileSnapshot, sshKeygen: string): 
     publicKeyFields[1] === undefined ||
     publicKeyFields[1] === ''
   ) {
-    throw new QilnInstallerError({
+    throw new InstallerError({
       code: 'INVALID_GATEWAY_HOST_KEY_ALGORITHM',
-      check: 'retained SSH gateway host-key algorithm',
-      summary: 'The retained SSH gateway host key is not an Ed25519 key.',
-      observed: 'The public key derived from the retained private key does not use the required algorithm.',
-      reason: 'Qiln does not replace or convert retained gateway host keys automatically.',
-      operatorAction: 'Inspect and recover the complete local credential set manually before retrying.',
-      rerun:
-        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      facts: [['Observed', 'The public key derived from the retained private key does not use the required algorithm.']],
+      retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
     })
   }
 }
 
-function credentialReadError(error: unknown, name: string): QilnInstallerError {
+function credentialReadError(error: unknown, _: string): InstallerError {
   if (error instanceof FileValidationError) {
     const reason = {
       type: 'The credential entry is not a normal regular file.',
@@ -193,28 +163,16 @@ function credentialReadError(error: unknown, name: string): QilnInstallerError {
       size: 'The credential entry is empty or exceeds its configured size limit.',
       changed: 'The credential entry changed while it was being read.',
     }[error.kind]
-    return new QilnInstallerError({
+    return new InstallerError({
       code: 'INVALID_LOCAL_CREDENTIAL_FILE',
-      check: 'protected local credential set',
-      summary: `The retained credential file '${name}' is unsafe or invalid.`,
-      observed: reason,
-      reason: 'Qiln never regenerates over an invalid retained credential set.',
-      operatorAction: 'Inspect and recover all four local credential files manually before retrying.',
-      rerun:
-        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
-      cause: error,
+      facts: [['Observed', reason]],
+      retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
     })
   }
-  return new QilnInstallerError({
+  return new InstallerError({
     code: 'LOCAL_CREDENTIAL_READ_FAILED',
-    check: 'protected local credential set',
-    summary: `The retained credential file '${name}' could not be read safely.`,
-    observed: 'The credential could not be opened as one stable bounded regular file.',
-    reason: 'Qiln cannot safely reuse or replace an unreadable credential set.',
-    operatorAction: 'Inspect and recover all four local credential files manually before retrying.',
-    rerun:
-      'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
-    cause: error,
+    facts: [['Observed', 'The credential could not be opened as one stable bounded regular file.']],
+    retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
   })
 }
 
@@ -241,15 +199,10 @@ async function files(directory: Dir): Promise<'absent' | LocalFiles> {
   }
   if (present.length !== expected.length) {
     const missing = expected.filter(name => !names.has(name))
-    throw new QilnInstallerError({
+    throw new InstallerError({
       code: 'PARTIAL_LOCAL_CREDENTIAL_SET',
-      check: 'protected local credential set',
-      summary: 'The local Qiln credential set is incomplete.',
-      observed: `Present files: ${present.join(', ') || 'none'}; missing files: ${missing.join(', ') || 'none'}.`,
-      reason: 'Qiln never fills in, rotates, or regenerates part of a retained credential set.',
-      operatorAction: 'Inspect and recover the complete four-file credential set manually before retrying.',
-      rerun:
-        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      facts: [['Observed', `Present files: ${present.join(', ') || 'none'}; missing files: ${missing.join(', ') || 'none'}.`]],
+      retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
     })
   }
   const limits = INSTALLER_SPEC.credentials.limits
@@ -268,15 +221,10 @@ async function validate(local: LocalFiles, sshKeygen: string): Promise<Credentia
   const natsToken = parseNats(natsText)
   const host = parseHost(hostText)
   if (natsToken !== host.natsToken) {
-    throw new QilnInstallerError({
+    throw new InstallerError({
       code: 'LOCAL_CREDENTIAL_TOKEN_MISMATCH',
-      check: 'retained NATS and Host credentials',
-      summary: 'The retained NATS credentials do not agree.',
-      observed: 'The NATS token in nats-server.conf differs from the token in qiln-host.env.',
-      reason: 'Qiln cannot determine one authoritative retained NATS authentication value.',
-      operatorAction: 'Inspect and recover the complete local credential set manually before retrying.',
-      rerun:
-        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      facts: [['Observed', 'The NATS token in nats-server.conf differs from the token in qiln-host.env.']],
+      retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
     })
   }
   await validateGatewayKey(local.gatewayKey, sshKeygen)
@@ -306,16 +254,10 @@ function collision(config: Readonly<IncusConfigMap>): void {
     const textKey = `${prefixes.text}${suffix}`
     const binaryKey = `${prefixes.binary}${suffix}`
     if (Object.hasOwn(config, textKey) && Object.hasOwn(config, binaryKey)) {
-      throw new QilnInstallerError({
+      throw new InstallerError({
         code: 'INSTANCE_CREDENTIAL_NAMESPACE_COLLISION',
-        check: 'orchestrator credential namespaces',
-        summary: 'The orchestrator contains conflicting text and binary credential keys.',
-        observed: `Both credential namespaces are populated for managed suffix '${suffix}'.`,
-        reason: 'Incus text and binary systemd credential namespaces are mutually exclusive for a managed suffix.',
-        operatorAction:
-          'Inspect the stopped orchestrator configuration and recover the intended credential namespace manually.',
-        rerun:
-          'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+        facts: [['Observed', `Both credential namespaces are populated for managed suffix '${suffix}'.`]],
+        retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
       })
     }
   }
@@ -332,15 +274,10 @@ function hasManagedCredentials(config: Readonly<IncusConfigMap>): boolean {
 async function current(directory: Dir, client: LocalIncusClient, sourceRoot: string): Promise<CurrentInstance> {
   const state = await inspectOpenInstallerState(directory)
   if (!state.installation) {
-    throw new QilnInstallerError({
+    throw new InstallerError({
       code: 'INSTALLATION_STATE_REQUIRED',
-      check: 'credential delivery installation pin',
-      summary: 'The installation image pin is unavailable.',
-      observed: 'installation.json is absent after image convergence.',
-      reason: 'Credentials may be delivered only to an instance derived from the persisted image identity.',
-      operatorAction: 'Rerun qiln up to reconcile the selected image and installation state.',
-      rerun:
-        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      facts: [['Observed', 'installation.json is absent after image convergence.']],
+      retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
     })
   }
   let instance: IncusRead<IncusInstance> | null
@@ -355,15 +292,10 @@ async function current(directory: Dir, client: LocalIncusClient, sourceRoot: str
     })
   }
   if (!instance) {
-    throw new QilnInstallerError({
+    throw new InstallerError({
       code: 'ORCHESTRATOR_INSTANCE_REQUIRED',
-      check: 'credential delivery instance inspection',
-      summary: 'The stopped development orchestrator is unavailable.',
-      observed: `Incus did not return '${INSTALLER_SPEC.orchestrator.name}'.`,
-      reason: 'Credentials cannot be delivered without an exact compatible stopped target instance.',
-      operatorAction: 'Rerun qiln up to reconcile the stopped development orchestrator.',
-      rerun:
-        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      facts: [['Observed', `Incus did not return '${INSTALLER_SPEC.orchestrator.name}'.`]],
+      retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
     })
   }
   collision(instance.value.config)
@@ -374,16 +306,10 @@ async function current(directory: Dir, client: LocalIncusClient, sourceRoot: str
     !FULL_FINGERPRINT_PATTERN.test(signature) ||
     signature !== state.installation.imageFingerprint
   ) {
-    throw new QilnInstallerError({
+    throw new InstallerError({
       code: 'ORCHESTRATOR_IMAGE_SIGNATURE_MISMATCH',
-      check: 'credential delivery image identity',
-      summary: 'The stopped orchestrator does not match the persisted image identity.',
-      observed: 'The instance base-image signature is missing, malformed, or different from installation.json.',
-      reason: 'Qiln never delivers credentials to an instance created from another image.',
-      operatorAction:
-        'Remove the incompatible stopped orchestrator manually while preserving its PostgreSQL volume, then rerun qiln up.',
-      rerun:
-        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      facts: [['Observed', 'The instance base-image signature is missing, malformed, or different from installation.json.']],
+      retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
     })
   }
   return {
@@ -415,15 +341,10 @@ async function gatewayKey(sshKeygen: string): Promise<FileSnapshot> {
       INSTALLER_SPEC.credentials.gatewayComment,
     ])
     if (generated.exitCode !== 0) {
-      throw new QilnInstallerError({
+      throw new InstallerError({
         code: 'GATEWAY_HOST_KEY_GENERATION_FAILED',
-        check: 'SSH gateway host-key generation',
-        summary: 'The SSH gateway host key could not be generated.',
-        observed: 'ssh-keygen did not complete successfully in the private temporary directory.',
-        reason: 'Qiln cannot configure the SSH gateway without one retained unencrypted Ed25519 host key.',
-        operatorAction: 'Inspect the local ssh-keygen installation and rerun qiln up.',
-        rerun:
-          'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+        facts: [['Observed', 'ssh-keygen did not complete successfully in the private temporary directory.']],
+        retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
       })
     }
     await rm(`${keyPath}.pub`, {
@@ -450,16 +371,10 @@ async function generate(
 ): Promise<Credentials> {
   const target = await current(directory, client, sourceRoot)
   if (hasManagedCredentials(target.read.value.config)) {
-    throw new QilnInstallerError({
+    throw new InstallerError({
       code: 'LOCAL_CREDENTIAL_RECOVERY_REQUIRED',
-      check: 'first credential-set generation',
-      summary: 'Managed instance credentials exist without their local source-of-truth files.',
-      observed: 'The stopped orchestrator contains one or more managed credential keys while the local set is absent.',
-      reason: 'Generating replacements could silently rotate credentials already delivered to the instance.',
-      operatorAction:
-        'Recover the original four local credential files manually or remove the stopped instance credential state after review.',
-      rerun:
-        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      facts: [['Observed', 'The stopped orchestrator contains one or more managed credential keys while the local set is absent.']],
+      retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
     })
   }
   const natsToken = randomBytes(INSTALLER_SPEC.credentials.secretBytes).toString(
@@ -482,15 +397,10 @@ async function generate(
   await writeChild(directory, names.gatewayKey, generated.gatewayKey.bytes, 0o600)
   const persisted = await load(directory, sshKeygen)
   if (persisted === 'absent') {
-    throw new QilnInstallerError({
+    throw new InstallerError({
       code: 'LOCAL_CREDENTIAL_PERSISTENCE_FAILED',
-      check: 'first credential-set persistence',
-      summary: 'The generated credential set could not be verified after persistence.',
-      observed: 'The protected state directory did not contain a complete valid credential set.',
-      reason: 'Qiln delivers credentials only after all four local source-of-truth files are retained and validated.',
-      operatorAction: 'Inspect the protected installer state directory manually before retrying.',
-      rerun:
-        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      facts: [['Observed', 'The protected state directory did not contain a complete valid credential set.']],
+      retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
     })
   }
   return persisted
@@ -575,15 +485,10 @@ async function deliver(
     const target = await current(directory, client, sourceRoot)
     const local = await load(directory, sshKeygen)
     if (local === 'absent') {
-      throw new QilnInstallerError({
+      throw new InstallerError({
         code: 'LOCAL_CREDENTIAL_SET_REQUIRED',
-        check: 'instance credential delivery',
-        summary: 'The complete local credential set is unavailable.',
-        observed: 'The protected installer state directory contains no credential set.',
-        reason: 'The instance can receive only credentials retained as the local source of truth.',
-        operatorAction: 'Supply a valid authorized-key roster and rerun qiln up.',
-        rerun:
-          'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+        facts: [['Observed', 'The protected installer state directory contains no credential set.']],
+        retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
       })
     }
     const expected = put(target.read.value, local.values)
@@ -614,16 +519,10 @@ async function deliver(
         continue
       }
       if (isIncusApiStatus(error, 412)) {
-        throw new QilnInstallerError({
+        throw new InstallerError({
           code: 'INCUS_ETAG_CONFLICT',
-          check: 'guarded orchestrator credential delivery',
-          summary: 'The orchestrator changed during both guarded update attempts.',
-          observed: 'Incus returned HTTP 412 after the instance was re-read and revalidated once.',
-          reason: 'Qiln will not continue retrying a secret-bearing complete update against changing provider state.',
-          operatorAction: 'Stop concurrent instance configuration changes, then rerun qiln up.',
-          rerun:
-            'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
-          cause: error,
+          facts: [['Observed', 'Incus returned HTTP 412 after the instance was re-read and revalidated once.']],
+          retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
         })
       }
       if (error instanceof IncusApiError) {
@@ -650,15 +549,10 @@ async function verify(
 ): Promise<string> {
   const state = await inspectOpenInstallerState(directory)
   if (!state.installation) {
-    throw new QilnInstallerError({
+    throw new InstallerError({
       code: 'FINAL_INSTALLATION_STATE_MISSING',
-      check: 'final stopped-installation verification',
-      summary: 'The persisted installation state is absent.',
-      observed: 'installation.json could not be re-read after credential convergence.',
-      reason: 'A successful installation requires one authoritative persisted image identity.',
-      operatorAction: 'Inspect the protected installer state directory and rerun qiln up.',
-      rerun:
-        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      facts: [['Observed', 'installation.json could not be re-read after credential convergence.']],
+      retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
     })
   }
   const installation = state.installation
@@ -690,40 +584,24 @@ async function verify(
   assertInstance(instance, installation.imageFingerprint, sourceRoot)
   const local = await load(directory, sshKeygen)
   if (local === 'absent') {
-    throw new QilnInstallerError({
+    throw new InstallerError({
       code: 'FINAL_LOCAL_CREDENTIAL_SET_MISSING',
-      check: 'final stopped-installation verification',
-      summary: 'The local credential set is absent after convergence.',
-      observed: 'The protected installer state directory no longer contains all four credentials.',
-      reason: 'Qiln cannot verify delivered credentials without their retained local source of truth.',
-      operatorAction: 'Inspect and recover the protected local credential set manually.',
-      rerun:
-        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      facts: [['Observed', 'The protected installer state directory no longer contains all four credentials.']],
+      retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
     })
   }
   if (!matches(instance.config, local.values)) {
-    throw new QilnInstallerError({
+    throw new InstallerError({
       code: 'FINAL_INSTANCE_CREDENTIAL_MISMATCH',
-      check: 'final stopped-installation verification',
-      summary: 'The stopped orchestrator credentials do not match the retained local credential set.',
-      observed: 'At least one managed credential is missing or differs from the local source of truth.',
-      reason: 'Qiln reports success only after exact text and binary credential equality is verified.',
-      operatorAction: 'Inspect concurrent instance changes and rerun qiln up.',
-      rerun:
-        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      facts: [['Observed', 'At least one managed credential is missing or differs from the local source of truth.']],
+      retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
     })
   }
   if (!samePut(instance, expected)) {
-    throw new QilnInstallerError({
+    throw new InstallerError({
       code: 'FINAL_INSTANCE_STATE_MISMATCH',
-      check: 'final stopped-installation verification',
-      summary: 'The stopped orchestrator changed during credential convergence.',
-      observed:
-        'Profiles, devices, local configuration, or another writable instance field differs from the guarded state.',
-      reason: 'Credential delivery must not alter unrelated instance configuration.',
-      operatorAction: 'Inspect concurrent instance changes and rerun qiln up.',
-      rerun:
-        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      facts: [['Observed', 'Profiles, devices, local configuration, or another writable instance field differs from the guarded state.']],
+      retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
     })
   }
   if (verifyAlias) {
@@ -739,15 +617,10 @@ async function verify(
       })
     }
     if (alias.target !== installation.imageFingerprint) {
-      throw new QilnInstallerError({
+      throw new InstallerError({
         code: 'FINAL_IMAGE_ALIAS_MISMATCH',
-        check: 'final managed image-alias verification',
-        summary: 'The managed image alias no longer identifies the selected image.',
-        observed: 'The alias target differs from the persisted full image fingerprint.',
-        reason: 'Explicit split-image convergence requires both image and managed alias identity to remain stable.',
-        operatorAction: 'Inspect concurrent Incus image changes and rerun qiln up.',
-        rerun:
-          'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+        facts: [['Observed', 'The alias target differs from the persisted full image fingerprint.']],
+        retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
       })
     }
   }
@@ -766,15 +639,10 @@ export async function convergeCredentials(options: {
   let localOutcome: LocalOutcome
   if (local === 'absent') {
     if (!options.roster) {
-      throw new QilnInstallerError({
+      throw new InstallerError({
         code: 'AUTHORIZED_KEYS_REQUIRED',
-        check: 'first credential-set generation',
-        summary: '--authorized-keys is required for the first credential set.',
-        observed: 'No local credential files or validated authorized-key roster are available.',
-        reason: 'Qiln cannot generate a complete first credential set without an explicitly selected SSH roster.',
-        operatorAction: 'Pass a valid developer-owned OpenSSH public-key roster with --authorized-keys.',
-        rerun:
-          'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+        facts: [['Observed', 'No local credential files or validated authorized-key roster are available.']],
+        retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
       })
     }
     local = await generate(options.directory, options.roster, options.sshKeygen, options.client, options.sourceRoot)

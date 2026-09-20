@@ -4,7 +4,7 @@ import { validateNetworkPreflight, type NetworkPreflight } from '../checks/netwo
 import { validateStoragePreflight, type StoragePreflight } from '../checks/storage'
 import { inspectInstallerState, type InstallerStateInspection } from '../install/state'
 import { INSTALLER_SPEC } from '../install/spec'
-import type { Reporter } from '../reporter'
+import type { Reporter } from '../terminal/reporter'
 
 export interface DoctorContext {
   host: HostPreflight

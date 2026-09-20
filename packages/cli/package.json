@@ -6,8 +6,7 @@
     "qiln": "./dist/cli.js"
   },
   "files": [
-    "dist",
-    "README.md"
+    "dist"
   ],
   "scripts": {
     "build": "vite build",
@@ -20,6 +19,9 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     }
+  },
+  "dependencies": {
+    "commander": "15.0.0"
   },
   "devDependencies": {
     "@types/node": "22.20.3",

@@ -1,6 +1,6 @@
 import { constants } from 'node:fs'
 import { lstat, open, unlink, type FileHandle } from 'node:fs/promises'
-import { QilnInstallerError } from '../error'
+import { InstallerError } from '../diagnostic/error'
 import { Dir } from './files'
 import { INSTALLER_SPEC } from './spec'
 
@@ -14,14 +14,10 @@ function isErrorCode(value: unknown, code: string): boolean {
 
 function currentUserId(): number {
   if (typeof process.geteuid !== 'function') {
-    throw new QilnInstallerError({
+    throw new InstallerError({
       code: 'UNSUPPORTED_PLATFORM',
-      check: 'installer lock ownership',
-      summary: 'Qiln cannot determine the invoking effective user ID.',
-      observed: `Node platform '${process.platform}' does not expose process.geteuid().`,
-      reason: 'The installer lock must belong to the unprivileged invoking developer.',
-      operatorAction: 'Run Qiln on the supported Ubuntu host as the invoking developer.',
-      rerun: 'qiln doctor',
+      facts: [['Observed', `Node platform '${process.platform}' does not expose process.geteuid().`]],
+      retry: 'qiln doctor',
     })
   }
   return process.geteuid()
@@ -38,15 +34,10 @@ async function removeOwnedLock(path: string, handle: FileHandle): Promise<void> 
     current.uid !== currentUserId() ||
     (current.mode & 0o7777) !== 0o600
   ) {
-    throw new QilnInstallerError({
+    throw new InstallerError({
       code: 'INSTALLER_LOCK_CHANGED',
-      check: 'exclusive installer lock',
-      summary: 'The installer lock changed while qiln up was running.',
-      observed: 'The lock path no longer identifies the regular file created by this installer execution.',
-      reason: 'Qiln must not remove a lock that it can no longer prove it owns.',
-      operatorAction:
-        'Inspect the protected installer state directory manually. Do not remove a lock until no Qiln installer process is active.',
-      rerun: 'qiln doctor',
+      facts: [['Observed', 'The lock path no longer identifies the regular file created by this installer execution.']],
+      retry: 'qiln doctor',
     })
   }
   await unlink(path)
@@ -63,26 +54,16 @@ export async function acquireInstallerLock(directory: Dir): Promise<InstallerLoc
     handle = await open(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600)
   } catch (error: unknown) {
     if (isErrorCode(error, 'EEXIST')) {
-      throw new QilnInstallerError({
+      throw new InstallerError({
         code: 'INSTALLER_LOCKED',
-        check: 'exclusive installer execution',
-        summary: 'Another Qiln installer execution may already be active.',
-        observed: `The protected installer lock '${INSTALLER_SPEC.state.lockFileName}' already exists.`,
-        reason: 'Qiln acquires the installer lock immediately and never waits for or breaks a potentially stale lock.',
-        operatorAction:
-          'Confirm that no qiln up process is active. Inspect the state directory manually before deciding whether an old lock can be removed.',
-        rerun: 'qiln doctor',
+        facts: [['Observed', `The protected installer lock '${INSTALLER_SPEC.state.lockFileName}' already exists.`]],
+        retry: 'qiln doctor',
       })
     }
-    throw new QilnInstallerError({
+    throw new InstallerError({
       code: 'INSTALLER_LOCK_FAILED',
-      check: 'exclusive installer execution',
-      summary: 'The protected installer lock could not be created.',
-      observed: 'Qiln could not exclusively create its installer lock in the validated state directory.',
-      reason: 'Incus mutations and installation-state writes must not run concurrently.',
-      operatorAction: 'Inspect the protected installer state directory ownership and permissions manually.',
-      rerun: 'qiln doctor',
-      cause: error,
+      facts: [['Observed', 'Qiln could not exclusively create its installer lock in the validated state directory.']],
+      retry: 'qiln doctor',
     })
   }
   try {
@@ -98,16 +79,10 @@ export async function acquireInstallerLock(directory: Dir): Promise<InstallerLoc
     await directory.sync()
   } catch (error: unknown) {
     await handle.close().catch(() => undefined)
-    throw new QilnInstallerError({
+    throw new InstallerError({
       code: 'INSTALLER_LOCK_FAILED',
-      check: 'exclusive installer execution',
-      summary: 'The protected installer lock could not be validated.',
-      observed: 'The newly created installer lock did not retain its required regular-file ownership and mode.',
-      reason: 'Qiln cannot safely serialize Incus mutations without a validated lock.',
-      operatorAction:
-        'Inspect the protected installer state directory manually. The lock is intentionally retained for review.',
-      rerun: 'qiln doctor',
-      cause: error,
+      facts: [['Observed', 'The newly created installer lock did not retain its required regular-file ownership and mode.']],
+      retry: 'qiln doctor',
     })
   }
   let released = false
