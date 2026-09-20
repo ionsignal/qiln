@@ -6,8 +6,7 @@
     "qiln-agent": "./dist/cli.js"
   },
   "files": [
-    "dist",
-    "README.md"
+    "dist"
   ],
   "scripts": {
     "build": "vite build",
