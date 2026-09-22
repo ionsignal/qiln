@@ -183,7 +183,9 @@ export class VersionedVolumeSnapshotPlanner {
     }
     const seen = new Set<string>()
     for (const resource of resources) {
-      const volume = plan.versionedVolumes.find(candidate => candidate.blueprintVolumeName === resource.blueprintVolumeName)
+      const volume = plan.versionedVolumes.find(
+        candidate => candidate.blueprintVolumeName === resource.blueprintVolumeName,
+      )
       if (
         !volume ||
         seen.has(resource.blueprintVolumeName) ||

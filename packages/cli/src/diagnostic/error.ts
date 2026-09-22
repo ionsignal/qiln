@@ -12,7 +12,8 @@ export interface InstallerErrorOptions {
 
 /**
  * Producers provide safe facts, not presentation policy or raw provider errors.
- * Terminal sanitization is deferred so the diagnostic retains exact identities.
+ * Terminal sanitization is deferred so the diagnostic retains exact
+ * identities.
  */
 export class InstallerError extends Error {
   public readonly code: InstallerErrorCode
@@ -23,9 +24,7 @@ export class InstallerError extends Error {
     super(catalog[options.code].title)
     this.name = 'InstallerError'
     this.code = options.code
-    this.facts = Object.freeze(
-      (options.facts ?? []).map(([label, value]) => Object.freeze([label, value] as const)),
-    )
+    this.facts = Object.freeze((options.facts ?? []).map(([label, value]) => Object.freeze([label, value] as const)))
     this.retry = options.retry
   }
 }

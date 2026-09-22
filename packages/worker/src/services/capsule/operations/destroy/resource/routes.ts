@@ -1,9 +1,5 @@
 import { eq } from 'drizzle-orm'
-import type {
-  CapsuleDestroyObservation,
-  CapsulePersistence,
-  CapsuleTables,
-} from '@qiln/core/server'
+import type { CapsuleDestroyObservation, CapsulePersistence, CapsuleTables } from '@qiln/core/server'
 import { CaddyError, CaddyErrorCode, type CaddyClient, type CaddyRecoveryBinding } from '../../../../../caddy'
 import type { PostgresJsDatabase } from 'drizzle-orm/postgres-js'
 import { IncusError } from '../../../../../errors'
@@ -53,7 +49,8 @@ export class DestroyRoutes<
         details: {
           ...observation.details,
           historical,
-          configurationMismatch: observation.state === 'present' &&
+          configurationMismatch:
+            observation.state === 'present' &&
             (typeof digest !== 'string' || !historical.configurationDigests.includes(digest)),
         },
       }
@@ -112,14 +109,18 @@ export class DestroyRoutes<
   }> {
     const t = this.persistence.tables
     if (resource.proof.source === 'preview') {
-      const [preview] = await this.persistence.db.select().from(t.capsuleBranchPreviews)
-        .where(eq(t.capsuleBranchPreviews.id, resource.proof.previewId)).limit(1)
+      const [preview] = await this.persistence.db
+        .select()
+        .from(t.capsuleBranchPreviews)
+        .where(eq(t.capsuleBranchPreviews.id, resource.proof.previewId))
+        .limit(1)
       if (!preview) {
         throw new IncusError('Historical preview evidence disappeared before withdrawal.', 'CONFLICT')
       }
       return {
-        configurationDigests: [preview.currentConfigurationDigest, preview.pendingConfigurationDigest]
-          .filter((digest): digest is string => digest !== null),
+        configurationDigests: [preview.currentConfigurationDigest, preview.pendingConfigurationDigest].filter(
+          (digest): digest is string => digest !== null,
+        ),
         preview: {
           host: preview.host,
           status: preview.status,
@@ -131,14 +132,18 @@ export class DestroyRoutes<
     if (resource.proof.source !== 'alias') {
       throw new IncusError('Route withdrawal requires preview or alias provenance.', 'CONFLICT')
     }
-    const rows = await this.persistence.db.select({
-      digest: t.capsuleRouteProviderApplications.configurationDigest,
-    }).from(t.capsuleRouteRevisions).innerJoin(
-      t.capsuleRouteProviderApplications,
-      eq(t.capsuleRouteProviderApplications.revisionId, t.capsuleRouteRevisions.id),
-    ).where(eq(t.capsuleRouteRevisions.aliasId, resource.proof.aliasId))
+    const rows = await this.persistence.db
+      .select({
+        digest: t.capsuleRouteProviderApplications.configurationDigest,
+      })
+      .from(t.capsuleRouteRevisions)
+      .innerJoin(
+        t.capsuleRouteProviderApplications,
+        eq(t.capsuleRouteProviderApplications.revisionId, t.capsuleRouteRevisions.id),
+      )
+      .where(eq(t.capsuleRouteRevisions.aliasId, resource.proof.aliasId))
     return {
-      configurationDigests: rows.flatMap(row => row.digest === null ? [] : [row.digest]),
+      configurationDigests: rows.flatMap(row => (row.digest === null ? [] : [row.digest])),
     }
   }
 

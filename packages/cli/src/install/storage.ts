@@ -39,7 +39,12 @@ export function assertVolume(volume: IncusStorageVolume): void {
   }
   throw new InstallerError({
     code: 'INCOMPATIBLE_POSTGRES_VOLUME',
-    facts: [['Observed', `Volume '${volume.name}' reports type='${volume.type}', content_type='${volume.contentType}', description='${volume.description}', and project='${volume.project || INSTALLER_SPEC.projectName}'; missing or mismatched expected keys: ${differences.missing.join(', ') || 'none'}; unexpected non-volatile keys: ${differences.unexpected.join(', ') || 'none'}.`]],
+    facts: [
+      [
+        'Observed',
+        `Volume '${volume.name}' reports type='${volume.type}', content_type='${volume.contentType}', description='${volume.description}', and project='${volume.project || INSTALLER_SPEC.projectName}'; missing or mismatched expected keys: ${differences.missing.join(', ') || 'none'}; unexpected non-volatile keys: ${differences.unexpected.join(', ') || 'none'}.`,
+      ],
+    ],
     retry: 'qiln doctor',
   })
 }
@@ -111,8 +116,14 @@ export async function convergeStorage(client: LocalIncusClient): Promise<Storage
     }
     throw new InstallerError({
       code: 'POSTGRES_VOLUME_VERIFICATION_FAILED',
-      facts: [['Observed', `Incus did not return '${INSTALLER_SPEC.storage.volumeName}' after accepting its synchronous creation request.`]],
-      retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      facts: [
+        [
+          'Observed',
+          `Incus did not return '${INSTALLER_SPEC.storage.volumeName}' after accepting its synchronous creation request.`,
+        ],
+      ],
+      retry:
+        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
     })
   }
   assertVolume(volume)

@@ -20,7 +20,12 @@ function validateImageSelector(value: string): string {
   if (value === '' || value.length > 512 || value.trim() !== value || CONTROL_CHARACTER_PATTERN.test(value)) {
     throw new InstallerError({
       code: 'INVALID_IMAGE_SELECTOR',
-      facts: [['Observed', 'The selector is empty, too long, contains surrounding whitespace, or contains control characters.']],
+      facts: [
+        [
+          'Observed',
+          'The selector is empty, too long, contains surrounding whitespace, or contains control characters.',
+        ],
+      ],
       retry: 'qiln up --source <checkout> --image <alias-or-fingerprint> [--authorized-keys <roster>]',
     })
   }
@@ -38,21 +43,30 @@ export function validateContainerImage(image: IncusImage, fingerprint: string): 
   if (!FULL_FINGERPRINT_PATTERN.test(image.fingerprint) || image.fingerprint !== fingerprint) {
     throw new InstallerError({
       code: 'IMAGE_FINGERPRINT_MISMATCH',
-      facts: [['Requested image', fingerprint], ['Returned image', image.fingerprint]],
+      facts: [
+        ['Requested image', fingerprint],
+        ['Returned image', image.fingerprint],
+      ],
       retry: 'qiln up --source <checkout> --image <alias-or-fingerprint> [--authorized-keys <roster>]',
     })
   }
   if (image.type !== 'container') {
     throw new InstallerError({
       code: 'IMAGE_TYPE_INCOMPATIBLE',
-      facts: [['Image type', image.type], ['Required type', 'container']],
+      facts: [
+        ['Image type', image.type],
+        ['Required type', 'container'],
+      ],
       retry: 'qiln up --source <checkout> --image <alias-or-fingerprint> [--authorized-keys <roster>]',
     })
   }
   if (image.architecture !== INSTALLER_SPEC.supportedHost.incusArchitecture) {
     throw new InstallerError({
       code: 'IMAGE_ARCHITECTURE_INCOMPATIBLE',
-      facts: [['Image architecture', image.architecture], ['Required architecture', INSTALLER_SPEC.supportedHost.incusArchitecture]],
+      facts: [
+        ['Image architecture', image.architecture],
+        ['Required architecture', INSTALLER_SPEC.supportedHost.incusArchitecture],
+      ],
       retry: 'qiln up --source <checkout> --image <alias-or-fingerprint> [--authorized-keys <roster>]',
     })
   }
@@ -86,14 +100,20 @@ export async function validateImagePreflight(
     if (!resolvedAlias) {
       throw new InstallerError({
         code: 'IMAGE_ALIAS_NOT_FOUND',
-        facts: [['Alias', selector], ['Project', INSTALLER_SPEC.projectName]],
+        facts: [
+          ['Alias', selector],
+          ['Project', INSTALLER_SPEC.projectName],
+        ],
         retry: 'qiln up --source <checkout> --image <alias-or-fingerprint> [--authorized-keys <roster>]',
       })
     }
     if (!FULL_FINGERPRINT_PATTERN.test(resolvedAlias.target)) {
       throw new InstallerError({
         code: 'IMAGE_ALIAS_TARGET_INVALID',
-        facts: [['Alias', selector], ['Alias target', resolvedAlias.target]],
+        facts: [
+          ['Alias', selector],
+          ['Alias target', resolvedAlias.target],
+        ],
         retry: 'qiln up --source <checkout> --image <alias-or-fingerprint> [--authorized-keys <roster>]',
       })
     }
@@ -104,7 +124,11 @@ export async function validateImagePreflight(
   if (installationState && installationState.imageFingerprint !== fingerprint) {
     throw new InstallerError({
       code: 'IMAGE_PIN_CONFLICT',
-      facts: [['Installed image', installationState.imageFingerprint], ['Selected image', fingerprint], ['Selected through', selector]],
+      facts: [
+        ['Installed image', installationState.imageFingerprint],
+        ['Selected image', fingerprint],
+        ['Selected through', selector],
+      ],
       retry: `qiln up --source <checkout> --image ${installationState.imageFingerprint} [--authorized-keys <roster>]`,
     })
   }

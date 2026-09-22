@@ -14,8 +14,6 @@ export interface IncusErrorContext {
   rerun: string
 }
 
-
-
 function apiFailureObserved(error: IncusApiError, operation: string): string {
   return `Incus returned HTTP ${error.statusCode} with API error code ${error.errorCode} while attempting to ${operation}.`
 }
@@ -40,7 +38,12 @@ export function toInstallerError(error: unknown, context: IncusErrorContext): In
   if (error instanceof IncusOperationWaitTimeoutError) {
     return new InstallerError({
       code: 'INCUS_OPERATION_INDETERMINATE',
-      facts: [['Observed', `The local wait for operation '${error.operationPath}' exceeded ${INSTALLER_SPEC.incus.operationWaitTimeoutMs}ms.`]],
+      facts: [
+        [
+          'Observed',
+          `The local wait for operation '${error.operationPath}' exceeded ${INSTALLER_SPEC.incus.operationWaitTimeoutMs}ms.`,
+        ],
+      ],
       retry: context.rerun,
     })
   }
@@ -54,14 +57,24 @@ export function toInstallerError(error: unknown, context: IncusErrorContext): In
   if (error instanceof IncusTransportError) {
     return new InstallerError({
       code: 'INCUS_API_UNAVAILABLE',
-      facts: [['Observed', `The local Unix-socket request to ${context.operation} did not complete through ${INSTALLER_SPEC.incus.socketPath}.`]],
+      facts: [
+        [
+          'Observed',
+          `The local Unix-socket request to ${context.operation} did not complete through ${INSTALLER_SPEC.incus.socketPath}.`,
+        ],
+      ],
       retry: context.rerun,
     })
   }
   if (error instanceof IncusProtocolError) {
     return new InstallerError({
       code: 'INCUS_PROTOCOL_INCOMPATIBLE',
-      facts: [['Observed', `The response received while attempting to ${context.operation} did not match the expected Incus API contract.`]],
+      facts: [
+        [
+          'Observed',
+          `The response received while attempting to ${context.operation} did not match the expected Incus API contract.`,
+        ],
+      ],
       retry: context.rerun,
     })
   }

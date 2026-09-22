@@ -27,8 +27,8 @@ export const capsuleDestroyResourceStatusEnum = pgEnum(
 /**
  * One operation's deletion obligation and observations.
  *
- * Target and proof are immutable. Before and after observations are separate
- * so a configuration mismatch remains auditable after successful removal.
+ * Target and proof are immutable. Before and after observations are separate so
+ * a configuration mismatch remains auditable after successful removal.
  * Historical branch-resource diagnostics are not cleared by these transitions.
  *
  * Unresolved may also represent abandonment without a new provider observation.

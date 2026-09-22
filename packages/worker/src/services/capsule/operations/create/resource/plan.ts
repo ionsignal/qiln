@@ -15,7 +15,11 @@ import {
 } from '../../../resource/identity'
 import { createProvisioningFileResourceMetadata } from '../../../resource/metadata'
 import { mergeCloudInit } from '../../../resource/bootstrap/cloudinit'
-import { resolveFileTarget, type AttachedVolume, type ProvisioningFileTarget } from '../../../resource/bootstrap/targets'
+import {
+  resolveFileTarget,
+  type AttachedVolume,
+  type ProvisioningFileTarget,
+} from '../../../resource/bootstrap/targets'
 import { IncusError } from '../../../../../errors'
 import type { CapsuleBranchResourceInventoryEntry } from '../../../resource/inventory'
 import type {
@@ -234,9 +238,9 @@ export class CapsuleCreateResourcePlanner {
 
     return blueprint.provisioning.files.map(file => {
       const target = resolveFileTarget(file.path, input.attachedVolumes)
-      
+
       this.assertWritableProvisioningTarget(file.path, target, input.attachedVolumes)
-      
+
       const content = file.content === undefined ? '' : interpolate(file.content, interpolationContext)
       return {
         kind: 'provisioningFile',
@@ -263,11 +267,11 @@ export class CapsuleCreateResourcePlanner {
       }
     })
   }
-  
+
   /**
-   * Historical blueprint pins may predate the catalog validation invariant.
-   * Do not redirect a write beneath a readonly mount to rootfs: the mounted
-   * volume would still mask that path at runtime.
+   * Historical blueprint pins may predate the catalog validation invariant. Do
+   * not redirect a write beneath a readonly mount to rootfs: the mounted volume
+   * would still mask that path at runtime.
    */
   private assertWritableProvisioningTarget(
     filePath: string,

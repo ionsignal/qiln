@@ -81,7 +81,9 @@ export async function acquireInstallerLock(directory: Dir): Promise<InstallerLoc
     await handle.close().catch(() => undefined)
     throw new InstallerError({
       code: 'INSTALLER_LOCK_FAILED',
-      facts: [['Observed', 'The newly created installer lock did not retain its required regular-file ownership and mode.']],
+      facts: [
+        ['Observed', 'The newly created installer lock did not retain its required regular-file ownership and mode.'],
+      ],
       retry: 'qiln doctor',
     })
   }

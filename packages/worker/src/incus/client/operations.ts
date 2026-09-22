@@ -24,7 +24,9 @@ export class IncusOperationsClient {
     if (!parsed.success) {
       throw new IncusError('Incus operation activity could not be validated.', 'VALIDATION_ERROR')
     }
-    const active = Object.values(parsed.data).flat().filter(operation => !INCUS_FINAL.has(operation.status_code))
+    const active = Object.values(parsed.data)
+      .flat()
+      .filter(operation => !INCUS_FINAL.has(operation.status_code))
     if (active.length > 0) {
       throw new IncusError('Owner project still contains unsettled Incus operations.', 'CONFLICT', {
         operationIds: active.map(operation => operation.id),

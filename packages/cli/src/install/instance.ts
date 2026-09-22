@@ -25,7 +25,8 @@ function validateSourceRoot(sourceRoot: string): void {
     throw new InstallerError({
       code: 'INVALID_SOURCE_ROOT',
       facts: [['Observed', 'The source root is not a canonical absolute non-root path.']],
-      retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      retry:
+        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
     })
   }
 }
@@ -139,8 +140,14 @@ export function assertInstance(instance: IncusInstance, imageFingerprint: string
   }
   throw new InstallerError({
     code: 'INCOMPATIBLE_ORCHESTRATOR_INSTANCE',
-    facts: [['Observed', `Instance '${instance.name}' reports architecture='${instance.architecture}', type='${instance.type}', status='${instance.status}', status_code=${instance.statusCode}, project='${instance.project || INSTALLER_SPEC.projectName}', ephemeral=${instance.ephemeral}, stateful=${instance.stateful}, and profiles='${instance.profiles.join(',') || 'none'}'; volatile.base_image expected '${imageFingerprint}' but was '${config.baseImage || 'unset'}'; missing or mismatched config keys: ${config.missing.join(', ') || 'none'}; unexpected non-volatile, non-image config keys: ${config.unexpected.join(', ') || 'none'}; missing devices: ${devices.missing.join(', ') || 'none'}; mismatched devices: ${devices.mismatched.join(', ') || 'none'}; unexpected devices: ${devices.unexpected.join(', ') || 'none'}.`]],
-    retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+    facts: [
+      [
+        'Observed',
+        `Instance '${instance.name}' reports architecture='${instance.architecture}', type='${instance.type}', status='${instance.status}', status_code=${instance.statusCode}, project='${instance.project || INSTALLER_SPEC.projectName}', ephemeral=${instance.ephemeral}, stateful=${instance.stateful}, and profiles='${instance.profiles.join(',') || 'none'}'; volatile.base_image expected '${imageFingerprint}' but was '${config.baseImage || 'unset'}'; missing or mismatched config keys: ${config.missing.join(', ') || 'none'}; unexpected non-volatile, non-image config keys: ${config.unexpected.join(', ') || 'none'}; missing devices: ${devices.missing.join(', ') || 'none'}; mismatched devices: ${devices.mismatched.join(', ') || 'none'}; unexpected devices: ${devices.unexpected.join(', ') || 'none'}.`,
+      ],
+    ],
+    retry:
+      'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
   })
 }
 
@@ -153,8 +160,14 @@ function validateState(state: InstallationState): void {
   ) {
     throw new InstallerError({
       code: 'INVALID_INSTALLATION_STATE',
-      facts: [['Observed', 'The state does not contain the required version, project, instance name, and full lowercase image fingerprint.']],
-      retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      facts: [
+        [
+          'Observed',
+          'The state does not contain the required version, project, instance name, and full lowercase image fingerprint.',
+        ],
+      ],
+      retry:
+        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
     })
   }
 }
@@ -238,8 +251,14 @@ export async function convergeInstance(
     }
     throw new InstallerError({
       code: 'ORCHESTRATOR_INSTANCE_VERIFICATION_FAILED',
-      facts: [['Observed', `Incus did not return '${INSTALLER_SPEC.orchestrator.name}' after its creation operation completed successfully.`]],
-      retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      facts: [
+        [
+          'Observed',
+          `Incus did not return '${INSTALLER_SPEC.orchestrator.name}' after its creation operation completed successfully.`,
+        ],
+      ],
+      retry:
+        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
     })
   }
   assertInstance(instance, state.imageFingerprint, sourceRoot)

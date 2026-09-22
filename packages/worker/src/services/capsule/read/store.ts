@@ -5,8 +5,8 @@ import { IncusError } from '../../../errors'
 import type { BranchRow, CapsuleReadScope, CapsuleRow, OperationRow, PreviewRow, ReadTransaction } from './types'
 
 /**
- * Dashboard reads share one statement snapshot across their batched queries
- * and historical provenance reads without blocking capsule mutations.
+ * Dashboard reads share one statement snapshot across their batched queries and
+ * historical provenance reads without blocking capsule mutations.
  */
 export class CapsuleReadStore<
   TDatabase extends PostgresJsDatabase = PostgresJsDatabase,
@@ -35,14 +35,15 @@ export class CapsuleReadStore<
     const branches = await tx
       .select()
       .from(tables.capsuleBranches)
-      .where(
-        and(inArray(tables.capsuleBranches.capsuleId, capsuleIds), eq(tables.capsuleBranches.isRootBranch, true)),
-      )
+      .where(and(inArray(tables.capsuleBranches.capsuleId, capsuleIds), eq(tables.capsuleBranches.isRootBranch, true)))
       .orderBy(asc(tables.capsuleBranches.id))
     const roots = this.group(branches, branch => branch.capsuleId)
     const operations = this.group(await this.operations(tx, capsuleIds), operation => operation.capsuleId)
     const previews = this.group(
-      await this.previews(tx, branches.map(branch => branch.id)),
+      await this.previews(
+        tx,
+        branches.map(branch => branch.id),
+      ),
       preview => preview.branchId,
     )
     return capsules.map(capsule => {
@@ -80,7 +81,10 @@ export class CapsuleReadStore<
         ),
       )
       .orderBy(asc(tables.capsuleBranches.id))
-    const root = this.root(capsule, branches.filter(branch => branch.isRootBranch))
+    const root = this.root(
+      capsule,
+      branches.filter(branch => branch.isRootBranch),
+    )
     const branch = branchId === undefined ? root : branches.find(candidate => candidate.id === branchId)
     if (!branch || branch.ownerId !== ownerId) {
       throw new IncusError('Capsule branch not found or access denied.', 'NOT_FOUND', {
@@ -175,11 +179,7 @@ export class CapsuleReadStore<
       })
     }
     for (const preview of previews) {
-      if (
-        preview.ownerId !== capsule.ownerId ||
-        preview.capsuleId !== capsule.id ||
-        preview.branchId !== branch.id
-      ) {
+      if (preview.ownerId !== capsule.ownerId || preview.capsuleId !== capsule.id || preview.branchId !== branch.id) {
         throw new IncusError('Preview does not match its capsule and selected branch.', 'CONFLICT', {
           capsuleId: capsule.id,
           branchId: branch.id,

@@ -5,11 +5,7 @@ import {
   type CapsuleDestroyTarget,
 } from '@qiln/core/server'
 import { CaddyError, CaddyErrorCode, CaddyMutationOutcome, caddyErrorDetailsFromUnknown } from './error'
-import {
-  CaddyFallbackRouteSchema,
-  CaddyRecoveryBindingSchema,
-  CaddyRecoveryStateSchema,
-} from './schema'
+import { CaddyFallbackRouteSchema, CaddyRecoveryBindingSchema, CaddyRecoveryStateSchema } from './schema'
 import type { CaddyHttp } from './transport'
 import type { CaddyRecoveryBinding, CaddyRecoveryState } from './types'
 
@@ -78,11 +74,12 @@ export class CaddyRecoveryClient {
       target,
       state: route === undefined ? 'absent' : 'present',
       observedAt: state.observedAt,
-      details: route === undefined
-        ? {}
-        : {
-            configurationDigest: digestCapsuleRouteConfiguration(route),
-          },
+      details:
+        route === undefined
+          ? {}
+          : {
+              configurationDigest: digestCapsuleRouteConfiguration(route),
+            },
     }
   }
 

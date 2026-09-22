@@ -170,10 +170,7 @@ export class CapsuleCreateResourceStore<
     })
   }
 
-  private async lockCreate(
-    tx: CapsuleCreateTransaction<TDatabase>,
-    input: CapsuleCreateResourceInput,
-  ): Promise<void> {
+  private async lockCreate(tx: CapsuleCreateTransaction<TDatabase>, input: CapsuleCreateResourceInput): Promise<void> {
     const { capsules, capsuleOperations, capsuleBranches, capsuleCreateOperations } = this.persistence.tables
     const [capsule] = await tx
       .select()
@@ -238,10 +235,7 @@ export class CapsuleCreateResourceStore<
     }
   }
 
-  private assertIdentity(
-    resource: CapsuleCreateResourceRow<TTables>,
-    input: CapsuleCreateResourceInput,
-  ): void {
+  private assertIdentity(resource: CapsuleCreateResourceRow<TTables>, input: CapsuleCreateResourceInput): void {
     const metadataMatches =
       digestCanonicalJsonValue(resource.metadata, { context: 'persisted create resource metadata' }) ===
       digestCanonicalJsonValue(input.metadata, { context: 'expected create resource metadata' })

@@ -35,7 +35,9 @@ export async function validateStoragePreflight(
   if (hostPoolName !== INSTALLER_SPEC.storage.poolName || hostPoolHealth !== 'ONLINE') {
     throw new InstallerError({
       code: 'HOST_ZFS_POOL_UNHEALTHY',
-      facts: [['Observed', `zpool reports name='${hostPoolName || 'unknown'}' and health='${hostPoolHealth || 'unknown'}'.`]],
+      facts: [
+        ['Observed', `zpool reports name='${hostPoolName || 'unknown'}' and health='${hostPoolHealth || 'unknown'}'.`],
+      ],
       retry: 'qiln doctor',
     })
   }
@@ -78,7 +80,12 @@ export async function validateStoragePreflight(
   if (!incusPoolCompatible) {
     throw new InstallerError({
       code: 'INCOMPATIBLE_INCUS_STORAGE_POOL',
-      facts: [['Observed', `Incus reports driver='${incusPool.driver}', status='${incusPool.status || 'unknown'}', and source='${incusPool.config.source ?? 'unset'}'.`]],
+      facts: [
+        [
+          'Observed',
+          `Incus reports driver='${incusPool.driver}', status='${incusPool.status || 'unknown'}', and source='${incusPool.config.source ?? 'unset'}'.`,
+        ],
+      ],
       retry: 'qiln doctor',
     })
   }

@@ -104,9 +104,14 @@ export class DestroyTargets<
         .for('update')
       if (
         branches.some(branch => branch.ownerId !== locked.operation.ownerId) ||
-        !sameIds(plan.branchIds, branches.map(branch => branch.id))
+        !sameIds(
+          plan.branchIds,
+          branches.map(branch => branch.id),
+        )
       ) {
-        throw new IncusError('Destroy plan does not cover the complete owned branch scope.', 'CONFLICT', { operationId })
+        throw new IncusError('Destroy plan does not cover the complete owned branch scope.', 'CONFLICT', {
+          operationId,
+        })
       }
       const [existing] = await tx
         .select({ operationId: capsuleDestroyOperations.operationId })
@@ -115,7 +120,9 @@ export class DestroyTargets<
         .for('update')
         .limit(1)
       if (existing) {
-        throw new IncusError('Destroy plan already exists and cannot be replaced or resumed.', 'CONFLICT', { operationId })
+        throw new IncusError('Destroy plan already exists and cannot be replaced or resumed.', 'CONFLICT', {
+          operationId,
+        })
       }
       const now = new Date()
       await tx.insert(capsuleDestroyOperations).values({
@@ -177,9 +184,7 @@ export class DestroyTargets<
         report.capsuleId !== state.operation.capsuleId ||
         new Set(branchIds).size !== branchIds.length ||
         !sameIds(branchIds, state.plan.branchIds) ||
-        report.branchAccess.some(
-          access => access.capsuleId !== state.operation.capsuleId || access.state !== 'blocked',
-        )
+        report.branchAccess.some(access => access.capsuleId !== state.operation.capsuleId || access.state !== 'blocked')
       ) {
         throw new IncusError('SSH revocation does not cover the destroy plan’s complete branch scope.', 'CONFLICT', {
           operationId,
@@ -234,7 +239,8 @@ export class DestroyTargets<
         .update(resources)
         .set({
           before: observation,
-          status: observation.state === 'absent' ? 'absent' : observation.state === 'present' ? 'planned' : 'unresolved',
+          status:
+            observation.state === 'absent' ? 'absent' : observation.state === 'present' ? 'planned' : 'unresolved',
           verifiedAt: observation.state === 'absent' ? observedAt : null,
           updatedAt: new Date(),
         })
@@ -257,10 +263,14 @@ export class DestroyTargets<
         resource.after !== null ||
         resource.intentAt !== null
       ) {
-        throw new IncusError('Deletion requires this attempt’s provider fence, SSH closure, and target inspection.', 'CONFLICT', {
-          operationId,
-          resourceId,
-        })
+        throw new IncusError(
+          'Deletion requires this attempt’s provider fence, SSH closure, and target inspection.',
+          'CONFLICT',
+          {
+            operationId,
+            resourceId,
+          },
+        )
       }
       const before = this.observation(resource, resource.before, resource.createdAt)
       if (before.state !== 'present') {
@@ -289,7 +299,8 @@ export class DestroyTargets<
    *
    * The caller must not submit absence while an earlier asynchronous mutation
    * could still create or reintroduce the target. Provider-operation settlement
-   * and that uncertainty classification remain adapter/executor responsibilities.
+   * and that uncertainty classification remain adapter/executor
+   * responsibilities.
    */
   public async settle(
     operationId: string,
@@ -422,19 +433,19 @@ export class DestroyTargets<
       targetDigest(observation.target) !== resource.targetDigest ||
       new Date(observation.observedAt).getTime() < notBefore.getTime()
     ) {
-      throw new IncusError('Provider observation does not match the exact target or this attempt’s timeline.', 'CONFLICT', {
-        operationId: resource.operationId,
-        resourceId: resource.id,
-      })
+      throw new IncusError(
+        'Provider observation does not match the exact target or this attempt’s timeline.',
+        'CONFLICT',
+        {
+          operationId: resource.operationId,
+          resourceId: resource.id,
+        },
+      )
     }
     return observation
   }
 
-  private require(
-    resource: DestroyTargetRow | undefined,
-    operationId: string,
-    resourceId: string,
-  ): DestroyTargetRow {
+  private require(resource: DestroyTargetRow | undefined, operationId: string, resourceId: string): DestroyTargetRow {
     if (!resource) {
       throw new IncusError('Destroy target accounting conflicted with another transition.', 'CONFLICT', {
         operationId,

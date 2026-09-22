@@ -73,7 +73,10 @@ export async function validateSourcePreflight(sourcePath: string, gitExecutable:
   if (gitTopLevel !== sourceRoot) {
     throw new InstallerError({
       code: 'SOURCE_NOT_CHECKOUT_ROOT',
-      facts: [['Selected source', sourceRoot], ['Checkout root', gitTopLevel]],
+      facts: [
+        ['Selected source', sourceRoot],
+        ['Checkout root', gitTopLevel],
+      ],
       retry: 'qiln up --source <checkout-root> --image <alias-or-fingerprint> --authorized-keys <roster>',
     })
   }
@@ -105,7 +108,12 @@ export async function validateSourcePreflight(sourcePath: string, gitExecutable:
   ) {
     throw new InstallerError({
       code: 'INVALID_SOURCE_PACKAGE',
-      facts: [['Observed', `${packageJsonPath} must be a non-empty regular file no larger than ${MAX_PACKAGE_JSON_BYTES} bytes.`]],
+      facts: [
+        [
+          'Observed',
+          `${packageJsonPath} must be a non-empty regular file no larger than ${MAX_PACKAGE_JSON_BYTES} bytes.`,
+        ],
+      ],
       retry: 'qiln up --source <checkout> --image <alias-or-fingerprint> --authorized-keys <roster>',
     })
   }

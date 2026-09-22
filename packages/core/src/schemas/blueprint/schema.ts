@@ -111,10 +111,10 @@ export const CapsuleBlueprintSchema = z
     }
 
     /**
-     * Provisioning initializes rootfs paths and writable versioned empty volumes only.
-     * Checking every enclosing mount prevents a nested bind from inheriting the
-     * writable provisioning policy of its enclosing managed volume. Ancestor
-     * directories such as /workspace remain rootfs targets.
+     * Provisioning initializes rootfs paths and writable versioned empty
+     * volumes only. Checking every enclosing mount prevents a nested bind from
+     * inheriting the writable provisioning policy of its enclosing managed
+     * volume. Ancestor directories such as /workspace remain rootfs targets.
      */
     blueprint.provisioning.files.forEach((file, index) => {
       for (const { volume } of volumes) {

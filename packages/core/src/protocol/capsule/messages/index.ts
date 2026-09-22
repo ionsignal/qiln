@@ -39,11 +39,7 @@ import {
   CapsulePreviewEventNameValues,
   CapsulePreviewEventSchemas,
 } from './preview'
-import {
-  CapsuleReadCommandDefinitions,
-  CapsuleReadCommandName,
-  CapsuleReadCommandNameValues,
-} from './read'
+import { CapsuleReadCommandDefinitions, CapsuleReadCommandName, CapsuleReadCommandNameValues } from './read'
 import {
   CapsuleRouteCommandDefinitions,
   CapsuleRouteCommandName,

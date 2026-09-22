@@ -84,7 +84,9 @@ async function validateAliasTarget(
   if (!image || image.fingerprint !== alias.target) {
     throw new InstallerError({
       code: 'MANAGED_IMAGE_ALIAS_TARGET_MISSING',
-      facts: [['Observed', `Alias '${alias.name}' targets '${alias.target}', but that full image could not be validated.`]],
+      facts: [
+        ['Observed', `Alias '${alias.name}' targets '${alias.target}', but that full image could not be validated.`],
+      ],
       retry: RERUN,
     })
   }
@@ -235,7 +237,9 @@ async function convergeSplit(
         if (unexpectedAlias) {
           throw new InstallerError({
             code: 'MANAGED_IMAGE_ALIAS_CONFLICT',
-            facts: [['Observed', `Alias target='${unexpectedAlias.target}', pending import fingerprint='${fingerprint}'.`]],
+            facts: [
+              ['Observed', `Alias target='${unexpectedAlias.target}', pending import fingerprint='${fingerprint}'.`],
+            ],
             retry: RERUN,
           })
         }

@@ -29,7 +29,7 @@ export function branchTargets(proof: DestroyBranchProof): CapsuleDestroyResource
     source: 'branch' as const,
     branchId: branch.id,
     originOperationId: origin.id,
-    originType: branch.isRootBranch ? 'create' as const : 'fork' as const,
+    originType: branch.isRootBranch ? ('create' as const) : ('fork' as const),
     blueprintDigest: blueprint.digest,
     inventoryDigest: branch.resourceInventoryDigest,
   }
@@ -49,19 +49,21 @@ export function branchTargets(proof: DestroyBranchProof): CapsuleDestroyResource
     ...blueprint.blueprint.provisioning.volumes.flatMap<CapsuleDestroyResourcePlan>(volume =>
       volume.type === 'bind'
         ? []
-        : [{
-            target: {
-              kind: 'volume',
-              provider: 'incus',
-              project,
-              pool: volume.pool,
-              volumeName: branchVolumeName(branch.id, volume.name),
+        : [
+            {
+              target: {
+                kind: 'volume',
+                provider: 'incus',
+                project,
+                pool: volume.pool,
+                volumeName: branchVolumeName(branch.id, volume.name),
+              },
+              proof: {
+                ...base,
+                blueprintVolumeName: volume.name,
+              },
             },
-            proof: {
-              ...base,
-              blueprintVolumeName: volume.name,
-            },
-          }],
+          ],
     ),
   ]
 }
@@ -93,14 +95,16 @@ export function verifyResources(proof: DestroyBranchProof, resources: readonly D
     switch (resource.resourceType) {
       case 'incus_project': {
         const metadata = parseProjectResourceMetadata(resource.metadata)
-        valid = metadata.namespace === namespace &&
+        valid =
+          metadata.namespace === namespace &&
           resource.resourceKey === projectResourceKey(namespace) &&
           resource.cleanupPolicy === 'retain'
         break
       }
       case 'incus_instance': {
         const metadata = parseInstanceResourceMetadata(resource.metadata)
-        valid = metadata.namespace === namespace &&
+        valid =
+          metadata.namespace === namespace &&
           metadata.instanceName === instanceName &&
           resource.resourceKey === instanceResourceKey(namespace, instanceName) &&
           resource.cleanupPolicy === 'delete_with_branch'
@@ -111,7 +115,9 @@ export function verifyResources(proof: DestroyBranchProof, resources: readonly D
           candidate => candidate.name === resource.blueprintVolumeName,
         )
         const metadata = parseVolumeResourceMetadata(resource.metadata)
-        valid = volume !== undefined && volume.type !== 'bind' &&
+        valid =
+          volume !== undefined &&
+          volume.type !== 'bind' &&
           metadata.namespace === namespace &&
           metadata.pool === volume.pool &&
           metadata.volumeName === branchVolumeName(branch.id, volume.name) &&
@@ -124,7 +130,8 @@ export function verifyResources(proof: DestroyBranchProof, resources: readonly D
           candidate => candidate.name === resource.blueprintVolumeName,
         )
         const metadata = parseBindMountResourceMetadata(resource.metadata)
-        valid = volume?.type === 'bind' &&
+        valid =
+          volume?.type === 'bind' &&
           metadata.namespace === namespace &&
           metadata.hostPath === volume.host_path &&
           metadata.mountPath === volume.mount_path &&
@@ -134,14 +141,16 @@ export function verifyResources(proof: DestroyBranchProof, resources: readonly D
       }
       case 'provisioning_file': {
         const metadata = parseProvisioningFileResourceMetadata(resource.metadata)
-        valid = metadata.namespace === namespace &&
+        valid =
+          metadata.namespace === namespace &&
           metadata.instanceName === instanceName &&
           resource.cleanupPolicy === 'delete_with_branch' &&
           (metadata.target === 'instance' ||
-            blueprint.blueprint.provisioning.volumes.some(volume =>
-              volume.type !== 'bind' &&
-              volume.pool === metadata.pool &&
-              branchVolumeName(branch.id, volume.name) === metadata.volumeName,
+            blueprint.blueprint.provisioning.volumes.some(
+              volume =>
+                volume.type !== 'bind' &&
+                volume.pool === metadata.pool &&
+                branchVolumeName(branch.id, volume.name) === metadata.volumeName,
             ))
         break
       }

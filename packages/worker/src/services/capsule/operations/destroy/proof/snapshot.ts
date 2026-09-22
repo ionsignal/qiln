@@ -59,9 +59,10 @@ export function snapshotTargets(input: SnapshotProofInput): CapsuleDestroyResour
         operationId: operation.id,
       })
     }
-    const snapshot = extension.snapshotId === null
-      ? undefined
-      : input.snapshots.find(candidate => candidate.id === extension.snapshotId)
+    const snapshot =
+      extension.snapshotId === null
+        ? undefined
+        : input.snapshots.find(candidate => candidate.id === extension.snapshotId)
     if (extension.snapshotId !== null) {
       if (
         !snapshot ||
@@ -79,9 +80,8 @@ export function snapshotTargets(input: SnapshotProofInput): CapsuleDestroyResour
       visitedSnapshots.add(snapshot.id)
     }
     const resources = input.resources.filter(resource => resource.operationId === operation.id)
-    const references = snapshot === undefined
-      ? []
-      : input.references.filter(reference => reference.snapshotId === snapshot.id)
+    const references =
+      snapshot === undefined ? [] : input.references.filter(reference => reference.snapshotId === snapshot.id)
     const versioned = blueprint.blueprint.provisioning.volumes.filter(
       volume => volume.type !== 'bind' && volume.versioned,
     )
@@ -116,14 +116,14 @@ export function snapshotTargets(input: SnapshotProofInput): CapsuleDestroyResour
         identity.project !== project ||
         identity.pool !== volume.pool ||
         identity.sourceVolume !== branchVolumeName(branch.branch.id, volume.name) ||
-        (resource && reference && (
-          reference.createResourceId !== resource.id ||
-          reference.sourceBranchResourceId !== resource.sourceBranchResourceId ||
-          reference.snapshotName !== resource.snapshotName ||
-          reference.project !== resource.project ||
-          reference.pool !== resource.pool ||
-          reference.sourceVolume !== resource.sourceVolume
-        ))
+        (resource &&
+          reference &&
+          (reference.createResourceId !== resource.id ||
+            reference.sourceBranchResourceId !== resource.sourceBranchResourceId ||
+            reference.snapshotName !== resource.snapshotName ||
+            reference.project !== resource.project ||
+            reference.pool !== resource.pool ||
+            reference.sourceVolume !== resource.sourceVolume))
       ) {
         throw new IncusError('Snapshot deletion identity is outside its proven managed volume.', 'CONFLICT', {
           operationId: operation.id,
@@ -131,12 +131,13 @@ export function snapshotTargets(input: SnapshotProofInput): CapsuleDestroyResour
         })
       }
       const source = input.branchResources.find(candidate => candidate.id === identity.sourceBranchResourceId)
-      if (source && (
-        source.ownerId !== operation.ownerId ||
-        source.branchId !== branch.branch.id ||
-        source.blueprintVolumeName !== volume.name ||
-        source.resourceType !== 'zfs_volume'
-      )) {
+      if (
+        source &&
+        (source.ownerId !== operation.ownerId ||
+          source.branchId !== branch.branch.id ||
+          source.blueprintVolumeName !== volume.name ||
+          source.resourceType !== 'zfs_volume')
+      ) {
         throw new IncusError('Snapshot deletion references contradictory source resource accounting.', 'CONFLICT', {
           operationId: operation.id,
           resourceId: source.id,
@@ -172,10 +173,11 @@ export function snapshotTargets(input: SnapshotProofInput): CapsuleDestroyResour
     input.snapshots.some(snapshot => !visitedSnapshots.has(snapshot.id)) ||
     input.resources.some(resource => !visitedResources.has(resource.id)) ||
     input.references.some(reference => !visitedReferences.has(reference.id)) ||
-    [...input.operations.values()].some(operation =>
-      operation.type === 'snapshot_create' &&
-      operation.providerMutationStartedAt !== null &&
-      !input.extensions.some(extension => extension.operationId === operation.id),
+    [...input.operations.values()].some(
+      operation =>
+        operation.type === 'snapshot_create' &&
+        operation.providerMutationStartedAt !== null &&
+        !input.extensions.some(extension => extension.operationId === operation.id),
     )
   ) {
     throw new IncusError('Snapshot deletion cannot prove complete capture and restoration coverage.', 'CONFLICT')

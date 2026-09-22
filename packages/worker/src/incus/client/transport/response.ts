@@ -70,11 +70,7 @@ function unexpectedStatusDetails(
   }
 }
 
-function assertHttpAgreement(
-  response: Response,
-  envelope: IncusResponse,
-  options: IncusResponseParseOptions,
-): void {
+function assertHttpAgreement(response: Response, envelope: IncusResponse, options: IncusResponseParseOptions): void {
   const status = response.status
   const agrees =
     envelope.type === 'sync'

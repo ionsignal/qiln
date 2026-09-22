@@ -21,7 +21,11 @@ const ProviderIdentitySchema = z
     },
   )
 
-const CaddyServerSchema = z.string().min(1).max(128).regex(/^[A-Za-z0-9][A-Za-z0-9_-]*$/)
+const CaddyServerSchema = z
+  .string()
+  .min(1)
+  .max(128)
+  .regex(/^[A-Za-z0-9][A-Za-z0-9_-]*$/)
 
 const CaddyRouteIdSchema = z
   .string()
@@ -83,8 +87,8 @@ export const CapsuleDestroyTargetSchema = z.discriminatedUnion('kind', [
  * References the durable evidence used by the operation-specific proof reader.
  *
  * Parsing these references does not validate their database relationships,
- * historical Blueprint contents, provider markers, or restoration lineage.
- * The destroy proof boundary must independently establish those facts.
+ * historical Blueprint contents, provider markers, or restoration lineage. The
+ * destroy proof boundary must independently establish those facts.
  */
 export const CapsuleDestroyProofSchema = z.discriminatedUnion('source', [
   z
@@ -177,13 +181,7 @@ export const CapsuleDestroyPlanSchema = z
     })
   })
 
-export const CapsuleDestroyResourceStatusValues = [
-  'planned',
-  'deleting',
-  'absent',
-  'deleted',
-  'unresolved',
-] as const
+export const CapsuleDestroyResourceStatusValues = ['planned', 'deleting', 'absent', 'deleted', 'unresolved'] as const
 
 export const CapsuleDestroyResourceStatusSchema = z.enum(CapsuleDestroyResourceStatusValues)
 

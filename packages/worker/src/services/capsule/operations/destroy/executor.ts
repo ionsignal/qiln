@@ -31,7 +31,8 @@ export interface DestroyCapsuleExecutorDependencies {
  * A new attempt may recover old failures but never resumes their execution.
  *
  * Access closure precedes provider mutation; ingress closure precedes upstream
- * removal. Each provider obligation is settled in this attempt's target ledger.
+ * removal. Each provider obligation is settled in this attempt's target
+ * ledger.
  */
 export class DestroyCapsuleExecutor {
   private readonly runner: CapsuleOperationStepRunner
@@ -48,20 +49,21 @@ export class DestroyCapsuleExecutor {
       this.dependencies.operationEvents.publishChanged(operation)
       const run = <TResult>(step: DestroyStepKey, action: () => Promise<TResult>): Promise<TResult> => {
         state.begin(step)
-        return this.runner.run({
-          operationId,
-          ownerId: operation.ownerId,
-          capsuleId: operation.capsuleId,
-          branchId: null,
-          branchName: null,
-          stepKey: step,
-          metadata: {},
-          failureContext: { operationType: 'destroy' },
-        }, action)
+        return this.runner.run(
+          {
+            operationId,
+            ownerId: operation.ownerId,
+            capsuleId: operation.capsuleId,
+            branchId: null,
+            branchName: null,
+            stepKey: step,
+            metadata: {},
+            failureContext: { operationType: 'destroy' },
+          },
+          action,
+        )
       }
-      const prepared = await run(DestroyStepKey.PLAN_DESTROY, () =>
-        this.dependencies.repository.prepare(operationId),
-      )
+      const prepared = await run(DestroyStepKey.PLAN_DESTROY, () => this.dependencies.repository.prepare(operationId))
       execution = prepared
       await run(DestroyStepKey.REVOKE_SSH_ACCESS, async () => {
         const report = await this.dependencies.channel.command(CapsuleSshAccessCommandName.CAPSULE_ACCESS_REVOKE, {
@@ -81,12 +83,8 @@ export class DestroyCapsuleExecutor {
         await this.dependencies.routes.withdraw(prepared)
         await this.dependencies.repository.withdrawn(operationId)
       })
-      await run(DestroyStepKey.DELETE_BRANCH_INSTANCES, () =>
-        this.dependencies.provider.instances(prepared),
-      )
-      await run(DestroyStepKey.DELETE_MANAGED_STORAGE, () =>
-        this.dependencies.provider.storage(prepared),
-      )
+      await run(DestroyStepKey.DELETE_BRANCH_INSTANCES, () => this.dependencies.provider.instances(prepared))
+      await run(DestroyStepKey.DELETE_MANAGED_STORAGE, () => this.dependencies.provider.storage(prepared))
       await run(DestroyStepKey.VERIFY_TERMINAL_RESOURCE_OUTCOMES, async () => {
         state.enter('complete_destroy')
         const completed = await this.dependencies.repository.complete(operationId)

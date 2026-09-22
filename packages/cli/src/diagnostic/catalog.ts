@@ -15,14 +15,12 @@ function entry(title: string, explanation: string, ...steps: string[]): Diagnost
 const recoverCredentials =
   'Inspect and recover the complete four-file local credential set before retrying. Do not regenerate individual credentials.'
 
-const inspectIncus =
-  'Inspect the local Incus daemon, its operations, and the managed resources before retrying.'
+const inspectIncus = 'Inspect the local Incus daemon, its operations, and the managed resources before retrying.'
 
 const restoreAccess =
   'Verify the daemon and the developer’s approved local Incus access. Start a new login session after changing group membership.'
 
-const preservePostgres =
-  'Preserve the PostgreSQL custom volume and its data during any manual recovery.'
+const preservePostgres = 'Preserve the PostgreSQL custom volume and its data during any manual recovery.'
 
 export const catalog = Object.freeze({
   MISSING_HOST_TOOL: entry(

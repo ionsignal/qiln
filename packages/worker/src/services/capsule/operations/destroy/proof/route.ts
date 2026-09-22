@@ -54,9 +54,13 @@ export function routeTargets(input: RouteProofInput): CapsuleDestroyResourcePlan
       preview.providerRouteId !== previewRouteId(preview.branchId, preview.applicationName) ||
       !CapsuleRouteHostSchema.safeParse(preview.host).success
     ) {
-      throw new IncusError('Preview deletion identity is not bound to an owned historical branch application.', 'CONFLICT', {
-        previewId: preview.id,
-      })
+      throw new IncusError(
+        'Preview deletion identity is not bound to an owned historical branch application.',
+        'CONFLICT',
+        {
+          previewId: preview.id,
+        },
+      )
     }
     const expected = createCapsuleRouteApplicationPin({
       schemaVersion: 1,
@@ -164,9 +168,7 @@ export function routeTargets(input: RouteProofInput): CapsuleDestroyResourcePlan
     // clearing its mutation fence. That status alone does not prove Caddy ever
     // received a route configuration to withdraw.
     if (ids.size === 0 && requiresExactRouteIdentity) {
-      const mutation = alias.mutationOperationId === null
-        ? undefined
-        : input.operations.get(alias.mutationOperationId)
+      const mutation = alias.mutationOperationId === null ? undefined : input.operations.get(alias.mutationOperationId)
       if (!mutation || mutation.providerMutationStartedAt !== null || revisions.length === 0) {
         throw new IncusError('Unresolved route alias has no exact provider identity for withdrawal.', 'CONFLICT', {
           aliasId: alias.id,
@@ -191,12 +193,14 @@ export function routeTargets(input: RouteProofInput): CapsuleDestroyResourcePlan
   if (
     input.providers.some(provider => !visitedProviders.has(provider.operationId)) ||
     input.revisions.some(revision => !input.aliases.some(alias => alias.id === revision.aliasId)) ||
-    input.extensions.some(extension =>
-      !input.revisions.some(revision =>
-        revision.id === extension.proposedRevisionId &&
-        revision.operationId === extension.operationId &&
-        revision.aliasId === extension.aliasId,
-      ),
+    input.extensions.some(
+      extension =>
+        !input.revisions.some(
+          revision =>
+            revision.id === extension.proposedRevisionId &&
+            revision.operationId === extension.operationId &&
+            revision.aliasId === extension.aliasId,
+        ),
     )
   ) {
     throw new IncusError('Route deletion cannot prove complete historical provider coverage.', 'CONFLICT')

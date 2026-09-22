@@ -80,7 +80,8 @@ function text(snapshotValue: FileSnapshot, _: string): string {
     throw new InstallerError({
       code: 'INVALID_LOCAL_CREDENTIAL',
       facts: [['Observed', 'The credential is not valid supported UTF-8 text.']],
-      retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      retry:
+        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
     })
   }
 }
@@ -100,7 +101,8 @@ function parseNats(value: string): string {
     throw new InstallerError({
       code: 'INVALID_NATS_CREDENTIAL',
       facts: [['Observed', 'nats-server.conf does not match the installer-owned configuration schema.']],
-      retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      retry:
+        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
     })
   }
   return match[1]
@@ -114,7 +116,8 @@ function parseHost(value: string): { natsToken: string; cookieSecret: string } {
     throw new InstallerError({
       code: 'INVALID_HOST_CREDENTIAL',
       facts: [['Observed', 'qiln-host.env contains missing, duplicate, malformed, or unsupported fields.']],
-      retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      retry:
+        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
     })
   }
   return {
@@ -133,7 +136,8 @@ async function validateGatewayKey(privateKey: FileSnapshot, sshKeygen: string): 
     throw new InstallerError({
       code: 'INVALID_GATEWAY_HOST_KEY',
       facts: [['Observed', 'ssh-keygen could not derive a public key using an empty passphrase.']],
-      retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      retry:
+        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
     })
   }
   const publicKey = derivedPublicKey.stdout.trim()
@@ -148,8 +152,11 @@ async function validateGatewayKey(privateKey: FileSnapshot, sshKeygen: string): 
   ) {
     throw new InstallerError({
       code: 'INVALID_GATEWAY_HOST_KEY_ALGORITHM',
-      facts: [['Observed', 'The public key derived from the retained private key does not use the required algorithm.']],
-      retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      facts: [
+        ['Observed', 'The public key derived from the retained private key does not use the required algorithm.'],
+      ],
+      retry:
+        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
     })
   }
 }
@@ -166,13 +173,15 @@ function credentialReadError(error: unknown, _: string): InstallerError {
     return new InstallerError({
       code: 'INVALID_LOCAL_CREDENTIAL_FILE',
       facts: [['Observed', reason]],
-      retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      retry:
+        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
     })
   }
   return new InstallerError({
     code: 'LOCAL_CREDENTIAL_READ_FAILED',
     facts: [['Observed', 'The credential could not be opened as one stable bounded regular file.']],
-    retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+    retry:
+      'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
   })
 }
 
@@ -201,8 +210,11 @@ async function files(directory: Dir): Promise<'absent' | LocalFiles> {
     const missing = expected.filter(name => !names.has(name))
     throw new InstallerError({
       code: 'PARTIAL_LOCAL_CREDENTIAL_SET',
-      facts: [['Observed', `Present files: ${present.join(', ') || 'none'}; missing files: ${missing.join(', ') || 'none'}.`]],
-      retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      facts: [
+        ['Observed', `Present files: ${present.join(', ') || 'none'}; missing files: ${missing.join(', ') || 'none'}.`],
+      ],
+      retry:
+        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
     })
   }
   const limits = INSTALLER_SPEC.credentials.limits
@@ -224,7 +236,8 @@ async function validate(local: LocalFiles, sshKeygen: string): Promise<Credentia
     throw new InstallerError({
       code: 'LOCAL_CREDENTIAL_TOKEN_MISMATCH',
       facts: [['Observed', 'The NATS token in nats-server.conf differs from the token in qiln-host.env.']],
-      retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      retry:
+        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
     })
   }
   await validateGatewayKey(local.gatewayKey, sshKeygen)
@@ -257,7 +270,8 @@ function collision(config: Readonly<IncusConfigMap>): void {
       throw new InstallerError({
         code: 'INSTANCE_CREDENTIAL_NAMESPACE_COLLISION',
         facts: [['Observed', `Both credential namespaces are populated for managed suffix '${suffix}'.`]],
-        retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+        retry:
+          'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
       })
     }
   }
@@ -277,7 +291,8 @@ async function current(directory: Dir, client: LocalIncusClient, sourceRoot: str
     throw new InstallerError({
       code: 'INSTALLATION_STATE_REQUIRED',
       facts: [['Observed', 'installation.json is absent after image convergence.']],
-      retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      retry:
+        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
     })
   }
   let instance: IncusRead<IncusInstance> | null
@@ -295,7 +310,8 @@ async function current(directory: Dir, client: LocalIncusClient, sourceRoot: str
     throw new InstallerError({
       code: 'ORCHESTRATOR_INSTANCE_REQUIRED',
       facts: [['Observed', `Incus did not return '${INSTALLER_SPEC.orchestrator.name}'.`]],
-      retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      retry:
+        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
     })
   }
   collision(instance.value.config)
@@ -308,8 +324,11 @@ async function current(directory: Dir, client: LocalIncusClient, sourceRoot: str
   ) {
     throw new InstallerError({
       code: 'ORCHESTRATOR_IMAGE_SIGNATURE_MISMATCH',
-      facts: [['Observed', 'The instance base-image signature is missing, malformed, or different from installation.json.']],
-      retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      facts: [
+        ['Observed', 'The instance base-image signature is missing, malformed, or different from installation.json.'],
+      ],
+      retry:
+        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
     })
   }
   return {
@@ -344,7 +363,8 @@ async function gatewayKey(sshKeygen: string): Promise<FileSnapshot> {
       throw new InstallerError({
         code: 'GATEWAY_HOST_KEY_GENERATION_FAILED',
         facts: [['Observed', 'ssh-keygen did not complete successfully in the private temporary directory.']],
-        retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+        retry:
+          'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
       })
     }
     await rm(`${keyPath}.pub`, {
@@ -373,8 +393,14 @@ async function generate(
   if (hasManagedCredentials(target.read.value.config)) {
     throw new InstallerError({
       code: 'LOCAL_CREDENTIAL_RECOVERY_REQUIRED',
-      facts: [['Observed', 'The stopped orchestrator contains one or more managed credential keys while the local set is absent.']],
-      retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      facts: [
+        [
+          'Observed',
+          'The stopped orchestrator contains one or more managed credential keys while the local set is absent.',
+        ],
+      ],
+      retry:
+        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
     })
   }
   const natsToken = randomBytes(INSTALLER_SPEC.credentials.secretBytes).toString(
@@ -400,7 +426,8 @@ async function generate(
     throw new InstallerError({
       code: 'LOCAL_CREDENTIAL_PERSISTENCE_FAILED',
       facts: [['Observed', 'The protected state directory did not contain a complete valid credential set.']],
-      retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      retry:
+        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
     })
   }
   return persisted
@@ -488,7 +515,8 @@ async function deliver(
       throw new InstallerError({
         code: 'LOCAL_CREDENTIAL_SET_REQUIRED',
         facts: [['Observed', 'The protected installer state directory contains no credential set.']],
-        retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+        retry:
+          'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
       })
     }
     const expected = put(target.read.value, local.values)
@@ -522,7 +550,8 @@ async function deliver(
         throw new InstallerError({
           code: 'INCUS_ETAG_CONFLICT',
           facts: [['Observed', 'Incus returned HTTP 412 after the instance was re-read and revalidated once.']],
-          retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+          retry:
+            'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
         })
       }
       if (error instanceof IncusApiError) {
@@ -552,7 +581,8 @@ async function verify(
     throw new InstallerError({
       code: 'FINAL_INSTALLATION_STATE_MISSING',
       facts: [['Observed', 'installation.json could not be re-read after credential convergence.']],
-      retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      retry:
+        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
     })
   }
   const installation = state.installation
@@ -587,21 +617,29 @@ async function verify(
     throw new InstallerError({
       code: 'FINAL_LOCAL_CREDENTIAL_SET_MISSING',
       facts: [['Observed', 'The protected installer state directory no longer contains all four credentials.']],
-      retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      retry:
+        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
     })
   }
   if (!matches(instance.config, local.values)) {
     throw new InstallerError({
       code: 'FINAL_INSTANCE_CREDENTIAL_MISMATCH',
       facts: [['Observed', 'At least one managed credential is missing or differs from the local source of truth.']],
-      retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      retry:
+        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
     })
   }
   if (!samePut(instance, expected)) {
     throw new InstallerError({
       code: 'FINAL_INSTANCE_STATE_MISMATCH',
-      facts: [['Observed', 'Profiles, devices, local configuration, or another writable instance field differs from the guarded state.']],
-      retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      facts: [
+        [
+          'Observed',
+          'Profiles, devices, local configuration, or another writable instance field differs from the guarded state.',
+        ],
+      ],
+      retry:
+        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
     })
   }
   if (verifyAlias) {
@@ -620,7 +658,8 @@ async function verify(
       throw new InstallerError({
         code: 'FINAL_IMAGE_ALIAS_MISMATCH',
         facts: [['Observed', 'The alias target differs from the persisted full image fingerprint.']],
-        retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+        retry:
+          'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
       })
     }
   }
@@ -642,7 +681,8 @@ export async function convergeCredentials(options: {
       throw new InstallerError({
         code: 'AUTHORIZED_KEYS_REQUIRED',
         facts: [['Observed', 'No local credential files or validated authorized-key roster are available.']],
-        retry: 'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+        retry:
+          'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
       })
     }
     local = await generate(options.directory, options.roster, options.sshKeygen, options.client, options.sourceRoot)

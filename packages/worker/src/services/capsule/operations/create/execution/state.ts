@@ -19,8 +19,7 @@ export interface CapsuleCreateInstanceCompensationTarget {
 }
 
 export type CapsuleCreateCompensationTarget =
-  | CapsuleCreateVolumeCompensationTarget
-  | CapsuleCreateInstanceCompensationTarget
+  CapsuleCreateVolumeCompensationTarget | CapsuleCreateInstanceCompensationTarget
 
 export interface CapsuleCreateDerivedProvisioningFile {
   resourceId: string

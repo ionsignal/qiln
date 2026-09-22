@@ -48,7 +48,7 @@ export class ForkAbandonment implements CapsuleOperationAbandonmentHandler {
     operation: PersistedCapsuleOperation,
   ): Promise<CapsuleOperationAbandonmentClassificationResult> {
     assertAbandonedOperationType(operation, this.operationType)
-    
+
     const result = await this.dependencies.repository.abandon(operation.id)
     if (!result) {
       return {

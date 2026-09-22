@@ -222,10 +222,7 @@ export class Reporter {
 
   private fact(label: string, value: string): void {
     const name = this.value(this.stderr, label, MAX_LABEL_LENGTH).padEnd(FACT_WIDTH)
-    this.write(
-      this.stderr,
-      `  ${this.paint(this.stderr, 'bold', name)} ${this.value(this.stderr, value)}`,
-    )
+    this.write(this.stderr, `  ${this.paint(this.stderr, 'bold', name)} ${this.value(this.stderr, value)}`)
   }
 
   private heading(value: string): void {

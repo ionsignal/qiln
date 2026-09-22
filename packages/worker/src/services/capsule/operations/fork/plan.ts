@@ -242,7 +242,7 @@ export class ForkPlanner {
         volumeName,
         pool: volume.pool,
         mountPath: volume.mount_path,
-        readonly: volume.readonly
+        readonly: volume.readonly,
       })
       devices[volume.name] = {
         type: 'disk',
@@ -581,7 +581,9 @@ export class ForkPlanner {
   }
 
   private assertCoverage(input: ForkPlanInput, volumes: readonly ForkVolumeResource[]): void {
-    const managedVolumes = input.source.blueprint.blueprint.provisioning.volumes.filter(volume => volume.type !== 'bind')
+    const managedVolumes = input.source.blueprint.blueprint.provisioning.volumes.filter(
+      volume => volume.type !== 'bind',
+    )
     const managedNames = new Set(managedVolumes.map(volume => volume.name))
     const versionedNames = new Set(managedVolumes.filter(volume => volume.versioned).map(volume => volume.name))
     const plannedNames = new Set(volumes.map(volume => volume.blueprintVolumeName))

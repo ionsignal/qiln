@@ -12,14 +12,19 @@ function assertUnprivilegedInvocation(): void {
   if (typeof process.geteuid !== 'function' || typeof process.getuid !== 'function') {
     throw new InstallerError({
       code: 'UNSUPPORTED_PLATFORM',
-      facts: [['Observed', `Node platform '${process.platform}' does not expose process.getuid() and process.geteuid().`]],
+      facts: [
+        ['Observed', `Node platform '${process.platform}' does not expose process.getuid() and process.geteuid().`],
+      ],
       retry: 'qiln doctor',
     })
   }
   if (process.getuid() === 0 || process.geteuid() === 0) {
     throw new InstallerError({
       code: 'ROOT_EXECUTION_REFUSED',
-      facts: [['User ID', String(process.getuid())], ['Effective user ID', String(process.geteuid())]],
+      facts: [
+        ['User ID', String(process.getuid())],
+        ['Effective user ID', String(process.geteuid())],
+      ],
       retry: 'qiln doctor',
     })
   }

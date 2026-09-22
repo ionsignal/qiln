@@ -105,12 +105,16 @@ export class ProjectService {
       .filter(([key, expected]) => config[key] !== expected)
       .map(([key]) => key)
     if (missingOrMismatched.length > 0) {
-      throw new IncusError('Owner namespace lacks matching Qiln ownership markers. Operator verification is required.', 'CONFLICT', {
-        namespace,
-        ownerId,
-        markerKeys: missingOrMismatched,
-        policy: 'never_silently_adopt_unmarked_owner_namespace',
-      })
+      throw new IncusError(
+        'Owner namespace lacks matching Qiln ownership markers. Operator verification is required.',
+        'CONFLICT',
+        {
+          namespace,
+          ownerId,
+          markerKeys: missingOrMismatched,
+          policy: 'never_silently_adopt_unmarked_owner_namespace',
+        },
+      )
     }
   }
 

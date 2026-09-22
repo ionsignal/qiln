@@ -30,7 +30,8 @@ export function convertUpOptions(input: UpInput): UpCommandOptions {
     throw new InstallerError({
       code: 'IMAGE_FILE_INTERFACE_RETIRED',
       facts: [['Observed', '--image-file was supplied.']],
-      retry: 'qiln up --source <checkout> --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs> [--authorized-keys <roster>]',
+      retry:
+        'qiln up --source <checkout> --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs> [--authorized-keys <roster>]',
     })
   }
   validateValue(input.source, '--source')
@@ -52,7 +53,8 @@ export function convertUpOptions(input: UpInput): UpCommandOptions {
     throw new InstallerError({
       code: 'SPLIT_IMAGE_PAIR_REQUIRED',
       facts: [['Observed', hasMetadata ? '--image-rootfs is missing.' : '--image-meta is missing.']],
-      retry: 'qiln up --source <checkout> --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs> [--authorized-keys <roster>]',
+      retry:
+        'qiln up --source <checkout> --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs> [--authorized-keys <roster>]',
     })
   }
   const authorizedKeys =
@@ -85,9 +87,14 @@ export function convertUpOptions(input: UpInput): UpCommandOptions {
   const hasReference = input.image !== undefined
   throw new InstallerError({
     code: 'IMAGE_SELECTION_REQUIRED',
-    facts: [['Observed', hasReference
-      ? '--image cannot be combined with --image-meta and --image-rootfs.'
-      : 'No complete image input was supplied.']],
+    facts: [
+      [
+        'Observed',
+        hasReference
+          ? '--image cannot be combined with --image-meta and --image-rootfs.'
+          : 'No complete image input was supplied.',
+      ],
+    ],
     retry: 'qiln --help',
   })
 }

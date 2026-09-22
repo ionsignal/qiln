@@ -117,7 +117,12 @@ function assertNoIncusNetworkConflict(
     if (candidate && cidrsOverlap(target, candidate)) {
       throw new InstallerError({
         code: 'INCUS_NETWORK_RANGE_CONFLICT',
-        facts: [['Observed', `Network '${network.name}' uses '${configuredAddress}', which overlaps '${INSTALLER_SPEC.network.ipv4Subnet}'.`]],
+        facts: [
+          [
+            'Observed',
+            `Network '${network.name}' uses '${configuredAddress}', which overlaps '${INSTALLER_SPEC.network.ipv4Subnet}'.`,
+          ],
+        ],
         retry: 'qiln doctor',
       })
     }
@@ -155,7 +160,12 @@ async function assertNoHostRouteConflict(
     }
     throw new InstallerError({
       code: 'HOST_ROUTE_RANGE_CONFLICT',
-      facts: [['Observed', `Host route '${route.dst}' on interface '${device || 'unknown'}' overlaps '${INSTALLER_SPEC.network.ipv4Subnet}'.`]],
+      facts: [
+        [
+          'Observed',
+          `Host route '${route.dst}' on interface '${device || 'unknown'}' overlaps '${INSTALLER_SPEC.network.ipv4Subnet}'.`,
+        ],
+      ],
       retry: 'qiln doctor',
     })
   }
@@ -194,7 +204,12 @@ async function assertNoHostRouteConflict(
       }
       throw new InstallerError({
         code: 'HOST_ADDRESS_RANGE_CONFLICT',
-        facts: [['Observed', `Interface '${interfaceName || 'unknown'}' has '${local}/${prefixLength}', overlapping '${INSTALLER_SPEC.network.ipv4Subnet}'.`]],
+        facts: [
+          [
+            'Observed',
+            `Interface '${interfaceName || 'unknown'}' has '${local}/${prefixLength}', overlapping '${INSTALLER_SPEC.network.ipv4Subnet}'.`,
+          ],
+        ],
         retry: 'qiln doctor',
       })
     }

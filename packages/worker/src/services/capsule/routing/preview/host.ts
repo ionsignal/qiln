@@ -23,9 +23,7 @@ function applicationDigest(value: string): string {
  * Stable provider identity is independent from hostname allocation.
  */
 export function previewRouteId(branchId: string, applicationName: string): string {
-  return CaddyPreviewRouteIdSchema.parse(
-    `qiln-preview-${compactUuid(branchId)}-${applicationDigest(applicationName)}`,
-  )
+  return CaddyPreviewRouteIdSchema.parse(`qiln-preview-${compactUuid(branchId)}-${applicationDigest(applicationName)}`)
 }
 
 /**

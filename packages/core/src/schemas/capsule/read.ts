@@ -240,8 +240,8 @@ export const CapsulePreviewSchema = z
  * Previews belong to the root branch. Lifecycle, runtime, preview, and current
  * operation state remain separate rather than implying a combined status.
  *
- * Null previews mean historical application provenance is unavailable. An
- * empty array means no preview records exist, not that verification failed.
+ * Null previews mean historical application provenance is unavailable. An empty
+ * array means no preview records exist, not that verification failed.
  */
 export const CapsuleSummarySchema = z
   .object({
@@ -261,8 +261,8 @@ export const CapsuleListOutputSchema = z.array(CapsuleSummarySchema)
  * silently falling back. Manifest and previews describe only the selected
  * branch; currentOperation remains capsule-wide.
  *
- * Null previews mean historical application provenance is unavailable. An
- * empty array means no preview records exist, not that verification failed.
+ * Null previews mean historical application provenance is unavailable. An empty
+ * array means no preview records exist, not that verification failed.
  */
 export const CapsuleDetailSchema = z
   .object({

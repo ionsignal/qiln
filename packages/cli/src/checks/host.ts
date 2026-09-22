@@ -135,7 +135,10 @@ const tools = {
     }
     throw new InstallerError({
       code: 'MISSING_HOST_TOOL',
-      facts: [['Tool', tool.name], ['Package', tool.packageName]],
+      facts: [
+        ['Tool', tool.name],
+        ['Package', tool.packageName],
+      ],
       retry: 'qiln doctor',
     })
   },
@@ -158,7 +161,9 @@ const deb = {
     if (result.exitCode !== 0) {
       throw new InstallerError({
         code: 'PACKAGE_QUERY_FAILED',
-        facts: [['Observed', `dpkg-query returned exit code ${result.exitCode ?? 'unknown'} while inspecting '${name}'.`]],
+        facts: [
+          ['Observed', `dpkg-query returned exit code ${result.exitCode ?? 'unknown'} while inspecting '${name}'.`],
+        ],
         retry: 'qiln doctor',
       })
     }
@@ -182,7 +187,9 @@ const deb = {
     }
     throw new InstallerError({
       code: 'PACKAGE_VERSION_CHECK_FAILED',
-      facts: [['Observed', `dpkg returned exit code ${result.exitCode ?? 'unknown'} while comparing the installed package.`]],
+      facts: [
+        ['Observed', `dpkg returned exit code ${result.exitCode ?? 'unknown'} while comparing the installed package.`],
+      ],
       retry: 'qiln doctor',
     })
   },
@@ -217,7 +224,12 @@ const deb = {
     }
     throw new InstallerError({
       code: 'UNSUPPORTED_INCUS_PACKAGE_VERSION',
-      facts: [['Observed', `Installed package versions: ${candidates.map(candidate => `${candidate.name}=${candidate.version}`).join(', ')}.`]],
+      facts: [
+        [
+          'Observed',
+          `Installed package versions: ${candidates.map(candidate => `${candidate.name}=${candidate.version}`).join(', ')}.`,
+        ],
+      ],
       retry: 'qiln doctor',
     })
   },
@@ -237,7 +249,9 @@ export async function validateHostPreflight(): Promise<HostPreflight> {
   } catch (error: unknown) {
     throw new InstallerError({
       code: 'HOST_RELEASE_UNAVAILABLE',
-      facts: [['Observed', '/etc/os-release could not be read or contains malformed required ID or VERSION_ID fields.']],
+      facts: [
+        ['Observed', '/etc/os-release could not be read or contains malformed required ID or VERSION_ID fields.'],
+      ],
       retry: 'qiln doctor',
     })
   }
@@ -249,7 +263,10 @@ export async function validateHostPreflight(): Promise<HostPreflight> {
   ) {
     throw new InstallerError({
       code: 'UNSUPPORTED_UBUNTU_RELEASE',
-      facts: [['Detected release', `${distributionId} ${distributionVersion}`], ['Required release', supportedUbuntuRelease]],
+      facts: [
+        ['Detected release', `${distributionId} ${distributionVersion}`],
+        ['Required release', supportedUbuntuRelease],
+      ],
       retry: 'qiln doctor',
     })
   }
@@ -257,7 +274,10 @@ export async function validateHostPreflight(): Promise<HostPreflight> {
   if (nodeArchitecture !== INSTALLER_SPEC.supportedHost.nodeArchitecture) {
     throw new InstallerError({
       code: 'UNSUPPORTED_HOST_ARCHITECTURE',
-      facts: [['Detected architecture', nodeArchitecture], ['Required architecture', INSTALLER_SPEC.supportedHost.nodeArchitecture]],
+      facts: [
+        ['Detected architecture', nodeArchitecture],
+        ['Required architecture', INSTALLER_SPEC.supportedHost.nodeArchitecture],
+      ],
       retry: 'qiln doctor',
     })
   }
@@ -266,7 +286,10 @@ export async function validateHostPreflight(): Promise<HostPreflight> {
   if (!kernelVersion || !minimumKernel || !kernel.meets(kernelVersion, minimumKernel)) {
     throw new InstallerError({
       code: 'UNSUPPORTED_KERNEL_VERSION',
-      facts: [['Running kernel', kernelRelease], ['Minimum kernel', INSTALLER_SPEC.supportedHost.minimumKernelRelease]],
+      facts: [
+        ['Running kernel', kernelRelease],
+        ['Minimum kernel', INSTALLER_SPEC.supportedHost.minimumKernelRelease],
+      ],
       retry: 'qiln doctor',
     })
   }

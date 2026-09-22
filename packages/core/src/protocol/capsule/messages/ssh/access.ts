@@ -54,12 +54,16 @@ export const CapsuleSshBranchAccessRevokeInputSchema = SshBranchAccessRevokeInpu
 }).strict()
 
 export const CapsuleSshCapsuleAccessRevokeInputSchema = z.discriminatedUnion('reason', [
-  SshCapsuleAccessRevokeInputSchema.options[0].extend({
-    target: TargetOwnerSchema,
-  }).strict(),
-  SshCapsuleAccessRevokeInputSchema.options[1].extend({
-    target: TargetOwnerSchema,
-  }).strict(),
+  SshCapsuleAccessRevokeInputSchema.options[0]
+    .extend({
+      target: TargetOwnerSchema,
+    })
+    .strict(),
+  SshCapsuleAccessRevokeInputSchema.options[1]
+    .extend({
+      target: TargetOwnerSchema,
+    })
+    .strict(),
 ])
 
 export const CapsuleSshBranchAccessMutationOutputSchema = SshBranchAccessMutationOutputSchema

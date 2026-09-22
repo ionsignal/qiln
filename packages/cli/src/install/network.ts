@@ -43,7 +43,12 @@ export function assertNetwork(network: IncusNetwork): void {
   }
   throw new InstallerError({
     code: 'INCOMPATIBLE_INCUS_NETWORK',
-    facts: [['Observed', `Incus reports type='${network.type}', managed=${network.managed}, status='${network.status || 'unknown'}', description='${network.description}', and project='${network.project || INSTALLER_SPEC.projectName}'; missing or mismatched expected keys: ${differences.missing.join(', ') || 'none'}; unexpected non-volatile keys: ${differences.unexpected.join(', ') || 'none'}.`]],
+    facts: [
+      [
+        'Observed',
+        `Incus reports type='${network.type}', managed=${network.managed}, status='${network.status || 'unknown'}', description='${network.description}', and project='${network.project || INSTALLER_SPEC.projectName}'; missing or mismatched expected keys: ${differences.missing.join(', ') || 'none'}; unexpected non-volatile keys: ${differences.unexpected.join(', ') || 'none'}.`,
+      ],
+    ],
     retry: 'qiln doctor',
   })
 }
@@ -106,7 +111,12 @@ export async function convergeNetwork(client: LocalIncusClient): Promise<Network
     }
     throw new InstallerError({
       code: 'INCUS_NETWORK_VERIFICATION_FAILED',
-      facts: [['Observed', `Incus did not return '${INSTALLER_SPEC.network.name}' after accepting its synchronous creation request.`]],
+      facts: [
+        [
+          'Observed',
+          `Incus did not return '${INSTALLER_SPEC.network.name}' after accepting its synchronous creation request.`,
+        ],
+      ],
       retry: RERUN,
     })
   }

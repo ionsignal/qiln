@@ -69,7 +69,7 @@ export function createSchema<TUserIdColumn extends PgColumn>(userIdColumn: TUser
     capsuleBranches,
     capsuleOperations,
     capsuleCreateOperations,
-   capsuleDestroyOperations,
+    capsuleDestroyOperations,
     capsuleDestroyResources,
     capsuleForkOperations,
     capsuleBranchRuntimeOperations,

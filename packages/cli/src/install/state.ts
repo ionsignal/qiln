@@ -91,9 +91,14 @@ function stateError(error: unknown, path: string, expectedDirectory?: boolean): 
     if (error.kind === 'type') {
       return new InstallerError({
         code: 'UNSAFE_STATE_ENTRY',
-        facts: [['Observed', expectedDirectory === undefined
-            ? `${path} is not a supported regular file or real directory.`
-            : `${path} is not a ${expectsDirectory ? 'real directory' : 'regular file'}.`]],
+        facts: [
+          [
+            'Observed',
+            expectedDirectory === undefined
+              ? `${path} is not a supported regular file or real directory.`
+              : `${path} is not a ${expectsDirectory ? 'real directory' : 'regular file'}.`,
+          ],
+        ],
         retry: 'qiln doctor',
       })
     }
@@ -143,7 +148,12 @@ function parseInstallationState(value: unknown): InstallationState {
   ) {
     throw new InstallerError({
       code: 'INVALID_INSTALLATION_STATE',
-      facts: [['Observed', 'installation.json does not contain the expected version, project, instance, and full lowercase image fingerprint.']],
+      facts: [
+        [
+          'Observed',
+          'installation.json does not contain the expected version, project, instance, and full lowercase image fingerprint.',
+        ],
+      ],
       retry: 'qiln doctor',
     })
   }

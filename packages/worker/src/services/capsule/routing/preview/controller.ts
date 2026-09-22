@@ -87,7 +87,7 @@ export class PreviewRouteController {
                   host: existingPreview.host,
                   providerRouteId: previewRouteId(branch.id, application.name),
                 }
-         const admission = await this.dependencies.repository.ensure(branch, applicationPin, identity)
+          const admission = await this.dependencies.repository.ensure(branch, applicationPin, identity)
           if (admission.kind === 'skipped') {
             return
           }

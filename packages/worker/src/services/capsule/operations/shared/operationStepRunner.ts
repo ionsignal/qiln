@@ -17,9 +17,9 @@ export interface CapsuleOperationStepRunInput<TStepKey extends string = string> 
 /**
  * Executes one action within a durable operation-step accounting boundary.
  *
- * Step rows are inspection records only. This runner never skips,
- * resumes, retries, replays, or otherwise authorizes operation work based on an
- * existing step row.
+ * Step rows are inspection records only. This runner never skips, resumes,
+ * retries, replays, or otherwise authorizes operation work based on an existing
+ * step row.
  *
  * The operation-specific executor remains responsible for:
  *

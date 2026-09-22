@@ -182,7 +182,7 @@ export function parseRoutingPublicOrigin(value: string): RoutingPublicOrigin {
   const url = parseUrl(value, label)
 
   assertNoCredentials(url, label)
-  
+
   if (
     (url.protocol !== 'http:' && url.protocol !== 'https:') ||
     url.hostname === '' ||

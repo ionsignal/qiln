@@ -80,7 +80,9 @@ export function createProgram(handlers: ProgramHandlers, output: ProgramOutput):
   )
   program
     .command('doctor')
-    .description('Validate the supported host, local Incus access, ZFS storage, networking, and existing installer state.')
+    .description(
+      'Validate the supported host, local Incus access, ZFS storage, networking, and existing installer state.',
+    )
     .allowExcessArguments(false)
     .action(() => handlers.doctor(program.opts<GlobalOptions>().color))
   const up = program
