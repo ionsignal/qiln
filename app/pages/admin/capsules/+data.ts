@@ -1,21 +1,20 @@
 import { useTRPC } from '@/composables/useTRPC'
 import type { PageContextClient, PageContextServer } from 'vike/types'
-import type { CapsuleBlueprintManifest } from '@qiln/core/client'
-import type { CapsuleBranchSummary } from '@qiln/engine/client'
+import type { CapsuleBlueprintManifest, CapsuleListOutput } from '@qiln/core/client'
 
 export type Data = {
-  branches: CapsuleBranchSummary[]
+  capsules: CapsuleListOutput
   manifest: CapsuleBlueprintManifest
 }
 
 export async function data(pageContext: PageContextServer | PageContextClient): Promise<Data> {
   const trpc = useTRPC(pageContext)
-  const [branches, manifest] = await Promise.all([
-    trpc.engine.capsules.branches.list.query(),
+  const [capsules, manifest] = await Promise.all([
+    trpc.engine.capsules.list.query(),
     trpc.engine.blueprints.list.query(),
   ])
   return {
-    branches,
+    capsules,
     manifest,
   }
 }

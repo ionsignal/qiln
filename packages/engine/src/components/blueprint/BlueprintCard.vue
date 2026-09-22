@@ -43,7 +43,7 @@
   import { computed } from 'vue'
   import { NButton, NCard, NFlex, NTag, NText } from 'naive-ui'
   import { mdiFingerprint, mdiLayers, mdiTag } from '@mdi/js'
-  import { Icon } from './Icon'
+  import { Icon } from '../Icon'
   import type { CapsuleBlueprintManifestItem } from '@qiln/core/client'
 
   const props = defineProps<{

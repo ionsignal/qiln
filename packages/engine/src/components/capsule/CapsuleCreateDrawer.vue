@@ -11,7 +11,6 @@
             :options="blueprintOptions"
             placeholder="Select a capsule blueprint"
             :disabled="isSubmitting" />
-          <n-text v-if="selectedBlueprint" depth="3" class="blueprint-digest">Digest: {{ shortSelectedDigest }}</n-text>
         </n-form-item>
         <n-form-item label="Root Branch CPU Limit" path="cpu">
           <n-slider
@@ -39,25 +38,11 @@
 
 <script setup lang="ts">
   import { computed, ref, watch } from 'vue'
-  import {
-    NButton,
-    NDrawer,
-    NDrawerContent,
-    NForm,
-    NFormItem,
-    NInput,
-    NSelect,
-    NSlider,
-    NText,
-    useMessage,
-  } from 'naive-ui'
+  import { NButton, NDrawer, NDrawerContent, NForm, NFormItem, NInput, NSelect, NSlider, useMessage } from 'naive-ui'
   import { isTRPCClientError } from '@trpc/client'
-  import {
-    CapsuleOperationIdempotencyKeySchema,
-    type CapsuleBlueprintManifestItem,
-    type CapsuleOperationIdempotencyKey,
-  } from '@qiln/core/client'
-  import { useCapsuleContext } from '../composables/useCapsules'
+  import { type CapsuleBlueprintManifestItem, type CapsuleOperationIdempotencyKey } from '@qiln/core/client'
+  import { useCapsuleContext } from '../../composables/useCapsules'
+  import { createIdempotencyKey } from '../../utils/idempotency'
 
   interface CapsuleCreateForm {
     rootBranchName: string
@@ -98,13 +83,6 @@
     return props.blueprints.find(blueprint => blueprint.name === form.value.blueprintName) ?? null
   })
 
-  const shortSelectedDigest = computed(() => {
-    if (!selectedBlueprint.value) {
-      return ''
-    }
-    return shortDigest(selectedBlueprint.value.digest)
-  })
-
   watch(
     () => props.show,
     show => {
@@ -133,7 +111,7 @@
       rootBranchName: '',
       blueprintName: resolveInitialBlueprint(),
       cpu: 4,
-      memory: 4,
+      memory: 16,
     }
   }
 
@@ -147,25 +125,11 @@
     return props.blueprints[0]?.name ?? ''
   }
 
-  function shortDigest(digest: string): string {
-    const normalizedDigest = digest.startsWith('sha256:') ? digest.slice('sha256:'.length) : digest
-    const digestPreview = normalizedDigest.length > 12 ? `${normalizedDigest.slice(0, 12)}…` : normalizedDigest
-    return digest.startsWith('sha256:') ? `sha256:${digestPreview}` : digestPreview
-  }
-
-  function generateOperationIdempotencyKey(): CapsuleOperationIdempotencyKey | null {
-    if (typeof globalThis.crypto?.randomUUID !== 'function') {
-      return null
-    }
-    const parsed = CapsuleOperationIdempotencyKeySchema.safeParse(globalThis.crypto.randomUUID())
-    return parsed.success ? parsed.data : null
-  }
-
   function resolveOperationIdempotencyKey(fingerprint: string): CapsuleOperationIdempotencyKey | null {
     if (pendingSubmission.value?.fingerprint === fingerprint) {
       return pendingSubmission.value.idempotencyKey
     }
-    const idempotencyKey = generateOperationIdempotencyKey()
+    const idempotencyKey = createIdempotencyKey()
     if (!idempotencyKey) {
       return null
     }
@@ -181,6 +145,9 @@
   }
 
   async function handleSubmit(): Promise<void> {
+    if (isSubmitting.value) {
+      return
+    }
     const rootBranchName = form.value.rootBranchName.trim()
     if (!rootBranchName || !form.value.blueprintName) {
       message.warning('Please provide a root branch name and capsule blueprint.')
@@ -220,12 +187,3 @@
     }
   }
 </script>
-
-<style scoped>
-  .blueprint-digest {
-    display: block;
-    margin-top: 6px;
-    font-size: 12px;
-    word-break: break-all;
-  }
-</style>

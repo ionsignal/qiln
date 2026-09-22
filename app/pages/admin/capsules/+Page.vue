@@ -1,9 +1,9 @@
 <template>
   <n-flex vertical :size="28" class="capsules-page">
-    <n-flex justify="space-between" align="center">
+    <n-flex justify="space-between" align="center" :size="16">
       <div>
         <h1 class="page-title">Capsules</h1>
-        <n-text depth="3">Create, branch, test, promote, and roll back versioned AI workflow systems.</n-text>
+        <n-text depth="3">Versioned AI workflow systems with isolated editable branches.</n-text>
       </div>
       <n-button type="primary" size="small" color="white" strong @click="openCreateDrawer()">
         Create Capsule
@@ -14,53 +14,54 @@
     </n-flex>
     <div class="summary-grid">
       <n-card embedded size="small" class="summary-card">
-        <n-text depth="3" class="summary-label">Capsule Branches</n-text>
-        <div class="summary-value">{{ branchCount }}</div>
+        <n-text depth="3" class="summary-label">Capsules</n-text>
+        <div class="summary-value">{{ capsuleCount }}</div>
       </n-card>
       <n-card embedded size="small" class="summary-card">
-        <n-text depth="3" class="summary-label">Online Branches</n-text>
-        <div class="summary-value">{{ onlineBranchCount }}</div>
+        <n-text depth="3" class="summary-label">Online Root Branches</n-text>
+        <div class="summary-value">{{ onlineRootCount }}</div>
       </n-card>
       <n-card embedded size="small" class="summary-card">
         <n-text depth="3" class="summary-label">Capsule Blueprints</n-text>
         <div class="summary-value">{{ blueprintCount }}</div>
       </n-card>
     </div>
-    <n-card embedded size="small" class="lifecycle-card">
-      <template #header>
-        <n-text class="section-title">Capsule lifecycle</n-text>
-      </template>
+    <n-alert v-if="refreshError !== null" type="warning" title="Displayed state may be out of date">
       <n-flex vertical :size="10">
-        <n-text depth="3" style="font-size: 13px">
-          Current working slice: create a capsule with its root branch, observe branch state, and start or stop branches
-          through the capsule channel.
-        </n-text>
-        <n-flex :size="8" wrap>
-          <n-tag size="small" :bordered="false" type="info">Snapshot</n-tag>
-          <n-tag size="small" :bordered="false" type="info">Golden Test</n-tag>
-          <n-tag size="small" :bordered="false" type="info">Diff</n-tag>
-          <n-tag size="small" :bordered="false" type="info">Route Alias</n-tag>
-          <n-tag size="small" :bordered="false" type="info">Promote</n-tag>
-          <n-tag size="small" :bordered="false" type="info">Rollback</n-tag>
-        </n-flex>
-      </n-flex>
-    </n-card>
-    <n-flex vertical :size="18">
-      <n-flex justify="space-between" align="center">
+        <span>
+          Qiln could not refresh the capsule index. The last loaded state is still displayed. An accepted operation is
+          not undone by a refresh failure.
+        </span>
         <div>
-          <h2 class="section-heading">Capsule Branches</h2>
-          <n-text depth="3">
-            Editable forks of durable capsule versions. Production is promoted, not edited directly.
-          </n-text>
+          <n-button size="small" :loading="refreshing" @click="retryRefresh">Refresh capsules</n-button>
         </div>
       </n-flex>
-      <div v-if="branchesRef.length === 0">
-        <n-empty
-          description="No capsule branches yet. Create a capsule from a blueprint to begin."
-          class="empty-state" />
+    </n-alert>
+    <n-flex vertical :size="18">
+      <n-flex justify="space-between" align="center" :size="16">
+        <div>
+          <h2 class="section-heading">Your capsules</h2>
+          <n-text depth="3">
+            Inspect capsule lifecycle, root branch runtime, previews, and current operations. Archived and destroyed
+            capsules remain visible.
+          </n-text>
+        </div>
+        <n-button size="small" secondary :loading="refreshing" @click="retryRefresh">
+          <template #icon>
+            <icon :path="mdiRefresh" :size="16" />
+          </template>
+          Refresh
+        </n-button>
+      </n-flex>
+      <div v-if="capsules.length === 0">
+        <n-empty description="No capsules yet. Create a capsule from a blueprint to begin." class="empty-state" />
       </div>
-      <div v-else class="branch-grid">
-        <capsule-branch-card v-for="branch in branchesRef" :key="branch.id" :branch="branch" />
+      <div v-else class="capsule-grid">
+        <capsule-card
+          v-for="capsule in capsules"
+          :key="capsule.capsule.capsuleId"
+          :summary="capsule"
+          @view-capsule="viewCapsule" />
       </div>
     </n-flex>
     <n-divider />
@@ -88,93 +89,101 @@
 </template>
 
 <script setup lang="ts">
-  import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-  import { NButton, NCard, NDivider, NEmpty, NFlex, NTag, NText } from 'naive-ui'
-  import { mdiPlus } from '@mdi/js'
+  import { computed, onUnmounted, ref, watch } from 'vue'
+  import { NAlert, NButton, NCard, NDivider, NEmpty, NFlex, NText, useMessage } from 'naive-ui'
+  import { mdiPlus, mdiRefresh } from '@mdi/js'
+  import { navigate } from 'vike/client/router'
   import { Icon } from '@/components/Icon'
+  import { useCapsuleEventStream } from '@/composables/useCapsuleEventStream'
   import { useData } from '@/composables/useData'
   import { usePageContext } from '@/composables/usePageContext'
   import { useTRPC } from '@/composables/useTRPC'
-  import { BlueprintCard, CapsuleBranchCard, CapsuleCreateDrawer, provideCapsules } from '@qiln/engine/client'
-  import type { CapsuleBranchSummary } from '@qiln/engine/client'
+  import { BlueprintCard, CapsuleCard, CapsuleCreateDrawer, provideCapsules } from '@qiln/engine/client'
+  import type { CapsuleListOutput } from '@qiln/core/client'
   import type { Data } from './+data'
 
   const data = useData<Data>()
   const pageContext = usePageContext()
   const trpc = useTRPC(pageContext.value)
+  const message = useMessage()
 
-  const branchesRef = ref<CapsuleBranchSummary[]>(data.value.branches)
+  const capsules = ref<CapsuleListOutput>(data.value.capsules)
   const showDrawer = ref(false)
   const selectedBlueprint = ref<string | undefined>(undefined)
-  const streamHandlers = new Set<(rawEvent: unknown) => void>()
+  let disposed = false
 
   const blueprints = computed(() => data.value.manifest.blueprints)
-  const branchCount = computed(() => branchesRef.value.length)
-  const onlineBranchCount = computed(() => branchesRef.value.filter(branch => branch.status === 'online').length)
+  const capsuleCount = computed(() => capsules.value.length)
+  const onlineRootCount = computed(
+    () => capsules.value.filter(capsule => capsule.rootBranch.status === 'online').length,
+  )
   const blueprintCount = computed(() => blueprints.value.length)
 
-  let streamSubscription: ReturnType<typeof trpc.stream.events.subscribe> | null = null
+  const { onEventStream } = useCapsuleEventStream(refreshAfterConnection)
+  const capsuleContext = provideCapsules({
+    client: trpc.engine.capsules,
+    refresh: refreshCapsules,
+    onError: error => {
+      console.error('[Qiln Admin] Capsule index refresh failed:', error)
+    },
+    onEventStream,
+  })
+  const { refreshing, refreshError } = capsuleContext
 
-  function registerStreamHandler(handler: (rawEvent: unknown) => void) {
-    streamHandlers.add(handler)
-    return {
-      unsubscribe: () => {
-        streamHandlers.delete(handler)
-      },
+  watch(
+    () => data.value.capsules,
+    nextCapsules => {
+      if (nextCapsules !== undefined) {
+        capsules.value = nextCapsules
+      }
+    },
+  )
+
+  async function refreshCapsules(): Promise<void> {
+    const scope = pageContext.value
+    try {
+      const nextCapsules = await trpc.engine.capsules.list.query()
+      // A read from an earlier navigation must not overwrite newly hydrated state.
+      if (!disposed && pageContext.value === scope) {
+        capsules.value = nextCapsules
+      }
+    } catch (error: unknown) {
+      if (!disposed && pageContext.value === scope) {
+        throw error
+      }
     }
   }
 
-  provideCapsules({
-    client: trpc.engine.capsules,
-    branches: branchesRef,
-    onError: error => {
-      console.error('[Qiln Admin] Capsule branch sync error:', error)
-    },
-    onEventStream: registerStreamHandler,
-  })
+  function refreshAfterConnection(): Promise<void> {
+    return capsuleContext.refresh()
+  }
 
-  watch(
-    () => data.value.branches,
-    branches => {
-      branchesRef.value = branches
-    },
-    { deep: false },
-  )
+  async function retryRefresh(): Promise<void> {
+    try {
+      await capsuleContext.refresh()
+    } catch {
+      message.error('The capsule index could not be refreshed. Please try again.')
+    }
+  }
 
   function openCreateDrawer(blueprintName?: string): void {
     selectedBlueprint.value = blueprintName
     showDrawer.value = true
   }
 
-  onMounted(() => {
-    streamSubscription = trpc.stream.events.subscribe(undefined, {
-      onStarted: () => {
-        console.log('[Qiln Admin] Connected to capsule event stream')
-      },
-      onData: event => {
-        streamHandlers.forEach(handler => {
-          handler(event)
-        })
-      },
-      onError: (error: unknown) => {
-        console.error('[Qiln Admin] Capsule stream error:', error)
-      },
-      onStopped: () => {
-        console.log('[Qiln Admin] Capsule event stream stopped')
-      },
-    })
-  })
+  function viewCapsule(capsuleId: string): void {
+    void navigate(`/admin/capsules/${encodeURIComponent(capsuleId)}`)
+  }
 
   onUnmounted(() => {
-    streamSubscription?.unsubscribe()
-    streamSubscription = null
-    streamHandlers.clear()
+    disposed = true
   })
 </script>
 
 <style scoped>
   .capsules-page {
     max-width: 1440px;
+    min-width: 0;
   }
 
   .page-title {
@@ -187,11 +196,6 @@
     margin: 0;
     font-size: 20px;
     font-weight: 600;
-  }
-
-  .section-title {
-    font-weight: 600;
-    letter-spacing: 0.04em;
   }
 
   .summary-grid {
@@ -218,15 +222,11 @@
     line-height: 1;
   }
 
-  .lifecycle-card {
-    border-color: rgba(10, 132, 255, 0.25);
-  }
-
-  .branch-grid,
+  .capsule-grid,
   .blueprint-grid {
     display: grid;
     gap: 16px;
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .empty-state {
@@ -234,23 +234,23 @@
   }
 
   @media (min-width: 720px) {
-    .branch-grid,
+    .capsule-grid,
     .blueprint-grid {
-      grid-template-columns: repeat(2, 1fr);
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
   }
 
   @media (min-width: 1120px) {
-    .branch-grid,
+    .capsule-grid,
     .blueprint-grid {
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(3, minmax(0, 1fr));
     }
   }
 
   @media (min-width: 1480px) {
-    .branch-grid,
+    .capsule-grid,
     .blueprint-grid {
-      grid-template-columns: repeat(4, 1fr);
+      grid-template-columns: repeat(4, minmax(0, 1fr));
     }
   }
 </style>
