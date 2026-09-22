@@ -149,10 +149,10 @@ export class CapsuleOperationsService {
    * Submits normal or force capsule destruction through the durable Worker
    * operation path.
    *
-   * Force authorization is evaluated against Host-derived request identity.
-   * The authorization decision is intentionally not persisted as actor
-   * provenance or forwarded to the Worker; the Worker receives only the
-   * existing validated Core destroy option union.
+   * Force authorization is evaluated against Host-derived request identity. The
+   * authorization decision is intentionally not persisted as actor provenance
+   * or forwarded to the Worker; the Worker receives only the existing validated
+   * Core destroy option union.
    */
   public async destroy(
     identity: CapsuleMutationIdentity,

@@ -9,8 +9,8 @@ type AuthenticatedEngineUser = NonNullable<EngineContext['user']>
  * context.
  *
  * Browser input never supplies owner, actor attribution, or administrator
- * authorization. The current authentication model supports human users only,
- * so ownership and actor identity use the same authenticated user ID. A future
+ * authorization. The current authentication model supports human users only, so
+ * ownership and actor identity use the same authenticated user ID. A future
  * agent-authentication boundary may return an agent actor while preserving the
  * authorized capsule owner separately.
  */
