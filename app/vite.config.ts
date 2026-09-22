@@ -98,7 +98,7 @@ export default defineConfig(({ isSsrBuild, command }): UserConfig => {
       },
     },
     ssr: {
-      noExternal: ['naive-ui', 'vueuc', 'date-fns', 'vfonts'], // Naive UI dependencies
+      noExternal: ['naive-ui', 'vueuc'], // Naive UI dependencies
     },
     server: {
       ws: {
