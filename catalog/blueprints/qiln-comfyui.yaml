@@ -133,13 +133,14 @@ provisioning:
       gid: 1000
       mode: '0644'
       content: |
-        qiln_shared_models:
-          base_path: /workspace/models/shared
+        qiln_private_models:
+          is_default: true
+          base_path: /workspace/models/private
           checkpoints: checkpoints/
           loras: loras/
           vae: vae/
-        qiln_private_models:
-          base_path: /workspace/models/private
+        qiln_shared_models:
+          base_path: /workspace/models/shared
           checkpoints: checkpoints/
           loras: loras/
           vae: vae/
