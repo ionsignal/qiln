@@ -1,16 +1,22 @@
 <template>
   <main class="login-container">
-    <n-card class="login-card" :bordered="false" size="large" content-style="padding: 32px;">
-      <div class="header">
-        <img class="login-logo" src="/images/qiln-logo-login.png" alt="Qiln" width="128" height="128" />
-        <n-text depth="3" class="login-description">Your AI workflows. Safely versioned.</n-text>
-      </div>
+    <n-card class="login-card" :bordered="false" size="large" content-style="padding: clamp(24px, 6vw, 32px);">
+      <header class="login-header">
+        <img class="login-logo" src="/images/qiln-logo-login.png" alt="Qiln" width="96" height="96" />
+      </header>
       <n-form ref="formRef" :model="form" :rules="rules" :disabled="isSubmitting" novalidate @submit.prevent="login">
         <n-form-item path="email" label="Email" :label-props="{ for: 'login-email' }">
           <n-input
             v-model:value="form.email"
             placeholder="you@example.com"
-            :input-props="{ id: 'login-email', name: 'email', type: 'email', autocomplete: 'username', autocapitalize: 'none', spellcheck: false }" />
+            :input-props="{
+              id: 'login-email',
+              name: 'email',
+              type: 'email',
+              autocomplete: 'username',
+              autocapitalize: 'none',
+              spellcheck: false,
+            }" />
         </n-form-item>
         <n-form-item path="password" label="Password" :label-props="{ for: 'login-password' }">
           <n-input
@@ -18,7 +24,11 @@
             type="password"
             show-password-on="click"
             placeholder="Enter your password"
-            :input-props="{ id: 'login-password', name: 'password', autocomplete: 'current-password' }" />
+            :input-props="{
+              id: 'login-password',
+              name: 'password',
+              autocomplete: 'current-password',
+            }" />
         </n-form-item>
         <n-button
           block
@@ -32,7 +42,13 @@
       </n-form>
       <div class="access-section">
         <n-text depth="3" class="access-description">Need an account?</n-text>
-        <n-button block secondary attr-type="button" :disabled="isSubmitting" class="login-button" @click="requestAccess">
+        <n-button
+          block
+          secondary
+          attr-type="button"
+          :disabled="isSubmitting"
+          class="login-button"
+          @click="requestAccess">
           Request access
         </n-button>
       </div>
@@ -99,34 +115,41 @@
 <style scoped>
   .login-container {
     width: 100%;
-    max-width: 376px;
+    max-width: 408px;
+    min-width: 0;
     margin: auto;
+    padding: 24px 16px;
     box-sizing: border-box;
   }
 
-  .login-card {
-    min-height: 440px;
-    border-radius: 4px;
-    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.4);
-    background-color: rgb(24, 24, 28);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-  }
-
-  .header {
+  .login-header {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding-bottom: 24px;
     text-align: center;
-    margin-bottom: 32px;
   }
 
   .login-logo {
     display: block;
-    margin: 0 auto 16px;
+    width: 96px;
+    height: 96px;
     object-fit: contain;
   }
 
   .login-description {
     display: block;
-    margin-top: 8px;
-    font-size: 14px;
+    margin-top: 12px;
+    font-size: 12px;
+    line-height: 1.5;
+  }
+
+  .login-card {
+    min-width: 0;
+    border-radius: 8px;
+    border: 1px solid var(--qiln-surface-border-strong, rgba(255, 255, 255, 0.08));
+    background-color: rgb(24, 24, 28);
+    box-shadow: 0 12px 32px -8px rgba(0, 0, 0, 0.4);
   }
 
   .login-button {
@@ -137,8 +160,8 @@
 
   .access-section {
     margin-top: 24px;
-    padding-top: 20px;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    padding-top: 24px;
+    border-top: 1px solid var(--qiln-surface-border-strong, rgba(255, 255, 255, 0.08));
     text-align: center;
   }
 
@@ -146,5 +169,12 @@
     display: block;
     margin-bottom: 12px;
     font-size: 13px;
+    line-height: 1.5;
+  }
+
+  @media (max-width: 480px) {
+    .login-header {
+      padding-bottom: 20px;
+    }
   }
 </style>
