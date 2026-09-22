@@ -53,6 +53,14 @@
       "path": "../vite"
     },
     {
+      "name": "commander.js",
+      "path": "../commander.js"
+    },
+    {
+      "name": "naive-ui",
+      "path": "../naive-ui"
+    },
+    {
       "name": "dagger",
       "path": "../dagger"
     },
