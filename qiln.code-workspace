@@ -49,6 +49,18 @@
       "path": "../vite"
     },
     {
+      "name": "client-ec2",
+      "path": "../aws-sdk-js-v3/clients/client-ec2"
+    },
+    {
+      "name": "client-fsx",
+      "path": "../aws-sdk-js-v3/clients/client-fsx"
+    },
+    {
+      "name": "client-ebs",
+      "path": "../aws-sdk-js-v3/clients/client-ebs"
+    },
+    {
       "name": "commander.js",
       "path": "../commander.js"
     },
