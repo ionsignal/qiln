@@ -77,6 +77,21 @@ export const operationLabels = {
 } satisfies Record<CapsuleOperationSummary['type'], string>
 
 /**
+ * Routine active lifecycle state adds no attention signal to the overview.
+ * Archive state remains independent from lifecycle and runtime state.
+ */
+export function lifecycleExceptions(capsule: CapsuleLifecycleState): StatePresentation[] {
+  const states: StatePresentation[] = []
+  if (capsule.lifecycleStatus !== 'active') {
+    states.push(lifecycleStates[capsule.lifecycleStatus])
+  }
+  if (capsule.archivedAt !== null) {
+    states.push({ label: 'Archived', tone: 'default' })
+  }
+  return states
+}
+
+/**
  * Explicit UTC formatting keeps server and browser rendering identical.
  */
 export function formatTimestamp(value: string): string {
@@ -85,4 +100,46 @@ export function formatTimestamp(value: string): string {
 
 export function shortId(value: string): string {
   return `${value.slice(0, 8)}…${value.slice(-4)}`
+}
+
+export function applicationLabel(name: string): string {
+  return name.toLowerCase() === 'comfyui' ? 'ComfyUI' : name
+}
+
+/**
+ * Browser links use only Worker-issued URLs. Callers additionally gate opening
+ * on their refresh state without rewriting persisted preview status.
+ */
+export function openablePreviews(previews: CapsulePreview[] | null): Array<CapsulePreview & { previewUrl: string }> {
+  return (previews ?? []).filter(
+    (preview): preview is CapsulePreview & { previewUrl: string } =>
+      preview.status === 'active' && preview.previewUrl !== null,
+  )
+}
+
+export function previewSummary(previews: CapsulePreview[] | null): StatePresentation {
+  if (previews === null) {
+    return { label: 'Evidence unavailable', tone: 'default' }
+  }
+  if (previews.length === 0) {
+    return { label: 'No preview records', tone: 'default' }
+  }
+  if (previews.some(preview => preview.status === 'cleanup_required')) {
+    return previewStates.cleanup_required
+  }
+  if (previews.some(preview => preview.status === 'degraded')) {
+    return previewStates.degraded
+  }
+  const readyCount = openablePreviews(previews).length
+  if (readyCount > 0) {
+    return {
+      label: previews.length === 1 ? 'Ready' : `${readyCount} of ${previews.length} ready`,
+      tone: readyCount === previews.length ? 'success' : 'info',
+    }
+  }
+  const first = previews[0]
+  if (first && previews.every(preview => preview.status === first.status)) {
+    return first.status === 'active' ? { label: 'Verified · no link', tone: 'default' } : previewStates[first.status]
+  }
+  return { label: 'Not ready', tone: 'default' }
 }

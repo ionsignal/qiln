@@ -6,6 +6,9 @@ const floatingBoxShadow = '0 0 0 1px rgba(255, 255, 255, 0.08), 0 8px 24px -4px 
 const floatingBorderRadius = '3px'
 const floatingOptionHoverColor = 'rgba(255, 255, 255, 0.08)'
 const cardColor = 'rgb(24, 24, 28)'
+const tableBaseColor = 'rgba(24, 24, 28, 0.075)'
+const tableHeaderColor = 'rgba(38, 38, 42, 0.3)'
+const tableHoverColor = 'rgba(128, 128, 128, 0.01)'
 
 export const adminThemeOverrides: GlobalThemeOverrides = {
   common: {
@@ -37,17 +40,26 @@ export const adminThemeOverrides: GlobalThemeOverrides = {
     headerColor: bodyColor,
   },
   DataTable: {
-    thPaddingSmall: '4px 8px',
-    tdPaddingSmall: '4px 8px',
-    tdColorHover: 'rgba(255, 255, 255, 0.005)',
-    tdColorHoverModal: 'rgba(255, 255, 255, 0.03)',
-    tdColorHoverPopover: 'rgba(255, 255, 255, 0.03)',
-    tdColorSorting: cardColor,
-    tdColorSortingModal: cardColor,
-    tdColorSortingPopover: cardColor,
-    thColorSorting: 'rgba(255, 255, 255, 0.04)',
-    thColorSortingModal: 'rgba(255, 255, 255, 0.04)',
-    thColorSortingPopover: 'rgba(255, 255, 255, 0.04)',
+    thPaddingSmall: '8px 12px',
+    tdPaddingSmall: '8px 12px',
+    tdColor: tableBaseColor,
+    tdColorModal: tableBaseColor,
+    tdColorPopover: tableBaseColor,
+    thColor: tableHeaderColor,
+    thColorModal: tableHeaderColor,
+    thColorPopover: tableHeaderColor,
+    tdColorHover: tableHoverColor,
+    tdColorHoverModal: tableHoverColor,
+    tdColorHoverPopover: tableHoverColor,
+    thColorHover: tableHoverColor,
+    thColorHoverModal: tableHoverColor,
+    thColorHoverPopover: tableHoverColor,
+    tdColorSorting: tableBaseColor,
+    tdColorSortingModal: tableBaseColor,
+    tdColorSortingPopover: tableBaseColor,
+    thColorSorting: tableHeaderColor,
+    thColorSortingModal: tableHeaderColor,
+    thColorSortingPopover: tableHeaderColor,
   },
   Input: {
     paddingSmall: '0 6px',
