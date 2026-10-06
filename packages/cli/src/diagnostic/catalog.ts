@@ -14,12 +14,9 @@ function entry(title: string, explanation: string, ...steps: string[]): Diagnost
 
 const recoverCredentials =
   'Inspect and recover the complete four-file local credential set before retrying. Do not regenerate individual credentials.'
-
 const inspectIncus = 'Inspect the local Incus daemon, its operations, and the managed resources before retrying.'
-
 const restoreAccess =
   'Verify the daemon and the developer’s approved local Incus access. Start a new login session after changing group membership.'
-
 const preservePostgres = 'Preserve the PostgreSQL custom volume and its data during any manual recovery.'
 
 export const catalog = Object.freeze({
@@ -615,11 +612,6 @@ export const catalog = Object.freeze({
     'Qiln requires declared options, explicit usable values, and no unexpected positional arguments.',
     'Review qiln --help or qiln up --help and correct the invocation.',
   ),
-  IMAGE_FILE_INTERFACE_RETIRED: entry(
-    'The --image-file interface has been retired',
-    'Split-image imports require explicit metadata and rootfs artifacts so they can be staged, bounded, hashed, and uploaded in order.',
-    'Use --image-meta together with --image-rootfs.',
-  ),
   SOURCE_REQUIRED: entry(
     'Source checkout is required',
     'The local host monorepo remains the canonical development working copy.',
@@ -655,5 +647,362 @@ export const catalog = Object.freeze({
     'Continuing after an unclassified failure could produce an unsafe or misleading installation result. No successful installation should be inferred.',
     'Review the installed CLI version and run qiln doctor.',
     'Inspect actual installation state before retrying a mutation.',
+  ),
+  COMMAND_CANCELLED: entry('Command canceled', 'No successful completion should be inferred.'),
+  INTERACTIVE_TERMINAL_REQUIRED: entry(
+    'Interactive terminal is required',
+    'Guided authentication and approvals require a real input/output terminal.',
+    'Run the command in an unprivileged Linux or macOS terminal, or Windows through WSL. Select the remote flow when the browser is on another machine.',
+  ),
+  AWS_TOOL_UNAVAILABLE: entry(
+    'Managed AWS CLI installation is unavailable for this target',
+    'This release provides managed AWS CLI installation only for Linux x64. Compatible external AWS CLI installations remain usable on supported operator platforms.',
+    'Use Linux x64 for Qiln-managed installation, or a compatible external AWS CLI on another supported operator platform.',
+  ),
+  AWS_TOOL_PATH_INVALID: entry(
+    'Managed AWS CLI destination is unsupported',
+    'Qiln installs into its configured final state location and does not redirect installation to another path.',
+    'Review HOME and XDG_STATE_HOME. The managed Linux destination must not contain whitespace or unsupported control characters.',
+  ),
+  AWS_TOOL_PREREQUISITE_MISSING: entry(
+    'Managed AWS CLI installation prerequisite is unavailable',
+    'Qiln uses already-installed extraction and platform tools. It does not install prerequisites, execute a package manager, or elevate privileges.',
+    'Install or restore the indicated prerequisite manually through an approved procedure.',
+  ),
+  AWS_TOOL_STATE_INVALID: entry(
+    'Managed AWS CLI state is unsafe or incompatible',
+    'Tool control directories and records must retain their exact supported schemas, ownership, permissions, and pinned artifact identity.',
+    'Inspect protected AWS tool state and the installed Qiln version before retrying.',
+    'Do not discard a retained installation or remove a lock while setup may still be active.',
+  ),
+  AWS_TOOL_PARTIAL: entry(
+    'Managed AWS CLI installation requires recovery',
+    'A retained target lacks a usable ready record, records an incomplete installation, or still contains its installation workspace. Qiln will not adopt, resume, repair, overwrite, or delete it automatically.',
+    'Inspect the installation record, retained payload, workspace, and tool lock.',
+    'Confirm that setup is inactive before manually recovering Qiln-owned tool state.',
+    'Existing external AWS CLI installations must remain untouched.',
+  ),
+  AWS_TOOL_PAYLOAD_INVALID: entry(
+    'Managed AWS CLI payload failed validation',
+    'The payload must have current-user ownership, non-writable group and world permissions, normal files and directories, and only reviewed non-broken links confined to its payload.',
+    'Inspect the retained payload and recorded native link policy.',
+    'Do not use the executable or silently reinstall over the retained target.',
+  ),
+  AWS_TOOL_VERSION_INVALID: entry(
+    'Managed AWS CLI executable does not match the pin',
+    'A verified artifact is not sufficient if its bundled or installed executable cannot establish the exact required CLI version.',
+    'Review native runtime compatibility, including Linux glibc requirements, and the retained installation.',
+    'Do not replace the pin or adopt another executable to bypass validation.',
+  ),
+  AWS_TOOL_DOWNLOAD_FAILED: entry(
+    'Managed AWS CLI download did not complete',
+    'Qiln accepts only bounded HTTPS transfers through the approved host and redirect policy. Network and provider details are not exposed.',
+    'Inspect connectivity and any recorded installation state before retrying.',
+    'Qiln does not resume downloads or silently overwrite a partial target.',
+  ),
+  AWS_TOOL_DOWNLOAD_TIMEOUT: entry(
+    'Managed AWS CLI download exceeded its deadline',
+    'The download was aborted. File handling is completed before confirmed-safe workspace cleanup is attempted.',
+    'Inspect the displayed cleanup and recovery outcomes.',
+  ),
+  AWS_TOOL_VERIFICATION_FAILED: entry(
+    'Managed AWS CLI artifact identity did not match',
+    'The exact byte count and SHA-256 digest must match the pinned artifact before extraction or execution.',
+    'Do not execute or extract the rejected artifact.',
+    'Maintainers should review the pinned artifact configuration without weakening runtime verification.',
+  ),
+  AWS_TOOL_INSTALL_FAILED: entry(
+    'Managed AWS CLI installation failed',
+    'No successful installation should be inferred. The retained payload is not automatically removed, repaired, or adopted.',
+    'Inspect the installation record, workspace, tool lock, and actual platform effects.',
+    'Do not assume that installation effects were rolled back.',
+  ),
+  AWS_TOOL_PROCESS_START_FAILED: entry(
+    'Managed AWS CLI setup process could not start',
+    'Qiln could not execute a required absolute-path setup command with its sanitized environment.',
+    'Inspect the indicated prerequisite or retained installer and its executable permissions.',
+  ),
+  AWS_TOOL_PROCESS_TIMEOUT: entry(
+    'Managed AWS CLI setup exceeded its deadline',
+    'Qiln attempted bounded termination of its owned Unix process group. Signal delivery alone does not establish termination.',
+    'Use the displayed termination and recovery outcomes before recovering retained inputs.',
+  ),
+  AWS_TOOL_PROCESS_OUTPUT_LIMIT: entry(
+    'Managed AWS CLI setup exceeded its output limit',
+    'Qiln does not retain unbounded installer output. It attempts bounded termination without exposing raw process output.',
+    'Inspect the retained installation and displayed lifecycle outcomes.',
+  ),
+  AWS_TOOL_PROCESS_FAILED: entry(
+    'Managed AWS CLI setup did not complete cleanly',
+    'The setup command failed or left activity in its owned Unix process group. Group handling does not contain descendants that escape that group.',
+    'Inspect retained installation state and confirm that setup is inactive before recovery.',
+    'For macOS installer failures, also inspect system-mediated installation activity and receipts.',
+  ),
+  AWS_TOOL_CLEANUP_FAILED: entry(
+    'Managed AWS CLI workspace cleanup was not confirmed',
+    'Qiln could not confirm input-file closure, workspace removal, or directory synchronization. A ready executable does not excuse incomplete transaction cleanup.',
+    'Inspect the retained workspace and displayed lifecycle outcomes.',
+    'Do not remove inputs that may still be active.',
+  ),
+  AWS_TOOL_LOCKED: entry(
+    'Managed AWS CLI tools are locked',
+    'Tool installation uses a separate shared lock. Qiln does not wait for it or assume it is stale, including when a ready record is already present.',
+    'Confirm that no setup process or system-mediated installation remains active before manually recovering the lock.',
+  ),
+  AWS_TOOL_LOCK_CHANGED: entry(
+    'Managed AWS CLI tool lock changed',
+    'Qiln will not unlink a lock that no longer identifies the protected file it created.',
+    'Inspect protected tool state and concurrent processes manually.',
+  ),
+  AWS_TOOL_LOCK_FAILED: entry(
+    'Managed AWS CLI tool lock handling failed',
+    'Exclusive tool locking or confirmed lock release did not complete. A lock created before validation failed may remain.',
+    'Inspect the tool lock, directory permissions, installation record, and actual setup activity.',
+  ),
+  AWS_TOOL_RECOVERY_REQUIRED: entry(
+    'Managed AWS CLI recovery remains outstanding',
+    'The original failure is preserved, but process termination, workspace cleanup, failure-record persistence, or tool-lock release was not confirmed. A ready record may already exist; no authentication or automatic rollback should be inferred.',
+    'Use the displayed outcomes to identify outstanding work.',
+    'Retain potentially active installer inputs and the protective lock until activity has been checked.',
+    'Confirm that no installer process or escaping descendant remains active before removing retained inputs.',
+    'Recover only the selected Qiln-owned tool state. Do not alter external AWS CLI installations or connection authentication state.',
+  ),
+  AWS_PLATFORM_UNSUPPORTED: entry(
+    'AWS operator platform is unsupported',
+    'AWS commands require Linux or macOS with Unix ownership and permission checks. They do not require the development installer’s Ubuntu, Incus, or ZFS setup.',
+    'Run Qiln as an unprivileged Linux or macOS operator. On Windows, use WSL with state stored on its Linux filesystem.',
+  ),
+  AWS_CLI_MISSING: entry(
+    'AWS CLI is unavailable',
+    'No compatible external AWS CLI was found. Qiln-managed installation is available on Linux x64 and requires explicit approval.',
+    'On Linux x64, approve managed installation through qiln aws connect. Other supported operator platforms require a compatible external AWS CLI.',
+  ),
+  AWS_CLI_UNSUPPORTED: entry(
+    'AWS CLI version is outside the reviewed baseline',
+    'This release accepts only its pinned reference version. An incompatible external installation is not modified; selection can continue to a validated managed CLI or an available installation proposal.',
+    'Use the pinned reference version or approve an available managed installation through qiln aws connect. Qiln will not update the external installation.',
+  ),
+  AWS_CLI_CHECK_FAILED: entry(
+    'AWS CLI compatibility check did not complete',
+    'Qiln could not establish the installed CLI version through a bounded non-interactive command.',
+    'Inspect the executable, its accessibility, and the reported failure category.',
+  ),
+  AWS_LOGIN_FAILED: entry(
+    'AWS browser authentication did not complete',
+    'Qiln does not infer successful authentication from an unsuccessful or interrupted AWS CLI process.',
+    'Review the AWS CLI terminal output and complete a fresh login.',
+  ),
+  AWS_LOGIN_TIMEOUT: entry(
+    'AWS login exceeded its local deadline',
+    'Bounded termination of the interactive authentication process was attempted. Its local authentication context is not accepted as a completed connection; use the displayed termination and recovery outcomes.',
+    'Complete a fresh login when ready to finish the browser flow.',
+  ),
+  AWS_ROOT_REQUIRED: entry(
+    'Root bootstrap requires the intended AWS root identity',
+    'Only the separate approved bootstrap context may use root authentication. Ordinary operator connections continue rejecting root.',
+    'Sign in as the intended account root user through the bootstrap browser flow.',
+  ),
+  AWS_ROOT_MFA_REQUIRED: entry(
+    'Root MFA is not configured',
+    'IAM mutations require observed root MFA configuration. This observation does not prove that this particular session authenticated with MFA.',
+    'Enroll root MFA in the AWS browser, then recheck before approving IAM changes.',
+  ),
+  AWS_BOOTSTRAP_STATE_INVALID: entry(
+    'AWS bootstrap state is unsafe or incompatible',
+    'The separate bootstrap journal and root authentication subtree must match their protected schemas, ownership, operation identity, and expected phase.',
+    'Inspect the bootstrap journal, authentication subtree, and connection lock.',
+    'Do not adopt resources or replay recorded mutations automatically.',
+  ),
+  AWS_BOOTSTRAP_CONFLICT: entry(
+    'State conflicts with the approved bootstrap',
+    'The local connection entry is not suitable for new-account setup, the selected IAM user already exists, or its permissions, credentials, or login state differ from the approved setup.',
+    'Use the existing-operator flow for an existing local connection. Inspect any recorded bootstrap and actual IAM user manually.',
+    'Qiln will not adopt the user, overwrite unexpected permissions, issue another password, or delete IAM resources.',
+  ),
+  AWS_BOOTSTRAP_OWNERSHIP_INVALID: entry(
+    'IAM operator ownership could not be verified',
+    'Subsequent bootstrap operations require the approved account, Qiln IAM path, exact ownership tags, operator ARN, and recorded immutable user ID.',
+    'Stop concurrent IAM changes and inspect the user and bootstrap journal manually.',
+    'Do not infer ownership from a matching user name alone.',
+  ),
+  AWS_BOOTSTRAP_POLICY_CHANGED: entry(
+    'Bootstrap policy differs from the reviewed permissions',
+    'The current managed policy or supplied approval differs from the restricted reviewed document. AWS-managed policy attachments cannot permanently pin an AWS-controlled version.',
+    'Review the managed policy default document and the retained bootstrap operation.',
+    'Do not bypass the review or grant broader permissions to complete setup.',
+  ),
+  AWS_BOOTSTRAP_INSPECTION_FAILED: entry(
+    'Required IAM bootstrap inspection did not complete',
+    'Qiln could not establish the required bounded account, policy, user, password-policy, or credential state.',
+    'Inspect AWS availability and the actual IAM state before recovery.',
+    'A failed read-after-write does not establish that the mutation had no effect.',
+  ),
+  AWS_BOOTSTRAP_VERIFICATION_FAILED: entry(
+    'IAM mutation outcome was not verified',
+    'A narrowly scoped read-verification budget ended before the expected artifact became visible. The recorded mutation may have completed; Qiln did not repeat it.',
+    'Inspect the bootstrap journal and actual IAM user, ownership tags, policy attachments, inline policy, or login profile for the recorded phase.',
+    'Do not interpret the exhausted budget as failed creation or automatically replay the mutation.',
+    'If the password phase is recorded, do not attempt password recovery or reissuance through Qiln.',
+  ),
+  AWS_BOOTSTRAP_READINESS_UNKNOWN: entry(
+    'Operator password-reset readiness is unknown',
+    'The login-profile response did not provide an explicit boolean password-reset state. Qiln does not interpret omission as false or continue prompting indefinitely.',
+    'Inspect the operator login profile and the pinned CLI/SDK behavior after browser password replacement.',
+    'Record an operator-run walkthrough and review the smallest evidence-based correction before changing readiness semantics.',
+    'No completed onboarding or IAM rollback should be inferred.',
+  ),
+  AWS_BOOTSTRAP_PASSWORD_REJECTED: entry(
+    'AWS rejected the initial operator password',
+    'The password was generated in the isolated bootstrap process, but AWS remains the final account-password-policy validator. No password retry or reissuance is performed.',
+    'Inspect the account password policy and recorded IAM operation manually.',
+    'Preserve any partially created operator rather than silently replacing its credentials.',
+  ),
+  AWS_BOOTSTRAP_PASSWORD_UNAVAILABLE: entry(
+    'Initial operator password delivery was not confirmed',
+    'The login profile may already exist, but the successful creation response or terminal delivery was not verified. Qiln does not retain the password or attempt to display or issue it again.',
+    'Inspect the bootstrap journal and operator login profile manually.',
+    'Use an explicitly reviewed administrator recovery procedure; do not rerun password creation through Qiln.',
+  ),
+  AWS_BOOTSTRAP_RECORDED: entry(
+    'A bootstrap operation is already recorded',
+    'Ordinary connection use requires a fully completed bootstrap journal bound to the saved operator. Incomplete or failed bootstrap is not automatically resumed, adopted, repaired, or overwritten.',
+    'Inspect the protected bootstrap journal and actual IAM resources.',
+    'Preserve recorded ownership and resource identities during manual recovery.',
+    'Explicit local disconnect may remove validated records only after authentication termination is confirmed and retained IAM resources are disclosed. It never deletes IAM resources.',
+  ),
+  AWS_BOOTSTRAP_RECOVERY_REQUIRED: entry(
+    'AWS bootstrap recovery remains outstanding',
+    'Authentication termination, root-context cleanup, or failure-journal persistence was not confirmed. IAM mutations may already have completed, and no automatic rollback is attempted.',
+    'Use the displayed lifecycle and journal outcomes to identify outstanding recovery.',
+    'Retain potentially active authentication inputs and the protective connection lock until authentication activity has been checked.',
+    'Inspect IAM resources against the recorded account, operation ID, ownership tags, and immutable user ID.',
+    'Do not automatically delete resources, adopt an existing user, or reissue its initial password.',
+  ),
+  AWS_CONNECTION_NAME_INVALID: entry(
+    'AWS connection name is invalid',
+    'Names must be 1–48 lowercase ASCII letters, digits, underscores, or hyphens, beginning with a letter or digit.',
+    'Choose a normal connection name without path separators or whitespace.',
+  ),
+  AWS_CONNECTION_NAME_REQUIRED: entry(
+    'AWS connection name is required',
+    'This operation must identify one local connection explicitly.',
+    'Supply --name with the intended connection name.',
+  ),
+  AWS_REGION_INVALID: entry(
+    'AWS region is unsupported or malformed',
+    'This batch accepts ordinary commercial AWS region names. Non-commercial partitions are not supported.',
+    'Enter a commercial region such as us-east-1.',
+  ),
+  AWS_CONNECTION_NOT_FOUND: entry(
+    'Local AWS connection was not found',
+    'Qiln found no selected connection in its protected local state.',
+    'Run qiln aws connect to create a CLI-owned connection.',
+  ),
+  AWS_CONNECTION_INCOMPLETE: entry(
+    'AWS connection setup is incomplete',
+    'An operation or local directory exists without a completed connection record.',
+    'Resume with qiln aws connect using the same name, or explicitly disconnect the local entry.',
+  ),
+  AWS_DISCONNECT_INCOMPLETE: entry(
+    'Local AWS disconnect is incomplete',
+    'The journal records approved local removal. Qiln will not reinterpret it as a connection attempt.',
+    'Re-run disconnect for the same connection after inspecting local state.',
+  ),
+  AWS_STATE_INVALID: entry(
+    'AWS connection state is unsafe or incompatible',
+    'Connection records and authentication directories must retain supported schemas, ownership, permissions, and bounded regular files.',
+    'Inspect the protected AWS state directory and stop concurrent changes.',
+    'Do not discard recorded identities or remove locks while another Qiln process is active.',
+  ),
+  AWS_LOCKED: entry(
+    'AWS connection state is locked',
+    'Qiln does not wait for an existing lock or assume it is stale.',
+    'Confirm that no AWS connection command or authentication subprocess is active before manually recovering a leftover lock.',
+  ),
+  AWS_LOCK_CHANGED: entry(
+    'AWS connection lock changed',
+    'Qiln will not unlink a lock that no longer identifies the protected file it created.',
+    'Inspect the AWS state directory and concurrent processes manually.',
+  ),
+  AWS_LOCK_FAILED: entry(
+    'AWS connection lock could not be established',
+    'Authentication-state changes require a validated exclusive lock. A lock created before validation failed may remain.',
+    'Inspect directory ownership, permissions, and lock state before retrying.',
+  ),
+  AWS_PROFILE_INVALID: entry(
+    'Qiln-owned AWS authentication profile is invalid',
+    'Only the dedicated login profile, empty shared-credentials file, and protected login cache are accepted. Other credential styles cannot take precedence.',
+    'Inspect the Qiln-owned authentication files. Reconnect to replace only this connection’s local authentication context.',
+  ),
+  AWS_SSO_UNSUPPORTED: entry(
+    'AWS SSO profiles are not supported',
+    'Qiln detects SSO configuration before resolving credentials. This release supports direct IAM-user browser login only.',
+    'Use an existing IAM-user operator connection. SSO onboarding is deferred.',
+  ),
+  AWS_ROOT_REFUSED: entry(
+    'Root AWS authentication is refused',
+    'Normal connections must resolve to a non-root IAM user. Root authority is accepted only in the separate explicitly approved bootstrap context.',
+    'Select the intended IAM operator in the browser and complete a fresh login.',
+  ),
+  AWS_PRINCIPAL_UNSUPPORTED: entry(
+    'AWS principal type is unsupported',
+    'This release requires a direct IAM-user identity in a commercial AWS account, not an assumed role, federated session, or another partition.',
+    'Authenticate as the intended IAM operator.',
+  ),
+  AWS_IDENTITY_INVALID: entry(
+    'AWS returned an incompatible identity',
+    'Qiln could not establish a supported account, operator ARN, and immutable user identity.',
+    'Inspect the selected browser account and complete a fresh login.',
+  ),
+  AWS_IDENTITY_MISMATCH: entry(
+    'Authenticated operator differs from the recorded identity',
+    'Connection reuse requires the same account ID, user ARN, and immutable user ID. Matching a profile or user name is insufficient.',
+    'Authenticate as the recorded operator, or choose a new connection name for another identity.',
+  ),
+  AWS_AUTH_FAILED: entry(
+    'AWS authentication could not be verified',
+    'The dedicated login credentials or cache were unavailable or rejected. An interrupted refresh may leave an unusable cache; Qiln does not fall back to ambient keys, roles, or other profiles.',
+    'Reconnect using the same connection name and complete a fresh browser login.',
+  ),
+  AWS_AUTH_EXPIRED: entry(
+    'AWS authentication has expired',
+    'The recorded identity is not a substitute for usable temporary credentials.',
+    'Reconnect and complete a fresh browser login.',
+  ),
+  AWS_ACCESS_DENIED: entry(
+    'AWS denied the requested operation',
+    'Browser login, credential refresh, bootstrap IAM actions, and infrastructure deployment have separate permission boundaries. No successful mutation or automatic rollback should be inferred.',
+    'Review the selected identity and required permissions with the account owner. Inspect any recorded bootstrap phase before recovery.',
+  ),
+  AWS_REQUEST_FAILED: entry(
+    'AWS request did not complete reliably',
+    'A failed or incomplete request does not establish a verified connection or a failed IAM mutation. A recorded mutation may already have completed, and Qiln does not replay it automatically.',
+    'Inspect network access, AWS availability, and any recorded operation against actual IAM state.',
+    'For a password-creation intent, use an explicitly reviewed administrator recovery procedure rather than recovering or reissuing the password through Qiln.',
+  ),
+  AWS_CONTEXT_FAILED: entry(
+    'Isolated AWS credential process failed',
+    'Qiln accepts only a validated response after its private credential process has exited. Raw provider output is not exposed.',
+    'Build the CLI and inspect its installation before retrying.',
+  ),
+  AWS_CONTEXT_TIMEOUT: entry(
+    'AWS credential verification exceeded its deadline',
+    'Bounded termination of the isolated credential process was attempted. Use the displayed termination and recovery outcomes; no successful authentication is inferred.',
+    'Inspect connectivity and retry authentication.',
+  ),
+  AWS_CLEANUP_FAILED: entry(
+    'Local AWS authentication cleanup failed',
+    'Qiln could not confirm safe removal and directory synchronization of its owned authentication state.',
+    'Inspect the protected connection directory, connection and operation records, and any remaining authentication state before manual recovery.',
+    'Local removal is not immediate revocation of credentials loaded elsewhere.',
+  ),
+  AWS_RECOVERY_REQUIRED: entry(
+    'AWS authentication recovery is incomplete',
+    'The original operation failed, and authentication termination, cleanup, failure-journal persistence, or connection-lock release was not confirmed. The displayed outcomes are authoritative; a connection record may already have been saved, and no rollback should be inferred.',
+    'If authentication termination is unconfirmed, retain its inputs and the protective connection lock until activity has been checked.',
+    'If authentication cleanup is not confirmed, verify that no Qiln authentication subprocess is active, then inspect and recover the remaining Qiln-owned authentication state.',
+    'If failure-journal persistence is not confirmed, inspect the connection and operation records before reconnecting or disconnecting.',
+    'Use the same connection name when reconnecting so the recorded account, operator ARN, and immutable user ID remain enforced.',
+    'Local removal is not immediate revocation of credentials loaded elsewhere.',
   ),
 })

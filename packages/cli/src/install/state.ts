@@ -12,7 +12,9 @@ import {
   withTemp,
   writeChild,
   type FileSnapshot,
-} from './files'
+} from '../state/files'
+import { acquireLock, type InstallerLock } from '../state/lock'
+import { statePath } from '../state/path'
 import { INSTALLER_SPEC } from './spec'
 
 const MAX_INSTALLATION_STATE_BYTES = 65_536
@@ -63,26 +65,7 @@ function currentUserId(): number {
 }
 
 export function installerStatePath(environment: NodeJS.ProcessEnv = process.env): string {
-  const configuredStateHome = environment.XDG_STATE_HOME?.trim()
-  if (configuredStateHome) {
-    if (!configuredStateHome.startsWith('/')) {
-      throw new InstallerError({
-        code: 'INVALID_STATE_HOME',
-        facts: [['Observed', 'XDG_STATE_HOME is set to a relative path.']],
-        retry: 'qiln doctor',
-      })
-    }
-    return resolve(configuredStateHome, 'qiln')
-  }
-  const home = environment.HOME?.trim()
-  if (!home || !home.startsWith('/')) {
-    throw new InstallerError({
-      code: 'MISSING_HOME',
-      facts: [['Observed', 'HOME is missing, empty, or relative.']],
-      retry: 'qiln doctor',
-    })
-  }
-  return resolve(home, '.local/state/qiln')
+  return statePath(environment)
 }
 
 function stateError(error: unknown, path: string, expectedDirectory?: boolean): InstallerError {
@@ -276,11 +259,7 @@ export async function inspectInstallerState(
     }
     throw stateError(error, directoryPath, true)
   }
-  try {
-    return await inspectOpenState(directory)
-  } finally {
-    await directory.close()
-  }
+  return await inspectOpenState(directory)
 }
 
 export async function openInstallerState(environment: NodeJS.ProcessEnv = process.env): Promise<Dir> {
@@ -335,6 +314,19 @@ export async function writeInstallationState(directory: Dir, imageFingerprint: s
   return state
 }
 
+export function acquireInstallerLock(directory: Dir): Promise<InstallerLock> {
+  return acquireLock(directory, {
+    name: INSTALLER_SPEC.state.lockFileName,
+    label: 'installer',
+    retry: 'qiln doctor',
+    codes: {
+      changed: 'INSTALLER_LOCK_CHANGED',
+      locked: 'INSTALLER_LOCKED',
+      failed: 'INSTALLER_LOCK_FAILED',
+    },
+  })
+}
+
 /**
  * Reads one developer-managed authorized-key roster into a stable validated
  * snapshot without reopening its path for later content validation.
@@ -355,8 +347,6 @@ export async function readRoster(rosterPath: string): Promise<FileSnapshot> {
     })
   } catch (error: unknown) {
     throw rosterReadError(error, path)
-  } finally {
-    await directory.close().catch(() => undefined)
   }
 }
 

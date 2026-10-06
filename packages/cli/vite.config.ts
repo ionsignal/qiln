@@ -27,6 +27,7 @@ export default defineConfig(() => {
       dts({
         insertTypesEntry: true,
         include: ['src/**/*.ts'],
+        exclude: ['src/aws/auth/process.ts', 'src/aws/bootstrap/process.ts'],
       }),
     ],
     build: {
@@ -34,6 +35,8 @@ export default defineConfig(() => {
         entry: {
           index: resolve(import.meta.dirname, 'src/index.ts'),
           cli: resolve(import.meta.dirname, 'src/cli.ts'),
+          aws: resolve(import.meta.dirname, 'src/aws/auth/process.ts'),
+          bootstrap: resolve(import.meta.dirname, 'src/aws/bootstrap/process.ts'),
         },
         formats: ['es'],
         fileName: (_format, entryName) => `${entryName}.js`,
@@ -42,10 +45,11 @@ export default defineConfig(() => {
         checks: {
           pluginTimings: false,
         },
-        external: [/^node:/, 'commander'],
+        external: [/^node:/, /^@aws-sdk\//, 'commander'],
         output: {
           preserveModules: false,
           exports: 'named',
+          chunkFileNames: '[name]-[hash].js',
         },
       },
       sourcemap: true,

@@ -1,12 +1,19 @@
+import * as aws from './commands/aws'
+import { diagnostic as awsDiagnostic, isCancellation } from './aws/errors'
 import { CommanderError } from 'commander'
 import { doctor } from './commands/doctor'
 import { up } from './commands/up'
 import { InstallerError } from './diagnostic/error'
 import { ProcessExecutionError } from './process'
 import { createProgram, parserFailure, type GlobalOptions } from './program'
-import { Reporter } from './terminal/reporter'
+import { Reporter, type OutputStream } from './terminal/reporter'
 
-type OperationalCommand = 'doctor' | 'up'
+type OperationalCommand = 'doctor' | 'up' | 'aws'
+
+interface OutputChunk {
+  text: string
+  stream: OutputStream
+}
 
 function assertUnprivilegedInvocation(): void {
   if (typeof process.geteuid !== 'function' || typeof process.getuid !== 'function') {
@@ -31,12 +38,18 @@ function assertUnprivilegedInvocation(): void {
 }
 
 function rerun(command: OperationalCommand | undefined): string {
+  if (command === 'aws') {
+    return 'qiln aws connect'
+  }
   return command === 'up'
     ? 'qiln up --source <checkout> --image <alias-or-fingerprint> [--authorized-keys <roster>]'
     : 'qiln doctor'
 }
 
 function processFailure(error: ProcessExecutionError, command: OperationalCommand | undefined): InstallerError {
+  if (command === 'aws') {
+    return awsDiagnostic(error)
+  }
   const codes = {
     start: 'PREFLIGHT_PROCESS_START_FAILED',
     timeout: 'PREFLIGHT_PROCESS_TIMEOUT',
@@ -52,7 +65,7 @@ function processFailure(error: ProcessExecutionError, command: OperationalComman
 export async function run(argumentsList: readonly string[]): Promise<number> {
   let reporter = new Reporter()
   let command: OperationalCommand | undefined
-  const output: string[] = []
+  const output: OutputChunk[] = []
   const program = createProgram(
     {
       async doctor(color) {
@@ -69,10 +82,33 @@ export async function run(argumentsList: readonly string[]): Promise<number> {
         reporter.header('up', 'stopped installation convergence')
         await up(options, reporter)
       },
+      aws: {
+        async connect(options, color) {
+          command = 'aws'
+          reporter = new Reporter({ color })
+          assertUnprivilegedInvocation()
+          reporter.header('aws connect', 'guided operator authentication')
+          await aws.connect(options, reporter)
+        },
+        async status(options, color) {
+          command = 'aws'
+          reporter = new Reporter({ color })
+          assertUnprivilegedInvocation()
+          reporter.header('aws status', 'operator identity verification')
+          await aws.status(options, reporter)
+        },
+        async disconnect(options, color) {
+          command = 'aws'
+          reporter = new Reporter({ color })
+          assertUnprivilegedInvocation()
+          reporter.header('aws disconnect', 'local connection removal')
+          await aws.disconnect(options, reporter)
+        },
+      },
     },
     {
-      write(text) {
-        output.push(text)
+      write(text, stream) {
+        output.push({ text, stream })
       },
     },
   )
@@ -87,18 +123,29 @@ export async function run(argumentsList: readonly string[]): Promise<number> {
     })
     if (error instanceof CommanderError) {
       if (error.code === 'commander.helpDisplayed' || error.code === 'commander.help') {
-        // Commander owns help spacing and wrapping; preserve its blank lines.
-        reporter.help(output.join('').replace(/\n$/, '').split('\n'))
+        for (const chunk of output) {
+          reporter.help(chunk.text, chunk.stream)
+        }
         return error.exitCode
       }
       if (error.code === 'commander.version') {
-        reporter.version(output.join('').trim())
+        reporter.version(
+          output
+            .map(chunk => chunk.text)
+            .join('')
+            .trim(),
+        )
         return error.exitCode
       }
       reporter.failure(parserFailure(error))
       return 1
     }
     reporter.failure(error instanceof ProcessExecutionError ? processFailure(error, command) : error)
+    // Recovery diagnostics expose outstanding work without changing the
+    // original cancellation exit status.
+    if (isCancellation(error)) {
+      return 130
+    }
     return 1
   }
 }

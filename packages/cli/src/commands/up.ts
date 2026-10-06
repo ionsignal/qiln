@@ -1,11 +1,11 @@
 import { InstallerError } from '../diagnostic/error'
 import { convergeImage, type InstallerImageSelection } from '../install/image'
 import { convergeInstance } from '../install/instance'
-import { acquireInstallerLock } from '../install/lock'
 import { convergeNetwork } from '../install/network'
 import { convergeStorage } from '../install/storage'
 import { convergeCredentials } from '../install/credentials'
 import {
+  acquireInstallerLock,
   inspectOpenInstallerState,
   openInstallerState,
   readRoster,
@@ -15,7 +15,8 @@ import {
 import { INSTALLER_SPEC } from '../install/spec'
 import { validateSourcePreflight } from '../checks/source'
 import { doctor } from './doctor'
-import type { FileSnapshot } from '../install/files'
+import type { FileSnapshot } from '../state/files'
+import type { InstallerLock } from '../state/lock'
 import type { Reporter } from '../terminal/reporter'
 
 export interface UpCommandOptions {
@@ -40,7 +41,9 @@ export async function up(options: UpCommandOptions, reporter: Reporter): Promise
   const preflight = await doctor(reporter, {
     summary: false,
   })
+
   requireIncusExtensions(preflight.incus.server.apiExtensions)
+
   const source = await validateSourcePreflight(options.sourcePath, preflight.host.commandPaths.git)
   let roster: FileSnapshot | null = null
   if (options.authorizedKeysPath !== undefined) {
@@ -54,8 +57,9 @@ export async function up(options: UpCommandOptions, reporter: Reporter): Promise
     reporter.row('verified', 'Authorized keys', `validated stable roster · ${roster.size} bytes`)
   }
   const stateDirectory = await openInstallerState()
-  const lock = await acquireInstallerLock(stateDirectory)
+  let lock: InstallerLock | undefined
   try {
+    lock = await acquireInstallerLock(stateDirectory)
     const currentState = await inspectOpenInstallerState(stateDirectory)
     const image = await convergeImage(preflight.incus.client, options.image, currentState.installation)
     const installation = await writeInstallationState(stateDirectory, image.fingerprint)
@@ -130,7 +134,6 @@ export async function up(options: UpCommandOptions, reporter: Reporter): Promise
     reporter.row('verified', 'Final state', `${instance.instance.name} · configured · stopped`)
     reporter.summary('Qiln installation configured and stopped.')
   } finally {
-    await lock.release()
-    await stateDirectory.close()
+    await lock?.release()
   }
 }

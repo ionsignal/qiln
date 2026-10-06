@@ -32,6 +32,7 @@ export interface InspectOptions {
   owner?: number
   fileMode?: number
   directoryMode?: number
+  maxFileSize?: number
 }
 
 export interface StageInput {
@@ -60,47 +61,31 @@ export class FileValidationError extends Error {
 }
 
 /**
- * Opened directory capability used to access children through the original
- * descriptor rather than through a path that can later be replaced.
+ * Validated directory pathname. The operator account and directory location are
+ * trusted; concurrent parent-directory replacement is not prevented.
  */
 export class Dir {
-  private readonly root: string
-  private closed = false
-
   constructor(
     public readonly path: string,
-    private readonly handle: FileHandle,
-  ) {
-    this.root = `/proc/self/fd/${handle.fd}`
-  }
+    private readonly options: EntryOptions = {},
+  ) {}
 
   public child(name: string): string {
-    this.assertOpen()
     assertChildName(name)
-    return `${this.root}/${name}`
+    return join(this.path, name)
   }
 
   public async list(): Promise<string[]> {
-    this.assertOpen()
-    return (await readdir(this.root)).sort()
+    return (await readdir(this.path)).sort()
   }
 
   public async sync(): Promise<void> {
-    this.assertOpen()
-    await this.handle.sync()
-  }
-
-  public async close(): Promise<void> {
-    if (this.closed) {
-      return
-    }
-    this.closed = true
-    await this.handle.close()
-  }
-
-  private assertOpen(): void {
-    if (this.closed) {
-      throw new Error(`Installer directory '${this.path}' is closed.`)
+    const handle = await openNoFollow(this.path, DIRECTORY_FLAGS, 'directory')
+    try {
+      validate(await handle.stat(), 'directory', this.path, this.options)
+      await handle.sync()
+    } finally {
+      await handle.close()
     }
   }
 }
@@ -216,8 +201,10 @@ async function readAt(path: string, options: ReadOptions): Promise<FileSnapshot>
 async function copyStable(sourcePath: string, destinationPath: string, options: ReadOptions): Promise<number> {
   assertSizeOptions(options)
   const source = await openNoFollow(sourcePath, FILE_FLAGS, 'file')
-  const destination = await open(destinationPath, TEMP_FLAGS, 0o600)
+  let destination: FileHandle | undefined
   try {
+    destination = await open(destinationPath, TEMP_FLAGS, 0o600)
+    const output = destination
     const before = await source.stat()
     validate(before, 'file', sourcePath, options)
     validateSize(before, sourcePath, options)
@@ -229,7 +216,14 @@ async function copyStable(sourcePath: string, destinationPath: string, options: 
       if (result.bytesRead === 0) {
         throw new FileValidationError('changed', sourcePath, 'file')
       }
-      await destination.write(buffer, 0, result.bytesRead, offset)
+      let written = 0
+      while (written < result.bytesRead) {
+        const writeResult = await output.write(buffer, written, result.bytesRead - written, offset + written)
+        if (writeResult.bytesWritten === 0) {
+          throw new FileValidationError('changed', destinationPath, 'file')
+        }
+        written += writeResult.bytesWritten
+      }
       offset += result.bytesRead
     }
     const extra = Buffer.allocUnsafe(1)
@@ -241,9 +235,9 @@ async function copyStable(sourcePath: string, destinationPath: string, options: 
     if (!isUnchanged(before, after)) {
       throw new FileValidationError('changed', sourcePath, 'file')
     }
-    await destination.sync()
-    await destination.chmod(0o600)
-    const staged = await destination.stat()
+    await output.sync()
+    await output.chmod(0o600)
+    const staged = await output.stat()
     validate(staged, 'file', destinationPath, {
       mode: 0o600,
     })
@@ -252,34 +246,35 @@ async function copyStable(sourcePath: string, destinationPath: string, options: 
     }
     return before.size
   } finally {
-    await Promise.allSettled([source.close(), destination.close()])
+    const handles: Promise<void>[] = [source.close()]
+    if (destination) {
+      handles.push(destination.close())
+    }
+    await Promise.allSettled(handles)
   }
 }
 
 /**
- * Reads one regular file through an opened parent directory so a later path
- * replacement cannot redirect the file access.
+ * Validates the parent directory and reads one regular file through a retained
+ * file handle. Parent-directory replacement is outside the threat model.
  */
 export async function read(path: string, options: ReadOptions): Promise<FileSnapshot> {
   const directory = await openDir(dirname(path))
-  try {
-    return await readChild(directory, basename(path), options)
-  } finally {
-    await directory.close()
-  }
+  return await readChild(directory, basename(path), options)
 }
 
 /**
- * Opens one directory without following its final path component.
+ * Validates one directory without following its final path component.
  */
 export async function openDir(path: string, options: EntryOptions = {}): Promise<Dir> {
   const handle = await openNoFollow(path, DIRECTORY_FLAGS, 'directory')
   try {
     validate(await handle.stat(), 'directory', path, options)
-    return new Dir(path, handle)
-  } catch (error: unknown) {
+    return new Dir(path, {
+      ...options,
+    })
+  } finally {
     await handle.close()
-    throw error
   }
 }
 
@@ -296,7 +291,33 @@ export async function createDir(path: string, options: Required<EntryOptions>): 
 }
 
 /**
- * Reads one regular child through a stable opened directory descriptor.
+ * Validates a direct child, optionally creating it without following its final
+ * path component. The parent directory location is trusted.
+ */
+export async function openChildDir(
+  directory: Dir,
+  name: string,
+  options: EntryOptions = {},
+  create = false,
+): Promise<Dir> {
+  const path = directory.child(name)
+  if (create) {
+    try {
+      await mkdir(path, {
+        mode: options.mode ?? 0o700,
+      })
+      await directory.sync()
+    } catch (error: unknown) {
+      if (!isErrorCode(error, 'EEXIST')) {
+        throw error
+      }
+    }
+  }
+  return await openDir(path, options)
+}
+
+/**
+ * Reads one regular child through a retained file handle.
  */
 export async function readChild(directory: Dir, name: string, options: ReadOptions): Promise<FileSnapshot> {
   return await readAt(directory.child(name), options)
@@ -315,6 +336,13 @@ export async function inspectChild(directory: Dir, name: string, options: Inspec
         owner: options.owner,
         mode: options.fileMode,
       })
+      if (options.maxFileSize !== undefined) {
+        const limits: ReadOptions = {
+          maxSize: options.maxFileSize,
+        }
+        assertSizeOptions(limits)
+        validateSize(metadata, path, limits)
+      }
       return 'file'
     }
     if (metadata.isDirectory()) {
@@ -331,7 +359,7 @@ export async function inspectChild(directory: Dir, name: string, options: Inspec
 }
 
 /**
- * Atomically writes exact bytes into an opened, validated directory.
+ * Atomically writes exact bytes into a validated directory pathname.
  */
 export async function writeChild(directory: Dir, name: string, bytes: Uint8Array, mode = 0o600): Promise<void> {
   assertChildName(name)
@@ -412,10 +440,9 @@ export async function withDir<T>(run: (directory: string) => Promise<T>): Promis
   const directory = await mkdtemp(join(tmpdir(), 'qiln-private-'))
   try {
     await chmod(directory, 0o700)
-    const opened = await openDir(directory, {
+    await openDir(directory, {
       mode: 0o700,
     })
-    await opened.close()
     return await run(directory)
   } finally {
     await rm(directory, {
@@ -448,22 +475,18 @@ export async function withStage<T>(
     const files: StagedFile[] = []
     for (const input of inputs) {
       const sourceDirectory = await openDir(dirname(input.sourcePath))
-      try {
-        const sourcePath = sourceDirectory.child(basename(input.sourcePath))
-        const destinationPath = join(stageDirectory, input.name)
-        const size = await copyStable(sourcePath, destinationPath, {
-          minSize: input.minSize ?? 1,
-          maxSize: input.maxSize,
-        })
-        files.push({
-          sourcePath: input.sourcePath,
-          path: destinationPath,
-          name: input.name,
-          size,
-        })
-      } finally {
-        await sourceDirectory.close()
-      }
+      const sourcePath = sourceDirectory.child(basename(input.sourcePath))
+      const destinationPath = join(stageDirectory, input.name)
+      const size = await copyStable(sourcePath, destinationPath, {
+        minSize: input.minSize ?? 1,
+        maxSize: input.maxSize,
+      })
+      files.push({
+        sourcePath: input.sourcePath,
+        path: destinationPath,
+        name: input.name,
+        size,
+      })
     }
     return await run(Object.freeze(files))
   } finally {

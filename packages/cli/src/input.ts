@@ -1,5 +1,51 @@
 import { InstallerError } from './diagnostic/error'
+import { validName, validRegion } from './aws/types'
 import type { UpCommandOptions } from './commands/up'
+
+export interface AwsInput {
+  name?: string
+}
+
+export interface AwsCommandOptions {
+  name?: string
+}
+
+export function convertAwsOptions(input: AwsInput): AwsCommandOptions {
+  if (input.name === undefined) {
+    return {}
+  }
+  if (!validName(input.name)) {
+    throw new InstallerError({
+      code: 'AWS_CONNECTION_NAME_INVALID',
+      facts: [['Option', '--name']],
+      retry: 'qiln aws --help',
+    })
+  }
+  return {
+    name: input.name,
+  }
+}
+
+export function requireAwsName(options: AwsCommandOptions): string {
+  const name = convertAwsOptions(options).name
+  if (name === undefined) {
+    throw new InstallerError({
+      code: 'AWS_CONNECTION_NAME_REQUIRED',
+      retry: 'qiln aws --help',
+    })
+  }
+  return name
+}
+
+export function validateAwsRegion(region: string): string {
+  if (!validRegion(region)) {
+    throw new InstallerError({
+      code: 'AWS_REGION_INVALID',
+      retry: 'qiln aws connect',
+    })
+  }
+  return region
+}
 
 export interface UpInput {
   source?: string
@@ -7,7 +53,6 @@ export interface UpInput {
   imageMeta?: string
   imageRootfs?: string
   authorizedKeys?: string
-  imageFile?: string | boolean
 }
 
 function validateValue(value: string | undefined, option: string): void {
@@ -26,14 +71,6 @@ function validateValue(value: string | undefined, option: string): void {
  * local or provider work.
  */
 export function convertUpOptions(input: UpInput): UpCommandOptions {
-  if (input.imageFile !== undefined) {
-    throw new InstallerError({
-      code: 'IMAGE_FILE_INTERFACE_RETIRED',
-      facts: [['Observed', '--image-file was supplied.']],
-      retry:
-        'qiln up --source <checkout> --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs> [--authorized-keys <roster>]',
-    })
-  }
   validateValue(input.source, '--source')
   validateValue(input.image, '--image')
   validateValue(input.imageMeta, '--image-meta')

@@ -1,11 +1,23 @@
 import { constants } from 'node:fs'
 import { lstat, open, unlink, type FileHandle } from 'node:fs/promises'
-import { InstallerError } from '../diagnostic/error'
+import { InstallerError, type InstallerErrorCode } from '../diagnostic/error'
 import { Dir } from './files'
-import { INSTALLER_SPEC } from './spec'
 
-export interface InstallerLock {
+export interface StateLock {
   release(): Promise<void>
+}
+
+export type InstallerLock = StateLock
+
+export interface LockOptions {
+  name: string
+  label: string
+  retry: string
+  codes: {
+    changed: InstallerErrorCode
+    locked: InstallerErrorCode
+    failed: InstallerErrorCode
+  }
 }
 
 function isErrorCode(value: unknown, code: string): boolean {
@@ -23,7 +35,7 @@ function currentUserId(): number {
   return process.geteuid()
 }
 
-async function removeOwnedLock(path: string, handle: FileHandle): Promise<void> {
+async function removeOwnedLock(path: string, handle: FileHandle, options: LockOptions): Promise<void> {
   const opened = await handle.stat()
   const current = await lstat(path)
   if (
@@ -35,35 +47,37 @@ async function removeOwnedLock(path: string, handle: FileHandle): Promise<void> 
     (current.mode & 0o7777) !== 0o600
   ) {
     throw new InstallerError({
-      code: 'INSTALLER_LOCK_CHANGED',
-      facts: [['Observed', 'The lock path no longer identifies the regular file created by this installer execution.']],
-      retry: 'qiln doctor',
+      code: options.codes.changed,
+      facts: [['Observed', `The ${options.label} lock no longer identifies the file created by this execution.`]],
+      retry: options.retry,
     })
   }
   await unlink(path)
 }
 
 /**
- * Acquires the installer lock by exclusively creating one protected state
- * entry. Existing locks are never waited on, removed, or treated as stale.
+ * Acquires a lock by exclusively creating one protected state entry. Existing
+ * locks are never waited on, removed, or treated as stale. The directory
+ * pathname is trusted; the retained file handle identifies the lock that this
+ * execution may release.
  */
-export async function acquireInstallerLock(directory: Dir): Promise<InstallerLock> {
-  const path = directory.child(INSTALLER_SPEC.state.lockFileName)
+export async function acquireLock(directory: Dir, options: LockOptions): Promise<StateLock> {
+  const path = directory.child(options.name)
   let handle: FileHandle
   try {
     handle = await open(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600)
   } catch (error: unknown) {
     if (isErrorCode(error, 'EEXIST')) {
       throw new InstallerError({
-        code: 'INSTALLER_LOCKED',
-        facts: [['Observed', `The protected installer lock '${INSTALLER_SPEC.state.lockFileName}' already exists.`]],
-        retry: 'qiln doctor',
+        code: options.codes.locked,
+        facts: [['Observed', `The protected ${options.label} lock '${options.name}' already exists.`]],
+        retry: options.retry,
       })
     }
     throw new InstallerError({
-      code: 'INSTALLER_LOCK_FAILED',
-      facts: [['Observed', 'Qiln could not exclusively create its installer lock in the validated state directory.']],
-      retry: 'qiln doctor',
+      code: options.codes.failed,
+      facts: [['Observed', `Qiln could not exclusively create its ${options.label} lock.`]],
+      retry: options.retry,
     })
   }
   try {
@@ -74,17 +88,15 @@ export async function acquireInstallerLock(directory: Dir): Promise<InstallerLoc
     await handle.sync()
     const metadata = await handle.stat()
     if (!metadata.isFile() || metadata.uid !== currentUserId() || (metadata.mode & 0o7777) !== 0o600) {
-      throw new Error('Installer lock validation failed.')
+      throw new Error('State lock validation failed.')
     }
     await directory.sync()
   } catch (error: unknown) {
     await handle.close().catch(() => undefined)
     throw new InstallerError({
-      code: 'INSTALLER_LOCK_FAILED',
-      facts: [
-        ['Observed', 'The newly created installer lock did not retain its required regular-file ownership and mode.'],
-      ],
-      retry: 'qiln doctor',
+      code: options.codes.failed,
+      facts: [['Observed', `The newly created ${options.label} lock did not retain its required ownership and mode.`]],
+      retry: options.retry,
     })
   }
   let released = false
@@ -95,7 +107,7 @@ export async function acquireInstallerLock(directory: Dir): Promise<InstallerLoc
       }
       released = true
       try {
-        await removeOwnedLock(path, handle)
+        await removeOwnedLock(path, handle, options)
         await directory.sync()
       } finally {
         await handle.close()
