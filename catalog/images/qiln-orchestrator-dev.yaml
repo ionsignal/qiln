@@ -166,6 +166,10 @@ actions:
       systemctl disable qiln-ssh-dev.service
 
 files:
+  # Retain Ubuntu's welcome and operational notices, but omit generic help links.
+  - path: /etc/update-motd.d/10-help-text
+    generator: remove
+
   # Keep login guidance local and static so MOTD generation never reads
   # credentials, contacts services, or delays login on infrastructure probes.
   - path: /etc/update-motd.d/99-qiln
@@ -199,6 +203,7 @@ files:
         SSH authority  npm run ssh:dev
 
       Development only image
+
       EOF
 
   # Incus/cloud-init image templates.
@@ -844,6 +849,7 @@ files:
       ChallengeResponseAuthentication no
       PermitEmptyPasswords no
       PermitRootLogin no
+      PrintLastLog no
 
       PubkeyAuthentication yes
       AuthenticationMethods publickey
