@@ -1,10 +1,13 @@
 import { realpath } from 'node:fs/promises'
 import { InstallerError } from '../../diagnostic/error'
-import { findExecutable, SetupExecutionError } from '../../process'
+import { findExecutable } from '../../process'
 import { checkCancellation } from '../../terminal/prompts'
-import { isErrorCode, toolDiagnostic, toolRecovery } from '../errors'
+import { SupervisedProcessError } from '../child/supervise'
+import { toolDiagnostic } from '../errors'
+import { toolRecovery } from '../recovery'
+import { isErrorCode } from '../guards'
 import { inspect, type AwsCli } from '../auth/login'
-import { requireAwsHost } from '../state'
+import { requireAwsHost } from '../host'
 import { environment, install as installTool, verify, type InstallOptions } from './install'
 import { current, RELEASE, TOOL_SPEC, type Artifact, type TargetId } from './spec'
 import * as state from './state'
@@ -102,7 +105,7 @@ export async function resolve(signal?: AbortSignal): Promise<Selection> {
         reason: 'incompatible',
       }
     } catch (error: unknown) {
-      if (error instanceof SetupExecutionError) {
+      if (error instanceof SupervisedProcessError) {
         if (!error.terminationConfirmed) {
           throw toolRecovery(
             toolDiagnostic(error),
@@ -155,7 +158,7 @@ export async function resolve(signal?: AbortSignal): Promise<Selection> {
       ...(rejected === undefined ? {} : { rejected }),
     }
   } catch (error: unknown) {
-    if (error instanceof SetupExecutionError && !error.terminationConfirmed) {
+    if (error instanceof SupervisedProcessError && !error.terminationConfirmed) {
       throw toolRecovery(
         toolDiagnostic(error),
         {
@@ -194,6 +197,7 @@ export async function install(approved: Proposal, options: InstallOptions = {}):
     throw new InstallerError({
       code: 'AWS_TOOL_STATE_INVALID',
       facts: [['Observed', 'The approved proposal differs from the pinned installation policy.']],
+      retry: 'qiln aws connect',
     })
   }
   return await installTool(options)

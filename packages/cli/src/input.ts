@@ -1,3 +1,4 @@
+import { AWS_SPEC } from './aws/spec'
 import { InstallerError } from './diagnostic/error'
 import { validName, validRegion } from './aws/types'
 import type { UpCommandOptions } from './commands/up'
@@ -26,15 +27,8 @@ export function convertAwsOptions(input: AwsInput): AwsCommandOptions {
   }
 }
 
-export function requireAwsName(options: AwsCommandOptions): string {
-  const name = convertAwsOptions(options).name
-  if (name === undefined) {
-    throw new InstallerError({
-      code: 'AWS_CONNECTION_NAME_REQUIRED',
-      retry: 'qiln aws --help',
-    })
-  }
-  return name
+export function resolveAwsName(options: AwsCommandOptions): string {
+  return convertAwsOptions(options).name ?? AWS_SPEC.defaultName
 }
 
 export function validateAwsRegion(region: string): string {

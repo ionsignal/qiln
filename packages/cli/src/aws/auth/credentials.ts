@@ -3,7 +3,7 @@ import { AWS_SPEC } from '../spec'
 import { InstallerError } from '../../diagnostic/error'
 import { openDir, readChild } from '../../state/files'
 import { readProfile } from './profile'
-import { requireAwsHost, userId } from '../state'
+import { requireAwsHost, userId } from '../host'
 
 export const quietLogger = Object.freeze({
   trace() {},

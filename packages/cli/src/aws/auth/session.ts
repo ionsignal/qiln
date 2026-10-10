@@ -2,11 +2,30 @@ import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { InstallerError } from '../../diagnostic/error'
 import { inspectChild, openChildDir, writeChild, type Dir } from '../../state/files'
-import { isErrorCode } from '../errors'
+import { isErrorCode } from '../guards'
 import { AWS_SPEC } from '../spec'
-import { userId } from '../state'
-import { isReply, validRegion, type AwsAuthentication, type AwsRequest } from '../types'
-import { request } from './child'
+import { userId } from '../host'
+import { validRegion, type AwsAuthentication } from '../types'
+import { request } from '../child/request'
+import { isReply, type Request } from './protocol'
+
+/**
+ * Browser sign-in needs the operator's desktop context, not AWS credentials,
+ * endpoint overrides, proxy settings, or Node options. HOME is included so the
+ * browser keeps the operator's real profile. AWS-owned state stays redirected
+ * to the Qiln directory, and the identity is re-verified afterwards in the
+ * credential process, which never receives the real HOME.
+ */
+const LOGIN_PASSTHROUGH = [
+  'HOME',
+  'TERM',
+  'DISPLAY',
+  'WAYLAND_DISPLAY',
+  'XDG_RUNTIME_DIR',
+  'DBUS_SESSION_BUS_ADDRESS',
+  'XAUTHORITY',
+  'BROWSER',
+] as const
 
 async function inspectAuth(directory: Dir): Promise<void> {
   for (const name of await directory.list()) {
@@ -131,8 +150,12 @@ export class Session {
     return new Session(directory, region)
   }
 
-  public environment(interactive = false): NodeJS.ProcessEnv {
-    const environment: NodeJS.ProcessEnv = {
+  /**
+   * Environment for isolated credential processes. HOME is the Qiln auth
+   * directory, which the credential process requires.
+   */
+  public credentialEnvironment(): NodeJS.ProcessEnv {
+    return {
       PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin',
       HOME: this.directory.path,
       LANG: 'C.UTF-8',
@@ -149,23 +172,19 @@ export class Session {
       AWS_CLI_AUTO_PROMPT: 'off',
       AWS_PAGER: '',
     }
-    if (interactive) {
-      // Browser integration needs the operator's desktop context, not AWS
-      // credentials, endpoint overrides, proxy settings, or Node options.
-      for (const key of [
-        'HOME',
-        'TERM',
-        'DISPLAY',
-        'WAYLAND_DISPLAY',
-        'XDG_RUNTIME_DIR',
-        'DBUS_SESSION_BUS_ADDRESS',
-        'XAUTHORITY',
-        'BROWSER',
-      ]) {
-        const value = process.env[key]
-        if (value !== undefined) {
-          environment[key] = value
-        }
+  }
+
+  /**
+   * Environment for the interactive AWS CLI login only. It adds the desktop
+   * context; a variable unset in the operator's environment keeps its
+   * credential-environment value, including HOME.
+   */
+  public loginEnvironment(): NodeJS.ProcessEnv {
+    const environment = this.credentialEnvironment()
+    for (const key of LOGIN_PASSTHROUGH) {
+      const value = process.env[key]
+      if (value !== undefined) {
+        environment[key] = value
       }
     }
     return environment
@@ -173,11 +192,11 @@ export class Session {
 
   public async verify(signal: AbortSignal): Promise<AwsAuthentication> {
     await inspectAuth(this.directory)
-    const input: AwsRequest = {
+    const input: Request = {
       kind: 'identity',
       region: this.region,
     }
-    const reply = await request(AWS_SPEC.processFile, this.environment(), input, isReply, signal)
+    const reply = await request(AWS_SPEC.children.auth, this.credentialEnvironment(), input, isReply, signal)
     await inspectAuth(this.directory)
     if (!reply.ok) {
       throw new InstallerError({
@@ -185,13 +204,13 @@ export class Session {
         retry: 'qiln aws connect',
       })
     }
-    if (new Date(reply.authentication.expiresAt).getTime() <= Date.now()) {
+    if (new Date(reply.result.expiresAt).getTime() <= Date.now()) {
       throw new InstallerError({
         code: 'AWS_AUTH_EXPIRED',
         retry: 'qiln aws connect',
       })
     }
-    return reply.authentication
+    return reply.result
   }
 }
 

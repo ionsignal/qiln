@@ -1,4 +1,4 @@
-import { InstallerError } from '../diagnostic/error'
+import { InstallerError } from '../../diagnostic/error'
 
 interface PasswordContext {
   accountId: string
@@ -28,7 +28,7 @@ export async function reveal(password: string, context: PasswordContext): Promis
   try {
     await new Promise<void>((resolve, reject) => {
       process.stdout.write(
-        `\nInitial operator password (shown once)\nAWS account: ${context.accountId}\nOperator: ${context.operatorName}\n\n${password}\n\nCopy this password now and replace it in the AWS browser.\nQiln does not store this password and will not display it again.\n\n`,
+        `\nAction required: Copy the initial password when it appears. It is shown once and is not retained by Qiln.\n\nInitial operator password (shown once)\nAWS account: ${context.accountId}\nOperator: ${context.operatorName}\n\n${password}\n\nCopy this password now and replace it in the AWS browser.\nQiln does not store this password and will not display it again.\n\n`,
         error => {
           if (error) {
             reject(error)

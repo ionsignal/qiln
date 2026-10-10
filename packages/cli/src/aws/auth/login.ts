@@ -1,5 +1,6 @@
-import { runProcess, runSetup } from '../../process'
-import { runInteractive } from '../../process/interactive'
+import { runProcess } from '../../process'
+import { runSetup } from '../child/setup'
+import { runInteractive } from './interactive'
 import { AWS_SPEC } from '../spec'
 import type { Session } from './session'
 import type { LoginFlow } from '../types'
@@ -46,7 +47,7 @@ export async function login(cli: AwsCli, session: Session, flow: LoginFlow, sign
     cli.executable,
     ['login', '--profile', AWS_SPEC.profile, '--region', session.region, ...(flow === 'remote' ? ['--remote'] : [])],
     {
-      environment: session.environment(true),
+      environment: session.loginEnvironment(),
       signal,
       timeoutMs: AWS_SPEC.loginTimeoutMs,
     },

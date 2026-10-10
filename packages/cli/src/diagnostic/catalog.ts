@@ -878,15 +878,43 @@ export const catalog = Object.freeze({
     'Inspect IAM resources against the recorded account, operation ID, ownership tags, and immutable user ID.',
     'Do not automatically delete resources, adopt an existing user, or reissue its initial password.',
   ),
+  AWS_PERMISSION_STATE_INVALID: entry(
+    'Qiln permission evidence is unsafe or incompatible',
+    'Permission operations must match the original creation journal, exact operator binding, supported permission specification, immutable approval, policy identities, and expected mutation sequence.',
+    'Inspect the original creation journal and separate permission-operation records.',
+    'Do not recreate the operator, adopt a matching policy name, or replay recorded mutations.',
+  ),
+  AWS_PERMISSION_RECORDED: entry(
+    'A permission operation requires explicit recovery',
+    'An incomplete, failed, or inconsistent permission operation blocks another automatic reconciliation. It does not invalidate an already saved operator login or become an incomplete user-creation operation.',
+    'Inspect the permission operation and actual IAM policy state using its recorded operator, policy ID, default version, and document digest.',
+    'Preserve the original creation journal and permission-operation evidence.',
+    'Do not replay mutations, recreate the operator, or assume that IAM changes were rolled back.',
+  ),
+  AWS_PERMISSION_POLICY_TOO_LARGE: entry(
+    'Foundation policy exceeds its supported document boundary',
+    'The completed customer-managed foundation policy must contain supported canonical text and fit the 6,144-character policy limit before approval.',
+    'Maintainers must review the complete policy document without weakening authorization constraints to bypass the limit.',
+    'Do not move the foundation grant into the operator self-service inline policy.',
+  ),
+  AWS_PERMISSION_VERSION_LIMIT: entry(
+    'Foundation policy has reached its version limit',
+    'A required whole-document replacement would exceed the five-version managed-policy limit. A known full inspected version list stops maintenance before approval or mutation-intent persistence; execution independently rechecks approved preconditions and capacity. Five retained versions do not block matching-content no-change verification. Qiln does not prune versions, select an older default, or roll back IAM changes.',
+    'Review the recorded policy identity and version history through an explicitly approved administrator procedure.',
+    'Do not automatically prune policy history or retry the replacement.',
+  ),
+  AWS_PERMISSION_RECOVERY_REQUIRED: entry(
+    'Permission-bootstrap recovery remains outstanding',
+    'Root authentication termination, root-context cleanup, or permission-evidence persistence was not confirmed. IAM changes may already have completed; the saved ordinary operator authentication is retained.',
+    'Use the displayed termination, cleanup, and journal outcomes to identify outstanding recovery.',
+    'Retain potentially active root authentication inputs and the protective connection lock until activity has been checked.',
+    'Inspect actual IAM state against the original creation identity and recorded policy identities.',
+    'Do not recreate the operator, reissue its password, replay mutations, delete policies, prune versions, or claim rollback.',
+  ),
   AWS_CONNECTION_NAME_INVALID: entry(
     'AWS connection name is invalid',
     'Names must be 1–48 lowercase ASCII letters, digits, underscores, or hyphens, beginning with a letter or digit.',
     'Choose a normal connection name without path separators or whitespace.',
-  ),
-  AWS_CONNECTION_NAME_REQUIRED: entry(
-    'AWS connection name is required',
-    'This operation must identify one local connection explicitly.',
-    'Supply --name with the intended connection name.',
   ),
   AWS_REGION_INVALID: entry(
     'AWS region is unsupported or malformed',

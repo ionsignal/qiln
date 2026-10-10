@@ -14,7 +14,7 @@ const TEMPORARY_PATH_PATTERN = /(^|[\s"'`(])(?:\/tmp|\/var\/tmp|\/private\/tmp)(
 
 export type ColorMode = 'auto' | 'always' | 'never'
 export type OutputStream = 'stdout' | 'stderr'
-export type Outcome = 'verified' | 'created' | 'reused' | 'imported' | 'transferred'
+export type Outcome = 'working' | 'verified' | 'created' | 'reused' | 'imported' | 'transferred'
 export type PromptTone = 'input' | 'approval'
 
 type Output = NodeJS.WriteStream
@@ -27,6 +27,7 @@ export interface ReporterOptions {
 }
 
 const OUTCOME_STYLES: Record<Outcome, Style> = {
+  working: 'dim',
   verified: ['green', 'bold'],
   created: ['green', 'bold'],
   reused: ['cyan', 'bold'],
@@ -170,12 +171,12 @@ export class Reporter {
     if (this.interactive(this.stdout)) {
       this.write(
         this.stdout,
-        `  ${this.paint(this.stdout, OUTCOME_STYLES[outcome], '✓')} ${this.paint(this.stdout, 'bold', name)} ${this.paint(this.stdout, OUTCOME_STYLES[outcome], badge)} ${value}`,
+        `  ${this.paint(this.stdout, OUTCOME_STYLES[outcome], outcome === 'working' ? '·' : '✓')} ${this.paint(this.stdout, 'bold', name)} ${this.paint(this.stdout, OUTCOME_STYLES[outcome], badge)} ${value}`,
       )
     } else {
       this.write(
         this.stdout,
-        `+ ${this.paint(this.stdout, 'bold', name)} ${this.paint(this.stdout, OUTCOME_STYLES[outcome], badge)} ${value}`,
+        `${outcome === 'working' ? '~' : '+'} ${this.paint(this.stdout, 'bold', name)} ${this.paint(this.stdout, OUTCOME_STYLES[outcome], badge)} ${value}`,
       )
     }
     this.stdoutWritten = true
@@ -200,6 +201,11 @@ export class Reporter {
 
   public info(message: string): void {
     this.message('Info', message, 'cyan')
+  }
+
+  public space(): void {
+    this.write(this.stdout, '')
+    this.stdoutWritten = true
   }
 
   public action(message: string): void {
@@ -260,7 +266,12 @@ export class Reporter {
     )
     this.write(this.stderr, '')
     this.heading(title)
+    this.write(this.stderr, '')
     this.fact(codeLabel, definition.explanation, codeLabelWidth, 'gray', 'red')
+    if (diagnostic.facts.length > 0) {
+      this.write(this.stderr, '')
+      this.heading('Details')
+    }
     for (const [label, value] of diagnostic.facts) {
       this.fact(label, value, factLabelWidth)
     }
@@ -268,14 +279,13 @@ export class Reporter {
       this.write(this.stderr, '')
       this.heading('Next steps')
       for (const step of definition.steps) {
-        this.paragraph(step, interactive ? '  • ' : '  - ')
+        this.paragraph(step, interactive ? '  • ' : '  - ', 'grey', 'cyan')
       }
     }
     if (diagnostic.retry !== undefined) {
       this.write(this.stderr, '')
       this.heading('Retry')
-      const retry = this.value(this.stderr, diagnostic.retry, Number.POSITIVE_INFINITY)
-      this.write(this.stderr, `  $ ${this.paint(this.stderr, 'cyan', retry)}`)
+      this.paragraph(diagnostic.retry, '  $ ', 'grey', 'cyan')
     }
     this.write(this.stderr, '')
   }
@@ -315,13 +325,14 @@ export class Reporter {
     this.write(this.stderr, `  ${this.paint(this.stderr, 'bold', value)}`)
   }
 
-  private paragraph(value: string, prefix = '  ', prefixStyle?: Style): void {
+  private paragraph(value: string, prefix = '  ', prefixStyle?: Style, valueStyle?: Style): void {
     const text = this.value(this.stderr, value)
     const width = Math.max(1, this.width('stderr') - prefix.length)
     const firstPrefix = prefixStyle === undefined ? prefix : this.paint(this.stderr, prefixStyle, prefix)
     const continuation = ' '.repeat(prefix.length)
     for (const [index, line] of wrap(text, width).entries()) {
-      this.write(this.stderr, `${index === 0 ? firstPrefix : continuation}${line}`)
+      const valueText = valueStyle === undefined ? line : this.paint(this.stderr, valueStyle, line)
+      this.write(this.stderr, `${index === 0 ? firstPrefix : continuation}${valueText}`)
     }
   }
 

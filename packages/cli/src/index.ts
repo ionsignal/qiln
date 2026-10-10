@@ -25,4 +25,12 @@ export * from './terminal/reporter'
 export * as awsCommands from './commands/aws'
 export { createProgram } from './program'
 export type { GlobalOptions, ProgramHandlers, ProgramOutput } from './program'
-export type { AwsAuthentication, AwsConnection, AwsIdentity, AwsOperation, LoginFlow } from './aws/types'
+export type {
+  AwsAuthentication,
+  AwsConnection,
+  AwsIdentity,
+  LoginFlow,
+  ManagedOperator,
+  PermissionMetadata,
+  PolicyBinding,
+} from './aws/types'

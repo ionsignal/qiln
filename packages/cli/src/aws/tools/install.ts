@@ -2,12 +2,15 @@ import { constants } from 'node:fs'
 import { access, lstat, rm } from 'node:fs/promises'
 import { isAbsolute, join } from 'node:path'
 import { InstallerError } from '../../diagnostic/error'
-import { findExecutable, runSetup, SetupExecutionError, type SetupOptions } from '../../process'
+import { findExecutable } from '../../process'
 import { openChildDir, type Dir } from '../../state/files'
 import { checkCancellation } from '../../terminal/prompts'
-import { toolDiagnostic, toolRecovery, type ToolRecoveryOutcomes } from '../errors'
+import { runSetup, type SetupOptions } from '../child/setup'
+import { SupervisedProcessError } from '../child/supervise'
+import { toolDiagnostic } from '../errors'
+import { toolRecovery, type ToolRecoveryOutcomes } from '../recovery'
 import { inspect, type AwsCli } from '../auth/login'
-import { userId } from '../state'
+import { userId } from '../host'
 import { download, DownloadError } from './download'
 import { current, TOOL_SPEC, type Release } from './spec'
 import * as state from './state'
@@ -25,6 +28,11 @@ export type Progress =
 export interface InstallOptions {
   signal?: AbortSignal
   progress?: (event: Progress) => void
+}
+
+interface SetupTools {
+  shell: string
+  unzip: string
 }
 
 function check(signal?: AbortSignal): void {
@@ -81,11 +89,14 @@ async function prerequisite(name: string): Promise<string> {
   return executable
 }
 
-async function prerequisites(): Promise<string> {
-  for (const name of ['cp', 'mkdir', 'ln', 'cut', 'dirname', 'cat', 'sh']) {
+async function prerequisites(): Promise<SetupTools> {
+  for (const name of ['cp', 'mkdir', 'ln', 'cut', 'dirname', 'cat']) {
     await prerequisite(name)
   }
-  return await prerequisite('unzip')
+  return {
+    shell: await prerequisite('sh'),
+    unzip: await prerequisite('unzip'),
+  }
 }
 
 export async function verify(executable: string, signal?: AbortSignal, workspace?: string): Promise<AwsCli> {
@@ -114,7 +125,7 @@ async function setup(
   target: Dir,
   workspace: Dir,
   archive: string,
-  unzip: string,
+  tools: SetupTools,
   options: InstallOptions,
 ): Promise<void> {
   const extracted = await openChildDir(
@@ -126,7 +137,7 @@ async function setup(
     },
     true,
   )
-  await runSetup(unzip, ['-q', archive, '-d', extracted.path], setupOptions(workspace, options))
+  await runSetup(tools.unzip, ['-q', archive, '-d', extracted.path], setupOptions(workspace, options))
   const names = await extracted.list()
   if (names.length !== 1 || names[0] !== 'aws') {
     throw new InstallerError({
@@ -147,7 +158,13 @@ async function setup(
   await runSetup(
     installer,
     ['--install-dir', target.child('aws-cli'), '--bin-dir', target.child('bin')],
-    setupOptions(workspace, options),
+    {
+      ...setupOptions(workspace, options),
+      umask: {
+        shell: tools.shell,
+        mask: 0o077,
+      },
+    },
   )
 }
 
@@ -159,15 +176,15 @@ export async function install(options: InstallOptions = {}): Promise<AwsCli> {
   check(options.signal)
   const release = current()
   state.location()
-  const unzip = await prerequisites()
+  const tools = await prerequisites()
   check(options.signal)
-  const tools = await state.open(true)
-  if (!tools) {
+  const toolsDirectory = await state.open(true)
+  if (!toolsDirectory) {
     throw new InstallerError({
       code: 'AWS_TOOL_STATE_INVALID',
     })
   }
-  const lock = await state.lock(tools)
+  const lock = await state.lock(toolsDirectory)
   const outcomes: ToolRecoveryOutcomes = {
     termination: true,
     cleanup: 'not-required',
@@ -182,11 +199,11 @@ export async function install(options: InstallOptions = {}): Promise<AwsCli> {
   let cli: AwsCli | undefined
   try {
     check(options.signal)
-    const existing = await state.read(tools)
+    const existing = await state.read(toolsDirectory)
     if (existing) {
       cli = await verify(existing.executable, options.signal)
     } else {
-      target = await state.create(tools)
+      target = await state.create(toolsDirectory)
       const startedAt = new Date().toISOString()
       record = {
         version: 1,
@@ -235,7 +252,7 @@ export async function install(options: InstallOptions = {}): Promise<AwsCli> {
       emit(options, {
         stage: 'installing',
       })
-      await setup(release, target, workspace, archive, unzip, options)
+      await setup(release, target, workspace, archive, tools, options)
       check(options.signal)
       cli = await verify(await state.executable(target, release), options.signal, workspace.path)
       emit(options, {
@@ -264,7 +281,7 @@ export async function install(options: InstallOptions = {}): Promise<AwsCli> {
     check(options.signal)
   } catch (error: unknown) {
     failure = toolDiagnostic(error)
-    if (error instanceof SetupExecutionError) {
+    if (error instanceof SupervisedProcessError) {
       outcomes.termination = error.terminationConfirmed
     }
     if (error instanceof DownloadError) {

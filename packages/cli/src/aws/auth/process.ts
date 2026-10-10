@@ -1,9 +1,11 @@
 import { GetCallerIdentityCommand, STSClient } from '@aws-sdk/client-sts'
 import { configuration, credentials, expiresAt } from './credentials'
-import { classify } from '../errors'
+import { classifier } from '../child/classify'
+import { serveChild } from '../child/serve'
 import { verifyIdentity } from './identity'
+import { FAILURES, isRequest } from './protocol'
 import { AWS_SPEC } from '../spec'
-import { isRequest, type AwsAuthentication, type AwsReply } from '../types'
+import type { AwsAuthentication } from '../types'
 
 async function authenticate(region: string): Promise<AwsAuthentication> {
   const identityCredentials = await credentials(region)
@@ -28,43 +30,9 @@ async function authenticate(region: string): Promise<AwsAuthentication> {
   }
 }
 
-function reply(message: AwsReply): void {
-  if (!process.send || !process.connected) {
-    process.exit(1)
-  }
-  process.send(message, error => {
-    // The IPC callback runs after transmission. No credentials or provider
-    // context survive into another request.
-    process.exit(error ? 1 : 0)
-  })
-}
-
-async function handle(message: unknown): Promise<void> {
-  if (!isRequest(message)) {
-    reply({
-      ok: false,
-      code: 'AWS_PROFILE_INVALID',
-    })
-    return
-  }
-  try {
-    reply({
-      ok: true,
-      authentication: await authenticate(message.region),
-    })
-  } catch (error: unknown) {
-    reply({
-      ok: false,
-      code: classify(error),
-    })
-  }
-}
-if (!process.send) {
-  process.exitCode = 1
-} else {
-  process.umask(0o077)
-  process.once('disconnect', () => process.exit(1))
-  process.once('message', (message: unknown) => {
-    void handle(message)
-  })
-}
+serveChild({
+  isRequest,
+  execute: request => authenticate(request.region),
+  classify: classifier(FAILURES),
+  invalidRequest: 'AWS_PROFILE_INVALID',
+})

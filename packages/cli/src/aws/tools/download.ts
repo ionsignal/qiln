@@ -5,7 +5,7 @@ import { get, type RequestOptions } from 'node:https'
 import type { IncomingMessage } from 'node:http'
 import { InstallerError } from '../../diagnostic/error'
 import type { Dir } from '../../state/files'
-import { userId } from '../state'
+import { userId } from '../host'
 import { TOOL_SPEC, validateArtifact, type Artifact } from './spec'
 
 export interface DownloadOptions {

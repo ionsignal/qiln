@@ -1,27 +1,38 @@
+export const AWS_RECORD_VERSION = Object.freeze({
+  connection: 2,
+  pending: 1,
+})
+
 export const AWS_SPEC = Object.freeze({
   cliVersion: '2.37.9',
   sdkVersion: '3.1146.0',
   defaultName: 'default',
   defaultRegion: 'us-west-2',
   profile: 'qiln',
-  processFile: 'aws.js',
+  children: Object.freeze({
+    auth: 'aws.js',
+    iam: 'iam.js',
+  }),
   loginTimeoutMs: 15 * 60 * 1_000,
   requestTimeoutMs: 30_000,
   connectionTimeoutMs: 5_000,
-  bootstrap: Object.freeze({
-    processFile: 'bootstrap.js',
-    record: 'bootstrap.json',
+  iam: Object.freeze({
     requestTimeoutMs: 120_000,
     maximumPages: 20,
+    verification: Object.freeze({
+      timeoutMs: 15_000,
+      delayMs: 1_000,
+      attempts: 8,
+    }),
   }),
   state: {
     directory: 'aws',
     connections: 'connections',
     lock: 'connections.lock',
     connection: 'connection.json',
-    operation: 'operation.json',
+    pending: 'pending.json',
+    root: 'root',
     auth: 'auth',
-    bootstrap: 'bootstrap',
     config: 'config',
     credentials: 'credentials',
     cache: 'cache',

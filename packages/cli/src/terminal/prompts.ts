@@ -24,8 +24,13 @@ export async function withCancellation<T>(run: (signal: AbortSignal) => Promise<
 }
 
 export class Prompts {
+  /**
+   * The retry command is supplied by the owning command so this class carries
+   * no knowledge of any particular command family.
+   */
   constructor(
     private readonly signal: AbortSignal,
+    private readonly retry: string,
     private readonly reporter: Reporter = new Reporter(),
   ) {}
 
@@ -47,6 +52,11 @@ export class Prompts {
       }
       this.reporter.info('Select one of the listed numbers.')
     }
+  }
+
+  public async consent(label: string): Promise<boolean> {
+    const answer = (await this.readAnswer(`${label} [y/N]`, undefined, 'approval')).toLowerCase()
+    return answer === 'y' || answer === 'yes'
   }
 
   public async approve(label: string): Promise<void> {
@@ -72,7 +82,7 @@ export class Prompts {
     if (!process.stdin.isTTY || !process.stdout.isTTY) {
       throw new InstallerError({
         code: 'INTERACTIVE_TERMINAL_REQUIRED',
-        retry: 'qiln aws connect',
+        retry: this.retry,
       })
     }
     const promptController = new AbortController()

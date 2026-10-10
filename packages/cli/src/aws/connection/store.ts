@@ -1,38 +1,12 @@
-import { InstallerError } from '../diagnostic/error'
-import { createDir, openChildDir, openDir, type Dir } from '../state/files'
-import { acquireLock, type StateLock } from '../state/lock'
-import { statePath } from '../state/path'
-import { isErrorCode, lockRecovery, stateFailure, terminationConfirmed } from './errors'
-import { AWS_SPEC } from './spec'
-
-export function requireAwsHost(): void {
-  if (
-    (process.platform !== 'linux' && process.platform !== 'darwin') ||
-    typeof process.getuid !== 'function' ||
-    typeof process.geteuid !== 'function'
-  ) {
-    throw new InstallerError({
-      code: 'AWS_PLATFORM_UNSUPPORTED',
-    })
-  }
-  if (process.getuid() === 0 || process.geteuid() === 0) {
-    throw new InstallerError({
-      code: 'ROOT_EXECUTION_REFUSED',
-      retry: 'qiln aws connect',
-    })
-  }
-}
-
-export function userId(): number {
-  requireAwsHost()
-  const geteuid = process.geteuid
-  if (typeof geteuid !== 'function') {
-    throw new InstallerError({
-      code: 'AWS_PLATFORM_UNSUPPORTED',
-    })
-  }
-  return geteuid()
-}
+import { InstallerError } from '../../diagnostic/error'
+import { createDir, openChildDir, openDir, type Dir } from '../../state/files'
+import { acquireLock, type StateLock } from '../../state/lock'
+import { statePath } from '../../state/path'
+import { requireAwsHost, userId } from '../host'
+import { stateFailure } from '../errors'
+import { lockRecovery, terminationConfirmed } from '../recovery'
+import { isErrorCode } from '../guards'
+import { AWS_SPEC } from '../spec'
 
 /**
  * Tools and connections share protected AWS-root access, not locks or records.
@@ -65,6 +39,35 @@ export async function openAwsRoot(create = false): Promise<Dir | null> {
     return await openChildDir(root, AWS_SPEC.state.directory, ownership, create)
   } catch (error: unknown) {
     if (!create && isErrorCode(error, 'ENOENT')) {
+      return null
+    }
+    throw stateFailure(error)
+  }
+}
+
+/**
+ * Preliminary inspection provides guidance only. Authentication and removal
+ * must re-read their records inside the existing locked transaction.
+ */
+export async function openExistingConnections(): Promise<Dir | null> {
+  const aws = await openAwsRoot()
+  if (!aws) {
+    return null
+  }
+  try {
+    if ((await aws.list()).includes(AWS_SPEC.state.lock)) {
+      throw new InstallerError({
+        code: 'AWS_LOCKED',
+        facts: [['Observed', `The protected AWS connection state lock '${AWS_SPEC.state.lock}' already exists.`]],
+        retry: 'qiln aws status',
+      })
+    }
+    return await openChildDir(aws, AWS_SPEC.state.connections, {
+      owner: userId(),
+      mode: 0o700,
+    })
+  } catch (error: unknown) {
+    if (isErrorCode(error, 'ENOENT')) {
       return null
     }
     throw stateFailure(error)

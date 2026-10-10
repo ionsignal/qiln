@@ -87,7 +87,7 @@ export async function run(argumentsList: readonly string[]): Promise<number> {
           command = 'aws'
           reporter = new Reporter({ color })
           assertUnprivilegedInvocation()
-          reporter.header('aws connect', 'guided operator authentication')
+          reporter.header('aws connect', 'guided AWS sign-in')
           await aws.connect(options, reporter)
         },
         async status(options, color) {
