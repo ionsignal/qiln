@@ -21,5 +21,5 @@ export function statePath(environment: NodeJS.ProcessEnv = process.env, retry = 
       retry,
     })
   }
-  return resolve(home, '.local/state/qiln')
+  return resolve(home, '.qiln/state')
 }
