@@ -104,6 +104,36 @@ export async function run(argumentsList: readonly string[]): Promise<number> {
           reporter.header('aws disconnect', 'local connection removal')
           await aws.disconnect(options, reporter)
         },
+        deployment: {
+          async create(options, color) {
+            command = 'aws'
+            reporter = new Reporter({ color })
+            assertUnprivilegedInvocation()
+            reporter.header('aws deployment create', 'approved VPC creation')
+            await aws.deployment.create(options, reporter)
+          },
+          async status(options, color) {
+            command = 'aws'
+            reporter = new Reporter({ color })
+            assertUnprivilegedInvocation()
+            reporter.header('aws deployment status', 'local deployment evidence')
+            await aws.deployment.status(options, reporter)
+          },
+          async inspect(options, color) {
+            command = 'aws'
+            reporter = new Reporter({ color })
+            assertUnprivilegedInvocation()
+            reporter.header('aws deployment inspect', 'fresh VPC observation')
+            await aws.deployment.inspect(options, reporter)
+          },
+          async remove(options, color) {
+            command = 'aws'
+            reporter = new Reporter({ color })
+            assertUnprivilegedInvocation()
+            reporter.header('aws deployment remove', 'approved VPC removal')
+            await aws.deployment.remove(options, reporter)
+          },
+        },
       },
     },
     {

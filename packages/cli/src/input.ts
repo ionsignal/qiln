@@ -1,6 +1,6 @@
 import { AWS_SPEC } from './aws/spec'
 import { InstallerError } from './diagnostic/error'
-import { validName, validRegion } from './aws/types'
+import { isOperationId, validName, validRegion } from './aws/types'
 import type { UpCommandOptions } from './commands/up'
 
 export interface AwsInput {
@@ -9,6 +9,14 @@ export interface AwsInput {
 
 export interface AwsCommandOptions {
   name?: string
+}
+
+export interface AwsDeploymentInput {
+  id?: string
+}
+
+export interface AwsDeploymentOptions {
+  id: string
 }
 
 export function convertAwsOptions(input: AwsInput): AwsCommandOptions {
@@ -24,6 +32,19 @@ export function convertAwsOptions(input: AwsInput): AwsCommandOptions {
   }
   return {
     name: input.name,
+  }
+}
+
+export function convertAwsDeploymentOptions(input: AwsDeploymentInput): AwsDeploymentOptions {
+  if (input.id === undefined || !isOperationId(input.id)) {
+    throw new InstallerError({
+      code: 'INVALID_ARGUMENT',
+      facts: [['Option', '--id']],
+      retry: 'qiln aws deployment --help',
+    })
+  }
+  return {
+    id: input.id,
   }
 }
 

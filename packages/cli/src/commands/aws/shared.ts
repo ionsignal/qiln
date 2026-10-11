@@ -1,11 +1,16 @@
+import { join } from 'node:path'
 import { InstallerError, type DiagnosticFact } from '../../diagnostic/error'
 import * as connections from '../../aws/connection/records'
+import { deploymentFacts, effects } from '../../aws/deployment/facts'
+import * as deployments from '../../aws/deployment/records'
+import type { Deployment } from '../../aws/deployment/types'
 import { diagnostic } from '../../aws/errors'
 import { authRecovery, iamRecovery, terminationConfirmed } from '../../aws/recovery'
 import { pendingFacts } from '../../aws/iam/facts'
 import { requireAuthentication } from '../../aws/auth/identity'
 import { removeAuth, Session } from '../../aws/auth/session'
 import type { Pending } from '../../aws/iam/types'
+import { AWS_SPEC } from '../../aws/spec'
 import type { AwsAuthentication, AwsConnection, AwsIdentity } from '../../aws/types'
 import type { Dir } from '../../state/files'
 import type { Reporter } from '../../terminal/reporter'
@@ -37,6 +42,33 @@ export async function requireAvailable(directory: Dir): Promise<void> {
   if (pending) {
     return pendingFailure(pending)
   }
+}
+
+/**
+ * Local removal discards the managed binding, so it is refused while retained
+ * deployment evidence indicates that resources or unresolved effects may remain.
+ * Returns the settled deployments, which stay on disk after removal.
+ */
+export async function requireSettledDeployments(root: Dir, identity: AwsIdentity): Promise<Deployment[]> {
+  const bound = await deployments.bound(root, identity)
+  const outstanding = bound.filter(record => effects(record) === 'outstanding')
+  const first = outstanding[0]
+  if (first !== undefined) {
+    throw new InstallerError({
+      code: 'AWS_DEPLOYMENT_RECORDED',
+      facts: [
+        ...deploymentFacts(first),
+        ['Retained evidence', join(root.child(AWS_SPEC.state.deployments), first.id, AWS_SPEC.state.deployment)],
+        [
+          'Preservation',
+          'Keep this record and the connection record. Deleting local state does not remove AWS resources and is not recovery.',
+        ],
+        ['Outstanding deployments', String(outstanding.length)],
+      ],
+      retry: `qiln aws deployment status --id ${first.id}`,
+    })
+  }
+  return bound
 }
 
 export async function failAuthentication(directory: Dir, name: string, cause: unknown): Promise<never> {

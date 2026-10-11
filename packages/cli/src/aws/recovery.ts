@@ -35,6 +35,11 @@ export interface ToolRecoveryOutcomes {
   lock: Outcome
 }
 
+export interface DeploymentRecoveryOutcomes {
+  termination: boolean
+  persistence: boolean
+}
+
 export function originalCode(error: InstallerError): InstallerErrorCode {
   if (isRecord(error) && typeof error.failureCode === 'string' && Object.hasOwn(catalog, error.failureCode)) {
     return error.failureCode as InstallerErrorCode
@@ -180,5 +185,31 @@ export function toolRecovery(
         pending: 'retained or release not confirmed',
       },
     ],
+  })
+}
+
+/**
+ * Deployment evidence is written as the fence closes, so recovery tracks the
+ * child's termination and whether that write was confirmed. The operation lock
+ * is retained by the caller whenever termination is unconfirmed.
+ */
+export function deploymentRecovery(
+  failure: InstallerError,
+  outcomes: DeploymentRecoveryOutcomes,
+  facts: readonly DiagnosticFact[],
+  retry: string,
+): InstallerError {
+  return new RecoveryError({
+    failure,
+    code: 'AWS_DEPLOYMENT_RECOVERY_REQUIRED',
+    retry,
+    keepFailureRetry: true,
+    terminationConfirmed: outcomes.termination,
+    before: facts,
+    steps: [
+      confirmation('Child termination', outcomes.termination),
+      confirmation('Deployment evidence persistence', outcomes.persistence),
+    ],
+    after: retainedLock(outcomes.termination),
   })
 }

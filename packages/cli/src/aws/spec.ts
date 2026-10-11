@@ -12,6 +12,7 @@ export const AWS_SPEC = Object.freeze({
   children: Object.freeze({
     auth: 'aws.js',
     iam: 'iam.js',
+    ec2: 'ec2.js',
   }),
   loginTimeoutMs: 15 * 60 * 1_000,
   requestTimeoutMs: 30_000,
@@ -25,11 +26,24 @@ export const AWS_SPEC = Object.freeze({
       attempts: 8,
     }),
   }),
+  deployment: Object.freeze({
+    defaultCidr: '172.16.0.0/16',
+    maximumRemovals: 3,
+    requestTimeoutMs: 120_000,
+    maximumPages: 20,
+    observation: Object.freeze({
+      timeoutMs: 60_000,
+      delayMs: 2_000,
+      attempts: 30,
+    }),
+  }),
   state: {
     directory: 'aws',
     connections: 'connections',
+    deployments: 'deployments',
     lock: 'connections.lock',
     connection: 'connection.json',
+    deployment: 'deployment.json',
     pending: 'pending.json',
     root: 'root',
     auth: 'auth',

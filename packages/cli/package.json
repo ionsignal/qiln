@@ -24,6 +24,7 @@
     "node": ">=22.22.2 <23.0.0"
   },
   "dependencies": {
+    "@aws-sdk/client-ec2": "3.1146.0",
     "@aws-sdk/client-iam": "3.1146.0",
     "@aws-sdk/client-sts": "3.1146.0",
     "@aws-sdk/credential-providers": "3.1146.0",

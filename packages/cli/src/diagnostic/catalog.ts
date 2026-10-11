@@ -18,7 +18,6 @@ const inspectIncus = 'Inspect the local Incus daemon, its operations, and the ma
 const restoreAccess =
   'Verify the daemon and the developer’s approved local Incus access. Start a new login session after changing group membership.'
 const preservePostgres = 'Preserve the PostgreSQL custom volume and its data during any manual recovery.'
-
 export const catalog = Object.freeze({
   MISSING_HOST_TOOL: entry(
     'Required host tool is unavailable',
@@ -936,6 +935,85 @@ export const catalog = Object.freeze({
     'The journal records approved local removal. Qiln will not reinterpret it as a connection attempt.',
     'Re-run disconnect for the same connection after inspecting local state.',
   ),
+  AWS_DEPLOYMENT_STATE_INVALID: entry(
+    'AWS deployment evidence is unsafe or incompatible',
+    'Deployment records must retain their exact supported schema, ownership, permissions, and recorded bindings. A missing, incomplete, or inconsistent record does not establish that no resource effects occurred, and evidence is never repaired, adopted, or discarded automatically.',
+    'Inspect the protected AWS deployments directory and the affected deployment record.',
+    'Do not delete deployment evidence or remove locks while another Qiln process may be active.',
+    'Compare actual AWS resources with the recorded account, operator, region, and deployment tag before any manual recovery.',
+  ),
+  AWS_DEPLOYMENT_NOT_FOUND: entry(
+    'AWS deployment record was not found',
+    'No deployment with this ID exists in protected local state. Qiln does not search by connection, VPC ID, or tag, and never adopts an AWS VPC that it did not record.',
+    'Use the deployment ID printed by qiln aws deployment create.',
+    'If the state location changed, restore the original HOME or XDG_STATE_HOME. Deployment records survive local disconnect.',
+  ),
+  AWS_DEPLOYMENT_PERMISSION_REQUIRED: entry(
+    'AWS deployment requires current verified permissions',
+    'Creating a deployment requires a Qiln-created operator with an enrolled foundation policy and a recorded verification that matches the current permission requirement. Authentication success and older metadata do not establish current permissions, and this requirement does not approve spending.',
+    'Run qiln aws connect with the same connection name and approve the root permission review. A connection verified under an earlier requirement needs a replace-foundation review, which adds tagged-VPC deletion authority.',
+    'Arbitrary existing IAM users remain authentication-only and cannot create deployments.',
+  ),
+  AWS_DEPLOYMENT_RECORDED: entry(
+    'Deployment evidence blocks local disconnect',
+    'Retained deployment evidence indicates that AWS resources may remain, that an operation outcome is unresolved, or that child termination was not confirmed. Local removal would discard the managed binding needed to reason about them. Qiln does not delete AWS resources, adopt candidates, or clear uncertainty automatically.',
+    'Inspect the displayed deployment evidence with qiln aws deployment status, and the actual AWS resources it names.',
+    'Preserve the retained deployment record and the connection record. They are the only local evidence binding these resources to this operator, even if the operator user or its credentials are later deleted or lost; deleting local state is never recovery.',
+    'Resolve outstanding resources through an explicitly reviewed administrator procedure using the recorded account, region, and deployment tag.',
+    'Retry disconnect only after retained evidence establishes that no resource effects remain.',
+  ),
+  AWS_DEPLOYMENT_NOT_ATTEMPTED: entry(
+    'AWS deployment mutation was not attempted',
+    'The isolated credential process refused before dispatching any mutating call because the retained deployment evidence, approval, bindings, or authenticated identity did not match. Read-only calls may have been made. This describes only that attempt and does not clear earlier effects.',
+    'Inspect the retained deployment evidence and the authenticated operator before repeating the command.',
+    'Do not edit or delete protected deployment state to bypass the refusal.',
+  ),
+  AWS_DEPLOYMENT_REFUSED: entry(
+    'AWS refused to create the VPC',
+    'AWS definitively refused the creation call, reporting the pinned CIDR range as invalid. Qiln validates the pinned range against its private IPv4 policy before approval, so this indicates a defect in the pinned default or an account-level range restriction, not an operator-correctable input. That call created no VPC, and the refused attempt is never retried.',
+    'Report the recorded deployment ID and its approved CIDR to the maintainers; the range cannot be changed from the command line.',
+    'Review any account-level restriction on the range through an explicitly approved procedure.',
+    'A later release with a corrected default needs a new deployment and a new approval.',
+  ),
+  AWS_DEPLOYMENT_LIMIT: entry(
+    'AWS VPC limit prevents creation',
+    'AWS definitively refused the creation call because a regional VPC limit was reached. That call created no VPC. Qiln does not probe, raise, or manage quotas.',
+    'Review existing VPCs in the account and region through an explicitly approved procedure, or request a quota change outside Qiln.',
+    'Then create a new deployment; the refused attempt is never retried.',
+  ),
+  AWS_DEPLOYMENT_BLOCKED: entry(
+    'VPC removal is blocked by dependencies',
+    'AWS refused the deletion because dependent resources remain in the VPC. That call removed nothing. Qiln never removes dependents and does not inventory them.',
+    'Inspect and resolve the dependent resources through an explicitly reviewed procedure.',
+    'Then inspect the deployment again; a later removal needs a fresh observation and a new approval.',
+  ),
+  AWS_DEPLOYMENT_VERIFICATION_FAILED: entry(
+    'VPC outcome was not verified',
+    'A bounded observation ended without the expected result or returned an incompatible response. A recorded mutation may already have completed, and Qiln did not repeat it. An exhausted budget does not prove that the mutation failed, that the VPC is absent, or who changed it.',
+    'Inspect the retained deployment evidence, then inspect the recorded deployment again when ready.',
+    'Compare actual AWS resources with the recorded account, region, and deployment tag before any manual recovery.',
+  ),
+  AWS_DEPLOYMENT_EVIDENCE_UNAVAILABLE: entry(
+    'VPC response evidence was not retained',
+    'The provider call may have completed, but its returned identity could not be validated or retained locally. Creation has no idempotency token, and Qiln never repeats an uncertain mutation, adopts candidate VPCs, or treats an empty listing as proof.',
+    'Inspect the deployment evidence and the actual AWS resources tagged with the recorded operator and deployment.',
+    'Resolve any resource through an explicitly reviewed procedure; a new create is a new deployment, never a retry.',
+  ),
+  AWS_DEPLOYMENT_RECOVERY_REQUIRED: entry(
+    'AWS deployment recovery remains outstanding',
+    'The original operation failed, or an earlier one left child termination unconfirmed, or the failure could not be written to the deployment evidence. A provider call may already have completed. No replay, adoption, deletion, rollback, or automatic recovery is attempted, and no further provider call runs while termination is unconfirmed.',
+    'Use the displayed termination and persistence outcomes to identify outstanding work.',
+    'Retain potentially active authentication inputs and the protective operation lock until child activity has been checked.',
+    'Compare actual AWS resources with the recorded account, region, and deployment tag.',
+    'Do not edit or delete deployment evidence or lock files to bypass this state.',
+  ),
+  AWS_DEPLOYMENT_REMOVAL_REFUSED: entry(
+    'VPC removal was refused locally',
+    'Removal requires confirmed prior termination, a retained VPC identity, removal attempts remaining, no earlier attempt that is unresolved or uncertain, and a fresh observation showing the approved VPC available and unchanged. Qiln cannot remove a VPC it cannot match to the approval. No DeleteVpc call was made.',
+    'Inspect the displayed deployment evidence and the actual VPC.',
+    'Inspect the deployment again to retain a fresh observation before offering removal.',
+    'Resolve unexpected changes to the VPC through an explicitly reviewed procedure outside Qiln.',
+  ),
   AWS_STATE_INVALID: entry(
     'AWS connection state is unsafe or incompatible',
     'Connection records and authentication directories must retain supported schemas, ownership, permissions, and bounded regular files.',
@@ -943,18 +1021,18 @@ export const catalog = Object.freeze({
     'Do not discard recorded identities or remove locks while another Qiln process is active.',
   ),
   AWS_LOCKED: entry(
-    'AWS connection state is locked',
+    'AWS operation state is locked',
     'Qiln does not wait for an existing lock or assume it is stale.',
-    'Confirm that no AWS connection command or authentication subprocess is active before manually recovering a leftover lock.',
+    'Confirm that no AWS command or authentication subprocess is active before manually recovering a leftover lock.',
   ),
   AWS_LOCK_CHANGED: entry(
-    'AWS connection lock changed',
+    'AWS operation lock changed',
     'Qiln will not unlink a lock that no longer identifies the protected file it created.',
     'Inspect the AWS state directory and concurrent processes manually.',
   ),
   AWS_LOCK_FAILED: entry(
-    'AWS connection lock could not be established',
-    'Authentication-state changes require a validated exclusive lock. A lock created before validation failed may remain.',
+    'AWS operation lock could not be established',
+    'AWS operations require a validated exclusive lock. A lock created before validation failed may remain.',
     'Inspect directory ownership, permissions, and lock state before retrying.',
   ),
   AWS_PROFILE_INVALID: entry(

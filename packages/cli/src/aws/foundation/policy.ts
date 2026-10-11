@@ -5,7 +5,7 @@ import { canonical, document, sameJson } from '../json'
 import { operatorName } from '../operator'
 import { validRegion } from '../types'
 
-export const PERMISSION_VERSION = 3
+export const PERMISSION_VERSION = 4
 
 export const FOUNDATION = Object.freeze({
   path: '/qiln/foundation/',
@@ -99,9 +99,11 @@ function allow(actions: string[], resources: string | string[], conditions?: Con
 }
 
 /**
- * This document prepares regional authority, not a launch request. Exact AMI,
- * placement, counts, storage, egress, and retention still require a separately
- * approved immutable deployment intent.
+ * This document prepares regional authority, not a launch or removal request.
+ * Exact AMI, placement, counts, storage, egress, and retention still require a
+ * separately approved immutable deployment intent. VPC deletion is limited to
+ * VPCs tagged for this operator, so the deployment record remains the
+ * per-deployment gate.
  */
 export function specification(accountId: string, connection: string, region: string): PermissionSpec {
   policyArn(accountId, connection)
@@ -120,6 +122,19 @@ export function specification(accountId: string, connection: string, region: str
       'ec2:ResourceTag/qiln:operator': principal,
     },
   }
+  // Creation checks the request tags and deletion checks the tags already on
+  // the VPC. '?*' requires a nonempty deployment tag.
+  const vpcTags = (prefix: 'aws:RequestTag' | 'ec2:ResourceTag'): Conditions => ({
+    StringEquals: {
+      [`${prefix}/qiln:operator`]: principal,
+      [`${prefix}/qiln:managed-by`]: 'qiln-cli',
+    },
+    StringLike: {
+      [`${prefix}/qiln:deployment`]: '?*',
+    },
+  })
+  const vpcRequested = vpcTags('aws:RequestTag')
+  const vpcOwned = vpcTags('ec2:ResourceTag')
   const creationActions = [
     'CreateVpc',
     'CreateSubnet',
@@ -173,7 +188,8 @@ export function specification(accountId: string, connection: string, region: str
         },
       },
     ),
-    allow(['CreateVpc'], resource('vpc'), requested),
+    allow(['CreateVpc'], resource('vpc'), vpcRequested),
+    allow(['DeleteVpc'], resource('vpc'), vpcOwned),
     // Existing parent VPCs use the ownership fence below, not request tags.
     allow(
       creationActions.filter(action => action !== 'CreateVpc'),

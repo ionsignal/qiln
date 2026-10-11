@@ -1,8 +1,9 @@
 import { basename, dirname } from 'node:path'
 import { InstallerError } from '../../diagnostic/error'
-import { openChildDir, openDir, readChild, writeChild, type Dir } from '../../state/files'
+import { openChildDir, openDir, writeChild, type Dir } from '../../state/files'
 import * as connections from '../connection/records'
 import { userId } from '../host'
+import { requireOperationLock } from '../root'
 import { AWS_SPEC } from '../spec'
 import type { AwsConnection } from '../types'
 import { requireTransition } from './transitions'
@@ -37,21 +38,11 @@ export async function requireLock(directory: Dir, expectedPid = process.pid): Pr
   ) {
     return invalid()
   }
-  const aws = await openDir(dirname(dirname(directory.path)), {
+  const root = await openDir(dirname(dirname(directory.path)), {
     owner: userId(),
     mode: 0o700,
   })
-  const snapshot = await readChild(aws, AWS_SPEC.state.lock, {
-    owner: userId(),
-    mode: 0o600,
-    minSize: 1,
-    maxSize: 64,
-  })
-  if (Buffer.from(snapshot.bytes).toString('utf8') !== `${expectedPid}\n`) {
-    throw new InstallerError({
-      code: 'AWS_LOCK_CHANGED',
-    })
-  }
+  await requireOperationLock(root, expectedPid)
 }
 
 export async function write(directory: Dir, record: Pending): Promise<void> {

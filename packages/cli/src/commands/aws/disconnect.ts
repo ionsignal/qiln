@@ -1,31 +1,33 @@
 import { InstallerError } from '../../diagnostic/error'
 import * as connections from '../../aws/connection/records'
+import { describe } from '../../aws/deployment/facts'
 import { diagnostic } from '../../aws/errors'
 import { pendingFacts } from '../../aws/iam/facts'
 import { cleanRoot } from '../../aws/iam/lifecycle'
 import { removeAuth } from '../../aws/auth/session'
-import { withAwsState } from '../../aws/connection/store'
+import { withAwsOperation } from '../../aws/root'
 import { requireAwsHost } from '../../aws/host'
 import { resolveAwsName, type AwsCommandOptions } from '../../input'
 import { checkCancellation, Prompts, withCancellation } from '../../terminal/prompts'
 import type { Reporter } from '../../terminal/reporter'
-import { pendingFailure, reportPermissionMetadata } from './shared'
+import { pendingFailure, reportPermissionMetadata, requireSettledDeployments } from './shared'
 
 export async function disconnect(options: AwsCommandOptions, reporter: Reporter): Promise<void> {
   requireAwsHost()
   const name = resolveAwsName(options)
   await withCancellation(async signal => {
     const prompts = new Prompts(signal, 'qiln aws disconnect', reporter)
-    await withAwsState(false, async store => {
+    await withAwsOperation(false, async ({ root, connections: store }) => {
       const directory = await connections.open(store, name)
       const connection = await connections.read(directory, name)
       const pending = await connections.pending(directory)
       if (pending?.termination === 'unconfirmed') {
         pendingFailure(pending)
       }
+      const identity = connection?.identity ?? pending?.operator
+      const retained = identity ? await requireSettledDeployments(root, identity) : []
       reporter.section('AWS connection')
       reporter.row('verified', 'Connection', name)
-      const identity = connection?.identity ?? pending?.operator
       if (identity) {
         reporter.row('verified', 'Recorded account', identity.accountId)
         reporter.row('verified', 'Recorded IAM user', identity.arn)
@@ -41,6 +43,13 @@ export async function disconnect(options: AwsCommandOptions, reporter: Reporter)
         for (const [label, value] of pendingFacts(pending)) {
           reporter.info(`${label}: ${value}`)
         }
+      }
+      if (retained.length > 0) {
+        reporter.section('Retained deployment evidence')
+        for (const record of retained) {
+          reporter.info(`${record.id}: ${describe(record)}`)
+        }
+        reporter.notice('Deployment records remain in protected local state after removal. AWS resources are not deleted.')
       }
       if (connection?.managed || pending) {
         reporter.notice(

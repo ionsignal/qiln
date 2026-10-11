@@ -1,12 +1,12 @@
 import { Command, Option } from 'commander'
 import { InstallerError } from './diagnostic/error'
 import { AWS_SPEC } from './aws/spec'
-import { convertAwsOptions, convertUpOptions } from './input'
+import { convertAwsDeploymentOptions, convertAwsOptions, convertUpOptions } from './input'
 import { configureHelp } from './terminal/help'
 import { Reporter, type ColorMode, type OutputStream } from './terminal/reporter'
 import type { CommanderError } from 'commander'
 import type { UpCommandOptions } from './commands/up'
-import type { AwsCommandOptions, AwsInput, UpInput } from './input'
+import type { AwsCommandOptions, AwsDeploymentInput, AwsDeploymentOptions, AwsInput, UpInput } from './input'
 
 export interface GlobalOptions {
   color: ColorMode
@@ -19,6 +19,12 @@ export interface ProgramHandlers {
     connect(options: AwsCommandOptions, color: ColorMode): void | Promise<void>
     status(options: AwsCommandOptions, color: ColorMode): void | Promise<void>
     disconnect(options: AwsCommandOptions, color: ColorMode): void | Promise<void>
+    deployment: {
+      create(options: AwsCommandOptions, color: ColorMode): void | Promise<void>
+      status(options: AwsDeploymentOptions, color: ColorMode): void | Promise<void>
+      inspect(options: AwsDeploymentOptions, color: ColorMode): void | Promise<void>
+      remove(options: AwsDeploymentOptions, color: ColorMode): void | Promise<void>
+    }
   }
 }
 
@@ -52,7 +58,9 @@ export function createProgram(handlers: ProgramHandlers, output: ProgramOutput):
   const program = new Command()
   program
     .name('qiln')
-    .description('Manage the Qiln development installation and AWS operator connections.')
+    .description(
+      'Manage the Qiln development installation, AWS operator connections, and approved AWS VPC deployments.',
+    )
     .version('0.1.2', '-v, --version', 'Display the Qiln version.')
     .helpOption('-h, --help', 'Display help.')
     .helpCommand(false)
@@ -138,15 +146,16 @@ export function createProgram(handlers: ProgramHandlers, output: ProgramOutput):
   if (awsHandlers) {
     const aws = program
       .command('aws')
-      .description('Manage Qiln-owned local AWS operator connections without provisioning infrastructure.')
-      .summary('Manage local AWS operator connections.')
+      .description('Manage Qiln-owned local AWS operator connections and explicitly approved VPC deployments.')
+      .summary('Manage AWS connections and VPC deployments.')
     describeHelp(aws, {
-      examples: ['qiln aws connect', 'qiln aws disconnect', 'qiln aws status'],
+      examples: ['qiln aws connect', 'qiln aws disconnect', 'qiln aws status', 'qiln aws deployment --help'],
       safety: [
         'AWS commands support unprivileged Linux and macOS operators, including Windows through WSL. They are independent of development doctor, Incus, Ubuntu-release, and ZFS checks.',
         'Connect an existing non-root IAM operator or explicitly approve root bootstrap to create one dedicated operator with console access, Sign-In permission, scoped password/MFA self-service, and a separate regional foundation policy.',
         'A saved Qiln-created operator can receive a new root-approved permission-only review. Its immutable identity, password, MFA enrollment, creation identity, and saved ordinary operator login are preserved. Unsupported local layouts are not adopted or migrated.',
-        'Root authentication is accepted only in separate approved bootstrap contexts. SSO, assumed-role onboarding, EC2 foundation inspection, and infrastructure provisioning are not available.',
+        'Root authentication is accepted only in separate approved bootstrap contexts. SSO, assumed-role onboarding, and EC2 foundation inspection are not available. Connecting never provisions or removes infrastructure; provisioning requires separate approval.',
+        'The deployment group creates and removes one approved VPC per deployment, each with its own approval. See qiln aws deployment --help.',
       ],
     })
     const connect = aws
@@ -179,9 +188,9 @@ export function createProgram(handlers: ProgramHandlers, output: ProgramOutput):
         'Onboarding and permission maintenance show one concise completion row per IAM mutation after retained results, successful AWS verification, and persisted verification evidence. No paired working row, animated spinner, or raw provider output is used. Failed or uncertain steps are described by recovery diagnostics.',
         'Foundation authority is approved for one displayed region independently of the editable connection default. Changing that default neither changes IAM permissions nor automatically triggers regional permission expansion.',
         'Permission-only bootstrap preserves the existing user ID, ARN, password, MFA devices, creation identity, Sign-In policy, password/MFA self-service, and saved operator login. Its approval summary distinguishes creating and attaching a missing dedicated foundation policy, creating a new default version for whole-document replacement while retaining existing versions, and verifying matching live content without IAM changes or version creation.',
-        'Maintenance approval discloses regional networking, constrained On-Demand launches, encrypted EBS, Elastic IPs, administrative public-key import, and instance/console inspection. It does not approve infrastructure provisioning or spending; exact deployment inputs require a separately approved immutable intent. Completion distinguishes freshly verified changes from freshly verified no-change.',
+        'Maintenance approval discloses regional networking, Qiln-tagged VPC creation and deletion, constrained On-Demand launches, encrypted EBS, Elastic IPs, administrative public-key import, and instance/console inspection. VPC deletion authority covers any VPC in the bound account and region tagged with this operator’s ARN, qiln:managed-by=qiln-cli, and a nonempty qiln:deployment value, not only one deployment ID. It does not approve infrastructure provisioning or spending, and connect itself never provisions or removes anything; exact deployment inputs require a separately approved immutable intent. Completion distinguishes freshly verified changes from freshly verified no-change.',
         'Unexpected policy identities, attachments, groups, permanent access keys, or operation evidence stop reconciliation. Bound policy content is observed for review; changed approved preconditions stop execution. Existing unattached policies are not adopted to recover partial execution.',
-        'The operator foundation policy grants no IAM administration, iam:PassRole, SSM, NAT-gateway, load-balancer, or resource-removal authority. No general-purpose ec2:* grant is used.',
+        'The operator foundation policy grants no IAM administration, iam:PassRole, SSM, NAT-gateway, load-balancer, or removal authority other than deleting VPCs tagged for this operator. No general-purpose ec2:* grant is used.',
         'The foundation policy is customer-managed, not inline. Its completed document is checked against the 6,144-character limit. A required replacement with five inspected retained versions stops before approval or mutation intent; execution independently rechecks approved preconditions and capacity. Five versions do not block matching-content no-change verification. Policy versions are retained without automatic pruning, older-default selection, or rollback.',
         'The initial password is generated and displayed only by an isolated terminal process. The copy instruction appears immediately above its heading. The password is not sent through IPC, stored in pending evidence, recovered, redisplayed, or reissued.',
         'After the password and browser instructions are shown, Qiln proceeds into AWS login without an operator-name confirmation. The operator must complete browser password replacement; operator MFA enrollment is optional. Readiness facts appear together before explanatory information and actions. Identity verification and explicit readiness rechecks remain required; an omitted password-reset field is unknown, not successful completion.',
@@ -237,6 +246,105 @@ export function createProgram(handlers: ProgramHandlers, output: ProgramOutput):
     })
     disconnect.action(() =>
       awsHandlers.disconnect(convertAwsOptions(disconnect.opts<AwsInput>()), program.opts<GlobalOptions>().color),
+    )
+    const deployment = aws
+      .command('deployment')
+      .description('Create, inspect, and remove one explicitly approved AWS VPC bound to a Qiln-managed operator.')
+      .summary('Manage approved VPC deployments.')
+    describeHelp(deployment, {
+      examples: [
+        'qiln aws deployment create',
+        'qiln aws deployment status --id <deployment-id>',
+        'qiln aws deployment inspect --id <deployment-id>',
+        'qiln aws deployment remove --id <deployment-id>',
+      ],
+      safety: [
+        'Each deployment is exactly one VPC. Subnets, instances, gateways, storage, remote preparation, pricing, and quota discovery are not available. This lifecycle exercises approval, evidence, locking, and recovery; it does not demonstrate spend protection.',
+        'Create and remove each require a separate interactive yes/no approval that defaults to no. Later commands resolve the connection and every binding from the deployment record; there are no VPC-ID, region, tag, CIDR, or rebinding options.',
+        'Deployment commands hold the exclusive AWS-operation lock, which is retained when child termination is unconfirmed. Recovery is forward-only: Qiln does not replay uncertain mutations, adopt VPCs, or resume abandoned work.',
+        'Deployment records are retained across disconnect, which refuses while effects remain outstanding. Qiln never deletes AWS resources or deployment evidence automatically. Completion does not establish launch authority, capacity, SSH access, Ubuntu compatibility, readiness, or rollback.',
+      ],
+    })
+    const create = deployment
+      .command('create')
+      .description('Approve and create one VPC with the pinned private CIDR, then verify it by observation.')
+      .summary('Create one approved VPC.')
+    addSingleOption(
+      create,
+      new Option('--name <name>', `Select the connection (default: ${AWS_SPEC.defaultName}).`),
+    )
+    describeHelp(create, {
+      examples: ['qiln aws deployment create', 'qiln aws deployment create --name default'],
+      safety: [
+        `Without --name, create uses '${AWS_SPEC.defaultName}'. The connection must be a Qiln-created operator whose recorded permission verification matches the current requirement; otherwise run qiln aws connect for a root-approved review. Arbitrary existing IAM users remain authentication-only.`,
+        `There are no network inputs. The CIDR is pinned by this Qiln release (${AWS_SPEC.deployment.defaultCidr}) and copied into the approval; the record alone governs later commands, and a later release never retargets an existing deployment.`,
+        'The account, operator, region, CIDR, default tenancy, ownership tags, and AWS default VPC components are displayed before one yes/no approval that defaults to no. The approval is persisted before any provider call.',
+        'Creation is one CreateVpc call with no idempotency token. An uncertain outcome is never repeated, and a new create is a new deployment. The returned VPC identity is retained before verification.',
+        'Verification observes the VPC until it is available and checks owner, CIDR, tenancy, tags, non-default status, and the absence of extra CIDR associations. Requires an interactive terminal and the saved operator login.',
+      ],
+    })
+    create.action(() =>
+      awsHandlers.deployment.create(convertAwsOptions(create.opts<AwsInput>()), program.opts<GlobalOptions>().color),
+    )
+    const deploymentStatus = deployment
+      .command('status')
+      .description('Report the retained evidence for one deployment without authenticating or calling AWS.')
+      .summary('Report local deployment evidence.')
+    addSingleOption(
+      deploymentStatus,
+      new Option('--id <deployment-id>', 'Select the deployment ID printed by create.'),
+    )
+    describeHelp(deploymentStatus, {
+      examples: ['qiln aws deployment status --id <deployment-id>'],
+      safety: [
+        'Reads local deployment evidence only. No credentials are used and no AWS call is made, so it also works while another AWS operation holds the lock.',
+        'The reported outcome is derived from retained facts. It does not establish the current state of AWS resources; use inspect for a fresh observation.',
+      ],
+    })
+    deploymentStatus.action(() =>
+      awsHandlers.deployment.status(
+        convertAwsDeploymentOptions(deploymentStatus.opts<AwsDeploymentInput>()),
+        program.opts<GlobalOptions>().color,
+      ),
+    )
+    const inspect = deployment
+      .command('inspect')
+      .description('Authenticate as the recorded operator, observe the recorded VPC, and retain the observation.')
+      .summary('Retain a fresh VPC observation.')
+    addSingleOption(inspect, new Option('--id <deployment-id>', 'Select the deployment ID printed by create.'))
+    describeHelp(inspect, {
+      examples: ['qiln aws deployment inspect --id <deployment-id>'],
+      safety: [
+        'Authenticates as the recorded operator and makes read-only EC2 calls. Like aws status, it may refresh temporary credentials.',
+        'With a retained VPC identity it observes that VPC once. Without one it lists VPCs carrying the recorded operator and deployment tags for display only: candidates are never adopted, and an empty listing proves nothing.',
+        'Absence never proves who deleted the VPC. Inspection is refused while an earlier child process remains unconfirmed.',
+      ],
+    })
+    inspect.action(() =>
+      awsHandlers.deployment.inspect(
+        convertAwsDeploymentOptions(inspect.opts<AwsDeploymentInput>()),
+        program.opts<GlobalOptions>().color,
+      ),
+    )
+    const remove = deployment
+      .command('remove')
+      .description('Approve and remove the recorded VPC, then observe and retain its absence.')
+      .summary('Remove one approved VPC.')
+    addSingleOption(remove, new Option('--id <deployment-id>', 'Select the deployment ID printed by create.'))
+    describeHelp(remove, {
+      examples: ['qiln aws deployment remove --id <deployment-id>'],
+      safety: [
+        'Removal needs a retained VPC identity, confirmed prior child termination, remaining attempts (at most three), and no earlier removal attempt that is unresolved or uncertain. Only a definite earlier refusal permits another attempt.',
+        'A fresh observation must show the approved VPC available and unchanged; otherwise removal is refused and no DeleteVpc call is made. An observed-absent VPC also makes no call.',
+        'After a separate yes/no approval that defaults to no, DeleteVpc is called once. AWS refusal because dependent resources remain is the only dependency gate; Qiln never removes dependents. Absence is then observed and retained.',
+        'Removal uses the permission evidence recorded with the deployment and never forces a root permission review. It is not rolled back once attempted.',
+      ],
+    })
+    remove.action(() =>
+      awsHandlers.deployment.remove(
+        convertAwsDeploymentOptions(remove.opts<AwsDeploymentInput>()),
+        program.opts<GlobalOptions>().color,
+      ),
     )
   }
   return program
