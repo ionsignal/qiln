@@ -1,4 +1,5 @@
 import { InstallerError } from '../../diagnostic/error'
+import { sendEvidence } from '../child/evidence'
 import { hasKeys, isRecord } from '../guards'
 import { isOperationId } from '../types'
 import { isPasswordReceipt, type PasswordReceipt } from './types'
@@ -54,55 +55,15 @@ export async function retainPassword(
     mutationId,
     receipt,
   }
-  if (!isPasswordEvidence(evidence) || !process.send || !process.connected) {
+  if (!isPasswordEvidence(evidence)) {
     throw new InstallerError({
       code: 'AWS_BOOTSTRAP_PASSWORD_UNAVAILABLE',
     })
   }
-  await new Promise<void>((resolve, reject) => {
-    let settled = false
-    const finish = (error?: InstallerError) => {
-      if (settled) {
-        return
-      }
-      settled = true
-      process.off('message', onMessage)
-      process.off('disconnect', onDisconnect)
-      signal.removeEventListener('abort', onAbort)
-      if (error) {
-        reject(error)
-      } else {
-        resolve()
-      }
-    }
-    const unavailable = () =>
-      finish(
-        new InstallerError({
-          code: 'AWS_BOOTSTRAP_PASSWORD_UNAVAILABLE',
-        }),
-      )
-    const onMessage = (message: unknown) => {
-      if (isAcknowledgment(message, evidence)) {
-        finish()
-      } else {
-        unavailable()
-      }
-    }
-    const onDisconnect = () => unavailable()
-    const onAbort = () => unavailable()
-    process.once('message', onMessage)
-    process.once('disconnect', onDisconnect)
-    signal.addEventListener('abort', onAbort, {
-      once: true,
-    })
-    if (signal.aborted || !process.send || !process.connected) {
-      unavailable()
-      return
-    }
-    process.send(evidence, error => {
-      if (error) {
-        unavailable()
-      }
-    })
-  })
+  await sendEvidence(
+    evidence,
+    message => isAcknowledgment(message, evidence),
+    signal,
+    'AWS_BOOTSTRAP_PASSWORD_UNAVAILABLE',
+  )
 }
