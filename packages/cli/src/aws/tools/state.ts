@@ -1,8 +1,7 @@
 import { constants } from 'node:fs'
 import { access, lstat, readlink, realpath, readdir, stat } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve } from 'node:path'
-import { catalog } from '../../diagnostic/catalog'
-import { InstallerError, type InstallerErrorCode } from '../../diagnostic/error'
+import { InstallerError, isInstallerErrorCode, type InstallerErrorCode } from '../../diagnostic/error'
 import { inspectChild, openChildDir, readChild, writeChild, type Dir } from '../../state/files'
 import { acquireLock, type StateLock } from '../../state/lock'
 import { statePath } from '../../state/path'
@@ -47,10 +46,6 @@ function stateError(error: unknown): InstallerError {
     code: 'AWS_TOOL_STATE_INVALID',
     retry: 'qiln aws connect',
   })
-}
-
-function isInstallerCode(value: unknown): value is InstallerErrorCode {
-  return typeof value === 'string' && Object.hasOwn(catalog, value)
 }
 
 export function contains(root: string, path: string): boolean {
@@ -104,7 +99,7 @@ function parse(value: unknown): InstallationRecord {
     (value.phase !== 'installing' && value.phase !== 'ready' && value.phase !== 'failed') ||
     !isTimestamp(value.startedAt) ||
     !isTimestamp(value.updatedAt) ||
-    (value.failureCode !== null && !isInstallerCode(value.failureCode)) ||
+    (value.failureCode !== null && !isInstallerErrorCode(value.failureCode)) ||
     (value.termination !== 'confirmed' && value.termination !== 'unconfirmed') ||
     (value.cleanup !== 'completed' && value.cleanup !== 'unconfirmed')
   ) {

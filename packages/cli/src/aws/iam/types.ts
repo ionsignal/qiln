@@ -1,5 +1,4 @@
-import { catalog } from '../../diagnostic/catalog'
-import type { InstallerErrorCode } from '../../diagnostic/error'
+import { isInstallerErrorCode, type InstallerErrorCode } from '../../diagnostic/error'
 import {
   isEvidence,
   isPolicy,
@@ -346,8 +345,7 @@ export function isPending(value: unknown): value is Pending {
     (value.verified !== null && !isPermissionMetadata(value.verified)) ||
     (value.termination !== 'confirmed' && value.termination !== 'unconfirmed') ||
     !['pending', 'completed', 'unconfirmed'].includes(String(value.cleanup)) ||
-    (value.failureCode !== null &&
-      (typeof value.failureCode !== 'string' || !Object.hasOwn(catalog, value.failureCode))) ||
+    (value.failureCode !== null && !isInstallerErrorCode(value.failureCode)) ||
     !isTimestamp(value.startedAt)
   ) {
     return false

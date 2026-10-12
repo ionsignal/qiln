@@ -2,6 +2,10 @@ import { catalog } from './catalog'
 
 export type InstallerErrorCode = keyof typeof catalog
 
+export function isInstallerErrorCode(value: unknown): value is InstallerErrorCode {
+  return typeof value === 'string' && Object.hasOwn(catalog, value)
+}
+
 export type DiagnosticFact = readonly [label: string, value: string]
 
 export interface InstallerErrorOptions {

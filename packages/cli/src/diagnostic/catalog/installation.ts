@@ -1,0 +1,169 @@
+import { entry, preservePostgresStep } from './define'
+
+export const installationDiagnostics = Object.freeze({
+  INVALID_IMAGE_SELECTOR: entry(
+    'Image selector is malformed',
+    'Image selection must identify one unambiguous local alias or full lowercase SHA-256 fingerprint.',
+    'Supply a non-empty selector without surrounding whitespace or control characters.',
+  ),
+  IMAGE_FINGERPRINT_NOT_LOWERCASE: entry(
+    'Image fingerprint must be lowercase',
+    'Qiln persists one canonical immutable image identity and does not silently normalize operator input.',
+    'Supply the same full 64-character fingerprint in lowercase.',
+  ),
+  IMAGE_FINGERPRINT_MISMATCH: entry(
+    'Resolved image does not match the selected fingerprint',
+    'The installation pin must identify the exact content-addressed image returned by Incus.',
+    'Inspect the local image store and image metadata manually.',
+  ),
+  IMAGE_TYPE_INCOMPATIBLE: entry(
+    'Selected image is not a container image',
+    'The development orchestrator is an Incus container, not a virtual machine.',
+    'Select or import a trusted local container image.',
+  ),
+  IMAGE_ARCHITECTURE_INCOMPATIBLE: entry(
+    'Selected image architecture is unsupported',
+    'The installer requires native x86_64 provider metadata and does not accept foreign-architecture emulation.',
+    'Select an image whose Incus architecture is x86_64.',
+  ),
+  IMAGE_ALIAS_NOT_FOUND: entry(
+    'Local image alias was not found',
+    'The --image workflow resolves existing local images only. It never pulls an image from a remote server.',
+    'Select an existing local alias or full fingerprint, or explicitly import the trusted image.',
+  ),
+  IMAGE_ALIAS_TARGET_INVALID: entry(
+    'Image alias target is malformed',
+    'The selected alias must resolve to one canonical full lowercase fingerprint.',
+    'Repair the local alias or select the full image fingerprint explicitly.',
+  ),
+  IMAGE_PIN_CONFLICT: entry(
+    'Image pin conflicts with this installation',
+    'The --image workflow verifies an existing local image. It never replaces the immutable image pin recorded for this installation.',
+    'Re-run with the installed fingerprint.',
+    'Use the explicit split-image workflow only for an intentional replacement.',
+  ),
+  IMAGE_NOT_FOUND: entry(
+    'Selected local image was not found',
+    'Qiln does not pull or automatically replace an image selected through --image.',
+    'Select an existing trusted local image or use the explicit split-image import workflow.',
+  ),
+  INVALID_IMAGE_FINGERPRINT: entry(
+    'Installation fingerprint is malformed',
+    'Qiln persists only full lowercase SHA-256 provider image identities.',
+    'Reconcile the selected local image before retrying.',
+  ),
+  MANAGED_IMAGE_ALIAS_TARGET_INVALID: entry(
+    'Managed image alias target is malformed',
+    'Explicit replacement must identify the exact old image before deleting it.',
+    'Inspect and repair the managed image alias manually.',
+  ),
+  MANAGED_IMAGE_ALIAS_TARGET_MISSING: entry(
+    'Managed image alias target could not be verified',
+    'Qiln will not delete an unverified or ambiguous image target.',
+    'Inspect the local image and alias state manually.',
+  ),
+  MANAGED_IMAGE_ALIAS_CONFLICT: entry(
+    'Managed image alias points to an unexpected image',
+    'Qiln does not implicitly retarget an unexpected alias or import into conflicting alias state.',
+    'Inspect the actual image and alias state before retrying.',
+  ),
+  MANAGED_IMAGE_ALIAS_VERIFICATION_FAILED: entry(
+    'Managed image alias could not be verified',
+    'The selected content-addressed image and managed alias must both converge before installation state is committed.',
+    'Inspect local image operations and aliases before retrying.',
+  ),
+  IMPORTED_IMAGE_NOT_FOUND: entry(
+    'Computed image is absent after convergence',
+    'Qiln cannot commit a pin that does not resolve to the exact provider image.',
+    'Inspect image operations and the local image store before retrying.',
+  ),
+  FINAL_IMAGE_ALIAS_MISMATCH: entry(
+    'Managed image alias changed during convergence',
+    'Split-image convergence requires the alias and persisted image identity to remain consistent.',
+    'Inspect concurrent image and alias changes, then re-run qiln up.',
+  ),
+  INVALID_SOURCE_CHECKOUT: entry(
+    'Source checkout is unavailable or invalid',
+    'The selected source must be a readable canonical checkout directory with a supported root package descriptor.',
+    'Select the root of the intended local Qiln Git checkout and repair the indicated entry if necessary.',
+  ),
+  SOURCE_NOT_ACCESSIBLE: entry(
+    'Source checkout is not accessible',
+    'Source validation runs entirely with the invoking developer’s filesystem permissions.',
+    'Provide a readable local checkout accessible to the developer.',
+  ),
+  SOURCE_NOT_GIT_CHECKOUT: entry(
+    'Source is not a valid Git working tree',
+    'The host checkout remains the canonical repository for the development workflow.',
+    'Pass the root of a valid local Qiln Git checkout.',
+  ),
+  SOURCE_NOT_CHECKOUT_ROOT: entry(
+    'Source path is not the checkout root',
+    'The source device requires one deterministic repository root.',
+    'Use the Git top-level directory shown in the diagnostic facts.',
+  ),
+  INVALID_GIT_METADATA: entry(
+    'Git metadata entry is unsupported',
+    'Qiln accepts normal checkouts and worktrees, but not symbolic or special-file metadata entries.',
+    'Repair or recreate the checkout before retrying.',
+  ),
+  INVALID_SOURCE_PACKAGE: entry(
+    'Source package descriptor is invalid',
+    'The root package.json must be a bounded, non-empty regular file containing valid JSON.',
+    'Repair package.json in the selected checkout.',
+  ),
+  SOURCE_NOT_QILN_PACKAGE: entry(
+    'Source does not identify the Qiln package',
+    'Qiln will not attach an unrelated source tree as its development checkout.',
+    'Select the repository whose root package.json has name qiln.',
+  ),
+  INVALID_SOURCE_ROOT: entry(
+    'Source root cannot be attached to the orchestrator',
+    'The source device requires a canonical absolute non-root path without unsupported characters.',
+    'Select the canonical Qiln Git checkout root with --source.',
+  ),
+  INSTALLATION_STATE_REQUIRED: entry(
+    'Installation image pin is unavailable',
+    'Credentials may be delivered only to an instance matching the persisted image identity.',
+    'Re-run qiln up to reconcile the selected image and installation state.',
+  ),
+  ORCHESTRATOR_INSTANCE_REQUIRED: entry(
+    'Stopped orchestrator is unavailable',
+    'Credential delivery requires an exact compatible stopped target instance.',
+    'Re-run qiln up to reconcile the development orchestrator.',
+  ),
+  ORCHESTRATOR_IMAGE_SIGNATURE_MISMATCH: entry(
+    'Orchestrator does not match the persisted image',
+    'Qiln never delivers credentials to an instance whose base-image signature differs from the installation pin.',
+    'Review and remove only the incompatible stopped instance manually, then re-run convergence.',
+    preservePostgresStep,
+  ),
+  FINAL_INSTALLATION_STATE_MISSING: entry(
+    'Installation state disappeared during convergence',
+    'A successful installation requires one authoritative persisted image identity.',
+    'Inspect the protected state directory and any concurrent changes before retrying.',
+  ),
+  FINAL_INSTANCE_STATE_MISMATCH: entry(
+    'Instance changed during credential convergence',
+    'Credential delivery must preserve unrelated writable instance configuration.',
+    'Inspect concurrent configuration changes, then re-run qiln up.',
+  ),
+  INCOMPATIBLE_ORCHESTRATOR_INSTANCE: entry(
+    'Existing orchestrator conflicts with the installation',
+    'Qiln will not start, stop, rebuild, delete, or partially repair an incompatible retained instance.',
+    'Review the differences and remove only the incompatible stopped instance manually if replacement is intended.',
+    preservePostgresStep,
+    'Re-run with the intended source checkout and image.',
+  ),
+  INVALID_INSTALLATION_STATE: entry(
+    'Installation state is invalid or incompatible',
+    'The state must contain exactly the supported version, project, instance name, and full lowercase image fingerprint.',
+    'Review the CLI version and inspect the state file manually before recovery.',
+    'Do not discard retained credentials or persistent data.',
+  ),
+  ORCHESTRATOR_INSTANCE_VERIFICATION_FAILED: entry(
+    'Orchestrator is absent after creation',
+    'Qiln cannot report success without re-reading the exact stopped instance after its operation completes.',
+    'Inspect the instance inventory and operation history before retrying.',
+  ),
+})

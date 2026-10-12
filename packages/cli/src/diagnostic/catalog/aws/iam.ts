@@ -1,0 +1,118 @@
+import { entry } from '../define'
+
+export const awsIamDiagnostics = Object.freeze({
+  AWS_ROOT_REQUIRED: entry(
+    'Root bootstrap requires the intended AWS root identity',
+    'Only the separate approved bootstrap context may use root authentication. Ordinary operator connections continue rejecting root.',
+    'Sign in as the intended account root user through the bootstrap browser flow.',
+  ),
+  AWS_ROOT_MFA_REQUIRED: entry(
+    'Root MFA is not configured',
+    'IAM mutations require observed root MFA configuration. This observation does not prove that this particular session authenticated with MFA.',
+    'Enroll root MFA in the AWS browser, then recheck before approving IAM changes.',
+  ),
+  AWS_BOOTSTRAP_STATE_INVALID: entry(
+    'AWS bootstrap state is unsafe or incompatible',
+    'The separate bootstrap journal and root authentication subtree must match their protected schemas, ownership, operation identity, and expected phase.',
+    'Inspect the bootstrap journal, authentication subtree, and connection lock.',
+    'Do not adopt resources or replay recorded mutations automatically.',
+  ),
+  AWS_BOOTSTRAP_CONFLICT: entry(
+    'State conflicts with the approved bootstrap',
+    'The local connection entry is not suitable for new-account setup, the selected IAM user already exists, or its permissions, credentials, or login state differ from the approved setup.',
+    'Use the existing-operator flow for an existing local connection. Inspect any recorded bootstrap and actual IAM user manually.',
+    'Qiln will not adopt the user, overwrite unexpected permissions, issue another password, or delete IAM resources.',
+  ),
+  AWS_BOOTSTRAP_OWNERSHIP_INVALID: entry(
+    'IAM operator ownership could not be verified',
+    'Subsequent bootstrap operations require the approved account, Qiln IAM path, exact ownership tags, operator ARN, and recorded immutable user ID.',
+    'Stop concurrent IAM changes and inspect the user and bootstrap journal manually.',
+    'Do not infer ownership from a matching user name alone.',
+  ),
+  AWS_BOOTSTRAP_POLICY_CHANGED: entry(
+    'Bootstrap policy differs from the reviewed permissions',
+    'The current managed policy or supplied approval differs from the restricted reviewed document. AWS-managed policy attachments cannot permanently pin an AWS-controlled version.',
+    'Review the managed policy default document and the retained bootstrap operation.',
+    'Do not bypass the review or grant broader permissions to complete setup.',
+  ),
+  AWS_BOOTSTRAP_INSPECTION_FAILED: entry(
+    'Required IAM bootstrap inspection did not complete',
+    'Qiln could not establish the required bounded account, policy, user, password-policy, or credential state.',
+    'Inspect AWS availability and the actual IAM state before recovery.',
+    'A failed read-after-write does not establish that the mutation had no effect.',
+  ),
+  AWS_BOOTSTRAP_VERIFICATION_FAILED: entry(
+    'IAM mutation outcome was not verified',
+    'A narrowly scoped read-verification budget ended before the expected artifact became visible. The recorded mutation may have completed; Qiln did not repeat it.',
+    'Inspect the bootstrap journal and actual IAM user, ownership tags, policy attachments, inline policy, or login profile for the recorded phase.',
+    'Do not interpret the exhausted budget as failed creation or automatically replay the mutation.',
+    'If the password phase is recorded, do not attempt password recovery or reissuance through Qiln.',
+  ),
+  AWS_BOOTSTRAP_READINESS_UNKNOWN: entry(
+    'Operator password-reset readiness is unknown',
+    'The login-profile response did not provide an explicit boolean password-reset state. Qiln does not interpret omission as false or continue prompting indefinitely.',
+    'Inspect the operator login profile and the pinned CLI/SDK behavior after browser password replacement.',
+    'Record an operator-run walkthrough and review the smallest evidence-based correction before changing readiness semantics.',
+    'No completed onboarding or IAM rollback should be inferred.',
+  ),
+  AWS_BOOTSTRAP_PASSWORD_REJECTED: entry(
+    'AWS rejected the initial operator password',
+    'The password was generated in the isolated bootstrap process, but AWS remains the final account-password-policy validator. No password retry or reissuance is performed.',
+    'Inspect the account password policy and recorded IAM operation manually.',
+    'Preserve any partially created operator rather than silently replacing its credentials.',
+  ),
+  AWS_BOOTSTRAP_PASSWORD_UNAVAILABLE: entry(
+    'Initial operator password delivery was not confirmed',
+    'The login profile may already exist, but the successful creation response or terminal delivery was not verified. Qiln does not retain the password or attempt to display or issue it again.',
+    'Inspect the bootstrap journal and operator login profile manually.',
+    'Use an explicitly reviewed administrator recovery procedure; do not rerun password creation through Qiln.',
+  ),
+  AWS_BOOTSTRAP_RECORDED: entry(
+    'A bootstrap operation is already recorded',
+    'Ordinary connection use requires a fully completed bootstrap journal bound to the saved operator. Incomplete or failed bootstrap is not automatically resumed, adopted, repaired, or overwritten.',
+    'Inspect the protected bootstrap journal and actual IAM resources.',
+    'Preserve recorded ownership and resource identities during manual recovery.',
+    'Explicit local disconnect may remove validated records only after authentication termination is confirmed and retained IAM resources are disclosed. It never deletes IAM resources.',
+  ),
+  AWS_BOOTSTRAP_RECOVERY_REQUIRED: entry(
+    'AWS bootstrap recovery remains outstanding',
+    'Authentication termination, root-context cleanup, or failure-journal persistence was not confirmed. IAM mutations may already have completed, and no automatic rollback is attempted.',
+    'Use the displayed lifecycle and journal outcomes to identify outstanding recovery.',
+    'Retain potentially active authentication inputs and the protective connection lock until authentication activity has been checked.',
+    'Inspect IAM resources against the recorded account, operation ID, ownership tags, and immutable user ID.',
+    'Do not automatically delete resources, adopt an existing user, or reissue its initial password.',
+  ),
+  AWS_PERMISSION_STATE_INVALID: entry(
+    'Qiln permission evidence is unsafe or incompatible',
+    'Permission operations must match the original creation journal, exact operator binding, supported permission specification, immutable approval, policy identities, and expected mutation sequence.',
+    'Inspect the original creation journal and separate permission-operation records.',
+    'Do not recreate the operator, adopt a matching policy name, or replay recorded mutations.',
+  ),
+  AWS_PERMISSION_RECORDED: entry(
+    'A permission operation requires explicit recovery',
+    'An incomplete, failed, or inconsistent permission operation blocks another automatic reconciliation. It does not invalidate an already saved operator login or become an incomplete user-creation operation.',
+    'Inspect the permission operation and actual IAM policy state using its recorded operator, policy ID, default version, and document digest.',
+    'Preserve the original creation journal and permission-operation evidence.',
+    'Do not replay mutations, recreate the operator, or assume that IAM changes were rolled back.',
+  ),
+  AWS_PERMISSION_POLICY_TOO_LARGE: entry(
+    'Foundation policy exceeds its supported document boundary',
+    'The completed customer-managed foundation policy must contain supported canonical text and fit the 6,144-character policy limit before approval.',
+    'Maintainers must review the complete policy document without weakening authorization constraints to bypass the limit.',
+    'Do not move the foundation grant into the operator self-service inline policy.',
+  ),
+  AWS_PERMISSION_VERSION_LIMIT: entry(
+    'Foundation policy has reached its version limit',
+    'A required whole-document replacement would exceed the five-version managed-policy limit. A known full inspected version list stops maintenance before approval or mutation-intent persistence; execution independently rechecks approved preconditions and capacity. Five retained versions do not block matching-content no-change verification. Qiln does not prune versions, select an older default, or roll back IAM changes.',
+    'Review the recorded policy identity and version history through an explicitly approved administrator procedure.',
+    'Do not automatically prune policy history or retry the replacement.',
+  ),
+  AWS_PERMISSION_RECOVERY_REQUIRED: entry(
+    'Permission-bootstrap recovery remains outstanding',
+    'Root authentication termination, root-context cleanup, or permission-evidence persistence was not confirmed. IAM changes may already have completed; the saved ordinary operator authentication is retained.',
+    'Use the displayed termination, cleanup, and journal outcomes to identify outstanding recovery.',
+    'Retain potentially active root authentication inputs and the protective connection lock until activity has been checked.',
+    'Inspect actual IAM state against the original creation identity and recorded policy identities.',
+    'Do not recreate the operator, reissue its password, replay mutations, delete policies, prune versions, or claim rollback.',
+  ),
+})

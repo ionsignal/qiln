@@ -1,5 +1,5 @@
 import { catalog } from '../diagnostic/catalog'
-import { InstallerError, type DiagnosticFact, type InstallerErrorCode, type InstallerErrorOptions } from '../diagnostic/error'
+import { InstallerError, isInstallerErrorCode, type DiagnosticFact, type InstallerErrorCode, type InstallerErrorOptions } from '../diagnostic/error'
 import { isRecord } from './guards'
 
 export type Outcome = boolean | 'not-required'
@@ -41,8 +41,8 @@ export interface DeploymentRecoveryOutcomes {
 }
 
 export function originalCode(error: InstallerError): InstallerErrorCode {
-  if (isRecord(error) && typeof error.failureCode === 'string' && Object.hasOwn(catalog, error.failureCode)) {
-    return error.failureCode as InstallerErrorCode
+  if (isRecord(error) && isInstallerErrorCode(error.failureCode)) {
+    return error.failureCode
   }
   return error.code
 }
