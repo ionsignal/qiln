@@ -3,7 +3,6 @@ import * as connections from '../../aws/connection/records'
 import { reviewRequired } from '../../aws/foundation/requirement'
 import { pendingFacts } from '../../aws/iam/facts'
 import { Session } from '../../aws/auth/session'
-import { withAwsOperation } from '../../aws/root'
 import { requireAwsHost } from '../../aws/host'
 import type { AwsAuthentication } from '../../aws/types'
 import type { AwsCommandOptions } from '../../input'
@@ -15,12 +14,13 @@ import {
   pendingFailure,
   reportAuthentication,
   reportPermissionMetadata,
+  withConfirmedOperation,
 } from './shared'
 
 export async function status(options: AwsCommandOptions, reporter: Reporter): Promise<void> {
   requireAwsHost()
   await withCancellation(async signal => {
-    await withAwsOperation(false, async ({ connections: store }) => {
+    await withConfirmedOperation(false, async ({ connections: store }) => {
       const names = options.name === undefined ? await connections.names(store) : [options.name]
       if (names.length === 0) {
         reporter.summary('No Qiln AWS connections are saved.')

@@ -1,6 +1,8 @@
 import type { DiagnosticFact } from '../../diagnostic/error'
 import { AWS_SPEC } from '../spec'
-import { verifies, type Deployment, type Fenced } from './types'
+import { refusals, settled, stateOf } from './step'
+import { creates, creationPlan, removalPlan, resourceId, resources, unreleased } from './topology'
+import type { Deployment } from './types'
 
 export type Phase =
   | 'approved'
@@ -9,10 +11,12 @@ export type Phase =
   | 'rejected'
   | 'blocked'
   | 'returned'
-  | 'present'
-  | 'deleted'
-  | 'absent'
   | 'uncertain'
+  | 'partial'
+  | 'created'
+  | 'removing'
+  | 'removed'
+  | 'absent'
 
 export type Effects = 'none' | 'outstanding'
 
@@ -22,52 +26,33 @@ const DESCRIPTIONS: Record<Phase, string> = {
   unresolved: 'mutation fenced; outcome unresolved',
   rejected: 'last mutation was definitively rejected by the provider',
   blocked: 'removal blocked by dependencies',
-  returned: 'VPC identity retained; not yet verified',
-  present: 'recorded VPC freshly verified present',
-  deleted: 'deletion response retained; absence unresolved',
-  absent: 'recorded VPC observed absent',
+  returned: 'response retained; not yet verified by observation',
   uncertain: 'outcome uncertain',
-}
-
-/** Absence clears effects only for a VPC that was seen present, since a fresh creation can be unobservable. */
-function seenPresent(record: Deployment): boolean {
-  return record.verified !== null || record.removals.length > 0
-}
-
-function observedAbsent(record: Deployment): boolean {
-  return record.latest !== null && record.latest.vpc === null && seenPresent(record)
-}
-
-/** Present means the latest observation still shows the approved VPC, not just that one once did. */
-function verifiedPresent(record: Deployment): boolean {
-  return record.verified !== null && record.latest !== null && verifies(record.latest, record)
-}
-
-function attempt(item: Fenced, returned: Phase): Phase {
-  const failure = item.failure
-  if (failure === null) {
-    return item.returned === null ? 'unresolved' : returned
-  }
-  return failure.outcome
+  partial: 'creation stopped after a verified step; network incomplete',
+  created: 'network created and observed',
+  removing: 'removal partly verified; recorded resources remain',
+  removed: 'all recorded resources removed and observed absent',
+  absent: 'recorded resources observed absent',
 }
 
 export function phase(record: Deployment): Phase {
-  const creation = record.creation
-  if (creation === null) {
+  const last = record.steps.at(-1)
+  if (last === undefined) {
     return 'approved'
   }
-  if (creation.returned !== null && observedAbsent(record)) {
-    return 'absent'
+  if (last.failure !== null) {
+    return last.failure.outcome
   }
-  const removal = record.removals.at(-1)
-  if (removal !== undefined) {
-    return attempt(removal, 'deleted')
+  if (last.verifiedAt === null) {
+    return last.returned === null ? 'unresolved' : 'returned'
   }
-  // A later inspection may establish the VPC without rewriting an earlier failure.
-  if (creation.returned !== null && verifiedPresent(record)) {
-    return 'present'
+  if (resources(record).length > 0 && unreleased(record).length === 0) {
+    return record.removals.length > 0 ? 'removed' : 'absent'
   }
-  return attempt(creation, 'returned')
+  if (last.removal !== null) {
+    return 'removing'
+  }
+  return record.steps.length === creationPlan(record.approval).length ? 'created' : 'partial'
 }
 
 export function describe(record: Deployment): string {
@@ -76,51 +61,56 @@ export function describe(record: Deployment): string {
 
 /**
  * Outstanding means resources or unresolved effects may remain, or a child may
- * still be active. Approved-but-unattempted and definitively refused creation
- * leave no effects.
+ * still be active. A creation call whose identity was never retained may have
+ * made a resource that Qiln cannot name, so it stays outstanding unless the
+ * provider definitely refused it.
  */
 export function effects(record: Deployment): Effects {
   if (record.termination === 'unconfirmed') {
     return 'outstanding'
   }
-  const creation = record.creation
-  if (creation === null) {
-    return 'none'
-  }
-  if (creation.returned === null) {
-    const outcome = creation.failure?.outcome
-    return outcome === 'not-attempted' || outcome === 'rejected' ? 'none' : 'outstanding'
-  }
-  return observedAbsent(record) ? 'none' : 'outstanding'
+  const unnamed = record.steps.some(step => {
+    const state = stateOf(step)
+    return creates(step.action) && (state === 'open' || state === 'uncertain')
+  })
+  return unnamed || unreleased(record).length > 0 ? 'outstanding' : 'none'
 }
 
 /**
- * Whether another removal attempt may be offered: a retained identity, confirmed
- * termination, attempts remaining, and no earlier attempt that is unresolved,
- * uncertain, or already returned. Only a definite refusal permits another.
+ * Whether a new removal attempt may be offered: confirmed termination, a
+ * non-empty plan, refusal budget remaining, and no step that is unresolved or
+ * uncertain. Only definite refusals and retained identities permit another.
  */
 export function removable(record: Deployment): boolean {
-  const prior = record.removals.at(-1)
   return (
     record.termination === 'confirmed' &&
-    record.creation?.returned != null &&
-    record.removals.length < AWS_SPEC.deployment.maximumRemovals &&
-    (prior === undefined || (prior.failure !== null && prior.failure.outcome !== 'uncertain'))
+    refusals(record.steps) < AWS_SPEC.deployment.maximumRefusals &&
+    record.steps.every(settled) &&
+    removalPlan(record).length > 0
   )
 }
 
 export function deploymentFacts(record: Deployment): readonly DiagnosticFact[] {
+  const { approval, binding } = record
   return [
     ['Deployment', record.id],
     ['Connection', record.connection],
-    ['Account', record.binding.accountId],
-    ['Operator', record.binding.operator.arn],
-    ['Operator user ID', record.binding.operator.userId],
-    ['Region', record.binding.region],
-    ['CIDR', record.approval.cidr],
-    ['VPC', record.creation?.returned?.vpcId ?? 'no identity retained'],
+    ['Account', binding.accountId],
+    ['Operator', binding.operator.arn],
+    ['Operator user ID', binding.operator.userId],
+    ['Region', binding.region],
+    ['CIDR', approval.cidr],
+    ['Zones', approval.zones.map(zone => zone.name).join(', ')],
+    ['Administrator CIDR', approval.ingress[0].cidr],
+    ['VPC', resourceId(record, 'create-vpc') ?? 'no identity retained'],
+    [
+      'Recorded resources',
+      `${resources(record).length} retained · ${unreleased(record).length} not confirmed removed`,
+    ],
     ['Observed outcome', describe(record)],
+    ['Recorded steps', String(record.steps.length)],
     ['Removal attempts', String(record.removals.length)],
+    ['Refused removals', `${refusals(record.steps)} of ${AWS_SPEC.deployment.maximumRefusals} allowed`],
     ['Child termination', record.termination],
     ['Deployment recovery', 'No replay, adoption, deletion, rebinding, or automatic recovery was attempted.'],
   ]

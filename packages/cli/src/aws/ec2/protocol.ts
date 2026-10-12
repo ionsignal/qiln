@@ -1,36 +1,39 @@
 import { hasKeys, isRecord } from '../guards'
 import { COMMON_CODES, replyGuard, type ChildReply } from '../child/protocol'
-import { isObservation, isVpcId, type Observation } from '../deployment/types'
+import { isObservation, isPlacement, type Observation, type Placement } from '../deployment/types'
+import { AWS_SPEC } from '../spec'
 import { isOperationId, isTimestamp } from '../types'
 
-export const UNTIL = ['any', 'available', 'absent'] as const
-
-export type Until = (typeof UNTIL)[number]
-
-/** Requests name only the deployment, operation, and action. Authority is reloaded from durable evidence. */
+/** Requests name only the deployment, step, and action. Authority is reloaded from durable evidence. */
 export type Request =
   | {
-      kind: 'create' | 'delete'
+      kind: 'placement'
+    }
+  | {
+      kind: 'mutate'
       deploymentId: string
       operationId: string
     }
   | {
       kind: 'observe'
       deploymentId: string
-      until: Until
+      wait: boolean
     }
   | {
       kind: 'candidates'
       deploymentId: string
     }
 
+export type DeploymentRequest = Exclude<Request, { kind: 'placement' }>
+
 export type Result =
   | {
-      kind: 'created'
-      vpcId: string
+      kind: 'zones'
+      zones: Placement[]
     }
   | {
-      kind: 'deleted'
+      kind: 'done'
+      resourceId: string | null
     }
   | {
       kind: 'observation'
@@ -42,20 +45,13 @@ export type Result =
     }
 
 /** Sent once by a mutating child, after its provider call returned and before its reply. */
-export type Evidence =
-  | {
-      kind: 'vpc-created'
-      deploymentId: string
-      operationId: string
-      vpcId: string
-      returnedAt: string
-    }
-  | {
-      kind: 'vpc-deleted'
-      deploymentId: string
-      operationId: string
-      returnedAt: string
-    }
+export interface Evidence {
+  kind: 'step-returned'
+  deploymentId: string
+  operationId: string
+  resourceId: string | null
+  returnedAt: string
+}
 
 export interface Acknowledgment {
   kind: 'evidence-retained'
@@ -71,6 +67,7 @@ export const FAILURES = [
   'AWS_DEPLOYMENT_BLOCKED',
   'AWS_DEPLOYMENT_VERIFICATION_FAILED',
   'AWS_DEPLOYMENT_EVIDENCE_UNAVAILABLE',
+  'AWS_DEPLOYMENT_PLACEMENT_UNSUPPORTED',
 ] as const
 
 export const CODES = [...COMMON_CODES, ...FAILURES] as const
@@ -80,38 +77,42 @@ export type Code = (typeof CODES)[number]
 export type Reply = ChildReply<Result, Code>
 
 export function isRequest(value: unknown): value is Request {
-  if (!isRecord(value) || !isOperationId(value.deploymentId)) {
+  if (!isRecord(value)) {
     return false
   }
   switch (value.kind) {
-    case 'create':
-    case 'delete':
-      return hasKeys(value, ['kind', 'deploymentId', 'operationId']) && isOperationId(value.operationId)
+    case 'placement':
+      return hasKeys(value, ['kind'])
+    case 'mutate':
+      return (
+        hasKeys(value, ['kind', 'deploymentId', 'operationId']) &&
+        isOperationId(value.deploymentId) &&
+        isOperationId(value.operationId)
+      )
     case 'observe':
-      return hasKeys(value, ['kind', 'deploymentId', 'until']) && UNTIL.some(until => until === value.until)
+      return (
+        hasKeys(value, ['kind', 'deploymentId', 'wait']) &&
+        isOperationId(value.deploymentId) &&
+        typeof value.wait === 'boolean'
+      )
     case 'candidates':
-      return hasKeys(value, ['kind', 'deploymentId'])
+      return hasKeys(value, ['kind', 'deploymentId']) && isOperationId(value.deploymentId)
     default:
       return false
   }
 }
 
+/** Shape only. The parent validates the identity against its open step and the action's ID pattern. */
 export function isEvidence(value: unknown): value is Evidence {
-  if (!isRecord(value) || !isOperationId(value.deploymentId) || !isOperationId(value.operationId)) {
-    return false
-  }
-  switch (value.kind) {
-    case 'vpc-created':
-      return (
-        hasKeys(value, ['kind', 'deploymentId', 'operationId', 'vpcId', 'returnedAt']) &&
-        isVpcId(value.vpcId) &&
-        isTimestamp(value.returnedAt)
-      )
-    case 'vpc-deleted':
-      return hasKeys(value, ['kind', 'deploymentId', 'operationId', 'returnedAt']) && isTimestamp(value.returnedAt)
-    default:
-      return false
-  }
+  return (
+    isRecord(value) &&
+    hasKeys(value, ['kind', 'deploymentId', 'operationId', 'resourceId', 'returnedAt']) &&
+    value.kind === 'step-returned' &&
+    isOperationId(value.deploymentId) &&
+    isOperationId(value.operationId) &&
+    (value.resourceId === null || typeof value.resourceId === 'string') &&
+    isTimestamp(value.returnedAt)
+  )
 }
 
 export function isAcknowledgment(value: unknown, evidence: Evidence): value is Acknowledgment {
@@ -129,10 +130,15 @@ function isResult(value: unknown): value is Result {
     return false
   }
   switch (value.kind) {
-    case 'created':
-      return hasKeys(value, ['kind', 'vpcId']) && isVpcId(value.vpcId)
-    case 'deleted':
-      return hasKeys(value, ['kind'])
+    case 'zones':
+      return (
+        hasKeys(value, ['kind', 'zones']) &&
+        Array.isArray(value.zones) &&
+        value.zones.length <= AWS_SPEC.deployment.maximumZones &&
+        value.zones.every(isPlacement)
+      )
+    case 'done':
+      return hasKeys(value, ['kind', 'resourceId']) && (value.resourceId === null || typeof value.resourceId === 'string')
     case 'observation':
       return hasKeys(value, ['kind', 'observation']) && isObservation(value.observation)
     case 'candidates':

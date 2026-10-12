@@ -28,7 +28,10 @@ export const AWS_SPEC = Object.freeze({
   }),
   deployment: Object.freeze({
     defaultCidr: '172.16.0.0/16',
-    maximumRemovals: 3,
+    subnetPrefix: 24,
+    maximumZones: 6,
+    maximumSteps: 64,
+    maximumRefusals: 3,
     requestTimeoutMs: 120_000,
     maximumPages: 20,
     observation: Object.freeze({

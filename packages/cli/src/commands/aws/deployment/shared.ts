@@ -5,7 +5,9 @@ import { requireBound } from '../../../aws/deployment/binding'
 import { Deployer } from '../../../aws/deployment/deployer'
 import { describe, effects } from '../../../aws/deployment/facts'
 import * as deployments from '../../../aws/deployment/records'
-import type { Deployment, Observation } from '../../../aws/deployment/types'
+import { refusals } from '../../../aws/deployment/step'
+import { resourceId, resources, unreleased } from '../../../aws/deployment/topology'
+import type { Deployment, Observation, ObservedState } from '../../../aws/deployment/types'
 import type { Dir } from '../../../state/files'
 import type { Reporter } from '../../../terminal/reporter'
 import { authenticate, requireAvailable } from '../shared'
@@ -50,16 +52,14 @@ export async function authenticateDeployer(root: Dir, target: Target, signal: Ab
 }
 
 export function observationSummary(observation: Observation): string {
-  const vpc = observation.vpc
-  if (vpc === null) {
-    return 'recorded VPC observed absent'
-  }
-  return `${vpc.state} · ${vpc.cidr} · ${vpc.tenancy} tenancy · ${vpc.tags.length} tags · ${vpc.extraCidrs} extra CIDR associations`
+  const count = (state: ObservedState) => observation.resources.filter(resource => resource.state === state).length
+  return `${observation.resources.length} recorded resources · ${count('present')} present · ${count('changed')} changed · ${count('absent')} absent`
 }
 
 /** Reports persisted facts only; the outcome row is derived, never stored. */
 export function reportDeployment(reporter: Reporter, record: Deployment): void {
   const outstanding = effects(record) === 'outstanding'
+  const failure = record.steps.findLast(step => step.failure !== null)
   reporter.section('AWS deployment')
   reporter.row('verified', 'Deployment', record.id)
   reporter.row('verified', 'Connection', record.connection)
@@ -67,15 +67,23 @@ export function reportDeployment(reporter: Reporter, record: Deployment): void {
   reporter.row('verified', 'Operator', record.binding.operator.arn)
   reporter.row('verified', 'Region', record.binding.region)
   reporter.row('verified', 'Approved CIDR', record.approval.cidr)
-  reporter.row('verified', 'VPC', record.creation?.returned?.vpcId ?? 'no identity retained')
+  reporter.row('verified', 'Zones', record.approval.zones.map(zone => zone.name).join(', '))
+  reporter.row('verified', 'Administrator CIDR', record.approval.ingress[0].cidr)
+  reporter.row('verified', 'VPC', resourceId(record, 'create-vpc') ?? 'no identity retained')
+  reporter.row(
+    'verified',
+    'Recorded resources',
+    `${resources(record).length} retained · ${unreleased(record).length} not confirmed removed`,
+  )
   reporter.row(outstanding ? 'working' : 'verified', 'Outcome', describe(record))
+  reporter.row('verified', 'Recorded steps', String(record.steps.length))
   reporter.row('verified', 'Removal attempts', String(record.removals.length))
+  reporter.row('verified', 'Refused removals', String(refusals(record.steps)))
   if (record.latest !== null) {
     reporter.row('verified', 'Last observation', `${record.latest.observedAt} · ${observationSummary(record.latest)}`)
   }
-  const failure = (record.removals.at(-1) ?? record.creation)?.failure
-  if (failure) {
-    reporter.row('verified', 'Last failure', `${failure.code} · ${failure.outcome}`)
+  if (failure?.failure) {
+    reporter.row('verified', 'Last failure', `${failure.action} · ${failure.failure.code} · ${failure.failure.outcome}`)
   }
   reporter.row(
     record.termination === 'confirmed' ? 'verified' : 'working',
@@ -87,12 +95,13 @@ export function reportDeployment(reporter: Reporter, record: Deployment): void {
       'A provider child process was not confirmed terminated. No further provider work runs for this deployment until that is resolved.',
     )
   }
+  reporter.space()
   if (outstanding) {
     reporter.notice(
       'Resources or unresolved effects may remain. No replay, adoption, deletion, rollback, or automatic recovery was attempted.',
     )
   }
-  if (record.latest?.vpc === null) {
-    reporter.notice('Absence never proves who deleted the VPC.')
+  if (record.latest?.resources.some(resource => resource.state === 'absent')) {
+    reporter.notice('Absence never proves who deleted a resource.')
   }
 }

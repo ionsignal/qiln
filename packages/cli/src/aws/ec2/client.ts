@@ -1,65 +1,23 @@
-import { CreateVpcCommand, DeleteVpcCommand, DescribeVpcsCommand, EC2Client, type Vpc } from '@aws-sdk/client-ec2'
+import { DescribeAvailabilityZonesCommand, type EC2Client } from '@aws-sdk/client-ec2'
 import { InstallerError } from '../../diagnostic/error'
-import { isRecord } from '../guards'
-import { collect, poll } from '../observe'
+import { isPlacement, type Placement } from '../deployment/types'
 import { AWS_SPEC } from '../spec'
-import { isObservation, isVpcId, requiredTags, type Deployment, type Observation } from '../deployment/types'
-import type { Until } from './protocol'
+import { markDispatched } from './dispatch'
 
-const PAGES = {
-  maxPages: AWS_SPEC.deployment.maximumPages,
-  code: 'AWS_DEPLOYMENT_VERIFICATION_FAILED',
-} as const
+export interface Call {
+  abortSignal: AbortSignal
+}
 
-const OBSERVATION = {
-  ...AWS_SPEC.deployment.observation,
-  code: 'AWS_DEPLOYMENT_VERIFICATION_FAILED',
-} as const
-
-function unverified(): never {
+function unsupported(): never {
   throw new InstallerError({
-    code: 'AWS_DEPLOYMENT_VERIFICATION_FAILED',
+    code: 'AWS_DEPLOYMENT_PLACEMENT_UNSUPPORTED',
   })
-}
-
-function byKey(left: { Key?: string }, right: { Key?: string }): number {
-  const a = left.Key ?? ''
-  const b = right.Key ?? ''
-  return a < b ? -1 : a > b ? 1 : 0
-}
-
-/**
- * Optional provider fields are validated by the record guard rather than read
- * as success. Tags are sorted so approved and fresh observations compare equal.
- */
-function toObservation(vpc: Vpc): Observation {
-  const primary = vpc.CidrBlock
-  const candidate: unknown = {
-    observedAt: new Date().toISOString(),
-    vpcId: vpc.VpcId,
-    vpc: {
-      state: vpc.State,
-      ownerId: vpc.OwnerId,
-      cidr: primary,
-      tenancy: vpc.InstanceTenancy,
-      isDefault: vpc.IsDefault,
-      tags: (vpc.Tags ?? []).map(({ Key, Value }) => ({ Key, Value })).sort(byKey),
-      // Any association beyond the primary range, including in-flight ones, is conservative.
-      extraCidrs:
-        (vpc.CidrBlockAssociationSet ?? []).filter(association => association.CidrBlock !== primary).length +
-        (vpc.Ipv6CidrBlockAssociationSet ?? []).length,
-    },
-  }
-  return isObservation(candidate) ? candidate : unverified()
-}
-
-function isNotFound(error: unknown): boolean {
-  return isRecord(error) && error.name === 'InvalidVpcID.NotFound'
 }
 
 /**
  * Thin EC2 boundary. Every call is a single attempt; mutations are never
- * polled or retried, and only reads are observed.
+ * polled or retried, and only reads are observed. Callers build their command
+ * first, so `write` marks dispatch only once everything local is prepared.
  */
 export class Ec2 {
   constructor(
@@ -67,7 +25,7 @@ export class Ec2 {
     private readonly signal: AbortSignal,
   ) {}
 
-  private options(signal?: AbortSignal) {
+  private call(signal?: AbortSignal): Call {
     return {
       abortSignal: AbortSignal.any([
         this.signal,
@@ -77,107 +35,34 @@ export class Ec2 {
     }
   }
 
-  /** `InvalidVpcID.NotFound` is an absent observation here, and nowhere else. */
-  private async describe(vpcId: string, signal?: AbortSignal): Promise<Observation> {
-    try {
-      const response = await this.client.send(new DescribeVpcsCommand({ VpcIds: [vpcId] }), this.options(signal))
-      const vpcs = response.Vpcs ?? []
-      if (vpcs.length === 0) {
-        return {
-          observedAt: new Date().toISOString(),
-          vpcId,
-          vpc: null,
-        }
-      }
-      const observation = vpcs.length === 1 ? toObservation(vpcs[0]!) : unverified()
-      return observation.vpcId === vpcId ? observation : unverified()
-    } catch (error: unknown) {
-      if (isNotFound(error)) {
-        return {
-          observedAt: new Date().toISOString(),
-          vpcId,
-          vpc: null,
-        }
-      }
-      throw error
-    }
+  public read<T>(send: (client: EC2Client, call: Call) => Promise<T>, signal?: AbortSignal): Promise<T> {
+    return send(this.client, this.call(signal))
   }
 
-  /** `any` observes once. The others poll until the VPC leaves its transitional state or disappears. */
-  public async observe(vpcId: string, until: Until): Promise<Observation> {
-    if (until === 'any') {
-      return await this.describe(vpcId)
-    }
-    const seen: { latest: Observation | undefined } = {
-      latest: undefined,
-    }
-    await poll(async signal => {
-      const observation = await this.describe(vpcId, signal)
-      seen.latest = observation
-      return until === 'absent' ? observation.vpc === null : observation.vpc !== null && observation.vpc.state !== 'pending'
-    }, OBSERVATION)
-    return seen.latest ?? unverified()
-  }
-
-  /** Display-only. Candidates are never adopted, and an empty result proves nothing. */
-  public async candidates(record: Deployment): Promise<Observation[]> {
-    const filters = [
-      {
-        Name: 'owner-id',
-        Values: [record.binding.accountId],
-      },
-      ...requiredTags(record.binding.operator.arn, record.id).map(tag => ({
-        Name: `tag:${tag.Key}`,
-        Values: [tag.Value],
-      })),
-    ]
-    const vpcs = await collect<Vpc>(async marker => {
-      const response = await this.client.send(
-        new DescribeVpcsCommand({
-          Filters: filters,
-          MaxResults: 100,
-          NextToken: marker,
-        }),
-        this.options(),
-      )
-      return {
-        items: response.Vpcs ?? [],
-        truncated: Boolean(response.NextToken),
-        marker: response.NextToken,
-      }
-    }, PAGES)
-    return vpcs.map(toObservation)
+  /** Only earlier failures are definite refusals, so dispatch is marked immediately before the send. */
+  public async write<T>(send: (client: EC2Client, call: Call) => Promise<T>): Promise<T> {
+    const call = this.call()
+    markDispatched()
+    return await send(this.client, call)
   }
 
   /**
-   * The call has no client token, so it is made once. A response without a
-   * usable identity cannot be retained and leaves the effect uncertain.
+   * Standard Availability Zones only. A visible zone that is not available, no
+   * zones, or too many refuses placement; Qiln never skips or chooses among them.
    */
-  public async create(record: Deployment): Promise<string> {
-    const response = await this.client.send(
-      new CreateVpcCommand({
-        CidrBlock: record.approval.cidr,
-        InstanceTenancy: record.approval.tenancy,
-        TagSpecifications: [
-          {
-            ResourceType: 'vpc',
-            Tags: record.approval.tags,
-          },
-        ],
-      }),
-      this.options(),
-    )
-    const vpcId: unknown = response.Vpc?.VpcId
-    if (!isVpcId(vpcId)) {
-      throw new InstallerError({
-        code: 'AWS_DEPLOYMENT_EVIDENCE_UNAVAILABLE',
-      })
+  public async zones(): Promise<Placement[]> {
+    const command = new DescribeAvailabilityZonesCommand({
+      Filters: [{ Name: 'zone-type', Values: ['availability-zone'] }],
+    })
+    const response = await this.read((client, call) => client.send(command, call))
+    const zones = response.AvailabilityZones ?? []
+    if (zones.length === 0 || zones.length > AWS_SPEC.deployment.maximumZones || zones.some(zone => zone.State !== 'available')) {
+      return unsupported()
     }
-    return vpcId
-  }
-
-  /** The SDK reports no result, so a resolved call establishes only that a response returned. */
-  public async delete(vpcId: string): Promise<void> {
-    await this.client.send(new DeleteVpcCommand({ VpcId: vpcId }), this.options())
+    const placements: unknown[] = zones.map(zone => ({ id: zone.ZoneId, name: zone.ZoneName }))
+    if (!placements.every(isPlacement)) {
+      return unsupported()
+    }
+    return placements
   }
 }

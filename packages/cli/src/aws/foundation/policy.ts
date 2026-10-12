@@ -5,7 +5,7 @@ import { canonical, document, sameJson } from '../json'
 import { operatorName } from '../operator'
 import { validRegion } from '../types'
 
-export const PERMISSION_VERSION = 4
+export const PERMISSION_VERSION = 5
 
 export const FOUNDATION = Object.freeze({
   path: '/qiln/foundation/',
@@ -101,8 +101,10 @@ function allow(actions: string[], resources: string | string[], conditions?: Con
 /**
  * This document prepares regional authority, not a launch or removal request.
  * Exact AMI, placement, counts, storage, egress, and retention still require a
- * separately approved immutable deployment intent. VPC deletion is limited to
- * VPCs tagged for this operator, so the deployment record remains the
+ * separately approved immutable deployment intent. Deleting VPCs, subnets,
+ * internet gateways, route tables, and security groups is limited to resources
+ * tagged for this operator, and VPC deletion additionally requires the
+ * managed-by and deployment tags, so the deployment record remains the
  * per-deployment gate.
  */
 export function specification(accountId: string, connection: string, region: string): PermissionSpec {
@@ -189,6 +191,7 @@ export function specification(accountId: string, connection: string, region: str
       },
     ),
     allow(['CreateVpc'], resource('vpc'), vpcRequested),
+    // VPC deletion keeps the stronger managed-by and deployment tag fence.
     allow(['DeleteVpc'], resource('vpc'), vpcOwned),
     // Existing parent VPCs use the ownership fence below, not request tags.
     allow(
@@ -198,6 +201,8 @@ export function specification(accountId: string, connection: string, region: str
     ),
     // These action/resource combinations share an existing-resource owner
     // fence. RunInstances is deliberately excluded to preserve launch checks.
+    // The trailing network cleanup actions need only the operator tag, since
+    // the VPC deletion fence and the deployment record gate each removal.
     allow(
       [
         'CreateSubnet',
@@ -212,6 +217,11 @@ export function specification(accountId: string, connection: string, region: str
         'RevokeSecurityGroupEgress',
         'AssociateAddress',
         'GetConsoleOutput',
+        'DetachInternetGateway',
+        'DeleteSubnet',
+        'DeleteInternetGateway',
+        'DeleteRouteTable',
+        'DeleteSecurityGroup',
       ],
       [
         'vpc',
@@ -226,7 +236,7 @@ export function specification(accountId: string, connection: string, region: str
       owned,
     ),
     // Do not authorize gateway route-table association for the single-host model.
-    allow(['AssociateRouteTable'], [resource('route-table'), resource('subnet')], owned),
+    allow(['AssociateRouteTable', 'DisassociateRouteTable'], [resource('route-table'), resource('subnet')], owned),
     allow(ruleActions, resource('security-group-rule'), requested),
     // Shared launch inputs cannot require Qiln-owned resource tags. Image-only
     // conditions must not be applied to snapshot authorization.

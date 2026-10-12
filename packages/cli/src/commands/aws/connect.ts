@@ -12,14 +12,20 @@ import * as awsLogin from '../../aws/auth/login'
 import * as tools from '../../aws/tools'
 import { removeAuth, Session } from '../../aws/auth/session'
 import { AWS_SPEC } from '../../aws/spec'
-import { openExistingConnections, withAwsOperation } from '../../aws/root'
+import { openExistingConnections } from '../../aws/root'
 import { requireAwsHost } from '../../aws/host'
 import type { AwsAuthentication, AwsConnection, LoginFlow } from '../../aws/types'
 import { resolveAwsName, validateAwsRegion, type AwsCommandOptions } from '../../input'
 import type { Dir } from '../../state/files'
 import { checkCancellation, Prompts, withCancellation } from '../../terminal/prompts'
 import type { Reporter } from '../../terminal/reporter'
-import { authenticate, failAuthentication, reportAuthentication, requireAvailable } from './shared'
+import {
+  authenticate,
+  failAuthentication,
+  reportAuthentication,
+  requireAvailable,
+  withConfirmedOperation,
+} from './shared'
 
 type PermissionOutcome = 'not-applicable' | 'recorded' | 'declined' | 'changed' | 'unchanged'
 
@@ -37,6 +43,7 @@ async function inspectConnection(name: string, reporter: Reporter): Promise<bool
   reporter.row('verified', 'Recorded account', saved.identity.accountId)
   reporter.row('verified', 'Recorded IAM user', saved.identity.arn)
   reporter.row('verified', 'Recorded user ID', saved.identity.userId)
+  reporter.space()
   reporter.info(
     `Connection '${name}' is saved. Sign in as its recorded IAM user; no operator will be recreated.`,
   )
@@ -222,13 +229,14 @@ function reportProposal(reporter: Reporter, proposal: Proposal, connection: stri
   reporter.space()
   if (proposal.kind === 'onboard') {
     reporter.info(
-      `Create a dedicated operator with browser sign-in and scoped EC2 permissions for ${FOUNDATION.instanceType} On-Demand instances and for creating and deleting Qiln-tagged VPCs.`,
+      `Create a dedicated operator with browser sign-in and scoped EC2 permissions for ${FOUNDATION.instanceType} On-Demand instances and for creating and deleting Qiln-tagged VPC networking: VPCs, subnets, internet gateways, route tables, and security groups.`,
     )
     reporter.space()
     reporter.line('- Initial password shown once; replacement required.')
     reporter.line('- Operator MFA optional. No permanent access keys.')
     reporter.line('- No IAM administration. Connect does not create or remove infrastructure.')
     reporter.line('- VPC deletion authority covers any VPC in this account and region tagged with the operator ARN, qiln:managed-by=qiln-cli, and a nonempty qiln:deployment value, not only one deployment ID.')
+    reporter.line('- Deletion authority for subnets, internet gateways, route tables, and security groups covers any such resource in this account and region tagged with the operator ARN, not only one deployment.')
   } else {
     if (mode === 'enroll') {
       reporter.info('Create and attach the dedicated regional foundation policy.')
@@ -238,14 +246,8 @@ function reportProposal(reporter: Reporter, proposal: Proposal, connection: stri
       reporter.info('Verify matching live foundation permissions. No IAM changes or policy version creation.')
     }
     reporter.info(
-      `Regional authority: networking, Qiln-tagged VPC creation and deletion, constrained ${FOUNDATION.instanceType} On-Demand launches, encrypted EBS, Elastic IPs, administrative public-key import, and instance/console inspection.`,
+      `Regional authority: networking, creation and deletion of Qiln-tagged VPCs, subnets, internet gateways, route tables, and security groups, constrained ${FOUNDATION.instanceType} On-Demand launches, encrypted EBS, Elastic IPs, administrative public-key import, and instance/console inspection.`,
     )
-    reporter.line('- Preserve the operator identity, password, MFA, Sign-In policy, and password/MFA self-service.')
-    reporter.line('- No user recreation, password reissuance, MFA changes, or permanent access keys.')
-    reporter.line('- No IAM administration, iam:PassRole, SSM, NAT gateways, load balancers, fleets, or removal authority other than tagged-VPC deletion.')
-    reporter.line('- VPC deletion authority covers any VPC in this account and region tagged with the operator ARN, qiln:managed-by=qiln-cli, and a nonempty qiln:deployment value, not only one deployment ID.')
-    reporter.line('- Policy versions are retained; no automatic pruning or rollback.')
-    reporter.line('- Connect does not provision or remove anything. Provisioning and spending are not approved; exact deployment inputs require separate approval.')
   }
   if (mode !== 'none') {
     reporter.space()
@@ -545,7 +547,7 @@ export async function connect(options: AwsCommandOptions, reporter: Reporter): P
     }
     const cli = await selectCli(reporter, prompts, signal)
     checkCancellation(signal)
-    return await withAwsOperation(true, async ({ connections: store }) => {
+    return await withConfirmedOperation(true, async ({ connections: store }) => {
       const directory = await connections.open(store, name, true)
       await requireAvailable(directory)
       if (createOperator) {
@@ -556,6 +558,7 @@ export async function connect(options: AwsCommandOptions, reporter: Reporter): P
       return await maintain(directory, connection, cli, prompts, signal, reporter)
     })
   })
+  reporter.space()
   switch (outcome) {
     case 'completed':
       reporter.info('Operator onboarding and the current approved IAM configuration were verified.')

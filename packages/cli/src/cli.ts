@@ -109,7 +109,7 @@ export async function run(argumentsList: readonly string[]): Promise<number> {
             command = 'aws'
             reporter = new Reporter({ color })
             assertUnprivilegedInvocation()
-            reporter.header('aws deployment create', 'approved VPC creation')
+            reporter.header('aws deployment create', 'approved network creation')
             await aws.deployment.create(options, reporter)
           },
           async status(options, color) {
@@ -123,14 +123,14 @@ export async function run(argumentsList: readonly string[]): Promise<number> {
             command = 'aws'
             reporter = new Reporter({ color })
             assertUnprivilegedInvocation()
-            reporter.header('aws deployment inspect', 'fresh VPC observation')
+            reporter.header('aws deployment inspect', 'fresh network observation')
             await aws.deployment.inspect(options, reporter)
           },
           async remove(options, color) {
             command = 'aws'
             reporter = new Reporter({ color })
             assertUnprivilegedInvocation()
-            reporter.header('aws deployment remove', 'approved VPC removal')
+            reporter.header('aws deployment remove', 'approved network removal')
             await aws.deployment.remove(options, reporter)
           },
         },

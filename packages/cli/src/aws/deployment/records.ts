@@ -96,7 +96,12 @@ async function write(directory: Dir, record: Deployment): Promise<void> {
 export async function create(root: Dir, record: Deployment): Promise<void> {
   await requireOperationLock(root)
   const initial = parse(record)
-  if (initial.creation !== null || initial.termination !== 'confirmed') {
+  if (
+    initial.steps.length !== 0 ||
+    initial.removals.length !== 0 ||
+    initial.latest !== null ||
+    initial.termination !== 'confirmed'
+  ) {
     return invalid()
   }
   const directory = await openDirectory(root, initial.id, true)

@@ -1,6 +1,9 @@
 import { InstallerError } from '../../diagnostic/error'
 import { sameJson } from '../json'
-import type { Deployment, Fenced, Removal } from './types'
+import { AWS_SPEC } from '../spec'
+import { refusals, settled, stateOf } from './step'
+import { creationPlan, expectation, matches, removalPlan } from './topology'
+import type { Deployment, Step } from './types'
 
 const FIXED_FIELDS = ['version', 'id', 'connection', 'binding', 'approval', 'createdAt'] as const
 
@@ -10,7 +13,6 @@ function invalid(): never {
   })
 }
 
-/** A new fence may open only while no child can be active, and must record that one now is. */
 function fenceOpens(current: Deployment, updated: Deployment): boolean {
   return current.termination === 'confirmed' && updated.termination === 'unconfirmed'
 }
@@ -24,61 +26,101 @@ function requireFixedFields(current: Deployment, updated: Deployment): void {
 }
 
 /**
- * Evidence is set once. A response cannot be added after a recorded failure,
- * and a failure never rewrites a response.
+ * Evidence is set once. A response cannot be added after a recorded failure
+ * (the record guard already forbids both), and a failure never rewrites a response.
  */
-function requireProgress(before: Fenced, after: Fenced, updated: Deployment): void {
+function requireProgress(before: Step, after: Step, updated: Deployment): void {
   if (
     before.id !== after.id ||
+    before.action !== after.action ||
+    before.slot !== after.slot ||
+    before.removal !== after.removal ||
     before.fencedAt !== after.fencedAt ||
     (before.returned !== null && !sameJson(before.returned, after.returned)) ||
     (before.failure !== null && !sameJson(before.failure, after.failure)) ||
-    (before.returned === null && after.returned !== null && before.failure !== null) ||
+    (before.verifiedAt !== null && before.verifiedAt !== after.verifiedAt) ||
     (before.failure === null && after.failure !== null && after.failure.termination !== updated.termination)
   ) {
     return invalid()
   }
 }
 
-function requireCreation(current: Deployment, updated: Deployment): void {
-  const before = current.creation
-  const after = updated.creation
-  if (before !== null) {
-    if (after === null) {
-      return invalid()
-    }
-    requireProgress(before, after, updated)
-    return
-  }
-  if (after !== null && (!fenceOpens(current, updated) || after.returned !== null || after.failure !== null)) {
+/**
+ * Another attempt needs a settled previous step, an unspent refusal budget, a
+ * fresh approved observation that is also the latest one and still agrees with
+ * the ledger, and, after a failure, an observation strictly newer than it.
+ */
+function requireRemovalApproval(current: Deployment, updated: Deployment, previous: Step): void {
+  const approval = updated.removals.at(-1)
+  if (
+    approval === undefined ||
+    !settled(previous) ||
+    refusals(current.steps) >= AWS_SPEC.deployment.maximumRefusals ||
+    !sameJson(approval.observation, updated.latest) ||
+    !matches(expectation(current), approval.observation) ||
+    (previous.failure !== null && approval.observation.observedAt <= previous.failure.recordedAt)
+  ) {
     return invalid()
   }
 }
 
 /**
- * Another attempt needs the retained identity, a fresh approved observation
- * that is also the latest one, and a prior definite refusal. An uncertain or
- * unresolved attempt never authorizes another.
+ * A new step is open, follows the fixed plan, and starts only after the previous
+ * step was verified. Creation never resumes once any removal exists.
  */
-function requireNewRemoval(current: Deployment, updated: Deployment, removal: Removal): void {
-  const vpcId = current.creation?.returned?.vpcId
-  const observation = removal.approval.observation
+function requireNewStep(current: Deployment, updated: Deployment, step: Step): void {
+  const previous = current.steps.at(-1)
+  if (!fenceOpens(current, updated) || stateOf(step) !== 'open') {
+    return invalid()
+  }
+  if (step.removal === null) {
+    const planned = creationPlan(updated.approval).at(current.steps.length)
+    if (
+      current.removals.length !== 0 ||
+      updated.removals.length !== 0 ||
+      planned?.action !== step.action ||
+      planned.slot !== step.slot ||
+      (previous !== undefined && stateOf(previous) !== 'verified')
+    ) {
+      return invalid()
+    }
+    return
+  }
+  const planned = removalPlan(current).at(0)
   if (
-    vpcId === undefined ||
-    !fenceOpens(current, updated) ||
-    removal.returned !== null ||
-    removal.failure !== null ||
-    observation.vpcId !== vpcId ||
-    !sameJson(observation, updated.latest)
+    previous === undefined ||
+    step.removal !== updated.removals.length - 1 ||
+    planned?.action !== step.action ||
+    planned.slot !== step.slot
   ) {
     return invalid()
   }
-  const prior = current.removals.at(-1)
-  if (prior !== undefined) {
-    const refusal = prior.failure
-    if (refusal === null || refusal.outcome === 'uncertain' || observation.observedAt <= refusal.recordedAt) {
-      return invalid()
+  if (updated.removals.length > current.removals.length) {
+    requireRemovalApproval(current, updated, previous)
+  } else if (previous.removal !== step.removal || stateOf(previous) !== 'verified') {
+    return invalid()
+  }
+}
+
+function requireSteps(current: Deployment, updated: Deployment): void {
+  const before = current.steps
+  const after = updated.steps
+  if (after.length < before.length || after.length > before.length + 1) {
+    return invalid()
+  }
+  const added = after.length > before.length
+  before.forEach((step, index) => {
+    const next = after[index]
+    if (added || index < before.length - 1) {
+      if (!sameJson(step, next)) {
+        return invalid()
+      }
+      return
     }
+    requireProgress(step, next, updated)
+  })
+  if (added) {
+    requireNewStep(current, updated, after[before.length])
   }
 }
 
@@ -88,31 +130,18 @@ function requireRemovals(current: Deployment, updated: Deployment): void {
   if (after.length < before.length || after.length > before.length + 1) {
     return invalid()
   }
-  before.forEach((prior, index) => {
-    const next = after[index]
-    if (!sameJson(prior.approval, next.approval)) {
+  before.forEach((removal, index) => {
+    if (!sameJson(removal, after[index])) {
       return invalid()
     }
-    requireProgress(prior, next, updated)
   })
-  const added = after[before.length]
-  if (added !== undefined) {
-    requireNewRemoval(current, updated, added)
+  if (after.length > before.length && updated.steps.length !== current.steps.length + 1) {
+    return invalid()
   }
 }
 
-/** Observations only move forward, and a verified one is kept exactly as first saved with the latest. */
 function requireObservations(current: Deployment, updated: Deployment): void {
   if (current.latest !== null && (updated.latest === null || updated.latest.observedAt < current.latest.observedAt)) {
-    return invalid()
-  }
-  if (current.verified !== null) {
-    if (!sameJson(current.verified, updated.verified)) {
-      return invalid()
-    }
-    return
-  }
-  if (updated.verified !== null && !sameJson(updated.verified, updated.latest)) {
     return invalid()
   }
 }
@@ -123,7 +152,7 @@ function requireObservations(current: Deployment, updated: Deployment): void {
  */
 export function requireTransition(current: Deployment, updated: Deployment): void {
   requireFixedFields(current, updated)
-  requireCreation(current, updated)
+  requireSteps(current, updated)
   requireRemovals(current, updated)
   requireObservations(current, updated)
 }

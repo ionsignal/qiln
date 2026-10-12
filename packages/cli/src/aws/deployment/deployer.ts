@@ -1,9 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { InstallerError, type InstallerErrorCode } from '../../diagnostic/error'
-import type { Dir } from '../../state/files'
 import { checkCancellation } from '../../terminal/prompts'
-import type { Session } from '../auth/session'
-import type { Certainty } from '../child/protocol'
 import { request, type ChildEvidence } from '../child/request'
 import {
   isEvidence,
@@ -12,24 +9,29 @@ import {
   type Evidence,
   type Request,
   type Result,
-  type Until,
 } from '../ec2/protocol'
 import { diagnostic } from '../errors'
 import { deploymentRecovery, originalCode, terminationConfirmed } from '../recovery'
 import { AWS_SPEC } from '../spec'
-import type { AwsConnection } from '../types'
-import { validCidr } from './cidr'
+import { validCidr, validSource } from './cidr'
 import { deploymentFacts, removable } from './facts'
 import * as records from './records'
+import { stateOf } from './step'
+import { allocate, creationPlan, expectation, ingressRules, matches, removalPlan, type Planned } from './topology'
 import {
+  isReceipt,
   requiredTags,
-  verifies,
   type Deployment,
   type Failure,
   type FailureOutcome,
-  type Fenced,
   type Observation,
+  type Placement,
+  type Step,
 } from './types'
+import type { Dir } from '../../state/files'
+import type { Session } from '../auth/session'
+import type { Certainty } from '../child/protocol'
+import type { AwsConnection } from '../types'
 
 /**
  * A reply from the EC2 child. The certainty is kept so the fence can record a
@@ -50,8 +52,10 @@ function invalid(): never {
   })
 }
 
-function isOpen(fence: Fenced): boolean {
-  return fence.returned === null && fence.failure === null
+/** Replaces only the newest step, which is the only one that may progress. */
+function withLast(steps: readonly Step[], change: Partial<Step>): Step[] {
+  const last = steps[steps.length - 1]
+  return [...steps.slice(0, -1), { ...last, ...change }]
 }
 
 /** Only a definite provider refusal is recorded as one. Everything else keeps the effect open. */
@@ -66,14 +70,21 @@ function outcomeOf(error: InstallerError): FailureOutcome {
 }
 
 /**
- * Builds the deployment that the operator is asked to approve. The CIDR is
- * copied into the approval here, so the record alone governs every later
- * command. Callers gate on managed permission state before proposing.
+ * Builds the deployment that the operator is asked to approve. Zones and the
+ * administrator network are copied into the approval here, so the record alone
+ * governs every later command. Callers gate on managed permission state first.
  */
-export function propose(connection: AwsConnection, cidr: string): Deployment {
+export function propose(connection: AwsConnection, zones: readonly Placement[], administrator: string): Deployment {
+  const cidr = AWS_SPEC.deployment.defaultCidr
   if (!validCidr(cidr)) {
     throw new InstallerError({
       code: 'INTERNAL_ERROR',
+    })
+  }
+  if (!validSource(administrator)) {
+    throw new InstallerError({
+      code: 'AWS_DEPLOYMENT_INGRESS_INVALID',
+      retry: `qiln aws deployment create --name ${connection.name}`,
     })
   }
   const managed = connection.managed
@@ -83,7 +94,7 @@ export function propose(connection: AwsConnection, cidr: string): Deployment {
   const id = randomUUID()
   const now = new Date().toISOString()
   return {
-    version: 1,
+    version: 2,
     id,
     connection: connection.name,
     binding: {
@@ -98,16 +109,40 @@ export function propose(connection: AwsConnection, cidr: string): Deployment {
       approvedBy: { ...connection.identity },
       cidr,
       tenancy: 'default',
+      zones: allocate(cidr, zones),
+      ingress: ingressRules(administrator),
       tags: requiredTags(connection.identity.arn, id),
       permission: { ...managed.verified },
     },
     termination: 'confirmed',
-    creation: null,
+    steps: [],
     removals: [],
     latest: null,
-    verified: null,
     createdAt: now,
   }
+}
+
+/**
+ * Read-only discovery of the standard Availability Zones. There is no
+ * deployment yet, so no record tracks this child: an unconfirmed termination
+ * still retains the operation lock through its error.
+ */
+export async function placement(session: Session, signal: AbortSignal): Promise<Placement[]> {
+  const input: Request = { kind: 'placement' }
+  const reply = await request(AWS_SPEC.children.ec2, session.credentialEnvironment(), input, isReply, signal, {
+    timeoutMs: AWS_SPEC.deployment.requestTimeoutMs,
+  })
+  if (!reply.ok) {
+    throw new InstallerError({
+      code: reply.code,
+    })
+  }
+  if (reply.result.kind !== 'zones') {
+    throw new InstallerError({
+      code: 'AWS_CONTEXT_FAILED',
+    })
+  }
+  return reply.result.zones
 }
 
 /**
@@ -116,6 +151,8 @@ export function propose(connection: AwsConnection, cidr: string): Deployment {
  * the recovery report. Commands own approval presentation.
  */
 export class Deployer {
+  private fencedStepId: string | undefined
+
   private constructor(
     private readonly root: Dir,
     private readonly session: Session,
@@ -126,7 +163,6 @@ export class Deployer {
     return new Deployer(root, session, record)
   }
 
-  /** Persists the approval. Nothing is fenced and no provider call is made. */
   public static async approve(root: Dir, session: Session, proposal: Deployment): Promise<Deployer> {
     const approvedAt = new Date().toISOString()
     const record: Deployment = {
@@ -149,7 +185,6 @@ export class Deployer {
     return `qiln aws deployment status --id ${this.current.id}`
   }
 
-  /** Unconfirmed termination is sticky: no further provider work runs until it is resolved. */
   private requireReady(): void {
     if (this.current.termination !== 'confirmed') {
       throw new InstallerError({
@@ -171,58 +206,29 @@ export class Deployer {
     await records.save(this.root, updated)
   }
 
-  private returned(evidence: Evidence): Partial<Deployment> {
-    const { creation, removals } = this.current
-    if (evidence.kind === 'vpc-created') {
-      if (creation === null) {
-        return invalid()
-      }
-      return {
-        creation: {
-          ...creation,
-          returned: {
-            vpcId: evidence.vpcId,
-            returnedAt: evidence.returnedAt,
-          },
-        },
-      }
-    }
-    const removal = removals.at(-1)
-    if (removal === undefined) {
-      return invalid()
-    }
-    return {
-      removals: [
-        ...removals.slice(0, -1),
-        {
-          ...removal,
-          returned: {
-            returnedAt: evidence.returnedAt,
-          },
-        },
-      ],
-    }
-  }
-
   /**
    * The child may reply only after the response is durably retained here, so the
-   * message must belong to the open fence and to the expected call.
+   * message must belong to the open step and carry an identity of the right shape.
    */
-  private evidence(kind: Evidence['kind'], operationId: string): ChildEvidence {
-    const matches = (message: unknown): message is Evidence =>
-      isEvidence(message) &&
-      message.kind === kind &&
-      message.deploymentId === this.current.id &&
-      message.operationId === operationId
+  private evidence(step: Step): ChildEvidence {
+    const owns = (message: unknown): message is Evidence =>
+      isEvidence(message) && message.deploymentId === this.current.id && message.operationId === step.id
     return {
-      accept: matches,
+      accept: owns,
       retain: async message => {
-        if (!matches(message)) {
+        if (!owns(message) || !isReceipt(step.action, message.resourceId)) {
           throw new InstallerError({
             code: 'AWS_DEPLOYMENT_EVIDENCE_UNAVAILABLE',
           })
         }
-        await this.persist(this.returned(message))
+        await this.persist({
+          steps: withLast(this.current.steps, {
+            returned: {
+              returnedAt: message.returnedAt,
+              resourceId: message.resourceId,
+            },
+          }),
+        })
         const acknowledgment: Acknowledgment = {
           kind: 'evidence-retained',
           deploymentId: message.deploymentId,
@@ -252,16 +258,12 @@ export class Deployer {
     return reply.result
   }
 
-  /**
-   * Retains the latest observation and sets `verified` once, the first time an
-   * observation shows the approved VPC available and unchanged.
-   */
-  private async observeUntil(until: Until, signal: AbortSignal): Promise<Observation> {
+  private async observation(wait: boolean, signal: AbortSignal): Promise<Observation> {
     const result = await this.call(
       {
         kind: 'observe',
         deploymentId: this.current.id,
-        until,
+        wait,
       },
       signal,
     )
@@ -270,50 +272,63 @@ export class Deployer {
         code: 'AWS_CONTEXT_FAILED',
       })
     }
-    const observation = result.observation
-    await this.persist({
-      latest: observation,
-      verified: this.current.verified ?? (verifies(observation, this.current) ? observation : null),
-    })
-    return observation
+    return result.observation
   }
 
   /**
-   * A failure is recorded on a fence only while it is open and no response is
-   * retained. Verification or observation failures after a retained response
-   * change only the termination evidence.
+   * Retains the observation as the latest one. An observation that agrees with
+   * the ledger is positive evidence, so it also verifies the newest step when
+   * that step's response is retained but not yet verified. Observing never
+   * triggers a mutation.
+   */
+  private async reconcile(observation: Observation): Promise<boolean> {
+    const agrees = matches(expectation(this.current), observation)
+    const last = this.current.steps.at(-1)
+    const verifiesLast = agrees && last !== undefined && stateOf(last) === 'returned'
+    await this.persist({
+      latest: observation,
+      ...(verifiesLast ? { steps: withLast(this.current.steps, { verifiedAt: observation.observedAt }) } : {}),
+    })
+    return agrees
+  }
+
+  private async verify(signal: AbortSignal): Promise<void> {
+    if (!(await this.reconcile(await this.observation(true, signal)))) {
+      throw new InstallerError({
+        code: 'AWS_DEPLOYMENT_VERIFICATION_FAILED',
+      })
+    }
+  }
+
+  /**
+   * A failure is recorded only on the step this instance fenced, and only while
+   * it is open. Any other failure, such as a verification or observation
+   * failure after a retained response, or an observation of an older open
+   * step, changes only the termination evidence.
    */
   private async close(failure: InstallerError, confirmed: boolean): Promise<void> {
     const termination: Deployment['termination'] = confirmed ? 'confirmed' : 'unconfirmed'
-    const { creation, removals } = this.current
-    const removal = removals.at(-1)
+    const { steps } = this.current
+    const last = steps.at(-1)
+    if (last === undefined || last.id !== this.fencedStepId || stateOf(last) !== 'open') {
+      await this.persist({
+        termination,
+      })
+      return
+    }
     const closed: Failure = {
       outcome: outcomeOf(failure),
       code: originalCode(failure),
       termination,
       recordedAt: new Date().toISOString(),
     }
-    if (removal !== undefined && isOpen(removal)) {
-      await this.persist({
-        termination,
-        removals: [...removals.slice(0, -1), { ...removal, failure: closed }],
-      })
-      return
-    }
-    if (removal === undefined && creation !== null && isOpen(creation)) {
-      await this.persist({
-        termination,
-        creation: { ...creation, failure: closed },
-      })
-      return
-    }
     await this.persist({
       termination,
+      steps: withLast(steps, { failure: closed }),
     })
   }
 
   private async fail(error: unknown): Promise<never> {
-    // Termination evidence lives on the original error, so read it first.
     const terminated = terminationConfirmed(error)
     const failure = diagnostic(error)
     let persisted = true
@@ -333,57 +348,73 @@ export class Deployer {
     )
   }
 
-  /** Fences one creation, calls `CreateVpc` once, then verifies by bounded observation. */
+  /**
+   * One fenced provider call, then its bounded verification. `removalApproval`
+   * carries a new removal approval together with the first deletion step.
+   */
+  private async runStep(
+    planned: Planned,
+    removal: number | null,
+    signal: AbortSignal,
+    removalApproval: Partial<Deployment> = {},
+  ): Promise<void> {
+    checkCancellation(signal)
+    const step: Step = {
+      id: randomUUID(),
+      action: planned.action,
+      slot: planned.slot,
+      removal,
+      fencedAt: new Date().toISOString(),
+      returned: null,
+      failure: null,
+      verifiedAt: null,
+    }
+    this.fencedStepId = step.id
+    await this.persist({
+      ...removalApproval,
+      termination: 'unconfirmed',
+      steps: [...this.current.steps, step],
+    })
+    const result = await this.call(
+      {
+        kind: 'mutate',
+        deploymentId: this.current.id,
+        operationId: step.id,
+      },
+      signal,
+      this.evidence(step),
+    )
+    const returned = this.current.steps.at(-1)?.returned
+    if (result.kind !== 'done' || !returned || returned.resourceId !== result.resourceId) {
+      throw new InstallerError({
+        code: 'AWS_DEPLOYMENT_EVIDENCE_UNAVAILABLE',
+      })
+    }
+    await this.verify(signal)
+  }
+
   public async create(signal: AbortSignal): Promise<void> {
     this.requireReady()
-    checkCancellation(signal)
-    const operationId = randomUUID()
     try {
-      await this.persist({
-        termination: 'unconfirmed',
-        creation: {
-          id: operationId,
-          fencedAt: new Date().toISOString(),
-          returned: null,
-          failure: null,
-        },
-      })
-      const result = await this.call(
-        {
-          kind: 'create',
-          deploymentId: this.current.id,
-          operationId,
-        },
-        signal,
-        this.evidence('vpc-created', operationId),
-      )
-      if (result.kind !== 'created' || this.current.creation?.returned?.vpcId !== result.vpcId) {
-        throw new InstallerError({
-          code: 'AWS_DEPLOYMENT_EVIDENCE_UNAVAILABLE',
-        })
-      }
-      const observation = await this.observeUntil('available', signal)
-      if (!verifies(observation, this.current)) {
-        throw new InstallerError({
-          code: 'AWS_DEPLOYMENT_VERIFICATION_FAILED',
-        })
+      for (const planned of creationPlan(this.current.approval)) {
+        await this.runStep(planned, null, signal)
       }
     } catch (error: unknown) {
       return await this.fail(error)
     }
   }
 
-  /** One fresh observation of the recorded VPC, retained as the latest. */
   public async observe(signal: AbortSignal): Promise<Observation> {
     this.requireReady()
     try {
-      return await this.observeUntil('any', signal)
+      const observation = await this.observation(false, signal)
+      await this.reconcile(observation)
+      return observation
     } catch (error: unknown) {
       return await this.fail(error)
     }
   }
 
-  /** Display only. Candidates are never adopted, and an empty result proves nothing. */
   public async candidates(signal: AbortSignal): Promise<Observation[]> {
     this.requireReady()
     try {
@@ -407,54 +438,29 @@ export class Deployer {
 
   /**
    * Call only after the operator approved removal of the displayed fresh
-   * observation. Fences one removal, calls `DeleteVpc` once, then observes
-   * absence. AWS refusal is the only dependency gate.
+   * observation. Runs the ledger-derived removal plan serially, one fenced
+   * deletion at a time, and stops at the first refused or uncertain step.
+   * AWS refusal is the only dependency gate.
    */
   public async remove(approved: Observation, signal: AbortSignal): Promise<void> {
     this.requireReady()
-    if (!removable(this.current) || !verifies(approved, this.current)) {
+    if (!removable(this.current) || !matches(expectation(this.current), approved)) {
       throw new InstallerError({
         code: 'AWS_DEPLOYMENT_REMOVAL_REFUSED',
         facts: deploymentFacts(this.current),
         retry: this.retry,
       })
     }
-    checkCancellation(signal)
-    const operationId = randomUUID()
-    const now = new Date().toISOString()
+    const attempt = this.current.removals.length
+    let removalApproval: Partial<Deployment> = {
+      latest: approved,
+      removals: [...this.current.removals, { approvedAt: new Date().toISOString(), observation: approved }],
+    }
     try {
-      await this.persist({
-        latest: approved,
-        termination: 'unconfirmed',
-        removals: [
-          ...this.current.removals,
-          {
-            id: operationId,
-            approval: {
-              approvedAt: now,
-              observation: approved,
-            },
-            fencedAt: now,
-            returned: null,
-            failure: null,
-          },
-        ],
-      })
-      const result = await this.call(
-        {
-          kind: 'delete',
-          deploymentId: this.current.id,
-          operationId,
-        },
-        signal,
-        this.evidence('vpc-deleted', operationId),
-      )
-      if (result.kind !== 'deleted' || this.current.removals.at(-1)?.returned == null) {
-        throw new InstallerError({
-          code: 'AWS_DEPLOYMENT_EVIDENCE_UNAVAILABLE',
-        })
+      for (let next = removalPlan(this.current).at(0); next !== undefined; next = removalPlan(this.current).at(0)) {
+        await this.runStep(next, attempt, signal, removalApproval)
+        removalApproval = {}
       }
-      await this.observeUntil('absent', signal)
     } catch (error: unknown) {
       return await this.fail(error)
     }
