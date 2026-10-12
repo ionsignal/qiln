@@ -5,7 +5,7 @@ import { refusals, settled, stateOf } from './step'
 import { creationPlan, expectation, matches, removalPlan } from './topology'
 import type { Deployment, Step } from './types'
 
-const FIXED_FIELDS = ['version', 'id', 'connection', 'binding', 'approval', 'createdAt'] as const
+const FIXED_FIELDS = ['version', 'id', 'alias', 'connection', 'binding', 'approval', 'createdAt'] as const
 
 function invalid(): never {
   throw new InstallerError({

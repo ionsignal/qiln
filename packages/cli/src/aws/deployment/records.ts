@@ -8,6 +8,7 @@ import { userId } from '../host'
 import { requireOperationLock } from '../root'
 import { AWS_SPEC } from '../spec'
 import { isOperationId, type AwsIdentity } from '../types'
+import type { DeploymentSelector } from './alias'
 import { requireTransition } from './transitions'
 import { isDeployment, type Deployment } from './types'
 
@@ -92,7 +93,20 @@ async function write(directory: Dir, record: Deployment): Promise<void> {
   }
 }
 
-/** Stores a newly approved deployment. Its directory must not already hold anything. */
+/**
+ * Aliases stay taken after removal because records are never deleted. The
+ * authoritative check runs again inside `create` under the operation lock.
+ */
+export async function requireFreeAlias(root: Dir, alias: string): Promise<void> {
+  if ((await find(root, { kind: 'alias', value: alias })) !== null) {
+    throw new InstallerError({
+      code: 'AWS_DEPLOYMENT_ALIAS_TAKEN',
+      facts: [['Alias', alias]],
+      retry: 'qiln aws deployment list',
+    })
+  }
+}
+
 export async function create(root: Dir, record: Deployment): Promise<void> {
   await requireOperationLock(root)
   const initial = parse(record)
@@ -104,6 +118,7 @@ export async function create(root: Dir, record: Deployment): Promise<void> {
   ) {
     return invalid()
   }
+  await requireFreeAlias(root, initial.alias)
   const directory = await openDirectory(root, initial.id, true)
   if (!directory || (await directory.list()).length !== 0) {
     return invalid()
@@ -124,6 +139,13 @@ export async function read(root: Dir, id: string): Promise<Deployment | null> {
   return await load(directory)
 }
 
+export async function find(root: Dir, selector: DeploymentSelector): Promise<Deployment | null> {
+  if (selector.kind === 'id') {
+    return await read(root, selector.value)
+  }
+  return (await list(root)).find(record => record.alias === selector.value) ?? null
+}
+
 /**
  * Replaces the record only through a permitted transition, under the
  * operation lock held by this process.
@@ -139,7 +161,6 @@ export async function save(root: Dir, updated: Deployment): Promise<void> {
   await write(directory, next)
 }
 
-/** Any unreadable or incomplete deployment fails the whole listing; an empty directory is skipped. */
 export async function list(root: Dir): Promise<Deployment[]> {
   const store = await openStore(root, false)
   if (!store) {
@@ -155,7 +176,6 @@ export async function list(root: Dir): Promise<Deployment[]> {
   return records
 }
 
-/** Matches by account, operator ARN, and immutable user ID, not by connection name. */
 export async function bound(root: Dir, identity: AwsIdentity): Promise<Deployment[]> {
   return (await list(root)).filter(record => sameIdentity(record.binding.operator, identity))
 }

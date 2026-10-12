@@ -1,12 +1,25 @@
 import { Command, Option } from 'commander'
 import { InstallerError } from './diagnostic/error'
 import { AWS_SPEC } from './aws/spec'
-import { convertAwsDeploymentOptions, convertAwsOptions, convertUpOptions } from './input'
+import {
+  convertAwsDeploymentCreateOptions,
+  convertAwsDeploymentOptions,
+  convertAwsOptions,
+  convertUpOptions,
+} from './input'
 import { configureHelp } from './terminal/help'
 import { Reporter, type ColorMode, type OutputStream } from './terminal/reporter'
 import type { CommanderError } from 'commander'
 import type { UpCommandOptions } from './commands/up'
-import type { AwsCommandOptions, AwsDeploymentInput, AwsDeploymentOptions, AwsInput, UpInput } from './input'
+import type {
+  AwsCommandOptions,
+  AwsDeploymentCreateInput,
+  AwsDeploymentCreateOptions,
+  AwsDeploymentInput,
+  AwsDeploymentOptions,
+  AwsInput,
+  UpInput,
+} from './input'
 
 export interface GlobalOptions {
   color: ColorMode
@@ -20,8 +33,9 @@ export interface ProgramHandlers {
     status(options: AwsCommandOptions, color: ColorMode): void | Promise<void>
     disconnect(options: AwsCommandOptions, color: ColorMode): void | Promise<void>
     deployment: {
-      create(options: AwsCommandOptions, color: ColorMode): void | Promise<void>
+      create(options: AwsDeploymentCreateOptions, color: ColorMode): void | Promise<void>
       status(options: AwsDeploymentOptions, color: ColorMode): void | Promise<void>
+      list(color: ColorMode): void | Promise<void>
       inspect(options: AwsDeploymentOptions, color: ColorMode): void | Promise<void>
       remove(options: AwsDeploymentOptions, color: ColorMode): void | Promise<void>
     }
@@ -48,6 +62,15 @@ function addSingleOption(command: Command, option: Option): void {
     }
     supplied = true
   })
+}
+
+/** The ID and the alias are alternatives. The converter rejects supplying both. */
+function addSelectorOptions(command: Command): void {
+  addSingleOption(command, new Option('--id <deployment-id>', 'Select the deployment by the ID printed by create.'))
+  addSingleOption(
+    command,
+    new Option('--alias <alias>', `Select the deployment by its local alias (default: ${AWS_SPEC.deployment.defaultName}).`),
+  )
 }
 
 /**
@@ -256,13 +279,15 @@ export function createProgram(handlers: ProgramHandlers, output: ProgramOutput):
     describeHelp(deployment, {
       examples: [
         'qiln aws deployment create',
-        'qiln aws deployment status --id <deployment-id>',
+        'qiln aws deployment list',
+        'qiln aws deployment status --alias <alias>',
         'qiln aws deployment inspect --id <deployment-id>',
-        'qiln aws deployment remove --id <deployment-id>',
+        'qiln aws deployment remove --alias <alias>',
       ],
       safety: [
         'Each deployment is one fixed IPv4 network: a VPC, one /24 subnet per standard Availability Zone, an internet gateway, a route table that sends 0.0.0.0/0 to the gateway, and one host security group. Instances, Elastic IPs, NAT, IPv6, load balancers, storage, remote preparation, pricing, and quota discovery are not available. This lifecycle exercises approval, evidence, locking, and recovery; it does not demonstrate spend protection.',
         'Create and remove each require a separate interactive yes/no approval that defaults to no. Later commands resolve the connection and every binding from the deployment record; there are no resource-ID, region, tag, CIDR, or rebinding options.',
+        `Each deployment has a unique local alias (default: ${AWS_SPEC.deployment.defaultName}), displayed as qiln-<alias> beside its immutable ID. status, inspect, and remove select by --alias or --id, never both; with neither they select the default alias. An alias is local metadata only: it is not an AWS tag and never changes a resource name. Deployment records are never deleted, so an alias is not reused after removal, and a second create needs a new --alias. Selecting a deployment never bypasses the fresh observation and approval that removal requires.`,
         'Provider work runs as one fenced call per step, each followed by a bounded observation of the recorded network. Deployment commands hold the exclusive AWS-operation lock, which is retained when child termination is unconfirmed. Connect, status, and the deployment commands that authenticate are refused while any deployment records unconfirmed child termination. Recovery is forward-only: Qiln does not replay uncertain mutations, adopt resources, or resume abandoned work.',
         'A mutating call that failed before it was sent is recorded as not attempted. A failure during or after sending, and any transport failure, stays uncertain.',
         'Deployment records are retained across disconnect, which refuses while effects remain outstanding. Qiln never deletes AWS resources or deployment evidence automatically. Completion does not establish public reachability, working HTTPS or SSH, launch authority, capacity, Ubuntu compatibility, readiness, or rollback.',
@@ -276,11 +301,23 @@ export function createProgram(handlers: ProgramHandlers, output: ProgramOutput):
       create,
       new Option('--name <name>', `Select the connection (default: ${AWS_SPEC.defaultName}).`),
     )
+    addSingleOption(
+      create,
+      new Option(
+        '--alias <alias>',
+        `Name the new deployment with a unique local alias (default: ${AWS_SPEC.deployment.defaultName}).`,
+      ),
+    )
     describeHelp(create, {
-      examples: ['qiln aws deployment create', 'qiln aws deployment create --name default'],
+      examples: [
+        'qiln aws deployment create',
+        'qiln aws deployment create --name default',
+        'qiln aws deployment create --alias staging',
+      ],
       safety: [
         `Without --name, create uses '${AWS_SPEC.defaultName}'. The connection must be a Qiln-created operator whose recorded permission verification matches the current requirement; otherwise run qiln aws connect for a root-approved review. Arbitrary existing IAM users remain authentication-only.`,
-        `The only input is the administrator IPv4 network allowed to reach SSH, prompted interactively. It must be canonical with no host bits and not /0. Ports 80 and 443 are open to the internet. The VPC CIDR is pinned by this Qiln release (${AWS_SPEC.deployment.defaultCidr}) and copied into the approval; the record alone governs later commands, and a later release never retargets an existing deployment.`,
+        `Without --alias, create uses '${AWS_SPEC.deployment.defaultName}'. The alias must be unused by every retained deployment record, including removed ones, and is checked before authentication and again when the approval is saved. It is local metadata only.`,
+        `Besides the optional alias, the only input is the administrator IPv4 network allowed to reach SSH, prompted interactively. It must be canonical with no host bits and not /0. Ports 80 and 443 are open to the internet. The VPC CIDR is pinned by this Qiln release (${AWS_SPEC.deployment.defaultCidr}) and copied into the approval; the record alone governs later commands, and a later release never retargets an existing deployment.`,
         'Placement uses the standard Availability Zones visible in the permission region, at most six, all of which must be available. Qiln never skips or chooses among zones. Zones are frozen at approval, and zones added later never join an existing deployment.',
         'The account, operator, region, CIDRs, zones, ingress rules, default tenancy, ownership tags, and AWS default VPC components are displayed before one yes/no approval that defaults to no. The approval is persisted before any provider call.',
         'Each creation call has no idempotency token and never resumes. An uncertain outcome is never repeated; clean up a stopped creation with remove, and a new create is a new deployment. Every returned identity is retained before its verification.',
@@ -288,18 +325,18 @@ export function createProgram(handlers: ProgramHandlers, output: ProgramOutput):
       ],
     })
     create.action(() =>
-      awsHandlers.deployment.create(convertAwsOptions(create.opts<AwsInput>()), program.opts<GlobalOptions>().color),
+      awsHandlers.deployment.create(
+        convertAwsDeploymentCreateOptions(create.opts<AwsDeploymentCreateInput>()),
+        program.opts<GlobalOptions>().color,
+      ),
     )
     const deploymentStatus = deployment
       .command('status')
       .description('Report the retained evidence for one deployment without authenticating or calling AWS.')
       .summary('Report local deployment evidence.')
-    addSingleOption(
-      deploymentStatus,
-      new Option('--id <deployment-id>', 'Select the deployment ID printed by create.'),
-    )
+    addSelectorOptions(deploymentStatus)
     describeHelp(deploymentStatus, {
-      examples: ['qiln aws deployment status --id <deployment-id>'],
+      examples: ['qiln aws deployment status --alias <alias>', 'qiln aws deployment status --id <deployment-id>'],
       safety: [
         'Reads local deployment evidence only. No credentials are used and no AWS call is made, so it also works while another AWS operation holds the lock.',
         'The reported outcome is derived from retained facts. It does not establish the current state of AWS resources; use inspect for a fresh observation.',
@@ -311,13 +348,26 @@ export function createProgram(handlers: ProgramHandlers, output: ProgramOutput):
         program.opts<GlobalOptions>().color,
       ),
     )
+    const list = deployment
+      .command('list')
+      .description('List every retained deployment with its recorded state, without authenticating or calling AWS.')
+      .summary('List local deployment evidence.')
+    describeHelp(list, {
+      examples: ['qiln aws deployment list'],
+      safety: [
+        'Reads local deployment evidence only. No credentials are used, no AWS call is made, and no lock is required, so it also works while another AWS operation holds the lock.',
+        'Recorded states and outstanding-effects flags are derived from retained facts. They do not establish the current state of AWS resources; use inspect for a fresh observation.',
+        'An unreadable or incompatible record fails the whole listing instead of being skipped.',
+      ],
+    })
+    list.action(() => awsHandlers.deployment.list(program.opts<GlobalOptions>().color))
     const inspect = deployment
       .command('inspect')
       .description('Authenticate as the recorded operator, observe the recorded network, and retain the observation.')
       .summary('Retain a fresh network observation.')
-    addSingleOption(inspect, new Option('--id <deployment-id>', 'Select the deployment ID printed by create.'))
+    addSelectorOptions(inspect)
     describeHelp(inspect, {
-      examples: ['qiln aws deployment inspect --id <deployment-id>'],
+      examples: ['qiln aws deployment inspect --alias <alias>', 'qiln aws deployment inspect --id <deployment-id>'],
       safety: [
         'Authenticates as the recorded operator and makes read-only EC2 calls. Like aws status, it may refresh temporary credentials.',
         'With retained resource identities it observes the recorded network once. Without one it lists VPCs carrying the recorded operator and deployment tags for display only: candidates are never adopted, and an empty listing proves nothing.',
@@ -335,11 +385,11 @@ export function createProgram(handlers: ProgramHandlers, output: ProgramOutput):
       .command('remove')
       .description('Approve and remove the recorded network resources, then observe and retain their absence.')
       .summary('Remove one approved network.')
-    addSingleOption(remove, new Option('--id <deployment-id>', 'Select the deployment ID printed by create.'))
+    addSelectorOptions(remove)
     describeHelp(remove, {
-      examples: ['qiln aws deployment remove --id <deployment-id>'],
+      examples: ['qiln aws deployment remove --alias <alias>', 'qiln aws deployment remove --id <deployment-id>'],
       safety: [
-        'Removal needs retained resource identities, confirmed prior child termination, an unspent refusal budget (at most three definitely refused removal steps), and no earlier step that is unresolved or uncertain. Only a definite earlier refusal permits another attempt; verified deletions never spend the budget.',
+        'Selecting a deployment by alias or ID grants nothing: removal still needs retained resource identities, confirmed prior child termination, an unspent refusal budget (at most three definitely refused removal steps), and no earlier step that is unresolved or uncertain. Only a definite earlier refusal permits another attempt; verified deletions never spend the budget.',
         'A fresh observation must match the recorded network; otherwise removal is refused and no deletion call is made, including after partial external deletion. If every recorded resource is observed absent, no call is made either.',
         'After a separate yes/no approval that defaults to no, deletions run serially in dependency order, each one call followed by an observation. The run stops at the first refused or uncertain step; completed deletions are preserved, and another invocation needs a fresh observation and approval.',
         'AWS refusal because dependent resources remain is the only dependency gate; Qiln never removes dependents it did not record. Absence is observed and retained after each deletion.',

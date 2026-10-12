@@ -1,10 +1,12 @@
 import { InstallerError, type DiagnosticFact } from '../../../diagnostic/error'
+import { deploymentName } from '../../../aws/deployment/alias'
 import { deploymentFacts, removable } from '../../../aws/deployment/facts'
 import { expectation, matches, removalPlan, unreleased } from '../../../aws/deployment/topology'
 import { requireAwsHost } from '../../../aws/host'
 import { Prompts, withCancellation } from '../../../terminal/prompts'
 import { withConfirmedOperation } from '../shared'
-import { authenticateDeployer, observationSummary, openTarget, reportDeployment } from './shared'
+import { observationSummary, reportDeployment } from './report'
+import { authenticateDeployer, openTarget } from './shared'
 import type { Deployment, Observation } from '../../../aws/deployment/types'
 import type { AwsDeploymentOptions } from '../../../input'
 import type { Reporter } from '../../../terminal/reporter'
@@ -21,19 +23,19 @@ function refusal(record: Deployment, observation?: Observation): InstallerError 
   })
 }
 
+/** Only the fresh observation just retained is a completed action, so it alone carries a badge. */
 function reportTarget(reporter: Reporter, record: Deployment, observation: Observation): void {
   reporter.section('Network removal')
-  reporter.row('verified', 'Deployment', record.id)
-  reporter.row('verified', 'Account', record.binding.accountId)
-  reporter.row('verified', 'Region', record.binding.region)
-  reporter.row('verified', 'CIDR', record.approval.cidr)
-  reporter.row('verified', 'Observed', observationSummary(observation))
-  for (const resource of unreleased(record)) {
-    reporter.row('verified', resource.kind, resource.id)
-  }
-  for (const tag of record.approval.tags) {
-    reporter.row('verified', 'Tag', `${tag.Key}=${tag.Value}`)
-  }
+  reporter.facts([
+    ['Deployment', record.id],
+    ['Name', deploymentName(record.alias)],
+    ['Account', record.binding.accountId],
+    ['Region', record.binding.region],
+    ['CIDR', record.approval.cidr],
+    ...unreleased(record).map((resource): DiagnosticFact => [resource.kind, resource.id]),
+    ...record.approval.tags.map((tag): DiagnosticFact => ['Tag', `${tag.Key}=${tag.Value}`]),
+  ])
+  reporter.row('verified', 'Fresh observation', observationSummary(observation))
   reporter.space()
   reporter.info(
     `Removal runs ${removalPlan(record).length} provider calls in dependency order, each followed by an observation. It stops at the first refused or uncertain call; completed deletions are preserved and another invocation needs a fresh observation and approval.`,
@@ -46,15 +48,15 @@ function reportTarget(reporter: Reporter, record: Deployment, observation: Obser
   )
   reporter.space()
   reporter.notice('Removal is not rolled back. Absence is observed afterwards and never proves who deleted a resource.')
-  reporter.space()
 }
 
 export async function remove(options: AwsDeploymentOptions, reporter: Reporter): Promise<void> {
   requireAwsHost()
+  const { selector } = options
   const message = await withCancellation(async signal => {
-    const prompts = new Prompts(signal, `qiln aws deployment remove --id ${options.id}`, reporter)
+    const prompts = new Prompts(signal, `qiln aws deployment remove --${selector.kind} ${selector.value}`, reporter)
     return await withConfirmedOperation(false, async ({ root, connections: store }) => {
-      const target = await openTarget(root, store, options.id)
+      const target = await openTarget(root, store, selector)
       if (!removable(target.record)) {
         throw refusal(target.record)
       }

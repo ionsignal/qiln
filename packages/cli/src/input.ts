@@ -1,6 +1,7 @@
 import { AWS_SPEC } from './aws/spec'
 import { InstallerError } from './diagnostic/error'
 import { isOperationId, validName, validRegion } from './aws/types'
+import type { DeploymentSelector } from './aws/deployment/alias'
 import type { UpCommandOptions } from './commands/up'
 
 export interface AwsInput {
@@ -11,12 +12,21 @@ export interface AwsCommandOptions {
   name?: string
 }
 
+export interface AwsDeploymentCreateInput extends AwsInput {
+  alias?: string
+}
+
+export interface AwsDeploymentCreateOptions extends AwsCommandOptions {
+  alias: string
+}
+
 export interface AwsDeploymentInput {
   id?: string
+  alias?: string
 }
 
 export interface AwsDeploymentOptions {
-  id: string
+  selector: DeploymentSelector
 }
 
 export function convertAwsOptions(input: AwsInput): AwsCommandOptions {
@@ -35,16 +45,50 @@ export function convertAwsOptions(input: AwsInput): AwsCommandOptions {
   }
 }
 
-export function convertAwsDeploymentOptions(input: AwsDeploymentInput): AwsDeploymentOptions {
-  if (input.id === undefined || !isOperationId(input.id)) {
+export function validateAwsAlias(alias: string): string {
+  if (!validName(alias)) {
     throw new InstallerError({
-      code: 'INVALID_ARGUMENT',
-      facts: [['Option', '--id']],
+      code: 'AWS_DEPLOYMENT_ALIAS_INVALID',
+      facts: [['Option', '--alias']],
       retry: 'qiln aws deployment --help',
     })
   }
+  return alias
+}
+
+export function convertAwsDeploymentCreateOptions(input: AwsDeploymentCreateInput): AwsDeploymentCreateOptions {
   return {
-    id: input.id,
+    ...convertAwsOptions(input),
+    alias: validateAwsAlias(input.alias ?? AWS_SPEC.deployment.defaultName),
+  }
+}
+
+/** The ID and the alias are alternatives; with neither, the default alias is selected. */
+export function convertAwsDeploymentOptions(input: AwsDeploymentInput): AwsDeploymentOptions {
+  if (input.id !== undefined && input.alias !== undefined) {
+    throw new InstallerError({
+      code: 'INVALID_ARGUMENT',
+      facts: [
+        ['Option', '--id, --alias'],
+        ['Observed', 'Supply either --id or --alias, not both.'],
+      ],
+      retry: 'qiln aws deployment --help',
+    })
+  }
+  if (input.id !== undefined) {
+    if (!isOperationId(input.id)) {
+      throw new InstallerError({
+        code: 'INVALID_ARGUMENT',
+        facts: [['Option', '--id']],
+        retry: 'qiln aws deployment --help',
+      })
+    }
+    return {
+      selector: { kind: 'id', value: input.id },
+    }
+  }
+  return {
+    selector: { kind: 'alias', value: validateAwsAlias(input.alias ?? AWS_SPEC.deployment.defaultName) },
   }
 }
 

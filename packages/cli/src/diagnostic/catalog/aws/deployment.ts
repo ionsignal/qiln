@@ -10,9 +10,20 @@ export const awsDeploymentDiagnostics = Object.freeze({
   ),
   AWS_DEPLOYMENT_NOT_FOUND: entry(
     'AWS deployment record was not found',
-    'No deployment with this ID exists in protected local state. Qiln does not search by connection, resource ID, or tag, and never adopts an AWS resource that it did not record.',
-    'Use the deployment ID printed by qiln aws deployment create.',
+    'No deployment with this ID or alias exists in protected local state. Qiln does not search by connection, resource ID, or tag, and never adopts an AWS resource that it did not record.',
+    'Run qiln aws deployment list to see the retained deployments, or use the ID printed by qiln aws deployment create.',
     'If the state location changed, restore the original HOME or XDG_STATE_HOME. Deployment records survive local disconnect.',
+  ),
+  AWS_DEPLOYMENT_ALIAS_INVALID: entry(
+    'Deployment alias is invalid',
+    'An alias is 1 to 48 lowercase letters, digits, hyphens, or underscores, starting with a letter or digit. It is local metadata that names a deployment beside its immutable ID. It is not an AWS tag and never changes a resource name.',
+    'Choose an alias such as staging or network-2.',
+  ),
+  AWS_DEPLOYMENT_ALIAS_TAKEN: entry(
+    'Deployment alias is already used',
+    'Aliases are unique among all retained deployment records, including removed ones, because Qiln never deletes deployment evidence. No approval was requested and nothing was created.',
+    'Run qiln aws deployment list to see the aliases in use.',
+    'Choose another alias with --alias.',
   ),
   AWS_DEPLOYMENT_PERMISSION_REQUIRED: entry(
     'AWS deployment requires current verified permissions',

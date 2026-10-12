@@ -1,4 +1,5 @@
 export { create } from './create'
 export { status } from './status'
+export { list } from './list'
 export { inspect } from './inspect'
 export { remove } from './remove'

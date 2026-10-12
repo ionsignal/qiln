@@ -110,11 +110,13 @@ export interface Observation {
 
 /**
  * Accounting and recovery evidence, not a resumable checkpoint. Phases,
- * effects, and plans are derived from these facts and never stored.
+ * effects, and plans are derived from these facts and never stored. The alias
+ * is local metadata, unique among records, and never an AWS tag.
  */
 export interface Deployment {
   version: 2
   id: string
+  alias: string
   connection: string
   binding: Binding
   approval: Approval
@@ -323,6 +325,7 @@ export function isDeployment(value: unknown): value is Deployment {
     !hasKeys(value, [
       'version',
       'id',
+      'alias',
       'connection',
       'binding',
       'approval',
@@ -334,6 +337,8 @@ export function isDeployment(value: unknown): value is Deployment {
     ]) ||
     value.version !== 2 ||
     !isOperationId(value.id) ||
+    typeof value.alias !== 'string' ||
+    !validName(value.alias) ||
     typeof value.connection !== 'string' ||
     !validName(value.connection) ||
     !isBinding(value.binding, value.connection) ||

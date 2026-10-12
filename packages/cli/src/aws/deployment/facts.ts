@@ -1,5 +1,6 @@
 import type { DiagnosticFact } from '../../diagnostic/error'
 import { AWS_SPEC } from '../spec'
+import { deploymentName } from './alias'
 import { refusals, settled, stateOf } from './step'
 import { creates, creationPlan, removalPlan, resourceId, resources, unreleased } from './topology'
 import type { Deployment } from './types'
@@ -19,6 +20,11 @@ export type Phase =
   | 'absent'
 
 export type Effects = 'none' | 'outstanding'
+
+export interface Cleanup {
+  status: 'not-needed' | 'eligible' | 'blocked'
+  detail: string
+}
 
 const DESCRIPTIONS: Record<Phase, string> = {
   approved: 'creation approved; not attempted',
@@ -77,23 +83,40 @@ export function effects(record: Deployment): Effects {
 }
 
 /**
- * Whether a new removal attempt may be offered: confirmed termination, a
- * non-empty plan, refusal budget remaining, and no step that is unresolved or
- * uncertain. Only definite refusals and retained identities permit another.
+ * Whether a new removal attempt may be offered, and if not, why. Blockers are
+ * confirmed termination, no step that is unresolved or uncertain, and refusal
+ * budget remaining. `eligible` only permits a fresh observation and approval;
+ * it does not promise that removal succeeds.
  */
+export function cleanup(record: Deployment): Cleanup {
+  if (record.termination !== 'confirmed') {
+    return { status: 'blocked', detail: 'child termination is not confirmed' }
+  }
+  if (!record.steps.every(settled)) {
+    return { status: 'blocked', detail: 'a recorded step is unresolved or uncertain, and Qiln never repeats it' }
+  }
+  if (removalPlan(record).length === 0) {
+    return { status: 'not-needed', detail: 'no recorded resource remains to remove' }
+  }
+  const refused = refusals(record.steps)
+  if (refused >= AWS_SPEC.deployment.maximumRefusals) {
+    return { status: 'blocked', detail: `${refused} removal steps were refused, which spends the allowed budget` }
+  }
+  return {
+    status: 'eligible',
+    detail: `${unreleased(record).length} recorded resources are not confirmed removed; removal needs a fresh observation and approval`,
+  }
+}
+
 export function removable(record: Deployment): boolean {
-  return (
-    record.termination === 'confirmed' &&
-    refusals(record.steps) < AWS_SPEC.deployment.maximumRefusals &&
-    record.steps.every(settled) &&
-    removalPlan(record).length > 0
-  )
+  return cleanup(record).status === 'eligible'
 }
 
 export function deploymentFacts(record: Deployment): readonly DiagnosticFact[] {
   const { approval, binding } = record
   return [
     ['Deployment', record.id],
+    ['Name', deploymentName(record.alias)],
     ['Connection', record.connection],
     ['Account', binding.accountId],
     ['Operator', binding.operator.arn],

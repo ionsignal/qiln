@@ -119,6 +119,13 @@ export async function run(argumentsList: readonly string[]): Promise<number> {
             reporter.header('aws deployment status', 'local deployment evidence')
             await aws.deployment.status(options, reporter)
           },
+          async list(color) {
+            command = 'aws'
+            reporter = new Reporter({ color })
+            assertUnprivilegedInvocation()
+            reporter.header('aws deployment list', 'retained deployments')
+            await aws.deployment.list(reporter)
+          },
           async inspect(options, color) {
             command = 'aws'
             reporter = new Reporter({ color })

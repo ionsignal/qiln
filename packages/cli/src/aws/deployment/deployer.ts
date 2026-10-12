@@ -52,13 +52,11 @@ function invalid(): never {
   })
 }
 
-/** Replaces only the newest step, which is the only one that may progress. */
 function withLast(steps: readonly Step[], change: Partial<Step>): Step[] {
   const last = steps[steps.length - 1]
   return [...steps.slice(0, -1), { ...last, ...change }]
 }
 
-/** Only a definite provider refusal is recorded as one. Everything else keeps the effect open. */
 function outcomeOf(error: InstallerError): FailureOutcome {
   if (!(error instanceof ChildFailure) || error.certainty !== 'rejected') {
     return 'uncertain'
@@ -74,7 +72,12 @@ function outcomeOf(error: InstallerError): FailureOutcome {
  * administrator network are copied into the approval here, so the record alone
  * governs every later command. Callers gate on managed permission state first.
  */
-export function propose(connection: AwsConnection, zones: readonly Placement[], administrator: string): Deployment {
+export function propose(
+  connection: AwsConnection,
+  zones: readonly Placement[],
+  administrator: string,
+  alias: string,
+): Deployment {
   const cidr = AWS_SPEC.deployment.defaultCidr
   if (!validCidr(cidr)) {
     throw new InstallerError({
@@ -84,7 +87,7 @@ export function propose(connection: AwsConnection, zones: readonly Placement[], 
   if (!validSource(administrator)) {
     throw new InstallerError({
       code: 'AWS_DEPLOYMENT_INGRESS_INVALID',
-      retry: `qiln aws deployment create --name ${connection.name}`,
+      retry: `qiln aws deployment create --name ${connection.name} --alias ${alias}`,
     })
   }
   const managed = connection.managed
@@ -96,6 +99,7 @@ export function propose(connection: AwsConnection, zones: readonly Placement[], 
   return {
     version: 2,
     id,
+    alias,
     connection: connection.name,
     binding: {
       accountId: connection.identity.accountId,
