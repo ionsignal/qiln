@@ -96,6 +96,7 @@ export class Prompts {
     readline.once('SIGINT', cancelPrompt)
     readline.once('close', cancelPrompt)
     try {
+      this.reporter.space()
       const question = this.reporter.promptQuestion(label, defaultValue, tone)
       const answer = await readline.question(question, {
         signal: questionSignal,

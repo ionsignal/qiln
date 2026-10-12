@@ -1,6 +1,6 @@
 import { stripVTControlCharacters, styleText } from 'node:util'
 import { catalog } from '../diagnostic/catalog'
-import { InstallerError } from '../diagnostic/error'
+import { InstallerError, type DiagnosticFact } from '../diagnostic/error'
 
 const LABEL_WIDTH = 18
 const BADGE_WIDTH = 13
@@ -16,6 +16,8 @@ export type ColorMode = 'auto' | 'always' | 'never'
 export type OutputStream = 'stdout' | 'stderr'
 export type Outcome = 'working' | 'verified' | 'created' | 'reused' | 'imported' | 'transferred'
 export type PromptTone = 'input' | 'approval'
+export type Tone = 'neutral' | 'success' | 'warning' | 'danger'
+export type TableCell = string | { text: string; tone: Tone }
 
 type Output = NodeJS.WriteStream
 type Style = Parameters<typeof styleText>[0]
@@ -33,6 +35,13 @@ const OUTCOME_STYLES: Record<Outcome, Style> = {
   reused: ['cyan', 'bold'],
   imported: ['magenta', 'bold'],
   transferred: ['blue', 'bold'],
+}
+
+const TONE_STYLES: Record<Tone, Style> = {
+  neutral: 'bold',
+  success: ['green', 'bold'],
+  warning: ['yellow', 'bold'],
+  danger: ['red', 'bold'],
 }
 
 function sanitize(value: string, maximumLength = MAX_VALUE_LENGTH): string {
@@ -131,7 +140,6 @@ export class Reporter {
       const description = this.value(this.stdout, choice, Number.POSITIVE_INFINITY)
       this.write(this.stdout, `  ${number} ${description}`)
     }
-    this.write(this.stdout, '')
     this.stdoutWritten = true
   }
 
@@ -182,21 +190,42 @@ export class Reporter {
     this.stdoutWritten = true
   }
 
-  public notice(message: string): void {
-    const label = 'Notice'.padEnd(LABEL_WIDTH)
-    const detail = this.value(this.stdout, message)
-    if (this.interactive(this.stdout)) {
-      this.write(
-        this.stdout,
-        `  ${this.paint(this.stdout, ['yellow', 'bold'], '!')} ${this.paint(this.stdout, 'bold', label)} ${''.padEnd(BADGE_WIDTH)} ${detail}`,
-      )
-    } else {
-      this.write(
-        this.stdout,
-        `${this.paint(this.stdout, ['yellow', 'bold'], '!')} ${this.paint(this.stdout, 'bold', label)} ${''.padEnd(BADGE_WIDTH)} ${detail}`,
-      )
+  public facts(entries: readonly DiagnosticFact[]): void {
+    for (const [label, value] of entries) {
+      this.fact('stdout', label, value, LABEL_WIDTH)
     }
     this.stdoutWritten = true
+  }
+
+  public state(label: string, value: string, tone: Tone): void {
+    const marker = this.paint(this.stdout, TONE_STYLES[tone], this.interactive(this.stdout) ? '‣' : '*')
+    this.fact('stdout', label, value, LABEL_WIDTH, TONE_STYLES[tone], 'bold', marker)
+    this.stdoutWritten = true
+  }
+
+  public table(headers: readonly string[], rows: readonly (readonly TableCell[])[]): void {
+    const indentation = this.interactive(this.stdout) ? '  ' : ''
+    const text = (cell: TableCell) => this.value(this.stdout, typeof cell === 'string' ? cell : cell.text)
+    const widths = headers.map((header, column) =>
+      Math.max(this.value(this.stdout, header, MAX_LABEL_LENGTH).length, ...rows.map(row => text(row[column]).length)),
+    )
+    const pad = (value: string, column: number) => (column === headers.length - 1 ? value : value.padEnd(widths[column]))
+    const heading = headers.map((header, column) =>
+      this.paint(this.stdout, 'bold', pad(this.value(this.stdout, header, MAX_LABEL_LENGTH), column)),
+    )
+    this.write(this.stdout, `${indentation}${heading.join('  ')}`)
+    for (const row of rows) {
+      const cells = row.map((cell, column) => {
+        const content = pad(text(cell), column)
+        return typeof cell === 'string' ? content : this.paint(this.stdout, TONE_STYLES[cell.tone], content)
+      })
+      this.write(this.stdout, `${indentation}${cells.join('  ')}`)
+    }
+    this.stdoutWritten = true
+  }
+
+  public notice(message: string): void {
+    this.message('Notice', message, ['yellow', 'bold'])
   }
 
   public info(message: string): void {
@@ -267,13 +296,13 @@ export class Reporter {
     this.write(this.stderr, '')
     this.heading(title)
     this.write(this.stderr, '')
-    this.fact(codeLabel, definition.explanation, codeLabelWidth, 'gray', 'red')
+    this.fact('stderr', codeLabel, definition.explanation, codeLabelWidth, 'gray', 'red')
     if (diagnostic.facts.length > 0) {
       this.write(this.stderr, '')
       this.heading('Details')
     }
     for (const [label, value] of diagnostic.facts) {
-      this.fact(label, value, factLabelWidth)
+      this.fact('stderr', label, value, factLabelWidth)
     }
     if (definition.steps.length > 0) {
       this.write(this.stderr, '')
@@ -301,23 +330,34 @@ export class Reporter {
     this.stdoutWritten = true
   }
 
-  private fact(label: string, value: string, labelWidth: number, valueStyle?: Style, labelStyle: Style = 'dim'): void {
-    const name = this.value(this.stderr, label, MAX_LABEL_LENGTH)
-    const detail = this.value(this.stderr, value)
-    const width = this.width('stderr')
-    const valueColumn = 2 + labelWidth + 2
-    const stacked = width - valueColumn < MIN_FACT_VALUE_WIDTH
-    const indentation = stacked ? 4 : valueColumn
+  private fact(
+    destination: OutputStream,
+    label: string,
+    value: string,
+    labelWidth: number,
+    valueStyle?: Style,
+    labelStyle: Style = 'dim',
+    marker?: string,
+  ): void {
+    const stream = this.stream(destination)
+    const name = this.value(stream, label, MAX_LABEL_LENGTH)
+    const detail = this.value(stream, value)
+    const width = this.width(destination)
+    const gutter = destination === 'stdout' && this.interactive(stream) ? '    ' : '  '
+    const labelPrefix = marker === undefined ? gutter : `${this.interactive(stream) ? '  ' : ''}${marker} `
+    const valueColumn = gutter.length + labelWidth + 2
+    const stacked = name.length > labelWidth || width - valueColumn < MIN_FACT_VALUE_WIDTH
+    const indentation = stacked ? gutter.length + 2 : valueColumn
     if (stacked) {
-      this.write(this.stderr, `  ${this.paint(this.stderr, labelStyle, name)}`)
+      this.write(stream, `${labelPrefix}${this.paint(stream, labelStyle, name)}`)
     }
     for (const [index, line] of wrap(detail, Math.max(1, width - indentation)).entries()) {
       const prefix =
         !stacked && index === 0
-          ? `  ${this.paint(this.stderr, labelStyle, name.padEnd(labelWidth))}  `
+          ? `${labelPrefix}${this.paint(stream, labelStyle, name.padEnd(labelWidth))}  `
           : ' '.repeat(indentation)
-      const valueText = valueStyle === undefined ? line : this.paint(this.stderr, valueStyle, line)
-      this.write(this.stderr, `${prefix}${valueText}`)
+      const valueText = valueStyle === undefined ? line : this.paint(stream, valueStyle, line)
+      this.write(stream, `${prefix}${valueText}`)
     }
   }
 

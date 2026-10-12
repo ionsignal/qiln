@@ -156,7 +156,6 @@ async function selectCli(reporter: Reporter, prompts: Prompts, signal: AbortSign
   reporter.notice(
     'Installation effects are not automatically rolled back. Unconfirmed setup termination retains potentially active inputs and the protective lock.',
   )
-  reporter.space()
   await prompts.approve('Install the displayed Qiln-managed AWS CLI')
   reporter.space()
   checkCancellation(signal)
@@ -300,7 +299,6 @@ async function maintain(
     return 'recorded'
   }
   reporter.notice('A current root-approved IAM review is required. Authentication success is not permission compliance.')
-  reporter.space()
   if (!(await prompts.consent('Run root bootstrap to review the current permission configuration'))) {
     reporter.space()
     reporter.info(
@@ -373,7 +371,6 @@ async function connectOperator(
   signal: AbortSignal,
   reporter: Reporter,
 ): Promise<AwsConnection> {
-  reporter.space()
   await requireAvailable(directory)
   const saved = await connections.read(directory, name)
   const region = validateAwsRegion(
@@ -431,7 +428,6 @@ async function onboard(
       facts: [['Connection', 'Initial onboarding requires an empty current-layout connection directory.']],
     })
   }
-  reporter.space()
   const region = validateAwsRegion(await prompts.text('Default AWS region', AWS_SPEC.defaultRegion))
   const flow = await selectFlow(prompts)
   const bootstrap = await Bootstrap.onboard(directory, name, region)
@@ -446,7 +442,6 @@ async function onboard(
     await inspectRoot(bootstrap, cli, flow, prompts, signal, reporter)
     const proposal = bootstrap.proposal()
     reportProposal(reporter, proposal, name)
-    reporter.space()
     await prompts.approve('Approve this AWS operator setup')
     await bootstrap.approve(proposal, signal)
     reporter.section('IAM setup')

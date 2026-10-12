@@ -165,8 +165,10 @@ export function reportPermissionMetadata(reporter: Reporter, connection: AwsConn
     reporter.row('verified', 'Recorded SHA-256', managed.verified.sha256)
     reporter.row('verified', 'Last verification', managed.verified.verifiedAt)
   } else {
+    reporter.space()
     reporter.info('No completed foundation verification is recorded.')
   }
+  reporter.space()
   reporter.info('These are retained bindings and last-verified metadata, not a fresh inspection of live IAM.')
 }
 
