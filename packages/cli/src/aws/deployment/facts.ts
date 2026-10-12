@@ -2,7 +2,7 @@ import type { DiagnosticFact } from '../../diagnostic/error'
 import { AWS_SPEC } from '../spec'
 import { deploymentName } from './alias'
 import { refusals, settled, stateOf } from './step'
-import { creates, creationPlan, removalPlan, resourceId, resources, unreleased } from './topology'
+import { creates, creationPlan, expectation, matches, removalPlan, resourceId, resources, unreleased } from './topology'
 import type { Deployment } from './types'
 
 export type Phase =
@@ -20,6 +20,7 @@ export type Phase =
   | 'absent'
 
 export type Effects = 'none' | 'outstanding'
+export type Verification = 'verified' | 'not-verified' | 'uncertain'
 
 export interface Cleanup {
   status: 'not-needed' | 'eligible' | 'blocked'
@@ -63,6 +64,24 @@ export function phase(record: Deployment): Phase {
 
 export function describe(record: Deployment): string {
   return DESCRIPTIONS[phase(record)]
+}
+
+export function verification(record: Deployment): Verification {
+  if (
+    record.termination === 'unconfirmed' ||
+    record.steps.some(step => {
+      const state = stateOf(step)
+      return state === 'open' || state === 'uncertain'
+    })
+  ) {
+    return 'uncertain'
+  }
+  const recordedPhase = phase(record)
+  return (recordedPhase === 'created' || recordedPhase === 'removed') &&
+    record.latest !== null &&
+    matches(expectation(record), record.latest)
+    ? 'verified'
+    : 'not-verified'
 }
 
 /**

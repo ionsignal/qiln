@@ -1,10 +1,16 @@
 import { deploymentName } from '../../../aws/deployment/alias'
-import { effects } from '../../../aws/deployment/facts'
+import { verification, type Verification } from '../../../aws/deployment/facts'
 import * as deployments from '../../../aws/deployment/records'
 import { requireAwsHost } from '../../../aws/host'
 import { openAwsRoot } from '../../../aws/root'
 import type { Reporter, TableCell } from '../../../terminal/reporter'
 import { recordedState } from './report'
+
+const VERIFICATION_CELLS: Record<Verification, TableCell> = {
+  verified: { text: 'Verified', tone: 'success' },
+  'not-verified': { text: 'Not verified', tone: 'neutral' },
+  uncertain: { text: 'Uncertain', tone: 'danger' },
+}
 
 export async function list(reporter: Reporter): Promise<void> {
   requireAwsHost()
@@ -15,14 +21,14 @@ export async function list(reporter: Reporter): Promise<void> {
     reporter.info('No deployment evidence is retained.')
   } else {
     reporter.table(
-      ['Name', 'ID', 'Recorded state', 'Outstanding effects'],
+      ['Name', 'ID', 'Recorded state', 'Recorded verification'],
       records.map((record): TableCell[] => {
         const state = recordedState(record)
         return [
           deploymentName(record.alias),
           record.id,
           { text: state.label, tone: state.tone },
-          effects(record) === 'outstanding' ? { text: 'outstanding', tone: 'warning' } : 'none',
+          VERIFICATION_CELLS[verification(record)],
         ]
       }),
     )
@@ -32,7 +38,7 @@ export async function list(reporter: Reporter): Promise<void> {
   reporter.info('This list read local evidence only. It did not authenticate, call AWS, or freshly observe any network.')
   reporter.summary(
     records.length === 0
-      ? 'No deployments are recorded.'
-      : `${records.length} recorded ${records.length === 1 ? 'deployment' : 'deployments'}.`,
+      ? 'No deployments are recorded. AWS was not checked.'
+      : `${records.length} recorded ${records.length === 1 ? 'deployment' : 'deployments'}. AWS was not checked.`,
   )
 }

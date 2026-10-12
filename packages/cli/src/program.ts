@@ -356,7 +356,7 @@ export function createProgram(handlers: ProgramHandlers, output: ProgramOutput):
       examples: ['qiln aws deployment list'],
       safety: [
         'Reads local deployment evidence only. No credentials are used, no AWS call is made, and no lock is required, so it also works while another AWS operation holds the lock.',
-        'Recorded states and outstanding-effects flags are derived from retained facts. They do not establish the current state of AWS resources; use inspect for a fresh observation.',
+        'Recorded states and verification labels are derived from retained facts. They do not establish the current state of AWS resources; use inspect for a fresh observation.',
         'An unreadable or incompatible record fails the whole listing instead of being skipped.',
       ],
     })
