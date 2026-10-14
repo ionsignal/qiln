@@ -9,13 +9,13 @@ import {
   type NetworkInterface,
   type Volume,
 } from '@aws-sdk/client-ec2'
-import type { Expected } from '../../deployment/expect'
 import { resourceId } from '../../deployment/topology'
-import type { Deployment, Implicit, ObservedResource } from '../../deployment/types'
 import { collect } from '../../observe'
-import type { Ec2 } from '../client'
 import { sameFingerprint, type KeyReader } from '../key'
 import { byId, judge, listed, PAGES, tagFilters, tagged, type Candidate, type Of } from './shared'
+import type { Ec2 } from '../client'
+import type { Expected, Mapping } from '../../deployment/expect'
+import type { Deployment, Implicit, ObservedResource } from '../../deployment/types'
 
 interface Launched {
   ownerId: string | undefined
@@ -43,11 +43,33 @@ type Target = ReturnType<typeof targetOf>
 const isTerminated = (launched: Launched) => launched.instance.State?.Name === 'terminated'
 
 /**
+ * The instance must report exactly the EBS mappings the ledger expects. An
+ * unrecorded mapping, which AWS would delete or keep with the instance without
+ * Qiln knowing, is never adopted. A mapping still attaching does not fit, so a
+ * verifying poll waits through it.
+ */
+function mappingsMatch(expected: readonly Mapping[], instance: Instance): boolean {
+  const reported = instance.BlockDeviceMappings ?? []
+  return (
+    reported.length === expected.length &&
+    expected.every(item =>
+      reported.some(
+        mapping =>
+          mapping.DeviceName === item.deviceName &&
+          mapping.Ebs?.Status === 'attached' &&
+          mapping.Ebs.DeleteOnTermination === item.deleteOnTermination &&
+          (item.volumeId === null || mapping.Ebs.VolumeId === item.volumeId),
+      ),
+    )
+  )
+}
+
+/**
  * `pending` is neither a fit nor a refusal, so a verifying poll waits through
  * it. Health checks are deliberately not part of this judgement: `running` is
  * never reported as healthy.
  */
-function instanceMatches(target: Target, { ownerId, instance }: Launched): boolean {
+function instanceMatches(target: Target, expected: Of<'instance'>, { ownerId, instance }: Launched): boolean {
   const { plan } = target
   const { metadata } = plan
   const options = instance.MetadataOptions
@@ -73,6 +95,7 @@ function instanceMatches(target: Target, { ownerId, instance }: Launched): boole
     options.HttpPutResponseHopLimit === metadata.httpPutResponseHopLimit &&
     options.HttpProtocolIpv6 === metadata.httpProtocolIpv6 &&
     options.InstanceMetadataTags === metadata.instanceMetadataTags &&
+    mappingsMatch(expected.mappings, instance) &&
     tagged(instance.Tags, target.tags)
   )
 }
@@ -89,7 +112,12 @@ function implicitOf(instance: Instance): Implicit | null {
   return rootVolumeId !== undefined && interfaceId !== undefined ? { rootVolumeId, interfaceId } : null
 }
 
-async function instances(ec2: Ec2, target: Target, wanted: Of<'instance'>[], signal?: AbortSignal) {
+async function instances(
+  ec2: Ec2,
+  target: Target,
+  wanted: Of<'instance'>[],
+  signal?: AbortSignal,
+): Promise<{ resources: ObservedResource[]; implicit: Implicit | null }> {
   if (wanted.length === 0) {
     return { resources: [], implicit: null }
   }
@@ -105,11 +133,23 @@ async function instances(ec2: Ec2, target: Target, wanted: Of<'instance'>[], sig
     wanted,
     launched,
     item => item.instance.InstanceId,
-    (_, item) => instanceMatches(target, item),
+    (expected, item) => instanceMatches(target, expected, item),
     isTerminated,
   )
   const seen = launched.find(item => item.instance.InstanceId === wanted[0].id)
   const implicit: Implicit | null = seen === undefined || isTerminated(seen) ? null : implicitOf(seen.instance)
+  // Until the launch is verified, no ledger entry names the root volume and
+  // interface, so the ones the instance reports are judged here. Otherwise a
+  // launch could be verified around a root volume that fails its own rules.
+  if (
+    wanted[0].present &&
+    wanted[0].implicit === null &&
+    implicit !== null &&
+    resources[0].state === 'present' &&
+    !(await discoveredFit(ec2, target, implicit, signal))
+  ) {
+    return { resources: [{ ...resources[0], state: 'changed' }], implicit }
+  }
   return { resources, implicit }
 }
 
@@ -196,6 +236,21 @@ async function interfaces(ec2: Ec2, target: Target, wanted: Of<'interface'>[], s
     network => network.NetworkInterfaceId,
     (_, network) => interfaceMatches(target, network),
   )
+}
+
+/**
+ * Judges the root volume and primary interface that a launching instance
+ * reports, by the same rules they face once recorded. Anything not found, or
+ * not fitting, means the launch is not yet verifiable.
+ */
+async function discoveredFit(ec2: Ec2, target: Target, implicit: Implicit, signal?: AbortSignal): Promise<boolean> {
+  const root: Of<'volume'> = { kind: 'volume', id: implicit.rootVolumeId, present: true, role: 'root', attached: true }
+  const primary: Of<'interface'> = { kind: 'interface', id: implicit.interfaceId, present: true }
+  const judged = [
+    ...(await volumes(ec2, target, [root], signal)),
+    ...(await interfaces(ec2, target, [primary], signal)),
+  ]
+  return judged.every(item => item.state === 'present')
 }
 
 function addressMatches(target: Target, expected: Of<'address'>, address: Address): boolean {

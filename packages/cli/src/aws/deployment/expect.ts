@@ -13,11 +13,23 @@ export interface AddressAssociation {
 }
 
 /**
+ * One EBS mapping the instance may report. The root volume ID is null until the
+ * launch verification names it; the device name and retention are always known.
+ */
+export interface Mapping {
+  volumeId: string | null
+  deviceName: string
+  deleteOnTermination: boolean
+}
+
+/**
  * What the ledger says one recorded resource should currently look like.
  * `present: false` means its deletion response was retained. For the instance,
- * a null `implicit` means the verifying observation must supply it. A data
- * volume stays present after termination, and `attached` says whether it
- * should still be attached to the instance.
+ * a null `implicit` means the verifying observation must supply it, and
+ * `mappings` is the exact set of EBS mappings it may report: any other mapping
+ * is never adopted and makes the instance changed. A data volume stays present
+ * after termination, and `attached` says whether it should still be attached
+ * to the instance.
  */
 export type Expected =
   | { kind: 'vpc'; id: string; present: boolean }
@@ -26,7 +38,7 @@ export type Expected =
   | { kind: 'route-table'; id: string; present: boolean; routed: boolean; associations: Association[] }
   | { kind: 'group'; id: string; present: boolean; ingress: Ingress[] }
   | { kind: 'key-pair'; id: string; present: boolean }
-  | { kind: 'instance'; id: string; present: boolean; implicit: Implicit | null }
+  | { kind: 'instance'; id: string; present: boolean; implicit: Implicit | null; mappings: Mapping[] }
   | { kind: 'volume'; id: string; present: boolean; role: 'root' | 'data'; attached: boolean }
   | { kind: 'interface'; id: string; present: boolean }
   | { kind: 'address'; id: string; present: boolean; association: AddressAssociation | null }
@@ -37,6 +49,7 @@ function range(count: number): number[] {
 
 export function expectation(record: Deployment): Expected[] {
   const { zones, ingress } = record.approval
+  const { root, data } = record.approval.host.plan
   const returned = (action: Action, slot = 0) => stepOf(record, action, slot)?.returned != null
   const associations: Association[] = range(zones.length).flatMap(slot => {
     const id = resourceId(record, 'associate-subnet', slot)
@@ -46,6 +59,19 @@ export function expectation(record: Deployment): Expected[] {
   const found = record.implicit
   const implicit = found === null ? null : { rootVolumeId: found.rootVolumeId, interfaceId: found.interfaceId }
   const terminated = returned('terminate-instance')
+  const dataAttached = returned('attach-volume') && !terminated
+  const mappings: Mapping[] = [
+    { volumeId: found?.rootVolumeId ?? null, deviceName: root.deviceName, deleteOnTermination: root.deleteOnTermination },
+    ...(dataAttached
+      ? [
+          {
+            volumeId: resourceId(record, 'create-volume'),
+            deviceName: data.deviceName,
+            deleteOnTermination: data.deleteOnTermination,
+          },
+        ]
+      : []),
+  ]
   const associationId = resourceId(record, 'associate-address')
   const association =
     associationId === null || found === null || returned('disassociate-address')
@@ -67,10 +93,10 @@ export function expectation(record: Deployment): Expected[] {
       case 'key-pair':
         return { kind, id, present }
       case 'instance':
-        return { kind, id, present, implicit }
+        return { kind, id, present, implicit, mappings }
       case 'volume': {
         const role = disposition === 'implicit' ? 'root' : 'data'
-        return { kind, id, present, role, attached: role === 'root' || (returned('attach-volume') && !terminated) }
+        return { kind, id, present, role, attached: role === 'root' || dataAttached }
       }
       case 'interface':
         return { kind, id, present }
