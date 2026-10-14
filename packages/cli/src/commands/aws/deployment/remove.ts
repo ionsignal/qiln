@@ -17,7 +17,7 @@ const EFFECTS: Partial<Record<Action, string>> = {
   'disassociate-address': 'Disassociate the Elastic IP from the primary network interface.',
   'release-address': 'Release the Elastic IP allocation.',
   'terminate-instance': 'Terminate the instance. AWS deletes its root volume and primary interface with it.',
-  'delete-key-pair': 'Delete the AWS key pair. Guest authorized keys and the local private key are unaffected.',
+  'delete-key-pair': 'Delete the AWS key pair. Guest authorized keys are unaffected, and this release creates and deletes no local SSH key.',
   'delete-group': 'Delete the security group.',
   'disassociate-subnet': 'Disassociate the route table from each subnet.',
   'delete-subnet': 'Delete each subnet.',

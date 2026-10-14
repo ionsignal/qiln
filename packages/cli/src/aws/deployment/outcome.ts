@@ -98,7 +98,7 @@ export function removalOutcome(record: Deployment): Outcome[] {
       record,
       'AWS key pair',
       find(record, 'key-pair'),
-      'deleted; guest authorized keys and the local private key are unaffected',
+      'deleted; this release creates, inspects, and deletes no local SSH key, and guest authorized keys are unaffected',
     ),
     network(record),
     unresolved(record),
