@@ -10,9 +10,6 @@ const ADDRESS = '(0|[1-9][0-9]{0,2})\\.(0|[1-9][0-9]{0,2})\\.(0|[1-9][0-9]{0,2})
 const CIDR_PATTERN = new RegExp(`^${ADDRESS}/([1-9][0-9])$`)
 const SOURCE_PATTERN = new RegExp(`^${ADDRESS}/([1-9]|[12][0-9]|3[0-2])$`)
 
-/**
- * AWS would canonicalize host bits, so they are rejected rather than normalized.
- */
 function parse(pattern: RegExp, value: string): { address: number; prefix: number } | null {
   const match = pattern.exec(value)
   if (!match) {
@@ -27,9 +24,6 @@ function parse(pattern: RegExp, value: string): { address: number; prefix: numbe
   return address % 2 ** (32 - prefix) === 0 ? { address, prefix } : null
 }
 
-/**
- * Private-only networks are Qiln policy, not an AWS restriction.
- */
 export function validCidr(value: string): boolean {
   const network = parse(CIDR_PATTERN, value)
   if (!network || network.prefix < 16 || network.prefix > 28) {
@@ -41,12 +35,10 @@ export function validCidr(value: string): boolean {
   )
 }
 
-/** An administrator source network: any canonical IPv4 network except the whole internet. */
 export function validSource(value: string): boolean {
   return parse(SOURCE_PATTERN, value) !== null
 }
 
-/** The subnet for the zone at `index`, allocated sequentially from the VPC base address. */
 export function subnetCidr(vpc: string, index: number): string {
   const prefix = AWS_SPEC.deployment.subnetPrefix
   const address =
@@ -57,4 +49,19 @@ export function subnetCidr(vpc: string, index: number): string {
     index * 2 ** (32 - prefix)
   const octets = [24, 16, 8, 0].map(shift => Math.floor(address / 2 ** shift) % 256)
   return `${octets.join('.')}/${prefix}`
+}
+
+/**
+ * Whether a canonical subnet lies inside its VPC network. This is a format
+ * rule that does not read the subnet prefix policy, so a stored record keeps
+ * its meaning if that policy changes. /28 is the smallest subnet AWS allows.
+ */
+export function contains(vpc: string, subnet: string): boolean {
+  const outer = parse(CIDR_PATTERN, vpc)
+  const inner = parse(CIDR_PATTERN, subnet)
+  if (!outer || !inner || inner.prefix < outer.prefix || inner.prefix > 28) {
+    return false
+  }
+  const size = 2 ** (32 - outer.prefix)
+  return Math.floor(inner.address / size) === Math.floor(outer.address / size)
 }

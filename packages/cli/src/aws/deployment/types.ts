@@ -17,7 +17,7 @@ import {
   type PermissionMetadata,
   type PolicyBinding,
 } from '../types'
-import { subnetCidr, validCidr, validSource } from './cidr'
+import { contains, validCidr, validSource } from './cidr'
 import {
   directionOf,
   isAction,
@@ -30,7 +30,7 @@ import {
   type Kind,
 } from './graph'
 import { isHostPlan, type HostPlan } from './host/types'
-import { ingressRules, shapeOf } from './topology'
+import { shapeOf } from './topology'
 
 export interface Tag {
   Key: string
@@ -150,6 +150,13 @@ export interface Observation {
  * effects, and plans are derived from these facts and never stored. The alias
  * is local metadata, unique among records, and never an AWS tag. `implicit` is
  * set once, by the observation that verifies the launch, and never rewritten.
+ *
+ * The `version` covers every constant, format rule, and graph declaration
+ * order that the guards and the audit consult, such as the zone limit, tag and
+ * key-name formats, and the creation and removal order. Changing any of them
+ * needs a version bump and an explicit versioned reader. Records are never
+ * migrated silently, and a stored launch plan is judged structurally, never
+ * rebuilt from today's compute constants.
  */
 export interface Deployment {
   version: 4
@@ -170,6 +177,7 @@ const OBSERVED_STATES = ['present', 'absent', 'changed'] as const
 const FAILURE_OUTCOMES = ['unattempted', 'rejected', 'blocked', 'uncertain'] as const
 const ZONE_ID = /^[a-z]+[0-9]-az[0-9]+$/
 const ZONE_NAME = /^[a-z]+-[a-z]+-[0-9]+[a-z]$/
+const INTERNET = '0.0.0.0/0'
 const MAXIMUM_OBSERVED = resourceCount({ zones: AWS_SPEC.deployment.maximumZones, ingress: 0 })
 
 export function requiredTags(operator: string, deploymentId: string): Tag[] {
@@ -220,14 +228,26 @@ function isTags(value: unknown): value is Tag[] {
   return Array.isArray(value) && value.length <= 50 && value.every(isTag)
 }
 
+/**
+ * Zones are judged structurally: ascending unique placements whose subnets
+ * lie inside the VPC network. The subnet prefix policy is deliberately not
+ * consulted, so it can change without making stored records unreadable.
+ */
 function isZones(value: unknown, cidr: string): value is Zone[] {
   if (!Array.isArray(value) || value.length < 1 || value.length > AWS_SPEC.deployment.maximumZones) {
     return false
   }
   const zones: unknown[] = value
+  const subnets = new Set<string>()
   let previous = ''
-  return zones.every((zone, index) => {
-    if (!isRecord(zone) || !hasKeys(zone, ['id', 'name', 'cidr']) || zone.cidr !== subnetCidr(cidr, index)) {
+  return zones.every(zone => {
+    if (
+      !isRecord(zone) ||
+      !hasKeys(zone, ['id', 'name', 'cidr']) ||
+      typeof zone.cidr !== 'string' ||
+      !contains(cidr, zone.cidr) ||
+      subnets.has(zone.cidr)
+    ) {
       return false
     }
     const placement = { id: zone.id, name: zone.name }
@@ -235,16 +255,35 @@ function isZones(value: unknown, cidr: string): value is Zone[] {
       return false
     }
     previous = placement.id
+    subnets.add(zone.cidr)
     return true
   })
 }
 
+function isIngressRule(value: unknown): value is Ingress {
+  return (
+    isRecord(value) &&
+    hasKeys(value, ['port', 'cidr']) &&
+    typeof value.port === 'number' &&
+    Number.isSafeInteger(value.port) &&
+    value.port >= 1 &&
+    value.port <= 65_535 &&
+    typeof value.cidr === 'string' &&
+    (value.cidr === INTERNET || validSource(value.cidr))
+  )
+}
+
+/**
+ * The first rule is the administrator's network and is never the whole
+ * internet. Which ports are opened is not judged against today's policy.
+ */
 function isIngress(value: unknown): value is Ingress[] {
   if (!Array.isArray(value) || value.length === 0) {
     return false
   }
-  const first: unknown = value[0]
-  return isRecord(first) && typeof first.cidr === 'string' && validSource(first.cidr) && sameJson(value, ingressRules(first.cidr))
+  const rules: unknown[] = value
+  const administrator = rules[0]
+  return isIngressRule(administrator) && validSource(administrator.cidr) && rules.every(isIngressRule)
 }
 
 function isBinding(value: unknown, connection: string): value is Binding {
@@ -264,9 +303,10 @@ function isBinding(value: unknown, connection: string): value is Binding {
 }
 
 /**
- * The plan is valid only when it equals the plan rebuilt from its variable
- * inputs. Tokens are UUIDs, well inside the 64-character ClientToken limit, and
- * the two calls never share one.
+ * The plan is judged structurally here, and `isApproval` then requires it to
+ * agree with the approval. It is never rebuilt from today's constants. Tokens
+ * are UUIDs, well inside the 64-character ClientToken limit, and the two calls
+ * never share one.
  */
 function isHostIntent(value: unknown, id: string): value is HostIntent {
   return (
