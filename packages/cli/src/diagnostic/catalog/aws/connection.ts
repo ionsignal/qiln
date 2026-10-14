@@ -94,8 +94,7 @@ export const awsConnectionDiagnostics = Object.freeze({
   ),
   AWS_AUTH_FAILED: entry(
     'AWS authentication could not be verified',
-    'The dedicated login credentials or cache were unavailable or rejected. An interrupted refresh may leave an unusable cache; Qiln does not fall back to ambient keys, roles, or other profiles.',
-    'Reconnect using the same connection name and complete a fresh browser login.',
+    'The requested connection session login credentials or cache were unavailable or rejected by aws.',
   ),
   AWS_AUTH_EXPIRED: entry(
     'AWS authentication has expired',
