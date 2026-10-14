@@ -1,13 +1,9 @@
 import { InstallerError } from '../../diagnostic/error'
-import * as connections from '../../aws/connection/records'
-import { reviewRequired } from '../../aws/foundation/requirement'
+import { reviewRequired } from '../../aws/permission/spec'
 import { pendingFacts } from '../../aws/iam/facts'
 import { Session } from '../../aws/auth/session'
 import { requireAwsHost } from '../../aws/host'
-import type { AwsAuthentication } from '../../aws/types'
-import type { AwsCommandOptions } from '../../input'
 import { checkCancellation, withCancellation } from '../../terminal/prompts'
-import type { Reporter } from '../../terminal/reporter'
 import {
   authenticate,
   failAuthentication,
@@ -16,6 +12,10 @@ import {
   reportPermissionMetadata,
   withConfirmedOperation,
 } from './shared'
+import * as connections from '../../aws/connection/records'
+import type { Reporter } from '../../terminal/reporter'
+import type { AwsAuthentication } from '../../aws/types'
+import type { AwsCommandOptions } from '../../input'
 
 export async function status(options: AwsCommandOptions, reporter: Reporter): Promise<void> {
   requireAwsHost()

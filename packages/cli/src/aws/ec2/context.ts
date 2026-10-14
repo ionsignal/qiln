@@ -6,9 +6,10 @@ import { configuration, credentials } from '../auth/credentials'
 import { requireIdentity, verifyIdentity } from '../auth/identity'
 import * as connections from '../connection/records'
 import { requireBound } from '../deployment/binding'
+import { expectation } from '../deployment/expect'
 import * as deployments from '../deployment/records'
 import { stateOf } from '../deployment/step'
-import { expectation } from '../deployment/topology'
+import { unnamed } from '../deployment/topology'
 import type { Deployment } from '../deployment/types'
 import { userId } from '../host'
 import { requireOperationLock } from '../root'
@@ -24,10 +25,10 @@ export interface Authority {
 }
 
 export interface DeploymentAuthority extends Authority {
+  root: Dir
   record: Deployment
 }
 
-/** Local validation fails before any mutating call, so the refusal is definite. */
 export function notAttempted(): never {
   throw new InstallerError({
     code: 'AWS_DEPLOYMENT_NOT_ATTEMPTED',
@@ -63,7 +64,6 @@ async function locate(): Promise<{ root: Dir; name: string; directory: Dir }> {
   return { root, name, directory }
 }
 
-/** Credentials resolve with the connection's login region; the caller picks the EC2 region. */
 async function authenticate(loginRegion: string, expected: AwsIdentity, signal: AbortSignal): Promise<Credentials> {
   const resolved = await credentials(loginRegion)
   const sts = new STSClient({
@@ -107,26 +107,28 @@ function requireAuthority(record: Deployment, request: DeploymentRequest): void 
         return notAttempted()
       }
       return
-    case 'candidates': {
-      const first = record.steps.at(0)
-      if (first === undefined || first.action !== 'create-vpc' || first.returned !== null) {
+    case 'candidates':
+      // Only a creation whose identity was never retained can leave a resource to look for.
+      if (unnamed(record).length === 0) {
         return notAttempted()
       }
       return
-    }
   }
 }
 
-/** Placement has no deployment: the saved operator and its managed foundation are the authority. */
-export async function authorizePlacement(signal: AbortSignal): Promise<Authority> {
+/**
+ * Connection-level authority for read-only preparation, which runs before any
+ * deployment exists. It targets the managed permission region, not the
+ * editable login region that only supplies credentials.
+ */
+export async function authorizePreparation(signal: AbortSignal): Promise<Authority> {
   const { name, directory } = await locate()
   const connection = await connections.read(directory, name)
-  const managed = connection?.managed
-  if (!connection || !managed?.foundation || !managed.verified) {
+  if (!connection?.managed) {
     return notAttempted()
   }
   return {
-    region: managed.permissionRegion,
+    region: connection.managed.permissionRegion,
     credentials: await authenticate(connection.region, connection.identity, signal),
   }
 }
@@ -140,8 +142,8 @@ export async function authorizeDeployment(request: DeploymentRequest, signal: Ab
   const connection = requireBound(await connections.read(directory, name), record)
   requireAuthority(record, request)
   return {
+    root,
     record,
-    // EC2 targets the deployment's immutable region, not the editable login region.
     region: record.binding.region,
     credentials: await authenticate(connection.region, record.binding.operator, signal),
   }

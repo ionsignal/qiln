@@ -1,12 +1,19 @@
 import { InstallerError } from '../../diagnostic/error'
-import { isSpec, reconciliationMode } from '../foundation/policy'
 import { sameJson } from '../json'
+import { POLICY_KEYS, policyMap, type PolicyKey, type PolicyMap } from '../permission/keys'
+import { emptySnapshot, type PolicyIdentity, type PolicySnapshot } from '../permission/policy'
+import { isSpec, reconciliation } from '../permission/spec'
 import { pendingFacts } from './facts'
 import type { Request } from './protocol'
-import type { FoundationInspection, Mutation, MutationAction, MutationResult, Pending } from './types'
+import type { Mutation, MutationAction, PermissionInspection, Pending } from './types'
 
 const FIXED_FIELDS = ['version', 'id', 'name', 'kind', 'region', 'creationId', 'startedAt'] as const
-const FIXED_MUTATION_FIELDS = ['id', 'action', 'approvedAt', 'before'] as const
+const FIXED_MUTATION_FIELDS = ['id', 'action', 'key', 'approvedAt'] as const
+
+export interface Step {
+  action: MutationAction
+  key: PolicyKey | null
+}
 
 function invalid(): never {
   throw new InstallerError({
@@ -14,13 +21,100 @@ function invalid(): never {
   })
 }
 
+function baseline(record: Pending): PolicyMap<PolicySnapshot> {
+  return record.approval?.inspection.before?.policies ?? policyMap(emptySnapshot)
+}
+
+/**
+ * The approved sequence, derived from the approval alone. One mutating call
+ * runs per step, and policies are reconciled in key order.
+ */
+export function plan(record: Pending): Step[] {
+  const approval = record.approval
+  if (!approval) {
+    return invalid()
+  }
+  const modes = reconciliation(approval.inspection.before?.policies ?? null, approval.permission)
+  const policySteps = POLICY_KEYS.flatMap((key): Step[] => {
+    switch (modes[key]) {
+      case 'enroll':
+        return [
+          { action: 'create-policy', key },
+          { action: 'attach-policy', key },
+        ]
+      case 'replace':
+        return [{ action: 'replace-policy', key }]
+      case 'none':
+        return []
+    }
+  })
+  if (record.kind === 'maintain') {
+    return policySteps
+  }
+  return [
+    { action: 'create-user', key: null },
+    { action: 'attach-signin', key: null },
+    { action: 'grant-self', key: null },
+    ...policySteps,
+    { action: 'password', key: null },
+  ]
+}
+
+/** Index of the outstanding mutation within the plan. */
+export function position(record: Pending): number {
+  const mutation = record.mutation
+  if (!mutation) {
+    return invalid()
+  }
+  const index = plan(record).findIndex(step => step.action === mutation.action && step.key === mutation.key)
+  if (index < 0) {
+    return invalid()
+  }
+  return index
+}
+
+function apply(snapshot: PolicySnapshot, action: MutationAction, policy: PolicyIdentity): PolicySnapshot {
+  switch (action) {
+    case 'create-policy':
+      return { policy, versions: [policy.versionId], attached: false }
+    case 'attach-policy':
+      return { ...snapshot, attached: true }
+    case 'replace-policy':
+      return { policy, versions: [...snapshot.versions, policy.versionId].sort(), attached: true }
+    default:
+      return invalid()
+  }
+}
+
+/**
+ * The state expected once the first `completed` plan steps are verified: the
+ * approved baseline with each policy step folded in. Retained identities supply
+ * the policy each step created or replaced.
+ */
+export function expectation(record: Pending, completed: number): PermissionInspection {
+  const approval = record.approval
+  if (!approval) {
+    return invalid()
+  }
+  const policies = structuredClone(baseline(record))
+  for (const { action, key } of plan(record).slice(0, completed)) {
+    if (key !== null) {
+      policies[key] = apply(policies[key], action, record.policies[key] ?? invalid())
+    }
+  }
+  return {
+    signIn: approval.inspection.signIn,
+    login: approval.inspection.before?.login ?? null,
+    policies,
+  }
+}
+
 /**
  * The verified outstanding mutation is replaced by the next intent. No phase
  * history or accumulated mutation ledger is retained.
  */
-export function next(record: Pending): MutationAction | null {
-  const approval = record.approval
-  if (!approval || record.failureCode !== null || record.verified !== null) {
+export function next(record: Pending): Step | null {
+  if (!record.approval || record.failureCode !== null || record.verified !== null) {
     return null
   }
   const mutation = record.mutation
@@ -30,137 +124,61 @@ export function next(record: Pending): MutationAction | null {
       facts: pendingFacts(record),
     })
   }
-  if (record.kind === 'onboard') {
-    switch (mutation?.action) {
-      case undefined:
-        return 'create-user'
-      case 'create-user':
-        return 'attach-signin'
-      case 'attach-signin':
-        return 'grant-self'
-      case 'grant-self':
-        return 'create-foundation'
-      case 'create-foundation':
-        return 'attach-foundation'
-      case 'attach-foundation':
-        return 'password'
-      case 'password':
-        return null
-      default:
-        return invalid()
-    }
-  }
-  if (mutation !== null) {
-    switch (mutation.action) {
-      case 'create-foundation':
-        return 'attach-foundation'
-      case 'attach-foundation':
-      case 'replace-foundation':
-        return null
-      default:
-        return invalid()
-    }
-  }
-  const before = approval.inspection.before
-  if (!before) {
-    return invalid()
-  }
-  switch (reconciliationMode(before.prior, approval.permission)) {
-    case 'enroll':
-      return 'create-foundation'
-    case 'replace':
-      return 'replace-foundation'
-    case 'none':
-      return null
-    default:
-      return invalid()
-  }
-}
-
-export function before(record: Pending, action: MutationAction): FoundationInspection | null {
-  const approval = record.approval
-  if (!approval) {
-    return invalid()
-  }
-  if (!['create-foundation', 'attach-foundation', 'replace-foundation'].includes(action)) {
-    return null
-  }
-  const inspected = approval.inspection.before
-  const baseline: FoundationInspection =
-    record.kind === 'onboard'
-      ? {
-          signIn: approval.inspection.signIn,
-          login: null,
-          prior: {
-            policy: null,
-            versions: [],
-          },
-        }
-      : inspected ?? invalid()
-  if (action === 'attach-foundation') {
-    const policy = record.foundation
-    if (!policy) {
-      return invalid()
-    }
-    return {
-      ...baseline,
-      prior: {
-        policy,
-        versions: [policy.versionId],
-      },
-    }
-  }
-  return baseline
+  return plan(record).at(mutation === null ? 0 : position(record) + 1) ?? null
 }
 
 function requireMutation(record: Pending): void {
   const mutation = record.mutation
   const approval = record.approval
-  if (!mutation || !approval || !sameJson(mutation.before, before(record, mutation.action))) {
+  if (!mutation || !approval) {
     return invalid()
   }
+  // Only a step of the approved plan may execute.
+  position(record)
+  const key = mutation.key
   switch (mutation.action) {
     case 'create-user':
-      if (record.kind !== 'onboard' || record.operator !== null || record.foundation !== null) {
+      if (record.kind !== 'onboard' || record.operator !== null || POLICY_KEYS.some(name => record.policies[name] !== null)) {
         return invalid()
       }
       break
     case 'attach-signin':
     case 'grant-self':
-      if (record.kind !== 'onboard' || !record.operator || record.foundation !== null || record.password !== null) {
-        return invalid()
-      }
-      break
-    case 'create-foundation':
-      if (!record.operator || record.foundation !== null || mutation.before?.prior.policy !== null) {
-        return invalid()
-      }
-      break
-    case 'attach-foundation':
       if (
+        record.kind !== 'onboard' ||
         !record.operator ||
-        !record.foundation ||
-        !sameJson(mutation.before?.prior.policy, record.foundation) ||
-        record.foundation.document !== approval.permission.document ||
-        record.foundation.sha256 !== approval.permission.sha256
+        record.password !== null ||
+        POLICY_KEYS.some(name => record.policies[name] !== null)
       ) {
         return invalid()
       }
       break
-    case 'replace-foundation':
+    case 'create-policy':
+      if (!record.operator || key === null || record.policies[key] !== null) {
+        return invalid()
+      }
+      break
+    case 'attach-policy':
+      if (
+        !record.operator ||
+        key === null ||
+        record.policies[key]?.sha256 !== approval.permission.policies[key].sha256
+      ) {
+        return invalid()
+      }
+      break
+    case 'replace-policy':
       if (
         record.kind !== 'maintain' ||
         !record.operator ||
-        !record.foundation ||
-        !mutation.before?.prior.policy ||
-        !sameJson(record.foundation, mutation.before.prior.policy) ||
-        reconciliationMode(mutation.before.prior, approval.permission) !== 'replace'
+        key === null ||
+        !sameJson(record.policies[key], baseline(record)[key].policy)
       ) {
         return invalid()
       }
       break
     case 'password':
-      if (record.kind !== 'onboard' || !record.operator || !record.foundation || record.password !== null) {
+      if (record.kind !== 'onboard' || !record.operator || record.password !== null) {
         return invalid()
       }
       break
@@ -214,8 +232,8 @@ export function authorize(record: Pending, request: Request): void {
     (mutation !== null && mutation.verifiedAt === null) ||
     next(record) !== null ||
     !record.operator ||
-    (record.kind === 'onboard' &&
-      (mutation?.action !== 'password' || record.password?.delivered !== true || record.foundation === null)) ||
+    POLICY_KEYS.some(key => record.policies[key] === null) ||
+    (record.kind === 'onboard' && (mutation?.action !== 'password' || record.password?.delivered !== true)) ||
     (request.kind === 'readiness' && record.kind !== 'onboard')
   ) {
     return invalid()
@@ -235,15 +253,15 @@ function requireFixedFields(current: Pending, updated: Pending): void {
  * rewritten or dropped.
  */
 function requireRetainedEvidence(current: Pending, updated: Pending): void {
-  const foundationChanged =
-    current.foundation !== null &&
-    (updated.foundation === null ||
-      current.foundation.arn !== updated.foundation.arn ||
-      current.foundation.id !== updated.foundation.id)
+  const policyChanged = POLICY_KEYS.some(key => {
+    const before = current.policies[key]
+    const after = updated.policies[key]
+    return before !== null && (after === null || before.arn !== after.arn || before.id !== after.id)
+  })
   if (
     (current.accountId !== null && current.accountId !== updated.accountId) ||
     (current.operator !== null && !sameJson(current.operator, updated.operator)) ||
-    foundationChanged ||
+    policyChanged ||
     (current.approval !== null && !sameJson(current.approval, updated.approval)) ||
     (current.verified !== null && !sameJson(current.verified, updated.verified)) ||
     (current.failureCode !== null && current.failureCode !== updated.failureCode) ||
@@ -264,7 +282,10 @@ function requireRetainedPassword(current: Pending, updated: Pending): void {
   }
 }
 
-function sameReceipt(previous: Extract<MutationResult, { kind: 'password' }>, updated: MutationResult | null): boolean {
+function sameReceipt(
+  previous: Extract<NonNullable<Mutation['returned']>, { kind: 'password' }>,
+  updated: Mutation['returned'],
+): boolean {
   return (
     updated?.kind === 'password' &&
     previous.receipt.createdAt === updated.receipt.createdAt &&
@@ -294,14 +315,16 @@ function requireSameMutation(previous: Mutation, updated: Mutation): void {
  */
 function requireNewMutation(current: Pending, updated: Pending): void {
   const mutation = updated.mutation
+  const step = next(current)
   if (
     !mutation ||
     mutation.returned !== null ||
     mutation.verifiedAt !== null ||
-    mutation.action !== next(current) ||
-    !sameJson(mutation.before, before(current, mutation.action)) ||
+    step === null ||
+    mutation.action !== step.action ||
+    mutation.key !== step.key ||
     !sameJson(updated.operator, current.operator) ||
-    !sameJson(updated.foundation, current.foundation) ||
+    !sameJson(updated.policies, current.policies) ||
     !sameJson(updated.password, current.password) ||
     updated.termination !== 'unconfirmed'
   ) {
@@ -330,7 +353,10 @@ function requireFirstApproval(current: Pending, updated: Pending): void {
     current.mutation !== null ||
     updated.mutation !== null ||
     !isSpec(approval.permission, approval.inspection.root.identity.accountId, updated.name) ||
-    !sameJson(updated.foundation, approval.inspection.before?.prior.policy ?? null)
+    !sameJson(
+      updated.policies,
+      policyMap(key => approval.inspection.before?.policies[key].policy ?? null),
+    )
   ) {
     return invalid()
   }

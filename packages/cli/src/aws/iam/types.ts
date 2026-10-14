@@ -1,17 +1,10 @@
 import { isInstallerErrorCode, type InstallerErrorCode } from '../../diagnostic/error'
-import {
-  isEvidence,
-  isPolicy,
-  isSnapshot,
-  policyArn,
-  type PermissionEvidence,
-  type PermissionSpec,
-  type PolicyIdentity,
-  type PolicySnapshot,
-} from '../foundation/policy'
 import { hasKeys, isRecord } from '../guards'
 import { sameJson } from '../json'
 import { operatorArn } from '../operator'
+import { isPolicyKey, POLICY_KEYS, type PolicyKey, type PolicyMap } from '../permission/keys'
+import { isPolicy, isSnapshots, policyArn, type PolicyIdentity, type PolicySnapshot } from '../permission/policy'
+import { isEvidence, type PermissionEvidence, type PermissionSpec } from '../permission/spec'
 import {
   isAccountId,
   isIdentity,
@@ -57,16 +50,11 @@ export interface Readiness {
   accessKeys: number
 }
 
-export interface FoundationInspection {
+/** Observed or expected state of the operator's managed policy set. */
+export interface PermissionInspection {
   signIn: PolicyReview
   login: LoginObservation | null
-  prior: PolicySnapshot
-}
-
-export interface FoundationChange {
-  action: 'create' | 'attach' | 'replace'
-  before: FoundationInspection
-  policy: PolicyIdentity
+  policies: PolicyMap<PolicySnapshot>
 }
 
 export interface RootIdentity {
@@ -83,7 +71,7 @@ export interface RootInspection {
 export interface Inspection {
   root: RootInspection
   signIn: PolicyReview
-  before: FoundationInspection | null
+  before: PermissionInspection | null
 }
 
 export type OperationKind = 'onboard' | 'maintain'
@@ -106,16 +94,29 @@ export const MUTATIONS = [
   'create-user',
   'attach-signin',
   'grant-self',
-  'create-foundation',
-  'attach-foundation',
-  'replace-foundation',
+  'create-policy',
+  'attach-policy',
+  'replace-policy',
   'password',
 ] as const
 
 export type MutationAction = (typeof MUTATIONS)[number]
 
+export const POLICY_ACTIONS = ['create-policy', 'attach-policy', 'replace-policy'] as const
+
+export type PolicyAction = (typeof POLICY_ACTIONS)[number]
+
+export function isMutationAction(value: unknown): value is MutationAction {
+  return MUTATIONS.some(action => action === value)
+}
+
+export function isPolicyAction(action: MutationAction): action is PolicyAction {
+  return POLICY_ACTIONS.some(candidate => candidate === action)
+}
+
 export interface MutationProgress {
   action: MutationAction
+  key: PolicyKey | null
   phase: 'started' | 'verified'
 }
 
@@ -130,7 +131,8 @@ export type MutationResult =
     }
   | {
       kind: 'policy'
-      action: 'create-foundation' | 'attach-foundation' | 'replace-foundation'
+      action: PolicyAction
+      key: PolicyKey
       policy: PolicyIdentity
     }
   | {
@@ -141,12 +143,13 @@ export type MutationResult =
 /**
  * This is the outstanding mutation, not a history. Returned evidence is saved
  * before read verification; an unresolved intent is never resumed automatically.
+ * `key` names the policy of a policy action and is null otherwise.
  */
 export interface Mutation {
   id: string
   action: MutationAction
+  key: PolicyKey | null
   approvedAt: string
-  before: FoundationInspection | null
   returned: MutationResult | null
   verifiedAt: string | null
 }
@@ -160,7 +163,7 @@ export interface Pending {
   accountId: string | null
   creationId: string
   operator: AwsIdentity | null
-  foundation: PolicyIdentity | null
+  policies: PolicyMap<PolicyIdentity | null>
   approval: Approval | null
   mutation: Mutation | null
   password: PasswordReceipt | null
@@ -226,13 +229,13 @@ function isRootInspection(value: unknown): value is RootInspection {
   )
 }
 
-function isFoundationInspection(value: unknown): value is FoundationInspection {
+function isPermissionInspection(value: unknown): value is PermissionInspection {
   return (
     isRecord(value) &&
-    hasKeys(value, ['signIn', 'login', 'prior']) &&
+    hasKeys(value, ['signIn', 'login', 'policies']) &&
     isReview(value.signIn) &&
     (value.login === null || isLoginObservation(value.login)) &&
-    isSnapshot(value.prior)
+    isSnapshots(value.policies)
   )
 }
 
@@ -243,7 +246,7 @@ export function isInspection(value: unknown): value is Inspection {
     isRootInspection(value.root) &&
     isReview(value.signIn) &&
     (value.before === null ||
-      (isFoundationInspection(value.before) && sameJson(value.before.signIn, value.signIn)))
+      (isPermissionInspection(value.before) && sameJson(value.before.signIn, value.signIn)))
   )
 }
 
@@ -258,7 +261,11 @@ function isApproval(value: unknown): value is Approval {
   )
 }
 
-export function isMutationResult(value: unknown, action: MutationAction): value is MutationResult {
+export function isMutationResult(
+  value: unknown,
+  action: MutationAction,
+  key: PolicyKey | null = null,
+): value is MutationResult {
   if (!isRecord(value)) {
     return false
   }
@@ -268,13 +275,15 @@ export function isMutationResult(value: unknown, action: MutationAction): value 
     case 'attach-signin':
     case 'grant-self':
       return hasKeys(value, ['kind', 'action']) && value.kind === 'done' && value.action === action
-    case 'create-foundation':
-    case 'attach-foundation':
-    case 'replace-foundation':
+    case 'create-policy':
+    case 'attach-policy':
+    case 'replace-policy':
       return (
-        hasKeys(value, ['kind', 'action', 'policy']) &&
+        hasKeys(value, ['kind', 'action', 'key', 'policy']) &&
         value.kind === 'policy' &&
         value.action === action &&
+        key !== null &&
+        value.key === key &&
         isPolicy(value.policy)
       )
     case 'password':
@@ -285,24 +294,36 @@ export function isMutationResult(value: unknown, action: MutationAction): value 
 function isMutation(value: unknown): value is Mutation {
   if (
     !isRecord(value) ||
-    !hasKeys(value, ['id', 'action', 'approvedAt', 'before', 'returned', 'verifiedAt']) ||
+    !hasKeys(value, ['id', 'action', 'key', 'approvedAt', 'returned', 'verifiedAt']) ||
     !isOperationId(value.id) ||
-    !MUTATIONS.some(action => action === value.action) ||
+    !isMutationAction(value.action) ||
+    (value.key !== null && !isPolicyKey(value.key)) ||
     !isTimestamp(value.approvedAt) ||
-    (value.before !== null && !isFoundationInspection(value.before)) ||
-    (value.returned !== null && !isMutationResult(value.returned, value.action as MutationAction)) ||
     (value.verifiedAt !== null && !isTimestamp(value.verifiedAt))
   ) {
     return false
   }
-  const foundation = ['create-foundation', 'attach-foundation', 'replace-foundation'].includes(String(value.action))
+  const key = value.key
+  if (
+    (key !== null) !== isPolicyAction(value.action) ||
+    (value.returned !== null && !isMutationResult(value.returned, value.action, key)) ||
+    (value.verifiedAt !== null && value.returned === null)
+  ) {
+    return false
+  }
   return (
-    foundation === (value.before !== null) &&
-    (value.verifiedAt === null || value.returned !== null) &&
-    (value.verifiedAt === null ||
-      !isRecord(value.returned) ||
-      value.returned.kind !== 'password' ||
-      (isPasswordReceipt(value.returned.receipt) && value.returned.receipt.delivered))
+    value.verifiedAt === null ||
+    !isRecord(value.returned) ||
+    value.returned.kind !== 'password' ||
+    (isPasswordReceipt(value.returned.receipt) && value.returned.receipt.delivered)
+  )
+}
+
+function isRetainedPolicies(value: unknown): value is PolicyMap<PolicyIdentity | null> {
+  return (
+    isRecord(value) &&
+    hasKeys(value, POLICY_KEYS) &&
+    POLICY_KEYS.every(key => value[key] === null || isPolicy(value[key]))
   )
 }
 
@@ -318,7 +339,7 @@ export function isPending(value: unknown): value is Pending {
       'accountId',
       'creationId',
       'operator',
-      'foundation',
+      'policies',
       'approval',
       'mutation',
       'password',
@@ -338,7 +359,7 @@ export function isPending(value: unknown): value is Pending {
     (value.accountId !== null && !isAccountId(value.accountId)) ||
     !isOperationId(value.creationId) ||
     (value.operator !== null && !isIdentity(value.operator)) ||
-    (value.foundation !== null && !isPolicy(value.foundation)) ||
+    !isRetainedPolicies(value.policies) ||
     (value.approval !== null && !isApproval(value.approval)) ||
     (value.mutation !== null && !isMutation(value.mutation)) ||
     (value.password !== null && !isPasswordReceipt(value.password)) ||
@@ -350,59 +371,79 @@ export function isPending(value: unknown): value is Pending {
   ) {
     return false
   }
+  const name = value.name
+  const accountId = value.accountId
+  const policies = value.policies
   if (
     (value.kind === 'onboard' && value.creationId !== value.id) ||
-    (value.kind === 'maintain' && (value.accountId === null || value.operator === null || value.password !== null)) ||
+    (value.kind === 'maintain' && (accountId === null || value.operator === null || value.password !== null)) ||
     (value.operator !== null &&
-      (value.operator.accountId !== value.accountId ||
-        value.operator.arn !== operatorArn(value.operator.accountId, value.name))) ||
-    (value.foundation !== null &&
-      (value.accountId === null || value.foundation.arn !== policyArn(value.accountId, value.name))) ||
+      (value.operator.accountId !== accountId ||
+        value.operator.arn !== operatorArn(value.operator.accountId, name))) ||
+    POLICY_KEYS.some(key => {
+      const policy = policies[key]
+      return policy !== null && (accountId === null || policy.arn !== policyArn(accountId, name, key))
+    }) ||
     (value.cleanup === 'completed' && value.termination !== 'confirmed')
   ) {
     return false
   }
   const approval = value.approval
   if (approval === null) {
-    return value.mutation === null && value.foundation === null && value.password === null && value.verified === null
+    return (
+      value.mutation === null &&
+      POLICY_KEYS.every(key => policies[key] === null) &&
+      value.password === null &&
+      value.verified === null
+    )
   }
   if (
-    approval.inspection.root.identity.accountId !== value.accountId ||
+    approval.inspection.root.identity.accountId !== accountId ||
     approval.permission.region !== value.region ||
     (value.kind === 'onboard' ? approval.inspection.before !== null : approval.inspection.before?.login == null)
   ) {
     return false
   }
-  const observedPolicy = approval.inspection.before?.prior.policy
-  if (observedPolicy && observedPolicy.arn !== policyArn(approval.inspection.root.identity.accountId, value.name)) {
+  const prior = approval.inspection.before?.policies
+  if (
+    prior &&
+    POLICY_KEYS.some(key => {
+      const policy = prior[key].policy
+      return policy !== null && policy.arn !== policyArn(approval.inspection.root.identity.accountId, name, key)
+    })
+  ) {
     return false
   }
   const mutation = value.mutation
   if (mutation !== null) {
-    if (
-      (value.kind === 'maintain' &&
-        !['create-foundation', 'attach-foundation', 'replace-foundation'].includes(mutation.action)) ||
-      (mutation.before !== null && !sameJson(mutation.before.signIn, approval.inspection.signIn))
-    ) {
+    if (value.kind === 'maintain' && !isPolicyAction(mutation.action)) {
       return false
     }
     const returned = mutation.returned
     if (
       (returned?.kind === 'operator' && !sameJson(returned.identity, value.operator)) ||
-      (returned?.kind === 'policy' && !sameJson(returned.policy, value.foundation)) ||
+      (returned?.kind === 'policy' && !sameJson(returned.policy, policies[returned.key])) ||
       (returned?.kind === 'password' && !sameJson(returned.receipt, value.password))
     ) {
       return false
     }
   }
-  if (value.verified !== null) {
+  const verified = value.verified
+  if (verified !== null) {
     if (
-      value.foundation === null ||
-      value.verified.version !== approval.permission.version ||
-      value.verified.policyVersion !== value.foundation.versionId ||
-      value.verified.sha256 !== approval.permission.sha256 ||
-      value.foundation.document !== approval.permission.document ||
-      value.foundation.sha256 !== approval.permission.sha256 ||
+      verified.version !== approval.permission.version ||
+      verified.sha256 !== approval.permission.sha256 ||
+      POLICY_KEYS.some(key => {
+        const policy = policies[key]
+        const verification = verified.policies[key]
+        return (
+          policy === null ||
+          verification === undefined ||
+          verification.policyVersion !== policy.versionId ||
+          verification.sha256 !== policy.sha256 ||
+          policy.sha256 !== approval.permission.policies[key].sha256
+        )
+      }) ||
       (mutation !== null && mutation.verifiedAt === null) ||
       (value.kind === 'onboard' && value.password?.delivered !== true)
     ) {

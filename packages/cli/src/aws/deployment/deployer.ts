@@ -14,23 +14,25 @@ import { diagnostic } from '../errors'
 import { deploymentRecovery, originalCode, terminationConfirmed } from '../recovery'
 import { AWS_SPEC } from '../spec'
 import { validCidr, validSource } from './cidr'
+import { expectation, matches } from './expect'
 import { deploymentFacts, removable } from './facts'
-import * as records from './records'
 import { stateOf } from './step'
-import { allocate, creationPlan, expectation, ingressRules, matches, removalPlan, type Planned } from './topology'
+import { creationPlan, removalPlan, type Planned } from './topology'
 import {
+  hostKeyName,
   isReceipt,
   requiredTags,
   type Deployment,
   type Failure,
   type FailureOutcome,
   type Observation,
-  type Placement,
   type Step,
 } from './types'
+import * as records from './records'
 import type { Dir } from '../../state/files'
 import type { Session } from '../auth/session'
 import type { Certainty } from '../child/protocol'
+import type { HostPlan } from './host/types'
 import type { AwsConnection } from '../types'
 
 /**
@@ -62,42 +64,40 @@ function outcomeOf(error: InstallerError): FailureOutcome {
     return 'uncertain'
   }
   if (error.code === 'AWS_DEPLOYMENT_NOT_ATTEMPTED') {
-    return 'not-attempted'
+    return 'unattempted'
   }
   return error.code === 'AWS_DEPLOYMENT_BLOCKED' ? 'blocked' : 'rejected'
 }
 
 /**
- * Builds the deployment that the operator is asked to approve. Zones and the
- * administrator network are copied into the approval here, so the record alone
- * governs every later command. Callers gate on managed permission state first.
+ * Builds the deployment that the operator is asked to approve. The approval is
+ * copied from one frozen host plan, so the zones, administrator network, and
+ * launch configuration the operator reviewed are the ones the record governs.
+ * A plan exists only when nothing blocked the proposal. The idempotency tokens
+ * are generated once, here, and are never regenerated for a retry. Callers gate
+ * on managed permission state first. Deployments bind only the foundation
+ * policy, which grants their authority.
  */
-export function propose(
-  connection: AwsConnection,
-  zones: readonly Placement[],
-  administrator: string,
-  alias: string,
-): Deployment {
-  const cidr = AWS_SPEC.deployment.defaultCidr
-  if (!validCidr(cidr)) {
+export function propose(connection: AwsConnection, plan: HostPlan, alias: string): Deployment {
+  if (!validCidr(plan.cidr)) {
     throw new InstallerError({
       code: 'INTERNAL_ERROR',
     })
   }
-  if (!validSource(administrator)) {
+  if (!validSource(plan.ingress[0].cidr)) {
     throw new InstallerError({
       code: 'AWS_DEPLOYMENT_INGRESS_INVALID',
       retry: `qiln aws deployment create --name ${connection.name} --alias ${alias}`,
     })
   }
   const managed = connection.managed
-  if (!managed?.foundation || !managed.verified) {
+  if (!managed || plan.region !== managed.permissionRegion) {
     return invalid()
   }
   const id = randomUUID()
   const now = new Date().toISOString()
   return {
-    version: 2,
+    version: 4,
     id,
     alias,
     connection: connection.name,
@@ -105,48 +105,32 @@ export function propose(
       accountId: connection.identity.accountId,
       operator: { ...connection.identity },
       creationId: managed.creationId,
-      foundation: { ...managed.foundation },
+      foundation: { ...managed.policies.foundation },
       region: managed.permissionRegion,
     },
     approval: {
       approvedAt: now,
       approvedBy: { ...connection.identity },
-      cidr,
+      cidr: plan.cidr,
       tenancy: 'default',
-      zones: allocate(cidr, zones),
-      ingress: ingressRules(administrator),
+      zones: structuredClone(plan.zones),
+      ingress: structuredClone(plan.ingress),
       tags: requiredTags(connection.identity.arn, id),
-      permission: { ...managed.verified },
+      permission: structuredClone(managed.verified),
+      host: {
+        plan: structuredClone(plan),
+        keyName: hostKeyName(id),
+        launchToken: randomUUID(),
+        volumeToken: randomUUID(),
+      },
     },
     termination: 'confirmed',
     steps: [],
     removals: [],
+    implicit: null,
     latest: null,
     createdAt: now,
   }
-}
-
-/**
- * Read-only discovery of the standard Availability Zones. There is no
- * deployment yet, so no record tracks this child: an unconfirmed termination
- * still retains the operation lock through its error.
- */
-export async function placement(session: Session, signal: AbortSignal): Promise<Placement[]> {
-  const input: Request = { kind: 'placement' }
-  const reply = await request(AWS_SPEC.children.ec2, session.credentialEnvironment(), input, isReply, signal, {
-    timeoutMs: AWS_SPEC.deployment.requestTimeoutMs,
-  })
-  if (!reply.ok) {
-    throw new InstallerError({
-      code: reply.code,
-    })
-  }
-  if (reply.result.kind !== 'zones') {
-    throw new InstallerError({
-      code: 'AWS_CONTEXT_FAILED',
-    })
-  }
-  return reply.result.zones
 }
 
 /**
@@ -282,16 +266,20 @@ export class Deployer {
   /**
    * Retains the observation as the latest one. An observation that agrees with
    * the ledger is positive evidence, so it also verifies the newest step when
-   * that step's response is retained but not yet verified. Observing never
-   * triggers a mutation.
+   * that step's response is retained but not yet verified. The first agreeing
+   * observation of a launched instance also supplies the root volume and
+   * interface that AWS created with it, in the same write that verifies the
+   * launch. Observing never triggers a mutation.
    */
   private async reconcile(observation: Observation): Promise<boolean> {
     const agrees = matches(expectation(this.current), observation)
     const last = this.current.steps.at(-1)
     const verifiesLast = agrees && last !== undefined && stateOf(last) === 'returned'
+    const discovered = agrees && this.current.implicit === null ? observation.implicit : null
     await this.persist({
       latest: observation,
       ...(verifiesLast ? { steps: withLast(this.current.steps, { verifiedAt: observation.observedAt }) } : {}),
+      ...(discovered === null ? {} : { implicit: { ...discovered, observedAt: observation.observedAt } }),
     })
     return agrees
   }

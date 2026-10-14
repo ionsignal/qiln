@@ -30,33 +30,39 @@ import { randomInt } from 'node:crypto'
 import { InstallerError } from '../../diagnostic/error'
 import { requireTerminal, reveal } from './secret'
 import { requireIdentity, verifyIdentity } from '../auth/identity'
-import {
-  FOUNDATION,
-  digest,
-  isPolicy,
-  isSpec,
-  normalize,
-  policyArn,
-  policyName,
-  sameSnapshot,
-  validVersionId,
-  type PermissionSpec,
-  type PolicyIdentity,
-  type PolicySnapshot,
-} from '../foundation/policy'
 import { isRecord } from '../guards'
 import { document, sameJson } from '../json'
 import { collect, poll } from '../observe'
 import { OPERATOR_PATH, operatorArn, operatorName, operatorTags } from '../operator'
+import {
+  POLICY_KEYS,
+  POLICY_PATH,
+  policyMap,
+  policyMapAsync,
+  type PolicyKey,
+  type PolicyMap,
+} from '../permission/keys'
+import {
+  POLICY_LIMITS,
+  digest,
+  emptySnapshot,
+  isPolicy,
+  normalize,
+  policyArn,
+  policyName,
+  validVersionId,
+  type PolicyIdentity,
+  type PolicySnapshot,
+} from '../permission/policy'
+import { isSpec, type PermissionEvidence } from '../permission/spec'
 import { AWS_SPEC } from '../spec'
 import type { AwsIdentity, PolicyBinding } from '../types'
 import { POLICY, review, sameReview, selfService } from './policy'
 import type {
   Binding,
-  FoundationChange,
-  FoundationInspection,
   LoginObservation,
   PasswordReceipt,
+  PermissionInspection,
   PolicyReview,
   Readiness,
   Target,
@@ -66,6 +72,11 @@ interface Entity {
   kind: 'user' | 'group' | 'role'
   name: string | undefined
   id: string | undefined
+}
+
+export interface PolicyChange {
+  key: PolicyKey
+  before: PolicySnapshot
 }
 
 type Stage = 'empty' | 'signin' | 'self'
@@ -141,6 +152,24 @@ function checkTags(actual: readonly Tag[], target: Target, propagating: boolean)
     return propagating ? false : ownershipFailed()
   }
   return true
+}
+
+function attachedPolicyArns(target: Target, policies: PolicyMap<PolicySnapshot>): string[] {
+  return POLICY_KEYS.filter(key => policies[key].attached).map(key =>
+    policyArn(target.accountId, target.connection, key),
+  )
+}
+
+/**
+ * A step's effect may not be visible yet: nothing is observable, or only states
+ * between the prior and the expected snapshot are.
+ */
+function inTransit(actual: PolicySnapshot | null, before: PolicySnapshot, expected: PolicySnapshot): boolean {
+  if (actual === null) {
+    return true
+  }
+  const known = actual.versions.every(version => expected.versions.includes(version))
+  return known && (sameJson(actual.policy, before.policy) || sameJson(actual.policy, expected.policy))
 }
 
 function password(minimum: number): string {
@@ -300,11 +329,16 @@ export class Iam {
     }
   }
 
+  /**
+   * Checks the user's baseline: owner, no groups or keys, and exactly the
+   * expected attachments and inline policy. With `'observed'`, any subset of the
+   * managed policies may be attached, and the snapshots report which are.
+   */
   private async baseline(
     binding: Binding,
     stage: Stage,
     signIn: PolicyReview,
-    foundationArn: string | null = null,
+    policyArns: readonly string[] | 'observed' = [],
     signal?: AbortSignal,
     propagating = false,
   ): Promise<boolean> {
@@ -349,13 +383,16 @@ export class Iam {
         marker: response.Marker,
       }
     }, PAGES)
-    const expectedAttachments = [
-      ...(stage === 'empty' ? [] : [POLICY.managedArn]),
-      ...(foundationArn === null ? [] : [foundationArn]),
-    ]
     const actualAttachments = attachments.map(policy => policy.PolicyArn)
+    const signInArns = stage === 'empty' ? [] : [POLICY.managedArn]
+    const known = POLICY_KEYS.map(key => policyArn(binding.accountId, binding.connection, key))
+    const required = [
+      ...signInArns,
+      ...(policyArns === 'observed' ? known.filter(arn => actualAttachments.includes(arn)) : policyArns),
+    ]
+    const allowed = policyArns === 'observed' ? [...signInArns, ...known] : required
     if (
-      actualAttachments.some(value => typeof value !== 'string' || !expectedAttachments.includes(value)) ||
+      actualAttachments.some(value => typeof value !== 'string' || !allowed.includes(value)) ||
       new Set(actualAttachments).size !== actualAttachments.length
     ) {
       return conflict()
@@ -378,8 +415,7 @@ export class Iam {
     ) {
       return conflict()
     }
-    const complete =
-      actualAttachments.length === expectedAttachments.length && inlineNames.length === expectedInline.length
+    const complete = actualAttachments.length === required.length && inlineNames.length === expectedInline.length
     if (!complete) {
       return propagating ? false : conflict()
     }
@@ -410,14 +446,14 @@ export class Iam {
   }
 
   private async entities(
-    policyArn: string,
+    arn: string,
     usage: 'PermissionsPolicy' | 'PermissionsBoundary',
     signal?: AbortSignal,
   ): Promise<Entity[]> {
     return await collect<Entity>(async Marker => {
       const response = await this.client.send(
         new ListEntitiesForPolicyCommand({
-          PolicyArn: policyArn,
+          PolicyArn: arn,
           PolicyUsageFilter: usage,
           Marker,
         }),
@@ -447,19 +483,18 @@ export class Iam {
     }, PAGES)
   }
 
-  private policyIdentity(target: Target, policy: Policy | undefined, value: string): PolicyIdentity {
+  private policyIdentity(target: Target, key: PolicyKey, policy: Policy | undefined, value: string): PolicyIdentity {
     const result: PolicyIdentity = {
       arn: policy?.Arn ?? '',
       id: policy?.PolicyId ?? '',
       versionId: policy?.DefaultVersionId ?? '',
-      document: value,
       sha256: digest(value),
     }
     if (
       !isPolicy(result) ||
-      result.arn !== policyArn(target.accountId, target.connection) ||
-      policy?.PolicyName !== policyName(target.connection) ||
-      policy.Path !== FOUNDATION.path ||
+      result.arn !== policyArn(target.accountId, target.connection, key) ||
+      policy?.PolicyName !== policyName(target.connection, key) ||
+      policy.Path !== POLICY_PATH ||
       policy.IsAttachable !== true ||
       policy.PermissionsBoundaryUsageCount !== 0
     ) {
@@ -468,17 +503,22 @@ export class Iam {
     return result
   }
 
+  /**
+   * Observes one policy and whether it is attached to the operator. Null means
+   * the policy is absent or, while propagating, not yet fully observable.
+   */
   private async snapshot(
     binding: Binding,
-    attached: boolean,
+    key: PolicyKey,
     signal?: AbortSignal,
     propagating = false,
   ): Promise<PolicySnapshot | null> {
+    const arn = policyArn(binding.accountId, binding.connection, key)
     let policy: Policy | undefined
     try {
       const response = await this.client.send(
         new GetPolicyCommand({
-          PolicyArn: policyArn(binding.accountId, binding.connection),
+          PolicyArn: arn,
         }),
         this.options(signal),
       )
@@ -496,7 +536,7 @@ export class Iam {
     try {
       const response = await this.client.send(
         new GetPolicyVersionCommand({
-          PolicyArn: policyArn(binding.accountId, binding.connection),
+          PolicyArn: arn,
           VersionId: policy.DefaultVersionId,
         }),
         this.options(signal),
@@ -514,7 +554,7 @@ export class Iam {
       }
       throw error
     }
-    const observed = this.policyIdentity(binding, policy, normalize(value))
+    const observed = this.policyIdentity(binding, key, policy, normalize(value))
     const actualTags = await collect(async Marker => {
       const response = await this.client.send(
         new ListPolicyTagsCommand({
@@ -536,27 +576,19 @@ export class Iam {
     const boundaries = await this.entities(observed.arn, 'PermissionsBoundary', signal)
     if (
       boundaries.length !== 0 ||
+      entities.length > 1 ||
       entities.some(
         entity =>
           entity.kind !== 'user' ||
           entity.name !== operatorName(binding.connection) ||
           entity.id !== binding.operator.userId,
-      ) ||
-      entities.length > 1
+      )
     ) {
       return conflict()
     }
-    const expectedCount = attached ? 1 : 0
-    if (entities.length !== expectedCount || policy.AttachmentCount !== expectedCount) {
-      if (
-        propagating &&
-        attached &&
-        (entities.length === 0 || entities.length === 1) &&
-        (policy.AttachmentCount === 0 || policy.AttachmentCount === 1)
-      ) {
-        return null
-      }
-      return conflict()
+    const count = policy.AttachmentCount
+    if (count !== entities.length) {
+      return propagating && (count === 0 || count === 1) ? null : conflict()
     }
     const versions = await collect(async Marker => {
       const response = await this.client.send(
@@ -574,7 +606,7 @@ export class Iam {
     }, PAGES)
     if (
       versions.length === 0 ||
-      versions.length > FOUNDATION.maximumVersions ||
+      versions.length > POLICY_LIMITS.maximumVersions ||
       versions.some(version => !validVersionId(version.VersionId) || typeof version.IsDefaultVersion !== 'boolean') ||
       new Set(versions.map(version => version.VersionId)).size !== versions.length ||
       versions.filter(version => version.IsDefaultVersion === true).length !== 1 ||
@@ -585,65 +617,72 @@ export class Iam {
     return {
       policy: observed,
       versions: versions.map(version => version.VersionId!).sort(),
+      attached: entities.length === 1,
     }
   }
 
-  public async foundationAbsent(target: Target): Promise<void> {
-    try {
-      await this.client.send(
-        new GetPolicyCommand({
-          PolicyArn: policyArn(target.accountId, target.connection),
-        }),
-        this.options(),
-      )
-    } catch (error: unknown) {
-      if (hasName(error, 'NoSuchEntityException')) {
-        return
+  public async policiesAbsent(target: Target): Promise<void> {
+    for (const key of POLICY_KEYS) {
+      try {
+        await this.client.send(
+          new GetPolicyCommand({
+            PolicyArn: policyArn(target.accountId, target.connection, key),
+          }),
+          this.options(),
+        )
+      } catch (error: unknown) {
+        if (hasName(error, 'NoSuchEntityException')) {
+          continue
+        }
+        throw error
       }
-      throw error
-    }
-    return conflict()
-  }
-
-  /**
-   * The binding authenticates the policy's identity, not its cached document.
-   * Live content is observed so a different document can receive a new review.
-   */
-  public async inspectFoundation(
-    binding: Binding,
-    bound: PolicyBinding | null,
-    attached = true,
-    loginState: 'present' | 'absent' = 'present',
-  ): Promise<FoundationInspection> {
-    if (bound && bound.arn !== policyArn(binding.accountId, binding.connection)) {
-      return ownershipFailed()
-    }
-    const signIn = await this.review()
-    await this.baseline(binding, 'self', signIn, bound && attached ? bound.arn : null)
-    const login = await this.login(binding)
-    if ((login !== null) !== (loginState === 'present')) {
       return conflict()
     }
-    const observed = await this.snapshot(binding, bound !== null && attached)
+  }
+
+  private async observe(binding: Binding, key: PolicyKey, bound: PolicyBinding | null): Promise<PolicySnapshot> {
+    if (bound !== null && bound.arn !== policyArn(binding.accountId, binding.connection, key)) {
+      return ownershipFailed()
+    }
+    const observed = await this.snapshot(binding, key)
     if (bound === null) {
       if (observed !== null) {
         return conflict()
       }
-    } else if (!observed?.policy || observed.policy.arn !== bound.arn || observed.policy.id !== bound.id) {
+      return emptySnapshot()
+    }
+    if (!observed?.policy || observed.policy.arn !== bound.arn || observed.policy.id !== bound.id) {
       return ownershipFailed()
+    }
+    return observed
+  }
+
+  /**
+   * The binding authenticates a policy's identity, not its cached document.
+   * Live content is observed so a different document can receive a new review.
+   */
+  public async inspect(
+    binding: Binding,
+    bound: Readonly<Partial<PolicyMap<PolicyBinding | null>>>,
+    loginState: 'present' | 'absent' = 'present',
+  ): Promise<PermissionInspection> {
+    const signIn = await this.review()
+    await this.baseline(binding, 'self', signIn, 'observed')
+    const login = await this.login(binding)
+    if ((login !== null) !== (loginState === 'present')) {
+      return conflict()
     }
     return {
       signIn,
       login,
-      prior: observed ?? { policy: null, versions: [] },
+      policies: await policyMapAsync(key => this.observe(binding, key, bound[key] ?? null)),
     }
   }
 
-  private async requireInspection(binding: Binding, before: FoundationInspection, attached: boolean): Promise<void> {
-    const actual = await this.inspectFoundation(
+  private async requireInspection(binding: Binding, before: PermissionInspection): Promise<void> {
+    const actual = await this.inspect(
       binding,
-      before.prior.policy,
-      attached,
+      policyMap(key => before.policies[key].policy),
       before.login === null ? 'absent' : 'present',
     )
     if (!sameJson(actual, before)) {
@@ -651,21 +690,23 @@ export class Iam {
     }
   }
 
-  public async createFoundation(
+  public async createPolicy(
     binding: Binding,
-    spec: PermissionSpec,
-    before: FoundationInspection,
+    spec: PermissionEvidence,
+    key: PolicyKey,
+    before: PermissionInspection,
   ): Promise<PolicyIdentity> {
-    if (before.prior.policy !== null || !isSpec(spec, binding.accountId, binding.connection)) {
+    if (before.policies[key].policy !== null || !isSpec(spec, binding.accountId, binding.connection)) {
       return conflict()
     }
-    await this.requireInspection(binding, before, false)
+    await this.requireInspection(binding, before)
+    const desired = spec.policies[key]
     const response = await this.client.send(
       new CreatePolicyCommand({
-        PolicyName: policyName(binding.connection),
-        Path: FOUNDATION.path,
-        PolicyDocument: spec.document,
-        Description: 'Qiln single-host AWS foundation authority',
+        PolicyName: policyName(binding.connection, key),
+        Path: POLICY_PATH,
+        PolicyDocument: desired.document,
+        Description: `Qiln single-host AWS ${key} authority`,
         Tags: expectedTags(binding),
       }),
       this.options(),
@@ -675,14 +716,13 @@ export class Iam {
       arn: policy?.Arn ?? '',
       id: policy?.PolicyId ?? '',
       versionId: policy?.DefaultVersionId ?? '',
-      document: spec.document,
-      sha256: spec.sha256,
+      sha256: desired.sha256,
     }
     if (
       !isPolicy(created) ||
-      created.arn !== policyArn(binding.accountId, binding.connection) ||
-      policy?.PolicyName !== policyName(binding.connection) ||
-      policy.Path !== FOUNDATION.path ||
+      created.arn !== policyArn(binding.accountId, binding.connection, key) ||
+      policy?.PolicyName !== policyName(binding.connection, key) ||
+      policy.Path !== POLICY_PATH ||
       created.versionId !== 'v1'
     ) {
       return verificationFailed()
@@ -690,12 +730,12 @@ export class Iam {
     return created
   }
 
-  public async attachFoundation(binding: Binding, before: FoundationInspection): Promise<PolicyIdentity> {
-    const policy = before.prior.policy
+  public async attachPolicy(binding: Binding, key: PolicyKey, before: PermissionInspection): Promise<PolicyIdentity> {
+    const policy = before.policies[key].policy
     if (!policy) {
       return conflict()
     }
-    await this.requireInspection(binding, before, false)
+    await this.requireInspection(binding, before)
     await this.client.send(
       new AttachUserPolicyCommand({
         UserName: operatorName(binding.connection),
@@ -706,25 +746,28 @@ export class Iam {
     return policy
   }
 
-  public async replaceFoundation(
+  public async replacePolicy(
     binding: Binding,
-    spec: PermissionSpec,
-    before: FoundationInspection,
+    spec: PermissionEvidence,
+    key: PolicyKey,
+    before: PermissionInspection,
   ): Promise<PolicyIdentity> {
-    const previous = before.prior.policy
+    const previous = before.policies[key].policy
     if (!previous || !isSpec(spec, binding.accountId, binding.connection)) {
       return conflict()
     }
-    await this.requireInspection(binding, before, true)
-    if (before.prior.versions.length >= FOUNDATION.maximumVersions) {
+    await this.requireInspection(binding, before)
+    const retained = before.policies[key].versions
+    if (retained.length >= POLICY_LIMITS.maximumVersions) {
       throw new InstallerError({
         code: 'AWS_PERMISSION_VERSION_LIMIT',
       })
     }
+    const desired = spec.policies[key]
     const response = await this.client.send(
       new CreatePolicyVersionCommand({
         PolicyArn: previous.arn,
-        PolicyDocument: spec.document,
+        PolicyDocument: desired.document,
         SetAsDefault: true,
       }),
       this.options(),
@@ -734,7 +777,7 @@ export class Iam {
       !version ||
       !validVersionId(version.VersionId) ||
       version.IsDefaultVersion !== true ||
-      before.prior.versions.includes(version.VersionId)
+      retained.includes(version.VersionId)
     ) {
       return verificationFailed()
     }
@@ -742,81 +785,63 @@ export class Iam {
       arn: previous.arn,
       id: previous.id,
       versionId: version.VersionId,
-      document: spec.document,
-      sha256: spec.sha256,
+      sha256: desired.sha256,
     }
   }
 
-  public async verifyFoundationChange(binding: Binding, change: FoundationChange): Promise<void> {
-    const attached = change.action !== 'create'
-    const expected: PolicySnapshot = {
-      policy: change.policy,
-      versions:
-        change.action === 'create'
-          ? [change.policy.versionId]
-          : change.action === 'replace'
-            ? [...change.before.prior.versions, change.policy.versionId].sort()
-            : [...change.before.prior.versions],
-    }
+  /**
+   * Polls until the live state equals `expected`. Only the policy named by
+   * `change` may still show its earlier state while the step propagates.
+   */
+  public async verifyPermissions(
+    binding: Binding,
+    expected: PermissionInspection,
+    change: PolicyChange | null,
+  ): Promise<void> {
     await poll(async signal => {
-      if (
-        !(await this.baseline(
-          binding,
-          'self',
-          change.before.signIn,
-          attached ? change.policy.arn : null,
-          signal,
-          true,
-        ))
-      ) {
+      const arns = attachedPolicyArns(binding, expected.policies)
+      if (!(await this.baseline(binding, 'self', expected.signIn, arns, signal, true))) {
         return false
       }
-      const login = await this.login(binding, signal)
-      if (!sameJson(login, change.before.login)) {
+      if (!sameJson(await this.login(binding, signal), expected.login)) {
         return conflict()
       }
-      const actual = await this.snapshot(binding, attached, signal, true)
-      if (!actual) {
-        return false
+      let settled = true
+      for (const key of POLICY_KEYS) {
+        const actual = await this.snapshot(binding, key, signal, true)
+        const wanted = expected.policies[key]
+        // A key that is not enrolled yet is expected to be absent from IAM.
+        if (sameJson(actual, wanted) || (actual === null && wanted.policy === null)) {
+          continue
+        }
+        if (change?.key === key && inTransit(actual, change.before, wanted)) {
+          settled = false
+          continue
+        }
+        return conflict()
       }
-      if (sameSnapshot(actual, expected)) {
-        return true
-      }
-      if (
-        change.action === 'replace' &&
-        sameJson(actual.policy, change.before.prior.policy) &&
-        (sameJson(actual.versions, change.before.prior.versions) || sameJson(actual.versions, expected.versions))
-      ) {
-        return false
-      }
-      if (
-        sameJson(actual.policy, expected.policy) &&
-        actual.versions.every(version => expected.versions.includes(version)) &&
-        expected.versions.some(version => !actual.versions.includes(version))
-      ) {
-        return false
-      }
-      return conflict()
+      return settled
     }, VERIFICATION)
   }
 
-  public async verifyFoundation(
+  public async verifyPolicies(
     binding: Binding,
     signIn: PolicyReview,
-    policy: PolicyIdentity,
+    policies: PolicyMap<PolicySnapshot>,
     signal?: AbortSignal,
   ): Promise<void> {
-    await this.baseline(binding, 'self', signIn, policy.arn, signal)
-    const actual = await this.snapshot(binding, true, signal)
-    if (!actual?.policy || !sameJson(actual.policy, policy)) {
-      return conflict()
+    await this.baseline(binding, 'self', signIn, attachedPolicyArns(binding, policies), signal)
+    for (const key of POLICY_KEYS) {
+      if (!sameJson(await this.snapshot(binding, key, signal), policies[key])) {
+        return conflict()
+      }
     }
   }
 
   public async create(target: Target, signIn: PolicyReview): Promise<AwsIdentity> {
     await this.requireReview(signIn)
     await this.absent(target)
-    await this.foundationAbsent(target)
+    await this.policiesAbsent(target)
     const response = await this.client.send(
       new CreateUserCommand({
         UserName: operatorName(target.connection),
@@ -830,7 +855,7 @@ export class Iam {
 
   public async verifyUser(binding: Binding, signIn: PolicyReview): Promise<void> {
     await poll(async signal => {
-      if (!(await this.baseline(binding, 'empty', signIn, null, signal, true))) {
+      if (!(await this.baseline(binding, 'empty', signIn, [], signal, true))) {
         return false
       }
       await this.noLogin(binding, signal)
@@ -865,7 +890,7 @@ export class Iam {
 
   public async verifyStage(binding: Binding, signIn: PolicyReview, stage: 'signin' | 'self'): Promise<void> {
     await poll(async signal => {
-      if (!(await this.baseline(binding, stage, signIn, null, signal, true))) {
+      if (!(await this.baseline(binding, stage, signIn, [], signal, true))) {
         return false
       }
       await this.noLogin(binding, signal)
@@ -892,12 +917,12 @@ export class Iam {
   public async password(
     binding: Binding,
     signIn: PolicyReview,
-    policy: PolicyIdentity,
+    policies: PolicyMap<PolicySnapshot>,
     retain: (receipt: PasswordReceipt) => Promise<void>,
   ): Promise<PasswordReceipt> {
     requireTerminal()
     const minimum = await this.minimum()
-    await this.verifyFoundation(binding, signIn, policy)
+    await this.verifyPolicies(binding, signIn, policies)
     await this.noLogin(binding)
     const initialPassword = password(minimum)
     const response = await this.client.send(
@@ -956,7 +981,7 @@ export class Iam {
   public async readiness(
     binding: Binding,
     signIn: PolicyReview,
-    policy: PolicyIdentity,
+    policies: PolicyMap<PolicySnapshot>,
     receipt: PasswordReceipt,
   ): Promise<Readiness> {
     if (!receipt.delivered) {
@@ -964,7 +989,7 @@ export class Iam {
         code: 'AWS_BOOTSTRAP_PASSWORD_UNAVAILABLE',
       })
     }
-    await this.verifyFoundation(binding, signIn, policy)
+    await this.verifyPolicies(binding, signIn, policies)
     const userName = operatorName(binding.connection)
     const devices = await collect(async Marker => {
       const response = await this.client.send(
@@ -1004,15 +1029,11 @@ export class Iam {
   public async verifyOnboarding(
     binding: Binding,
     signIn: PolicyReview,
-    policy: PolicyIdentity,
+    policies: PolicyMap<PolicySnapshot>,
     receipt: PasswordReceipt,
   ): Promise<void> {
-    const readiness = await this.readiness(binding, signIn, policy, receipt)
+    const readiness = await this.readiness(binding, signIn, policies, receipt)
     if (readiness.passwordResetRequired !== false || readiness.accessKeys !== 0) {
-      return conflict()
-    }
-    const actual = await this.snapshot(binding, true)
-    if (!actual || !sameSnapshot(actual, { policy, versions: [policy.versionId] })) {
       return conflict()
     }
   }

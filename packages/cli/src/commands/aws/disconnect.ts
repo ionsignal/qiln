@@ -1,6 +1,7 @@
 import { InstallerError } from '../../diagnostic/error'
 import * as connections from '../../aws/connection/records'
 import { describe } from '../../aws/deployment/facts'
+import { retained } from '../../aws/deployment/topology'
 import { diagnostic } from '../../aws/errors'
 import { pendingFacts } from '../../aws/iam/facts'
 import { cleanRoot } from '../../aws/iam/lifecycle'
@@ -25,7 +26,7 @@ export async function disconnect(options: AwsCommandOptions, reporter: Reporter)
         pendingFailure(pending)
       }
       const identity = connection?.identity ?? pending?.operator
-      const retained = identity ? await requireSettledDeployments(root, identity) : []
+      const settled = identity ? await requireSettledDeployments(root, identity) : []
       reporter.section('AWS connection')
       reporter.row('verified', 'Connection', name)
       if (identity) {
@@ -44,12 +45,22 @@ export async function disconnect(options: AwsCommandOptions, reporter: Reporter)
           reporter.info(`${label}: ${value}`)
         }
       }
-      if (retained.length > 0) {
+      if (settled.length > 0) {
         reporter.section('Retained deployment evidence')
-        for (const record of retained) {
+        for (const record of settled) {
           reporter.info(`${record.id}: ${describe(record)}`)
         }
         reporter.notice('Deployment records remain in protected local state after removal. AWS resources are not deleted.')
+      }
+      const kept = settled.flatMap(record => retained(record).map(resource => ({ record, resource })))
+      if (kept.length > 0) {
+        reporter.section('Retained AWS resources')
+        for (const { record, resource } of kept) {
+          reporter.info(`${record.id}: ${resource.kind} ${resource.id} · retained by design`)
+        }
+        reporter.notice(
+          'Qiln never deletes these resources. They keep incurring charges until they are deleted outside Qiln. Once this connection is removed, Qiln can no longer authenticate to observe them, so keep the deployment ID and these identifiers.',
+        )
       }
       if (connection?.managed || pending) {
         reporter.notice(

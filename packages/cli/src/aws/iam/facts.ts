@@ -1,6 +1,8 @@
+import { POLICY_KEYS } from '../permission/keys'
+import type { DiagnosticFact } from '../../diagnostic/error'
 import type { Pending } from './types'
 
-export function pendingFacts(record: Pending) {
+export function pendingFacts(record: Pending): readonly DiagnosticFact[] {
   const mutation = record.mutation
   const outcome =
     record.verified !== null
@@ -21,11 +23,19 @@ export function pendingFacts(record: Pending) {
     ['Creation identity', record.creationId],
     ['Permission region', record.region],
     ['Approved requirement', String(record.approval?.permission.version ?? 'not approved')],
-    ['Outstanding mutation', mutation?.action ?? 'none'],
+    [
+      'Outstanding mutation',
+      mutation === null ? 'none' : mutation.key === null ? mutation.action : `${mutation.action} (${mutation.key})`,
+    ],
     ['Observed outcome', outcome],
-    ['Foundation policy', record.foundation?.arn ?? 'not recorded'],
-    ['Policy ID', record.foundation?.id ?? 'not recorded'],
-    ['Policy version', record.foundation?.versionId ?? 'not recorded'],
+    ...POLICY_KEYS.flatMap((key): DiagnosticFact[] => {
+      const policy = record.policies[key]
+      return [
+        [`Policy ${key}`, policy?.arn ?? 'not recorded'],
+        [`Policy ${key} ID`, policy?.id ?? 'not recorded'],
+        [`Policy ${key} version`, policy?.versionId ?? 'not recorded'],
+      ]
+    }),
     [
       'Initial password',
       record.password === null
@@ -40,5 +50,5 @@ export function pendingFacts(record: Pending) {
     ['Root cleanup', record.cleanup],
     ['Recorded failure', record.failureCode ?? 'none'],
     ['IAM recovery', 'No replay, rollback, adoption, policy deletion, version pruning, or password reissuance was attempted.'],
-  ] as const
+  ]
 }

@@ -1,15 +1,20 @@
 /**
- * The one authored description of the network graph: which actions exist, in
+ * The one authored description of the deployment graph: which actions exist, in
  * what order they run, what identity each returns, and how many slots each
  * uses. Plans, resource tracking, receipts, and observation bounds derive
  * from it. It stays pure and SDK-free so `ec2/` keeps all provider code.
  */
 export const KIND_IDS = {
-  vpc: /^vpc-[0-9a-f]{8,17}$/,
-  subnet: /^subnet-[0-9a-f]{8,17}$/,
-  gateway: /^igw-[0-9a-f]{8,17}$/,
+  'vpc': /^vpc-[0-9a-f]{8,17}$/,
+  'subnet': /^subnet-[0-9a-f]{8,17}$/,
+  'gateway': /^igw-[0-9a-f]{8,17}$/,
   'route-table': /^rtb-[0-9a-f]{8,17}$/,
-  group: /^sg-[0-9a-f]{8,17}$/,
+  'group': /^sg-[0-9a-f]{8,17}$/,
+  'key-pair': /^key-[0-9a-f]{8,17}$/,
+  'instance': /^i-[0-9a-f]{8,17}$/,
+  'volume': /^vol-[0-9a-f]{8,17}$/,
+  'interface': /^eni-[0-9a-f]{8,17}$/,
+  'address': /^eipalloc-[0-9a-f]{8,17}$/,
 } as const
 
 export type Kind = keyof typeof KIND_IDS
@@ -28,8 +33,10 @@ interface CreationEntry {
 }
 
 /**
- * Declaration order is creation plan order. `create-route` and
- * `allow-ingress` have no removal: they die with their parent resource.
+ * Declaration order is creation plan order. `create-route`, `allow-ingress`,
+ * and `attach-volume` have no removal: they die with their parent resource.
+ * The instance precedes the data volume so a capacity refusal never leaves a
+ * volume that Qiln has no authority to delete.
  */
 export const CREATIONS = {
   'create-vpc': { slots: 'one', resource: 'vpc', receipt: KIND_IDS.vpc },
@@ -41,15 +48,34 @@ export const CREATIONS = {
   'associate-subnet': { slots: 'zone', resource: null, receipt: /^rtbassoc-[0-9a-f]{8,17}$/ },
   'create-group': { slots: 'one', resource: 'group', receipt: KIND_IDS.group },
   'allow-ingress': { slots: 'ingress', resource: null, receipt: /^sgr-[0-9a-f]{8,17}$/ },
+  'import-key-pair': { slots: 'one', resource: 'key-pair', receipt: KIND_IDS['key-pair'] },
+  'run-instances': { slots: 'one', resource: 'instance', receipt: KIND_IDS.instance },
+  'create-volume': { slots: 'one', resource: 'volume', receipt: KIND_IDS.volume },
+  'attach-volume': { slots: 'one', resource: null, receipt: null },
+  'allocate-address': { slots: 'one', resource: 'address', receipt: KIND_IDS.address },
+  'associate-address': { slots: 'one', resource: null, receipt: /^eipassoc-[0-9a-f]{8,17}$/ },
 } as const satisfies Record<string, CreationEntry>
 
 export type CreationAction = keyof typeof CREATIONS
 
 /**
+ * Creations whose resource deliberately has no removal, because Qiln holds no
+ * authority to delete it. Such a resource stays, billable, until it is deleted
+ * outside Qiln.
+ */
+export const RETAINED: readonly CreationAction[] = ['create-volume']
+
+/**
  * Declaration order is removal plan order. It is deliberately not the reverse
- * of creation order, and each entry names the creation it undoes.
+ * of creation order, and each entry names the creation it undoes. The instance
+ * is terminated, and verified gone, before the security group and subnets that
+ * its interface depends on.
  */
 export const REMOVALS = {
+  'disassociate-address': { undoes: 'associate-address' },
+  'release-address': { undoes: 'allocate-address' },
+  'terminate-instance': { undoes: 'run-instances' },
+  'delete-key-pair': { undoes: 'import-key-pair' },
   'delete-group': { undoes: 'create-group' },
   'disassociate-subnet': { undoes: 'associate-subnet' },
   'delete-subnet': { undoes: 'create-subnet' },
@@ -61,11 +87,30 @@ export const REMOVALS = {
 
 export type RemovalAction = keyof typeof REMOVALS
 export type Action = CreationAction | RemovalAction
-export type Phase = 'creation' | 'removal'
+export type Direction = 'creation' | 'removal'
+
+/**
+ * - removed: Qiln deletes it.
+ * - retained: it stays by design.
+ * - implicit: AWS creates and deletes it together with the instance.
+ */
+export type Disposition = 'removed' | 'retained' | 'implicit'
+
+/**
+ * Resources that AWS creates and deletes together with the instance. No
+ * mutation response names them, so their identities are learned from the
+ * observation that verifies the launch.
+ */
+export const IMPLICIT = {
+  parent: 'run-instances',
+  removal: 'terminate-instance',
+  kinds: ['volume', 'interface'],
+} as const satisfies { parent: CreationAction; removal: RemovalAction; kinds: readonly Kind[] }
+
 export interface ResourceDescriptor {
   kind: Kind
   create: CreationAction
-  remove: RemovalAction
+  remove: RemovalAction | null
 }
 
 function keysOf<T extends object>(record: T): (keyof T & string)[] {
@@ -80,11 +125,16 @@ export const RESOURCES: readonly ResourceDescriptor[] = CREATION_ACTIONS.flatMap
     return []
   }
   const removals = REMOVAL_ACTIONS.filter(remove => REMOVALS[remove].undoes === create)
-  if (removals.length !== 1) {
-    throw new Error(`Resource creation '${create}' must have exactly one removal.`)
+  const retained = RETAINED.includes(create)
+  if (removals.length !== (retained ? 0 : 1)) {
+    throw new Error(`Resource creation '${create}' must have ${retained ? 'no removal' : 'exactly one removal'}.`)
   }
-  return [{ kind, create, remove: removals[0] }]
+  return [{ kind, create, remove: removals.at(0) ?? null }]
 })
+
+if (REMOVALS[IMPLICIT.removal].undoes !== IMPLICIT.parent) {
+  throw new Error('The implicit resources must be removed by the removal of their parent.')
+}
 
 export function isAction(value: unknown): value is Action {
   return typeof value === 'string' && (Object.hasOwn(CREATIONS, value) || Object.hasOwn(REMOVALS, value))
@@ -98,8 +148,12 @@ function isCreation(action: Action): action is CreationAction {
   return Object.hasOwn(CREATIONS, action)
 }
 
-export function phaseOf(action: Action): Phase {
+export function directionOf(action: Action): Direction {
   return isCreation(action) ? 'creation' : 'removal'
+}
+
+export function undoes(action: Action): CreationAction | null {
+  return isCreation(action) ? null : REMOVALS[action].undoes
 }
 
 export function slotCount(action: Action, shape: Shape): number {
@@ -112,5 +166,5 @@ export function receiptPattern(action: Action): RegExp | null {
 }
 
 export function resourceCount(shape: Shape): number {
-  return RESOURCES.reduce((total, { create }) => total + slotCount(create, shape), 0)
+  return RESOURCES.reduce((total, { create }) => total + slotCount(create, shape), 0) + IMPLICIT.kinds.length
 }

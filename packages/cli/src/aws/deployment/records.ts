@@ -5,10 +5,12 @@ import { sameIdentity } from '../auth/identity'
 import { stateFailure } from '../errors'
 import { isErrorCode } from '../guards'
 import { userId } from '../host'
+import { encodeRecord } from '../json'
 import { requireOperationLock } from '../root'
 import { AWS_SPEC } from '../spec'
 import { isOperationId, type AwsIdentity } from '../types'
 import type { DeploymentSelector } from './alias'
+import { isConsistent } from './audit'
 import { requireTransition } from './transitions'
 import { isDeployment, type Deployment } from './types'
 
@@ -26,7 +28,7 @@ function ownership() {
 }
 
 export function parse(value: unknown): Deployment {
-  if (!isDeployment(value)) {
+  if (!isDeployment(value) || !isConsistent(value)) {
     return invalid()
   }
   return value
@@ -82,10 +84,7 @@ async function load(directory: Dir): Promise<Deployment> {
 
 /** Evidence is never pruned, so a record that would outgrow its bound is refused before writing. */
 async function write(directory: Dir, record: Deployment): Promise<void> {
-  const bytes = Buffer.from(`${JSON.stringify(parse(record), null, 2)}\n`)
-  if (bytes.byteLength > AWS_SPEC.limits.record) {
-    return invalid()
-  }
+  const bytes = encodeRecord(parse(record), 'AWS_DEPLOYMENT_STATE_INVALID')
   try {
     await writeChild(directory, AWS_SPEC.state.deployment, bytes, 0o600)
   } catch (error: unknown) {
@@ -113,6 +112,7 @@ export async function create(root: Dir, record: Deployment): Promise<void> {
   if (
     initial.steps.length !== 0 ||
     initial.removals.length !== 0 ||
+    initial.implicit !== null ||
     initial.latest !== null ||
     initial.termination !== 'confirmed'
   ) {

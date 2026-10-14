@@ -1,15 +1,17 @@
 import { rm } from 'node:fs/promises'
 import { basename } from 'node:path'
+import { AWS_SPEC } from '../spec'
 import { InstallerError } from '../../diagnostic/error'
-import { inspectChild, openChildDir, readChild, writeChild, type Dir } from '../../state/files'
 import { sameIdentity } from '../auth/identity'
 import { Session } from '../auth/session'
+import { userId } from '../host'
 import { stateFailure } from '../errors'
 import { isErrorCode } from '../guards'
 import { isPending, type Pending } from '../iam/types'
-import { AWS_SPEC } from '../spec'
-import { userId } from '../host'
-import { isConnection, validName, type AwsConnection } from '../types'
+import { encodeRecord, sameJson } from '../json'
+import { inspectChild, openChildDir, readChild, writeChild, type Dir } from '../../state/files'
+import { isConnection, validName, type AwsConnection, type PolicyBinding } from '../types'
+import { POLICY_KEYS, bindingEntries, type PolicyBindings, type PolicyKey } from '../permission/keys'
 
 export async function names(directory: Dir): Promise<string[]> {
   const entries = await directory.list()
@@ -65,6 +67,26 @@ export async function pending(directory: Dir): Promise<Pending | null> {
   return value
 }
 
+function sameBinding(left: PolicyBinding, right: PolicyBinding): boolean {
+  return left.arn === right.arn && left.id === right.id
+}
+
+/**
+ * An operation may retain identities for keys the connection has not recorded
+ * yet, but it may never contradict a recorded binding.
+ */
+function contradicts(recorded: PolicyBindings<PolicyBinding>, key: PolicyKey, policy: PolicyBinding | null): boolean {
+  const bound = recorded[key]
+  return policy !== null && bound !== undefined && !sameBinding(bound, policy)
+}
+
+function keepsBindings(previous: PolicyBindings<PolicyBinding>, next: PolicyBindings<PolicyBinding>): boolean {
+  return bindingEntries(previous).every(([key, policy]) => {
+    const kept = next[key]
+    return kept !== undefined && sameBinding(kept, policy)
+  })
+}
+
 function requireBindings(connection: AwsConnection | null, operation: Pending): void {
   if (connection === null) {
     if (operation.kind === 'maintain') {
@@ -86,20 +108,13 @@ function requireBindings(connection: AwsConnection | null, operation: Pending): 
       code: 'AWS_PERMISSION_STATE_INVALID',
     })
   }
-  const approvedPolicy = operation.approval?.inspection.before?.prior.policy
-  if (
-    approvedPolicy &&
-    (managed.foundation?.arn !== approvedPolicy.arn || managed.foundation.id !== approvedPolicy.id)
-  ) {
+  const approved = operation.approval?.inspection.before?.policies
+  if (approved && POLICY_KEYS.some(key => contradicts(managed.policies, key, approved[key].policy))) {
     throw new InstallerError({
       code: 'AWS_PERMISSION_STATE_INVALID',
     })
   }
-  if (
-    operation.foundation !== null &&
-    managed.foundation !== null &&
-    (operation.foundation.arn !== managed.foundation.arn || operation.foundation.id !== managed.foundation.id)
-  ) {
+  if (POLICY_KEYS.some(key => contradicts(managed.policies, key, operation.policies[key]))) {
     throw new InstallerError({
       code: 'AWS_PERMISSION_STATE_INVALID',
     })
@@ -107,9 +122,12 @@ function requireBindings(connection: AwsConnection | null, operation: Pending): 
   if (
     operation.kind === 'onboard' &&
     (operation.verified === null ||
-      managed.foundation?.arn !== operation.foundation?.arn ||
-      managed.foundation?.id !== operation.foundation?.id ||
-      JSON.stringify(managed.verified) !== JSON.stringify(operation.verified))
+      POLICY_KEYS.some(key => {
+        const policy = operation.policies[key]
+        const bound = managed.policies[key]
+        return policy === null || bound === undefined || !sameBinding(bound, policy)
+      }) ||
+      !sameJson(managed.verified, operation.verified))
   ) {
     throw new InstallerError({
       code: 'AWS_PERMISSION_STATE_INVALID',
@@ -221,16 +239,14 @@ export async function save(directory: Dir, connection: AwsConnection): Promise<v
         connection.managed !== null &&
         (previous.managed.creationId !== connection.managed.creationId ||
           previous.managed.permissionRegion !== connection.managed.permissionRegion ||
-          (previous.managed.foundation !== null &&
-            (previous.managed.foundation.arn !== connection.managed.foundation?.arn ||
-              previous.managed.foundation.id !== connection.managed.foundation?.id)))))
+          !keepsBindings(previous.managed.policies, connection.managed.policies))))
   ) {
     throw new InstallerError({
       code: 'AWS_IDENTITY_MISMATCH',
     })
   }
   try {
-    await writeChild(directory, AWS_SPEC.state.connection, Buffer.from(`${JSON.stringify(connection, null, 2)}\n`), 0o600)
+    await writeChild(directory, AWS_SPEC.state.connection, encodeRecord(connection, 'AWS_STATE_INVALID'), 0o600)
   } catch (error: unknown) {
     throw stateFailure(error)
   }

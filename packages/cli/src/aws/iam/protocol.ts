@@ -1,6 +1,7 @@
 import { hasKeys, isRecord } from '../guards'
 import { COMMON_CODES, replyGuard, type ChildReply } from '../child/protocol'
-import { isPolicy, type PolicyIdentity } from '../foundation/policy'
+import { isPolicyKey, type PolicyMap } from '../permission/keys'
+import { isIdentities, type PolicyIdentity } from '../permission/policy'
 import { isOperationId, validRegion } from '../types'
 import {
   isInspection,
@@ -33,10 +34,9 @@ export type Result =
     }
   | {
       kind: 'verified'
-      policy: PolicyIdentity
+      policies: PolicyMap<PolicyIdentity>
     }
 
-/** Failures specific to this child, in addition to the common ones. */
 export const FAILURES = [
   'AWS_ROOT_REQUIRED',
   'AWS_ROOT_MFA_REQUIRED',
@@ -94,17 +94,18 @@ function isResult(value: unknown): value is Result {
       )
     case 'policy':
       return (
-        (value.action === 'create-foundation' ||
-          value.action === 'attach-foundation' ||
-          value.action === 'replace-foundation') &&
-        isMutationResult(value, value.action)
+        (value.action === 'create-policy' ||
+          value.action === 'attach-policy' ||
+          value.action === 'replace-policy') &&
+        isPolicyKey(value.key) &&
+        isMutationResult(value, value.action, value.key)
       )
     case 'password':
       return isMutationResult(value, 'password')
     case 'readiness':
       return hasKeys(value, ['kind', 'readiness']) && isReadiness(value.readiness)
     case 'verified':
-      return hasKeys(value, ['kind', 'policy']) && isPolicy(value.policy)
+      return hasKeys(value, ['kind', 'policies']) && isIdentities(value.policies)
     default:
       return false
   }

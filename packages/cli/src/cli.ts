@@ -109,7 +109,7 @@ export async function run(argumentsList: readonly string[]): Promise<number> {
             command = 'aws'
             reporter = new Reporter({ color })
             assertUnprivilegedInvocation()
-            reporter.header('aws deployment create', 'approved network creation')
+            reporter.header('aws deployment create', 'proposed GPU host preview')
             await aws.deployment.create(options, reporter)
           },
           async status(options, color) {

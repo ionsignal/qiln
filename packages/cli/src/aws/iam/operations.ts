@@ -2,19 +2,19 @@ import { IAMClient } from '@aws-sdk/client-iam'
 import { GetCallerIdentityCommand, STSClient } from '@aws-sdk/client-sts'
 import { InstallerError } from '../../diagnostic/error'
 import { configuration, credentials, expiresAt } from '../auth/credentials'
-import { isSpec } from '../foundation/policy'
-import { sameJson } from '../json'
+import { POLICY_KEYS, policyMap, type PolicyKey } from '../permission/keys'
+import { isSpec } from '../permission/spec'
 import { AWS_SPEC } from '../spec'
 import type { AwsConnection } from '../types'
 import { Iam } from './client'
 import { childContext } from './journal'
 import { retainPassword } from './password'
 import type { Request, Result } from './protocol'
-import { authorize } from './transitions'
+import { authorize, expectation, plan, position } from './transitions'
 import {
   isRootIdentity,
   type Binding,
-  type FoundationChange,
+  type Mutation,
   type MutationResult,
   type Pending,
   type RootIdentity,
@@ -58,28 +58,8 @@ function operatorBinding(record: Pending): Binding {
   }
 }
 
-function foundationChange(record: Pending): FoundationChange {
-  const mutation = record.mutation
-  const returned = mutation?.returned
-  if (!mutation?.before || returned?.kind !== 'policy' || returned.action !== mutation.action) {
-    return invalid()
-  }
-  const action =
-    mutation.action === 'create-foundation'
-      ? 'create'
-      : mutation.action === 'attach-foundation'
-        ? 'attach'
-        : mutation.action === 'replace-foundation'
-          ? 'replace'
-          : null
-  if (action === null) {
-    return invalid()
-  }
-  return {
-    action,
-    before: mutation.before,
-    policy: returned.policy,
-  }
+function policyKey(mutation: Mutation): PolicyKey {
+  return mutation.key ?? invalid()
 }
 
 async function inspect(
@@ -93,7 +73,7 @@ async function inspect(
   if (record.kind === 'onboard') {
     const intended = target(record, identity.accountId)
     await iam.absent(intended)
-    await iam.foundationAbsent(intended)
+    await iam.policiesAbsent(intended)
     return {
       kind: 'inspection',
       inspection: {
@@ -110,7 +90,16 @@ async function inspect(
   if (!connection?.managed) {
     return invalid()
   }
-  const before = await iam.inspectFoundation(operatorBinding(record), connection.managed.foundation)
+  const bound = connection.managed.policies
+  const before = await iam.inspect(operatorBinding(record), bound)
+  // A bound policy that is detached is an inconsistency, not something to
+  // silently approve and later report as verified. A key the connection has
+  // not enrolled is already required to be absent from IAM by the inspection.
+  if (POLICY_KEYS.some(key => bound[key] !== undefined && !before.policies[key].attached)) {
+    throw new InstallerError({
+      code: 'AWS_BOOTSTRAP_CONFLICT',
+    })
+  }
   return {
     kind: 'inspection',
     inspection: {
@@ -144,6 +133,7 @@ async function mutate(iam: Iam, record: Pending, signal: AbortSignal): Promise<M
     }
   }
   const operator = operatorBinding(record)
+  const index = position(record)
   switch (mutation.action) {
     case 'attach-signin':
       await iam.attach(operator, signIn)
@@ -157,40 +147,37 @@ async function mutate(iam: Iam, record: Pending, signal: AbortSignal): Promise<M
         kind: 'done',
         action: 'grant-self',
       }
-    case 'create-foundation':
-      if (!mutation.before) {
-        return invalid()
-      }
+    case 'create-policy': {
+      const key = policyKey(mutation)
       return {
         kind: 'policy',
-        action: 'create-foundation',
-        policy: await iam.createFoundation(operator, approval.permission, mutation.before),
+        action: 'create-policy',
+        key,
+        policy: await iam.createPolicy(operator, approval.permission, key, expectation(record, index)),
       }
-    case 'attach-foundation':
-      if (!mutation.before) {
-        return invalid()
-      }
+    }
+    case 'attach-policy': {
+      const key = policyKey(mutation)
       return {
         kind: 'policy',
-        action: 'attach-foundation',
-        policy: await iam.attachFoundation(operator, mutation.before),
+        action: 'attach-policy',
+        key,
+        policy: await iam.attachPolicy(operator, key, expectation(record, index)),
       }
-    case 'replace-foundation':
-      if (!mutation.before) {
-        return invalid()
-      }
+    }
+    case 'replace-policy': {
+      const key = policyKey(mutation)
       return {
         kind: 'policy',
-        action: 'replace-foundation',
-        policy: await iam.replaceFoundation(operator, approval.permission, mutation.before),
+        action: 'replace-policy',
+        key,
+        policy: await iam.replacePolicy(operator, approval.permission, key, expectation(record, index)),
       }
+    }
     case 'password':
-      if (!record.foundation) {
-        return invalid()
-      }
       return {
         kind: 'password',
-        receipt: await iam.password(operator, signIn, record.foundation, receipt =>
+        receipt: await iam.password(operator, signIn, expectation(record, index).policies, receipt =>
           retainPassword(record.id, mutation.id, receipt, signal),
         ),
       }
@@ -205,6 +192,7 @@ async function verifyMutation(iam: Iam, record: Pending): Promise<MutationResult
     return invalid()
   }
   const operator = operatorBinding(record)
+  const index = position(record)
   switch (mutation.action) {
     case 'create-user':
       if (returned.kind !== 'operator') {
@@ -224,16 +212,21 @@ async function verifyMutation(iam: Iam, record: Pending): Promise<MutationResult
       }
       await iam.verifyStage(operator, signIn, 'self')
       break
-    case 'create-foundation':
-    case 'attach-foundation':
-    case 'replace-foundation':
-      await iam.verifyFoundationChange(operator, foundationChange(record))
+    case 'create-policy':
+    case 'attach-policy':
+    case 'replace-policy': {
+      const key = policyKey(mutation)
+      await iam.verifyPermissions(operator, expectation(record, index + 1), {
+        key,
+        before: expectation(record, index).policies[key],
+      })
       break
+    }
     case 'password':
-      if (returned.kind !== 'password' || !record.foundation) {
+      if (returned.kind !== 'password') {
         return invalid()
       }
-      await iam.verifyFoundation(operator, signIn, record.foundation)
+      await iam.verifyPolicies(operator, signIn, expectation(record, index).policies)
       await iam.verifyPassword(operator, returned.receipt)
       break
   }
@@ -241,39 +234,22 @@ async function verifyMutation(iam: Iam, record: Pending): Promise<MutationResult
 }
 
 async function verify(iam: Iam, record: Pending): Promise<Result> {
-  const approval = record.approval
-  const policy = record.foundation
-  if (!approval || !policy) {
+  if (!record.approval) {
     return invalid()
   }
   const operator = operatorBinding(record)
+  const expected = expectation(record, plan(record).length)
   if (record.kind === 'onboard') {
     if (!record.password) {
       return invalid()
     }
-    await iam.verifyOnboarding(operator, approval.inspection.signIn, policy, record.password)
-  } else if (record.mutation !== null) {
-    const expected = foundationChange(record)
-    if (expected.action === 'create') {
-      return invalid()
-    }
-    await iam.verifyFoundationChange(operator, expected)
+    await iam.verifyOnboarding(operator, expected.signIn, expected.policies, record.password)
   } else {
-    const before = approval.inspection.before
-    if (!before?.prior.policy) {
-      return invalid()
-    }
-    const actual = await iam.inspectFoundation(operator, before.prior.policy)
-    if (!sameJson(actual, before)) {
-      return invalid()
-    }
-  }
-  if (policy.document !== approval.permission.document || policy.sha256 !== approval.permission.sha256) {
-    return invalid()
+    await iam.verifyPermissions(operator, expected, null)
   }
   return {
     kind: 'verified',
-    policy,
+    policies: policyMap(key => expected.policies[key].policy ?? invalid()),
   }
 }
 
@@ -323,7 +299,7 @@ export async function execute(request: Request): Promise<Result> {
         return await verifyMutation(iam, record)
       case 'readiness': {
         const approval = record.approval
-        if (!approval || !record.foundation || !record.password) {
+        if (!approval || !record.password) {
           return invalid()
         }
         return {
@@ -331,7 +307,7 @@ export async function execute(request: Request): Promise<Result> {
           readiness: await iam.readiness(
             operatorBinding(record),
             approval.inspection.signIn,
-            record.foundation,
+            expectation(record, plan(record).length).policies,
             record.password,
           ),
         }

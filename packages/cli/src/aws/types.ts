@@ -1,5 +1,13 @@
 import { AWS_RECORD_VERSION } from './spec'
 import { hasKeys, isRecord } from './guards'
+import {
+  POLICY_KEYS,
+  POLICY_PATH,
+  bindingEntries,
+  enrolledKeys,
+  isPolicyKey,
+  type PolicyBindings,
+} from './permission/keys'
 
 export type LoginFlow = 'browser' | 'remote'
 
@@ -19,18 +27,28 @@ export interface PolicyBinding {
   id: string
 }
 
-export interface PermissionMetadata {
-  version: number
+export interface PolicyVerification {
   policyVersion: string
   sha256: string
+}
+
+/**
+ * `sha256` is the digest of the complete verified set. Each policy keeps its own
+ * verified default version and document digest beside it. Keys added after a
+ * verification are absent until a later verification enrolls them.
+ */
+export interface PermissionMetadata {
+  version: number
+  sha256: string
+  policies: PolicyBindings<PolicyVerification>
   verifiedAt: string
 }
 
 export interface ManagedOperator {
   creationId: string
   permissionRegion: string
-  foundation: PolicyBinding | null
-  verified: PermissionMetadata | null
+  policies: PolicyBindings<PolicyBinding>
+  verified: PermissionMetadata
 }
 
 export interface AwsConnection {
@@ -102,6 +120,30 @@ export function isPolicyBinding(value: unknown): value is PolicyBinding {
   )
 }
 
+function isPolicyVerification(value: unknown): value is PolicyVerification {
+  return (
+    isRecord(value) &&
+    hasKeys(value, ['policyVersion', 'sha256']) &&
+    typeof value.policyVersion === 'string' &&
+    /^v[1-9][0-9]{0,9}$/.test(value.policyVersion) &&
+    typeof value.sha256 === 'string' &&
+    /^[a-f0-9]{64}$/.test(value.sha256)
+  )
+}
+
+/**
+ * Durable records tolerate key-set growth: `foundation` is required, and any
+ * other present key must be a known one.
+ */
+function isBindings<T>(value: unknown, isEntry: (entry: unknown) => entry is T): value is PolicyBindings<T> {
+  return (
+    isRecord(value) &&
+    Object.keys(value).every(key => isPolicyKey(key)) &&
+    isEntry(value.foundation) &&
+    POLICY_KEYS.every(key => !Object.hasOwn(value, key) || isEntry(value[key]))
+  )
+}
+
 /**
  * Last verification remains readable when permission requirements or tooling
  * pins change. It is metadata, not a reconstruction of historical authority.
@@ -109,14 +151,13 @@ export function isPolicyBinding(value: unknown): value is PolicyBinding {
 export function isPermissionMetadata(value: unknown): value is PermissionMetadata {
   return (
     isRecord(value) &&
-    hasKeys(value, ['version', 'policyVersion', 'sha256', 'verifiedAt']) &&
+    hasKeys(value, ['version', 'sha256', 'policies', 'verifiedAt']) &&
     typeof value.version === 'number' &&
     Number.isSafeInteger(value.version) &&
     value.version >= 1 &&
-    typeof value.policyVersion === 'string' &&
-    /^v[1-9][0-9]{0,9}$/.test(value.policyVersion) &&
     typeof value.sha256 === 'string' &&
     /^[a-f0-9]{64}$/.test(value.sha256) &&
+    isBindings(value.policies, isPolicyVerification) &&
     isTimestamp(value.verifiedAt)
   )
 }
@@ -124,13 +165,13 @@ export function isPermissionMetadata(value: unknown): value is PermissionMetadat
 export function isManagedOperator(value: unknown): value is ManagedOperator {
   return (
     isRecord(value) &&
-    hasKeys(value, ['creationId', 'permissionRegion', 'foundation', 'verified']) &&
+    hasKeys(value, ['creationId', 'permissionRegion', 'policies', 'verified']) &&
     isOperationId(value.creationId) &&
     typeof value.permissionRegion === 'string' &&
     validRegion(value.permissionRegion) &&
-    (value.foundation === null || isPolicyBinding(value.foundation)) &&
-    (value.verified === null || isPermissionMetadata(value.verified)) &&
-    (value.verified === null || value.foundation !== null)
+    isBindings(value.policies, isPolicyBinding) &&
+    isPermissionMetadata(value.verified) &&
+    enrolledKeys(value.policies).join() === enrolledKeys(value.verified.policies).join()
   )
 }
 
@@ -152,11 +193,13 @@ export function isConnection(value: unknown): value is AwsConnection {
   if (value.managed === null) {
     return true
   }
+  const managed = value.managed
+  const accountId = value.identity.accountId
   const operatorName = `qiln-${value.name}`
   return (
-    value.identity.arn === `arn:aws:iam::${value.identity.accountId}:user/qiln/operators/${operatorName}` &&
-    (value.managed.foundation === null ||
-      value.managed.foundation.arn ===
-        `arn:aws:iam::${value.identity.accountId}:policy/qiln/foundation/${operatorName}-foundation`)
+    value.identity.arn === `arn:aws:iam::${accountId}:user/qiln/operators/${operatorName}` &&
+    bindingEntries(managed.policies).every(
+      ([key, policy]) => policy.arn === `arn:aws:iam::${accountId}:policy${POLICY_PATH}${operatorName}-${key}`,
+    )
   )
 }

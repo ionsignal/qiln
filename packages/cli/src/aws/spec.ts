@@ -5,7 +5,7 @@ export const AWS_RECORD_VERSION = Object.freeze({
 
 export const AWS_SPEC = Object.freeze({
   cliVersion: '2.37.9',
-  sdkVersion: '3.1146.0',
+  sdkVersion: '3.1150.0',
   defaultName: 'default',
   defaultRegion: 'us-west-2',
   profile: 'qiln',
@@ -33,12 +33,72 @@ export const AWS_SPEC = Object.freeze({
     maximumZones: 6,
     maximumSteps: 64,
     maximumRefusals: 3,
-    requestTimeoutMs: 120_000,
+    // Instance start and termination, and the interface deletion that follows
+    // it, outlast network resources. These budgets are provisional until an
+    // operator walkthrough measures them. The poll must stay inside the child
+    // request deadline minus its 5 second reserve.
+    requestTimeoutMs: 300_000,
     maximumPages: 20,
     observation: Object.freeze({
-      timeoutMs: 60_000,
-      delayMs: 2_000,
-      attempts: 30,
+      timeoutMs: 240_000,
+      delayMs: 3_000,
+      attempts: 80,
+    }),
+  }),
+  compute: Object.freeze({
+    instanceType: 'g7e.12xlarge',
+    storage: Object.freeze({
+      volumeType: 'gp3',
+      iops: 3_000,
+      throughput: 250,
+      rootSizeGiB: 75,
+      dataSizeGiB: 250,
+    }),
+    launch: Object.freeze({
+      count: 1,
+      purchase: 'on-demand',
+      dataDeviceName: '/dev/sdf',
+      rootDeleteOnTermination: true,
+      dataDeleteOnTermination: false,
+      metadata: Object.freeze({
+        httpEndpoint: 'enabled',
+        httpTokens: 'required',
+        httpPutResponseHopLimit: 1,
+        httpProtocolIpv6: 'disabled',
+        instanceMetadataTags: 'disabled',
+      }),
+      network: Object.freeze({
+        deviceIndex: 0,
+        networkCardIndex: 0,
+        associatePublicIp: false,
+        deleteOnTermination: true,
+      }),
+      key: Object.freeze({
+        algorithm: 'ed25519',
+        passphrase: 'none',
+        protection: 'owner-only directory 0700, file 0600',
+      }),
+      elasticIp: Object.freeze({
+        allowReassociation: false,
+      }),
+      tagged: Object.freeze(['instance', 'volume', 'network-interface', 'key-pair', 'elastic-ip']),
+    }),
+    image: Object.freeze({
+      name: 'Deep Learning Base OSS Nvidia Driver GPU AMI (Ubuntu 26.04) 20261006',
+      release: '20261006',
+      owner: 'amazon',
+      architecture: 'x86_64',
+      documentation: 'https://docs.aws.amazon.com/dlami/latest/devguide/aws-deep-learning-ami-gpubaseoss-ul2604-2026-10-08.html',
+      documented: Object.freeze({
+        os: 'Ubuntu 26.04.1 LTS',
+        driver: 'NVIDIA 595.91.07',
+        cuda: 'CUDA 13.3 at /usr/local/cuda-13.3/',
+        kernel: '7.0.0-1014-aws',
+      }),
+    }),
+    discovery: Object.freeze({
+      maximumDevices: 32,
+      maximumZones: 32,
     }),
   }),
   state: {
@@ -54,10 +114,12 @@ export const AWS_SPEC = Object.freeze({
     config: 'config',
     credentials: 'credentials',
     cache: 'cache',
+    publicKey: 'admin.pub',
   },
   limits: {
     record: 65_536,
     config: 65_536,
     cache: 262_144,
+    publicKey: 4_096,
   },
 })

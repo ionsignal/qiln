@@ -1,4 +1,5 @@
-import { expectation, matches, resources } from '../../../aws/deployment/topology'
+import { expectation, matches } from '../../../aws/deployment/expect'
+import { resources } from '../../../aws/deployment/topology'
 import type { Observation } from '../../../aws/deployment/types'
 import { requireAwsHost } from '../../../aws/host'
 import type { AwsDeploymentOptions } from '../../../input'
@@ -9,12 +10,14 @@ import { reportDeployment } from './report'
 import { authenticateDeployer, openTarget } from './shared'
 
 function reportCandidates(reporter: Reporter, candidates: readonly Observation[]): void {
-  reporter.section('Tagged candidate VPCs')
+  reporter.section('Tagged candidate resources')
   if (candidates.length === 0) {
-    reporter.info('No tagged VPC was listed. An empty result does not prove that none exists.')
+    reporter.info('No tagged resource was listed. An empty result does not prove that none exists.')
   }
   for (const candidate of candidates) {
-    reporter.facts([['Candidate', candidate.resources.map(resource => `${resource.id} · ${resource.state}`).join(', ')]])
+    reporter.facts([
+      ['Candidate', candidate.resources.map(resource => `${resource.kind} ${resource.id} · ${resource.state}`).join(', ')],
+    ])
   }
   reporter.notice('Candidates are displayed only. Qiln never adopts or deletes them, or treats an empty result as proof.')
 }
@@ -39,7 +42,7 @@ export async function inspect(options: AwsDeploymentOptions, reporter: Reporter)
       const candidates = await deployer.candidates(signal)
       reportDeployment(reporter, deployer.record)
       reportCandidates(reporter, candidates)
-      return 'No VPC identity was retained; candidates were displayed only.'
+      return 'No resource identity was retained; candidates were displayed only.'
     })
   })
   reporter.summary(message)

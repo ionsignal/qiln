@@ -1,5 +1,6 @@
-import { InstallerError } from '../diagnostic/error'
+import { InstallerError, type InstallerErrorCode } from '../diagnostic/error'
 import { isRecord } from './guards'
+import { AWS_SPEC } from './spec'
 
 function invalid(): never {
   throw new InstallerError({
@@ -32,6 +33,20 @@ export function canonical(value: unknown): string {
  */
 export function sameJson(left: unknown, right: unknown): boolean {
   return canonical(left) === canonical(right)
+}
+
+/**
+ * Evidence is never pruned, so a record that would outgrow its read bound is
+ * refused before writing rather than persisted unreadable.
+ */
+export function encodeRecord(value: unknown, code: InstallerErrorCode): Buffer {
+  const bytes = Buffer.from(`${JSON.stringify(value, null, 2)}\n`)
+  if (bytes.byteLength > AWS_SPEC.limits.record) {
+    throw new InstallerError({
+      code,
+    })
+  }
+  return bytes
 }
 
 /**

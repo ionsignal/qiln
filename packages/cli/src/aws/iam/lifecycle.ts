@@ -5,14 +5,15 @@ import { InstallerError } from '../../diagnostic/error'
 import { openChildDir, type Dir } from '../../state/files'
 import { sameIdentity } from '../auth/identity'
 import { removeAuth } from '../auth/session'
-import * as connections from '../connection/records'
-import type { PolicyIdentity } from '../foundation/policy'
 import { userId } from '../host'
 import { sameJson } from '../json'
-import { AWS_SPEC } from '../spec'
-import type { AwsConnection } from '../types'
 import { read, requireLock, write } from './journal'
+import { AWS_SPEC } from '../spec'
+import { POLICY_KEYS, bindingEntries, policyMap, type PolicyBindings, type PolicyMap } from '../permission/keys'
+import * as connections from '../connection/records'
 import type { Pending } from './types'
+import type { AwsConnection, PolicyBinding } from '../types'
+import type { PolicyIdentity } from '../permission/policy'
 
 function invalid(): never {
   throw new InstallerError({
@@ -52,7 +53,7 @@ async function begin(directory: Dir, name: string, region: string, saved: AwsCon
     accountId: saved?.identity.accountId ?? null,
     creationId: saved?.managed?.creationId ?? id,
     operator: saved === null ? null : { ...saved.identity },
-    foundation: null,
+    policies: policyMap(() => null),
     approval: null,
     mutation: null,
     password: null,
@@ -109,11 +110,18 @@ export async function cleanRoot(directory: Dir, operationId: string): Promise<vo
   }
 }
 
-function policyBinding(policy: PolicyIdentity) {
-  return {
-    arn: policy.arn,
-    id: policy.id,
-  }
+function bindings(policies: PolicyMap<PolicyIdentity | null>): PolicyMap<PolicyBinding> {
+  return policyMap(key => {
+    const policy = policies[key]
+    return policy === null ? invalid() : { arn: policy.arn, id: policy.id }
+  })
+}
+
+function keepsBindings(saved: PolicyBindings<PolicyBinding>, retained: PolicyMap<PolicyIdentity | null>): boolean {
+  return bindingEntries(saved).every(([key, policy]) => {
+    const identity = retained[key]
+    return identity !== null && identity.arn === policy.arn && identity.id === policy.id
+  })
 }
 
 export async function publish(directory: Dir, record: Pending): Promise<AwsConnection> {
@@ -123,8 +131,8 @@ export async function publish(directory: Dir, record: Pending): Promise<AwsConne
     !actual ||
     !sameJson(actual, record) ||
     !record.operator ||
-    !record.foundation ||
     !record.verified ||
+    POLICY_KEYS.some(key => record.policies[key] === null) ||
     record.failureCode !== null ||
     record.termination !== 'confirmed' ||
     record.cleanup !== 'completed' ||
@@ -138,7 +146,8 @@ export async function publish(directory: Dir, record: Pending): Promise<AwsConne
     (!saved ||
       !sameIdentity(saved.identity, record.operator) ||
       saved.managed?.creationId !== record.creationId ||
-      saved.managed.permissionRegion !== record.region)
+      saved.managed.permissionRegion !== record.region ||
+      !keepsBindings(saved.managed.policies, record.policies))
   ) {
     return invalid()
   }
@@ -151,8 +160,8 @@ export async function publish(directory: Dir, record: Pending): Promise<AwsConne
     managed: {
       creationId: record.creationId,
       permissionRegion: record.region,
-      foundation: policyBinding(record.foundation),
-      verified: { ...record.verified },
+      policies: bindings(record.policies),
+      verified: structuredClone(record.verified),
     },
   }
   await connections.save(directory, connection)
@@ -181,17 +190,20 @@ export async function removePending(directory: Dir, record: Pending): Promise<vo
       record.failureCode !== null ||
       !record.verified ||
       !record.operator ||
-      !record.foundation ||
       !saved ||
       !sameIdentity(saved.identity, record.operator) ||
       saved.managed?.creationId !== record.creationId ||
       saved.managed.permissionRegion !== record.region ||
-      !sameJson(saved.managed.foundation, policyBinding(record.foundation)) ||
+      !sameJson(saved.managed.policies, bindings(record.policies)) ||
       !sameJson(saved.managed.verified, record.verified)
     ) {
       return invalid()
     }
-  } else if (record.mutation !== null || record.password !== null || record.foundation !== null) {
+  } else if (
+    record.mutation !== null ||
+    record.password !== null ||
+    POLICY_KEYS.some(key => record.policies[key] !== null)
+  ) {
     return invalid()
   }
   await unlink(directory.child(AWS_SPEC.state.pending))

@@ -10,6 +10,7 @@ import { pendingFacts } from '../../aws/iam/facts'
 import { requireAuthentication } from '../../aws/auth/identity'
 import { removeAuth, Session } from '../../aws/auth/session'
 import type { Pending } from '../../aws/iam/types'
+import { POLICY_KEYS } from '../../aws/permission/keys'
 import { withAwsOperation, type AwsState } from '../../aws/root'
 import { AWS_SPEC } from '../../aws/spec'
 import type { AwsAuthentication, AwsConnection, AwsIdentity } from '../../aws/types'
@@ -154,20 +155,25 @@ export function reportPermissionMetadata(reporter: Reporter, connection: AwsConn
     reporter.info('This connection is authentication-only. No Qiln-managed IAM ownership is inferred from its name.')
     return
   }
+  const verified = managed.verified
   reporter.row('verified', 'Permission region', managed.permissionRegion)
-  reporter.row('verified', 'Foundation binding', managed.foundation?.arn ?? 'not enrolled')
-  if (managed.foundation) {
-    reporter.row('verified', 'Policy identity', managed.foundation.id)
+  for (const key of POLICY_KEYS) {
+    const policy = managed.policies[key]
+    if (policy === undefined) {
+      reporter.row('working', `${key} policy`, 'not enrolled; review required')
+      continue
+    }
+    reporter.row('verified', `${key} policy`, `${policy.arn} (ID ${policy.id})`)
   }
-  if (managed.verified) {
-    reporter.row('verified', 'Recorded requirement', String(managed.verified.version))
-    reporter.row('verified', 'Recorded version', managed.verified.policyVersion)
-    reporter.row('verified', 'Recorded SHA-256', managed.verified.sha256)
-    reporter.row('verified', 'Last verification', managed.verified.verifiedAt)
-  } else {
-    reporter.space()
-    reporter.info('No completed foundation verification is recorded.')
+  reporter.row('verified', 'Recorded requirement', String(verified.version))
+  reporter.row('verified', 'Recorded SHA-256', verified.sha256)
+  for (const key of POLICY_KEYS) {
+    const policy = verified.policies[key]
+    if (policy !== undefined) {
+      reporter.row('verified', `${key} version`, `${policy.policyVersion} · ${policy.sha256}`)
+    }
   }
+  reporter.row('verified', 'Last verification', verified.verifiedAt)
   reporter.space()
   reporter.info('These are retained bindings and last-verified metadata, not a fresh inspection of live IAM.')
 }

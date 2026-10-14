@@ -96,13 +96,13 @@ export const awsIamDiagnostics = Object.freeze({
     'Do not replay mutations, recreate the operator, or assume that IAM changes were rolled back.',
   ),
   AWS_PERMISSION_POLICY_TOO_LARGE: entry(
-    'Foundation policy exceeds its supported document boundary',
-    'The completed customer-managed foundation policy must contain supported canonical text and fit the 6,144-character policy limit before approval.',
+    'Managed policy exceeds its supported document boundary',
+    'Each completed customer-managed policy must contain supported canonical text and fit the 6,144-character policy limit before approval.',
     'Maintainers must review the complete policy document without weakening authorization constraints to bypass the limit.',
-    'Do not move the foundation grant into the operator self-service inline policy.',
+    'Do not move a managed-policy grant into the operator self-service inline policy.',
   ),
   AWS_PERMISSION_VERSION_LIMIT: entry(
-    'Foundation policy has reached its version limit',
+    'A managed policy has reached its version limit',
     'A required whole-document replacement would exceed the five-version managed-policy limit. A known full inspected version list stops maintenance before approval or mutation-intent persistence; execution independently rechecks approved preconditions and capacity. Five retained versions do not block matching-content no-change verification. Qiln does not prune versions, select an older default, or roll back IAM changes.',
     'Review the recorded policy identity and version history through an explicitly approved administrator procedure.',
     'Do not automatically prune policy history or retry the replacement.',

@@ -1,9 +1,9 @@
+import { AWS_SPEC } from '../spec'
 import { isInstallerErrorCode, type InstallerErrorCode } from '../../diagnostic/error'
-import { policyArn } from '../foundation/policy'
+import { policyArn } from '../permission/policy'
 import { hasKeys, isRecord } from '../guards'
 import { sameJson } from '../json'
 import { operatorArn } from '../operator'
-import { AWS_SPEC } from '../spec'
 import {
   isAccountId,
   isIdentity,
@@ -18,7 +18,18 @@ import {
   type PolicyBinding,
 } from '../types'
 import { subnetCidr, validCidr, validSource } from './cidr'
-import { isAction, isKind, KIND_IDS, phaseOf, receiptPattern, resourceCount, slotCount, type Action, type Kind } from './graph'
+import {
+  directionOf,
+  isAction,
+  isKind,
+  KIND_IDS,
+  receiptPattern,
+  resourceCount,
+  slotCount,
+  type Action,
+  type Kind,
+} from './graph'
+import { isHostPlan, type HostPlan } from './host/types'
 import { ingressRules, shapeOf } from './topology'
 
 export interface Tag {
@@ -48,6 +59,13 @@ export interface Ingress {
   cidr: string
 }
 
+export interface HostIntent {
+  plan: HostPlan
+  keyName: string
+  launchToken: string
+  volumeToken: string
+}
+
 export interface Approval {
   approvedAt: string
   approvedBy: AwsIdentity
@@ -57,13 +75,14 @@ export interface Approval {
   ingress: Ingress[]
   tags: Tag[]
   permission: PermissionMetadata
+  host: HostIntent
 }
 
 /**
- * `not-attempted` and `rejected` are definite refusals of one call, `blocked`
+ * `unattempted` and `rejected` are definite refusals of one call, `blocked`
  * is a removal refused for dependencies, and `uncertain` keeps any effect open.
  */
-export type FailureOutcome = 'not-attempted' | 'rejected' | 'blocked' | 'uncertain'
+export type FailureOutcome = 'unattempted' | 'rejected' | 'blocked' | 'uncertain'
 
 export interface Failure {
   outcome: FailureOutcome
@@ -103,18 +122,37 @@ export interface ObservedResource {
   state: ObservedState
 }
 
+/**
+ * The root volume and primary interface that AWS created with the instance.
+ * No mutation response names them, so they are observation evidence.
+ */
+export interface Implicit {
+  rootVolumeId: string
+  interfaceId: string
+}
+
+export interface ImplicitEvidence extends Implicit {
+  observedAt: string
+}
+
+/**
+ * `implicit` is the relationship the instance reported when it was observed
+ * present, and null when no single root volume and interface were reported.
+ */
 export interface Observation {
   observedAt: string
   resources: ObservedResource[]
+  implicit: Implicit | null
 }
 
 /**
  * Accounting and recovery evidence, not a resumable checkpoint. Phases,
  * effects, and plans are derived from these facts and never stored. The alias
- * is local metadata, unique among records, and never an AWS tag.
+ * is local metadata, unique among records, and never an AWS tag. `implicit` is
+ * set once, by the observation that verifies the launch, and never rewritten.
  */
 export interface Deployment {
-  version: 2
+  version: 4
   id: string
   alias: string
   connection: string
@@ -123,12 +161,13 @@ export interface Deployment {
   termination: 'confirmed' | 'unconfirmed'
   steps: Step[]
   removals: Removal[]
+  implicit: ImplicitEvidence | null
   latest: Observation | null
   createdAt: string
 }
 
 const OBSERVED_STATES = ['present', 'absent', 'changed'] as const
-const FAILURE_OUTCOMES = ['not-attempted', 'rejected', 'blocked', 'uncertain'] as const
+const FAILURE_OUTCOMES = ['unattempted', 'rejected', 'blocked', 'uncertain'] as const
 const ZONE_ID = /^[a-z]+[0-9]-az[0-9]+$/
 const ZONE_NAME = /^[a-z]+-[a-z]+-[0-9]+[a-z]$/
 const MAXIMUM_OBSERVED = resourceCount({ zones: AWS_SPEC.deployment.maximumZones, ingress: 0 })
@@ -139,6 +178,10 @@ export function requiredTags(operator: string, deploymentId: string): Tag[] {
     { Key: 'qiln:deployment', Value: deploymentId },
     { Key: 'qiln:managed-by', Value: 'qiln-cli' },
   ]
+}
+
+export function hostKeyName(deploymentId: string): string {
+  return `qiln-${deploymentId}`
 }
 
 export function isReceipt(action: Action, resourceId: unknown): boolean {
@@ -214,16 +257,33 @@ function isBinding(value: unknown, connection: string): value is Binding {
     value.operator.arn === operatorArn(value.accountId, connection) &&
     isOperationId(value.creationId) &&
     isPolicyBinding(value.foundation) &&
-    value.foundation.arn === policyArn(value.accountId, connection) &&
+    value.foundation.arn === policyArn(value.accountId, connection, 'foundation') &&
     typeof value.region === 'string' &&
     validRegion(value.region)
+  )
+}
+
+/**
+ * The plan is valid only when it equals the plan rebuilt from its variable
+ * inputs. Tokens are UUIDs, well inside the 64-character ClientToken limit, and
+ * the two calls never share one.
+ */
+function isHostIntent(value: unknown, id: string): value is HostIntent {
+  return (
+    isRecord(value) &&
+    hasKeys(value, ['plan', 'keyName', 'launchToken', 'volumeToken']) &&
+    isHostPlan(value.plan) &&
+    value.keyName === hostKeyName(id) &&
+    isOperationId(value.launchToken) &&
+    isOperationId(value.volumeToken) &&
+    value.launchToken !== value.volumeToken
   )
 }
 
 function isApproval(value: unknown, binding: Binding, id: string): value is Approval {
   return (
     isRecord(value) &&
-    hasKeys(value, ['approvedAt', 'approvedBy', 'cidr', 'tenancy', 'zones', 'ingress', 'tags', 'permission']) &&
+    hasKeys(value, ['approvedAt', 'approvedBy', 'cidr', 'tenancy', 'zones', 'ingress', 'tags', 'permission', 'host']) &&
     isTimestamp(value.approvedAt) &&
     isIdentity(value.approvedBy) &&
     sameJson(value.approvedBy, binding.operator) &&
@@ -234,7 +294,12 @@ function isApproval(value: unknown, binding: Binding, id: string): value is Appr
     isIngress(value.ingress) &&
     isTags(value.tags) &&
     sameJson(value.tags, requiredTags(binding.operator.arn, id)) &&
-    isPermissionMetadata(value.permission)
+    isPermissionMetadata(value.permission) &&
+    isHostIntent(value.host, id) &&
+    value.host.plan.region === binding.region &&
+    value.host.plan.cidr === value.cidr &&
+    sameJson(value.host.plan.zones, value.zones) &&
+    sameJson(value.host.plan.ingress, value.ingress)
   )
 }
 
@@ -242,7 +307,9 @@ function isFailure(value: unknown, action: Action): value is Failure {
   return (
     isRecord(value) &&
     hasKeys(value, ['outcome', 'code', 'termination', 'recordedAt']) &&
-    FAILURE_OUTCOMES.some(outcome => outcome === value.outcome && (outcome !== 'blocked' || phaseOf(action) === 'removal')) &&
+    FAILURE_OUTCOMES.some(
+      outcome => outcome === value.outcome && (outcome !== 'blocked' || directionOf(action) === 'removal'),
+    ) &&
     isInstallerErrorCode(value.code) &&
     isTermination(value.termination) &&
     isTimestamp(value.recordedAt)
@@ -267,7 +334,7 @@ function isStep(value: unknown): value is Step {
     typeof value.slot !== 'number' ||
     !Number.isSafeInteger(value.slot) ||
     value.slot < 0 ||
-    (value.removal === null) !== (phaseOf(value.action) === 'creation') ||
+    (value.removal === null) !== (directionOf(value.action) === 'creation') ||
     (value.removal !== null &&
       (typeof value.removal !== 'number' || !Number.isSafeInteger(value.removal) || value.removal < 0)) ||
     !isTimestamp(value.fencedAt) ||
@@ -295,14 +362,35 @@ function isObserved(value: unknown): value is ObservedResource {
   )
 }
 
+function isImplicit(value: unknown): value is Implicit {
+  return (
+    isRecord(value) &&
+    hasKeys(value, ['rootVolumeId', 'interfaceId']) &&
+    typeof value.rootVolumeId === 'string' &&
+    KIND_IDS.volume.test(value.rootVolumeId) &&
+    typeof value.interfaceId === 'string' &&
+    KIND_IDS.interface.test(value.interfaceId)
+  )
+}
+
+function isImplicitEvidence(value: unknown): value is ImplicitEvidence {
+  return (
+    isRecord(value) &&
+    hasKeys(value, ['rootVolumeId', 'interfaceId', 'observedAt']) &&
+    isImplicit({ rootVolumeId: value.rootVolumeId, interfaceId: value.interfaceId }) &&
+    isTimestamp(value.observedAt)
+  )
+}
+
 export function isObservation(value: unknown): value is Observation {
   return (
     isRecord(value) &&
-    hasKeys(value, ['observedAt', 'resources']) &&
+    hasKeys(value, ['observedAt', 'resources', 'implicit']) &&
     isTimestamp(value.observedAt) &&
     Array.isArray(value.resources) &&
     value.resources.length <= MAXIMUM_OBSERVED &&
-    value.resources.every(isObserved)
+    value.resources.every(isObserved) &&
+    (value.implicit === null || isImplicit(value.implicit))
   )
 }
 
@@ -332,10 +420,11 @@ export function isDeployment(value: unknown): value is Deployment {
       'termination',
       'steps',
       'removals',
+      'implicit',
       'latest',
       'createdAt',
     ]) ||
-    value.version !== 2 ||
+    value.version !== 4 ||
     !isOperationId(value.id) ||
     typeof value.alias !== 'string' ||
     !validName(value.alias) ||
@@ -346,6 +435,7 @@ export function isDeployment(value: unknown): value is Deployment {
     !isTermination(value.termination) ||
     !isSteps(value.steps) ||
     !isRemovals(value.removals) ||
+    (value.implicit !== null && !isImplicitEvidence(value.implicit)) ||
     (value.latest !== null && !isObservation(value.latest)) ||
     !isTimestamp(value.createdAt)
   ) {

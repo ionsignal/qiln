@@ -1,0 +1,78 @@
+import { AWS_SPEC } from '../../aws/spec'
+import type { HelpContent } from '../../terminal/help'
+
+export const group: HelpContent = {
+  examples: ['qiln aws connect', 'qiln aws disconnect', 'qiln aws status', 'qiln aws deployment --help'],
+  safety: [
+    'AWS commands support unprivileged Linux and macOS operators, including Windows through WSL. They are independent of development doctor, Incus, Ubuntu-release, and ZFS checks.',
+    'Connect an existing non-root IAM operator or explicitly approve root bootstrap to create one dedicated operator with console access, Sign-In permission, scoped password/MFA self-service, and separate regional foundation (networking) and compute policies.',
+    'A saved Qiln-created operator can receive a root-authenticated policy update. It needs two yes/no approvals: consent to sign in as root and review, then approval of the displayed changes. Its immutable identity, password, MFA enrollment, creation identity, and saved ordinary operator login are preserved. Unsupported local layouts are not adopted or migrated.',
+    'Root authentication is accepted only in separate approved bootstrap contexts. SSO and assumed-role onboarding are not available. Connecting never provisions or removes infrastructure; provisioning requires separate approval.',
+    'The deployment group previews one proposed GPU host (execution unavailable) and inspects, lists, and removes retained deployments. Removal deliberately retains the data volume, which keeps incurring charges until it is deleted outside Qiln. See qiln aws deployment --help.',
+  ],
+}
+
+export const connect: HelpContent = {
+  examples: ['qiln aws connect', 'qiln aws connect --name default'],
+  safety: [
+    `Without --name, connect uses '${AWS_SPEC.defaultName}'. The selected connection is inspected before account setup or CLI selection. Saved connections proceed with IAM-user sign-in; retained pending IAM operations require explicit recovery before reconnecting.`,
+    `New connections default to ${AWS_SPEC.defaultRegion} (Oregon). Reconnects suggest the saved region before that fallback. The region remains editable.`,
+    'For a new connection, choose an existing IAM user or create a dedicated IAM user for Qiln. Creating a user requires root sign-in and explicit approval of the displayed IAM setup summary. Neither choice deploys infrastructure.',
+    'Requires an interactive terminal. Qiln selects a compatible external AWS CLI first, then a validated ready managed CLI. Select the remote login flow when the browser is on another machine; copy its complete authorization code into the terminal when AWS prompts.',
+    'Credentials refresh automatically while signed in. Login sessions last up to 12 hours; reconnect when AWS requires another login.',
+    'Managed installation is available for Linux x64. macOS authentication requires a compatible external AWS CLI. The proposal shows the pinned version, target, exact artifact size, download host, destination, and installation effects. Installation approval is yes/no and defaults to no.',
+    'Declining installation approval creates neither tool state nor connection state. Existing external AWS CLI installations are never updated, removed, repaired, or overwritten.',
+    'Qiln uses already-installed prerequisites without privilege escalation, package-manager execution, global PATH changes, or shell-profile edits.',
+    'Installation uses separate shared tool storage and locking, and must finish before connection-state access or authentication. Shared managed tools remain installed after disconnect.',
+    'Unconfirmed setup termination retains potentially active inputs and the protective tool lock for manual recovery. Cleanup failures block authentication; installation effects are not automatically rolled back.',
+    'Reconnecting replaces only the selected connection’s Qiln-owned local authentication cache. Identity verification is automatic; a recorded connection must match the same account, operator ARN, and immutable user ID before saving.',
+    'Ordinary operator authentication rejects root, assumed-role, and SSO identities. Arbitrary existing IAM users are authenticated without IAM modification. Saved Qiln-created operators may separately update their policies through permission-only bootstrap after authentication is saved.',
+    'New operator setup uses a separate root authentication directory. The account, intended operator, foundation region, observed root MFA configuration, and the permission change summary are shown before one yes/no approval that defaults to no. Onboarding does not require typing the account ID.',
+    'New bootstrap creates one tagged IAM user, attaches the reviewed SignInLocalDevelopmentAccess policy, adds unchanged scoped password/MFA self-service, creates and attaches the current customer-managed foundation and compute policies, and creates one initial console password requiring replacement. Intent and returned evidence are persisted for the outstanding mutation before its verification; verified mutations are replaced by the next intent, not accumulated as a history.',
+    'Onboarding and policy updates show one concise completion row per IAM mutation after retained results, successful AWS verification, and persisted verification evidence. No paired working row, animated spinner, or raw provider output is used. Failed or uncertain steps are described by recovery diagnostics.',
+    'Policy authority is approved for one recorded region independently of the editable connection default. Changing that default neither changes IAM permissions nor automatically triggers regional permission expansion.',
+    'Permission-only bootstrap preserves the existing user ID, ARN, password, MFA devices, creation identity, Sign-In policy, password/MFA self-service, and saved operator login. When requirements change, connect first asks one yes/no question, "Sign in as root to review required AWS policy changes now", defaulting to no. That answer only begins the root review; nothing is approved and no IAM mutation is possible yet.',
+    'After root inspection, the permission change summary is shown: per policy, whether it is created and attached, receives a new default version, or is unchanged, with the current and desired digests and the complete list of actions derived from the exact document that will be approved. It does not display the policy JSON or a document-level difference. If any policy would change, connect asks a second yes/no question, "Apply the displayed IAM policy changes", defaulting to no, and the answer is persisted as an immutable approval before any IAM mutation. If nothing would change, no second question is asked and live policies are freshly verified. Declining either question retains the saved login and claims no current compliance. Completion distinguishes freshly verified changes from freshly verified no-change.',
+    'Onboarding approval discloses two policies. The foundation policy covers regional networking: creation and deletion of Qiln-tagged VPCs, subnets, internet gateways, route tables, and security groups, plus reads. The compute policy covers constrained On-Demand launches, termination of tagged instances, gp3 root and data volume creation, data-volume attachment, Elastic IPs, administrative public-key import and deletion, and console output. VPC deletion authority covers any VPC in the bound account and region tagged with this operator’s ARN, qiln:managed-by=qiln-cli, and a nonempty qiln:deployment value, not only one deployment ID. Deletion authority for subnets, internet gateways, route tables, and security groups covers any such resource in the bound account and region tagged with this operator’s ARN. Neither policy approves infrastructure provisioning or spending, and connect itself never provisions or removes anything; exact deployment inputs require a separately approved immutable intent. Policy updates display the same summary and caveats and require their own approval.',
+    'These IAM permissions can be exercised with the operator’s credentials outside Qiln. A protected deployment record is a Qiln execution gate, not an AWS authorization boundary.',
+    'Unexpected policy identities, attachments, groups, permanent access keys, or operation evidence stop reconciliation. Bound policy content is observed for review; changed approved preconditions stop execution. Existing unattached policies are not adopted to recover partial execution.',
+    'The operator policies grant no IAM administration, iam:PassRole, SSM, NAT-gateway, load-balancer, volume deletion or detachment, snapshot, or KMS authority. The only removal authority is deleting tagged VPC networking, terminating tagged instances, deleting administrative key pairs, and releasing tagged Elastic IPs. No general-purpose ec2:* grant is used.',
+    'Both policies are customer-managed, not inline, and each completed document is checked against the 6,144-character limit. A required replacement with five inspected retained versions stops before approval or mutation intent; execution independently rechecks approved preconditions and capacity. Five versions do not block matching-content no-change verification. Policy versions are retained without automatic pruning, older-default selection, or rollback.',
+    'The initial password is generated and displayed only by an isolated terminal process. The copy instruction appears immediately above its heading. The password is not sent through IPC, stored in pending evidence, recovered, redisplayed, or reissued.',
+    'After the password and browser instructions are shown, Qiln proceeds into AWS login without an operator-name confirmation. The operator must complete browser password replacement; operator MFA enrollment is optional. Readiness facts appear together before explanatory information and actions. Identity verification and explicit readiness rechecks remain required; an omitted password-reset field is unknown, not successful completion.',
+    'New-onboarding root authentication is terminated and removed before the ordinary connection is saved. Permission-only bootstrap starts after ordinary authentication is saved and removes only its separate root subtree. Declining or failing permission bootstrap does not remove the saved operator cache.',
+    'Incomplete or failed creation and permission operations retain minimal pending approval and recovery evidence. They are not automatically resumed, adopted, repaired, rolled back, or replayed. A timeout or exhausted propagation check does not prove that a mutation failed. Unconfirmed credential-process termination retains potentially active inputs and the protective connection lock. Declining the displayed policy change before approval retains no pending evidence.',
+    'IAM inspection does not atomically exclude another administrator. Stop concurrent IAM changes; observed inconsistencies block execution.',
+    'No infrastructure or deployed Qiln services are provisioned.',
+    'Completed pending evidence is removed after publication. Saved bindings and last-verified permission metadata describe the verified configuration, not current IAM correctness or safe launch inputs. Completed new onboarding requires password replacement, not operator MFA enrollment.',
+    'Connect performs no EC2 discovery. Read-only GPU host discovery belongs to qiln aws deployment create, which previews a proposal and creates nothing. No quota, capacity, host compatibility, or deployment readiness is established.',
+    'Connect is refused while any deployment records unconfirmed child termination; see qiln aws deployment --help.',
+  ],
+}
+
+export const status: HelpContent = {
+  examples: ['qiln aws status', 'qiln aws status --name default'],
+  safety: [
+    'This command never downloads or installs AWS CLI tools.',
+    'Verification may refresh temporary credentials and update the local authentication cache. This is not a read-only cache inspection.',
+    'Credentials refresh automatically while signed in. Login sessions last up to 12 hours; reconnect when AWS requires another login.',
+    'Root authentication is refused and its local authentication cache is removed when detected.',
+    'Pending operations with unconfirmed root-context termination block ordinary verification. Other validated pending evidence is reported separately when a saved operator connection exists; it does not establish current IAM correctness.',
+    'Permission evidence is reported as saved bindings and last-verified metadata without freshly inspecting IAM. The editable default region is independent of recorded foundation scope.',
+    'Verification is refused while any deployment records unconfirmed child termination.',
+    'Password-reset completion, MFA configuration, EC2 discovery, launch capacity, and deployment readiness are not assessed. No infrastructure is provisioned.',
+  ],
+}
+
+export const disconnect: HelpContent = {
+  examples: ['qiln aws disconnect', 'qiln aws disconnect --name default'],
+  safety: [
+    `Without --name, disconnect selects '${AWS_SPEC.defaultName}'. If that connection is absent, nothing is removed; another connection is never selected implicitly.`,
+    'Displays the selected connection and its known account and IAM-user identity. Removal requires interactive yes/no approval and defaults to no.',
+    'Only the selected Qiln-owned local connection, authentication caches, and disclosed pending IAM evidence are removed. Shared managed tools remain installed; IAM identities, policies, policy versions, and infrastructure are not deleted. This command never downloads or installs tools.',
+    'Incomplete IAM-operation removal discloses retained or potentially created resources and requires confirmed recorded root-context termination. Unsafe or inconsistent local state is not removed automatically.',
+    'Disconnect is refused while a deployment record has outstanding effects. Resources retained by design, such as a data volume that Qiln cannot delete, do not block it but are disclosed: they keep incurring charges until deleted outside Qiln, and Qiln can no longer authenticate to observe them once the connection is removed.',
+    'Removing the connection and pending evidence discards local ownership bindings, approval, and recovery evidence. Inspect or retain that evidence before approving local removal.',
+    'Local removal is not immediate credential revocation. Credentials already loaded elsewhere can remain usable until expiration.',
+  ],
+}

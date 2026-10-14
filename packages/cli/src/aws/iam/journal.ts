@@ -3,6 +3,7 @@ import { InstallerError } from '../../diagnostic/error'
 import { openChildDir, openDir, writeChild, type Dir } from '../../state/files'
 import * as connections from '../connection/records'
 import { userId } from '../host'
+import { encodeRecord } from '../json'
 import { requireOperationLock } from '../root'
 import { AWS_SPEC } from '../spec'
 import type { AwsConnection } from '../types'
@@ -46,7 +47,12 @@ export async function requireLock(directory: Dir, expectedPid = process.pid): Pr
 }
 
 export async function write(directory: Dir, record: Pending): Promise<void> {
-  await writeChild(directory, AWS_SPEC.state.pending, Buffer.from(`${JSON.stringify(parse(record), null, 2)}\n`), 0o600)
+  await writeChild(
+    directory,
+    AWS_SPEC.state.pending,
+    encodeRecord(parse(record), 'AWS_PERMISSION_STATE_INVALID'),
+    0o600,
+  )
 }
 
 /**

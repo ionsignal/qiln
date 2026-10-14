@@ -1,8 +1,9 @@
 import { InstallerError } from '../../diagnostic/error'
 import { sameJson } from '../json'
 import { AWS_SPEC } from '../spec'
+import { expectation, matches } from './expect'
 import { refusals, settled, stateOf } from './step'
-import { creationPlan, expectation, matches, removalPlan } from './topology'
+import { creationPlan, removalPlan } from './topology'
 import type { Deployment, Step } from './types'
 
 const FIXED_FIELDS = ['version', 'id', 'alias', 'connection', 'binding', 'approval', 'createdAt'] as const
@@ -146,6 +147,12 @@ function requireObservations(current: Deployment, updated: Deployment): void {
   }
 }
 
+function requireImplicit(current: Deployment, updated: Deployment): void {
+  if (current.implicit !== null && !sameJson(current.implicit, updated.implicit)) {
+    return invalid()
+  }
+}
+
 /**
  * The journal's write rule: one record may replace another only through a
  * permitted step. Both records are already validated by their guard.
@@ -155,4 +162,5 @@ export function requireTransition(current: Deployment, updated: Deployment): voi
   requireSteps(current, updated)
   requireRemovals(current, updated)
   requireObservations(current, updated)
+  requireImplicit(current, updated)
 }

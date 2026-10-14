@@ -1,10 +1,12 @@
 import type { DiagnosticFact } from '../../../diagnostic/error'
 import { deploymentName } from '../../../aws/deployment/alias'
 import { cleanup, phase, type Phase } from '../../../aws/deployment/facts'
+import type { Disposition } from '../../../aws/deployment/graph'
+import { removalOutcome } from '../../../aws/deployment/outcome'
 import { refusals } from '../../../aws/deployment/step'
-import { resourceId, resources, unreleased } from '../../../aws/deployment/topology'
+import { released, resourceId, resources, retained, unreleased, type Resource } from '../../../aws/deployment/topology'
 import type { Deployment, Observation, ObservedState } from '../../../aws/deployment/types'
-import type { Reporter, Tone } from '../../../terminal/reporter'
+import type { Reporter, TableCell, Tone } from '../../../terminal/reporter'
 
 interface RecordedState {
   label: string
@@ -13,10 +15,19 @@ interface RecordedState {
 }
 
 const OBSERVED_STATES: readonly ObservedState[] = ['present', 'changed', 'absent']
-
+const LIFECYCLES: Record<Disposition, string> = {
+  removed: 'removed by Qiln',
+  retained: 'retained by design',
+  implicit: 'deleted with the instance',
+}
+const RECOVERY: RecordedState = {
+  label: 'Recovery required',
+  tone: 'danger',
+  text: 'A provider child process was not confirmed terminated. No further provider work runs for this deployment until that is resolved.',
+}
 const STATES: Record<Phase, RecordedState> = {
   approved: { label: 'Approved', tone: 'neutral', text: 'Creation was approved, but no provider call was made.' },
-  'not-attempted': {
+  unattempted: {
     label: 'Not attempted',
     tone: 'warning',
     text: 'The last mutation was refused before dispatch, so it changed nothing.',
@@ -32,7 +43,7 @@ const STATES: Record<Phase, RecordedState> = {
     tone: 'warning',
     text: 'The last response was retained but has not been verified by observation.',
   },
-  partial: { label: 'Partial', tone: 'warning', text: 'Creation stopped after a verified step; the network is incomplete.' },
+  partial: { label: 'Partial', tone: 'warning', text: 'Creation stopped after a verified step; the deployment is incomplete.' },
   unresolved: {
     label: 'Uncertain',
     tone: 'danger',
@@ -46,21 +57,24 @@ const STATES: Record<Phase, RecordedState> = {
   created: {
     label: 'Created',
     tone: 'success',
-    text: 'The network was created and observed. It remains until it is removed.',
+    text: 'The recorded resources were created and observed. They remain until they are removed.',
   },
   removing: { label: 'Partly removed', tone: 'warning', text: 'Removal is partly verified; recorded resources remain.' },
   removed: { label: 'Removed', tone: 'success', text: 'All recorded resources were removed and observed absent.' },
+  retained: {
+    label: 'Retained storage',
+    tone: 'warning',
+    text: 'Removal was verified. Resources retained by design remain, are not removed by Qiln, and continue to incur charges until they are deleted outside Qiln.',
+  },
   absent: { label: 'Absent', tone: 'neutral', text: 'All recorded resources were observed absent.' },
-}
-
-const RECOVERY: RecordedState = {
-  label: 'Recovery required',
-  tone: 'danger',
-  text: 'A provider child process was not confirmed terminated. No further provider work runs for this deployment until that is resolved.',
 }
 
 export function recordedState(record: Deployment): RecordedState {
   return record.termination === 'unconfirmed' ? RECOVERY : STATES[phase(record)]
+}
+
+export function lifecycleOf(resource: Resource): string {
+  return LIFECYCLES[resource.disposition]
 }
 
 export function observationSummary(observation: Observation): string {
@@ -69,6 +83,32 @@ export function observationSummary(observation: Observation): string {
     return count > 0 ? [`${count} ${state}`] : []
   })
   return [`${observation.resources.length} recorded`, ...counts].join(' · ')
+}
+
+function recordedOutcome(record: Deployment, resource: Resource): TableCell {
+  if (released(record, resource)) {
+    return 'observed absent'
+  }
+  return resource.disposition === 'retained'
+    ? { text: 'retained; not removed by Qiln', tone: 'warning' }
+    : 'not confirmed removed'
+}
+
+function reportResources(reporter: Reporter, record: Deployment): void {
+  const recorded = resources(record)
+  if (recorded.length === 0) {
+    return
+  }
+  reporter.section('Resources')
+  reporter.table(
+    ['Kind', 'ID', 'Lifecycle', 'Recorded outcome'],
+    recorded.map((resource): TableCell[] => [
+      resource.kind,
+      resource.id,
+      lifecycleOf(resource),
+      recordedOutcome(record, resource),
+    ]),
+  )
 }
 
 export function reportDeployment(reporter: Reporter, record: Deployment): void {
@@ -87,9 +127,10 @@ export function reportDeployment(reporter: Reporter, record: Deployment): void {
     ['Zones', record.approval.zones.map(zone => zone.name).join(', ')],
     ['Administrator CIDR', record.approval.ingress[0].cidr],
     [historical ? 'VPC (historical)' : 'VPC', resourceId(record, 'create-vpc') ?? 'no identity retained'],
+    ['Instance', resourceId(record, 'run-instances') ?? 'no identity retained'],
     [
       'Recorded resources',
-      `${resources(record).length} retained · ${unreleased(record).length} not confirmed removed`,
+      `${resources(record).length} recorded · ${unreleased(record).length} not confirmed removed · ${retained(record).length} retained by design`,
     ],
     ['Recorded steps', String(record.steps.length)],
   ]
@@ -121,7 +162,17 @@ export function reportDeployment(reporter: Reporter, record: Deployment): void {
       'Resources or unresolved effects may remain. No replay, adoption, deletion, rollback, or automatic recovery was attempted.',
     )
   }
+  if (retained(record).length > 0) {
+    reporter.notice(
+      'Retained resources are never deleted by Qiln. They keep incurring charges for as long as they exist, including after the instance is terminated, until they are deleted outside Qiln.',
+    )
+  }
   if (record.latest?.resources.some(resource => resource.state === 'absent')) {
     reporter.notice('Absence never proves who deleted a resource.')
+  }
+  reportResources(reporter, record)
+  if (record.removals.length > 0) {
+    reporter.section('Removal outcome')
+    reporter.facts(removalOutcome(record).map((row): DiagnosticFact => [row.label, `${row.state} · ${row.detail}`]))
   }
 }

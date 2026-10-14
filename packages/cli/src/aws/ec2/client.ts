@@ -1,17 +1,9 @@
-import { DescribeAvailabilityZonesCommand, type EC2Client } from '@aws-sdk/client-ec2'
-import { InstallerError } from '../../diagnostic/error'
-import { isPlacement, type Placement } from '../deployment/types'
+import type { EC2Client } from '@aws-sdk/client-ec2'
 import { AWS_SPEC } from '../spec'
 import { markDispatched } from './dispatch'
 
 export interface Call {
   abortSignal: AbortSignal
-}
-
-function unsupported(): never {
-  throw new InstallerError({
-    code: 'AWS_DEPLOYMENT_PLACEMENT_UNSUPPORTED',
-  })
 }
 
 /**
@@ -44,25 +36,5 @@ export class Ec2 {
     const call = this.call()
     markDispatched()
     return await send(this.client, call)
-  }
-
-  /**
-   * Standard Availability Zones only. A visible zone that is not available, no
-   * zones, or too many refuses placement; Qiln never skips or chooses among them.
-   */
-  public async zones(): Promise<Placement[]> {
-    const command = new DescribeAvailabilityZonesCommand({
-      Filters: [{ Name: 'zone-type', Values: ['availability-zone'] }],
-    })
-    const response = await this.read((client, call) => client.send(command, call))
-    const zones = response.AvailabilityZones ?? []
-    if (zones.length === 0 || zones.length > AWS_SPEC.deployment.maximumZones || zones.some(zone => zone.State !== 'available')) {
-      return unsupported()
-    }
-    const placements: unknown[] = zones.map(zone => ({ id: zone.ZoneId, name: zone.ZoneName }))
-    if (!placements.every(isPlacement)) {
-      return unsupported()
-    }
-    return placements
   }
 }

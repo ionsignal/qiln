@@ -5,8 +5,8 @@ import { Bootstrap } from '../../aws/iam/bootstrap'
 import { canonical } from '../../aws/json'
 import { operatorName } from '../../aws/operator'
 import { ready, type MutationProgress, type Proposal, type Readiness } from '../../aws/iam/types'
-import { FOUNDATION, reconciliationMode } from '../../aws/foundation/policy'
-import { currentRequirement, reviewRequired } from '../../aws/foundation/requirement'
+import { POLICY_KEYS } from '../../aws/permission/keys'
+import { currentRequirement, reviewRequired } from '../../aws/permission/spec'
 import { requireIdentity } from '../../aws/auth/identity'
 import * as awsLogin from '../../aws/auth/login'
 import * as tools from '../../aws/tools'
@@ -19,6 +19,7 @@ import { resolveAwsName, validateAwsRegion, type AwsCommandOptions } from '../..
 import type { Dir } from '../../state/files'
 import { checkCancellation, Prompts, withCancellation } from '../../terminal/prompts'
 import type { Reporter } from '../../terminal/reporter'
+import { modesOf, policyLabel, reportPermissionChange } from './review'
 import {
   authenticate,
   failAuthentication,
@@ -78,6 +79,7 @@ function toolProgress(reporter: Reporter): (event: tools.Progress) => void {
 }
 
 function iamProgress(reporter: Reporter): (event: MutationProgress) => void {
+  // Policy actions are labeled with their key at report time.
   const steps: Record<MutationProgress['action'], { label: string; detail: string }> = {
     'create-user': {
       label: 'Operator',
@@ -91,16 +93,16 @@ function iamProgress(reporter: Reporter): (event: MutationProgress) => void {
       label: 'Self-service',
       detail: 'configured',
     },
-    'create-foundation': {
-      label: 'Foundation policy',
+    'create-policy': {
+      label: 'Policy',
       detail: 'created',
     },
-    'attach-foundation': {
-      label: 'Foundation link',
+    'attach-policy': {
+      label: 'Policy',
       detail: 'attached',
     },
-    'replace-foundation': {
-      label: 'Foundation policy',
+    'replace-policy': {
+      label: 'Policy',
       detail: 'new default version created',
     },
     password: {
@@ -113,7 +115,7 @@ function iamProgress(reporter: Reporter): (event: MutationProgress) => void {
       return
     }
     const step = steps[event.action]
-    reporter.row('verified', step.label, step.detail)
+    reporter.row('verified', event.key === null ? step.label : policyLabel(event.key), step.detail)
   }
 }
 
@@ -205,53 +207,23 @@ async function recheck(prompts: Prompts, label: string): Promise<void> {
   }
 }
 
-function reportProposal(reporter: Reporter, proposal: Proposal, connection: string): void {
-  const accountId = proposal.inspection.root.identity.accountId
-  const mode =
-    proposal.kind === 'onboard'
-      ? 'enroll'
-      : reconciliationMode(
-          proposal.inspection.before?.prior ?? { policy: null, versions: [] },
-          proposal.permission,
-        )
-  if (mode === null) {
-    throw new InstallerError({
-      code: 'AWS_PERMISSION_STATE_INVALID',
-    })
-  }
-  reporter.section(proposal.kind === 'onboard' ? 'AWS operator setup' : 'AWS permission review')
-  reporter.help(
-    reporter.fragment(
-      `  Account   ${accountId}\n  Operator  ${operatorName(connection)}\n  Region    ${proposal.permission.region}\n`,
-    ),
+function reportSetup(reporter: Reporter, proposal: Proposal): void {
+  reporter.section('AWS operator setup')
+  reporter.info(
+    'Create a dedicated operator with browser sign-in and the customer-managed EC2 policies displayed below.',
   )
   reporter.space()
-  if (proposal.kind === 'onboard') {
-    reporter.info(
-      `Create a dedicated operator with browser sign-in and scoped EC2 permissions for ${FOUNDATION.instanceType} On-Demand instances and for creating and deleting Qiln-tagged VPC networking: VPCs, subnets, internet gateways, route tables, and security groups.`,
-    )
-    reporter.space()
-    reporter.line('- Initial password shown once; replacement required.')
-    reporter.line('- Operator MFA optional. No permanent access keys.')
-    reporter.line('- No IAM administration. Connect does not create or remove infrastructure.')
-    reporter.line('- VPC deletion authority covers any VPC in this account and region tagged with the operator ARN, qiln:managed-by=qiln-cli, and a nonempty qiln:deployment value, not only one deployment ID.')
-    reporter.line('- Deletion authority for subnets, internet gateways, route tables, and security groups covers any such resource in this account and region tagged with the operator ARN, not only one deployment.')
-  } else {
-    if (mode === 'enroll') {
-      reporter.info('Create and attach the dedicated regional foundation policy.')
-    } else if (mode === 'replace') {
-      reporter.info('Create a new foundation policy version and make it default; retain existing versions.')
-    } else {
-      reporter.info('Verify matching live foundation permissions. No IAM changes or policy version creation.')
-    }
-    reporter.info(
-      `Regional authority: networking, creation and deletion of Qiln-tagged VPCs, subnets, internet gateways, route tables, and security groups, constrained ${FOUNDATION.instanceType} On-Demand launches, encrypted EBS, Elastic IPs, administrative public-key import, and instance/console inspection.`,
-    )
-  }
-  if (mode !== 'none') {
-    reporter.space()
-    reporter.notice('IAM changes are not automatically undone if setup fails.')
-  }
+  reporter.line('- Initial password shown once; replacement required.')
+  reporter.line('- Operator MFA optional. No permanent access keys.')
+  reporter.line('- No IAM administration. Connect does not create or remove infrastructure.')
+  reportPermissionChange(reporter, proposal)
+}
+
+function reportDeclined(reporter: Reporter): void {
+  reporter.space()
+  reporter.info(
+    'Policy update declined. The saved operator login is retained; current IAM configuration is not claimed.',
+  )
 }
 
 async function inspectRoot(
@@ -298,36 +270,35 @@ async function maintain(
     )
     return 'recorded'
   }
-  reporter.notice('A current root-approved IAM review is required. Authentication success is not permission compliance.')
-  if (!(await prompts.consent('Run root bootstrap to review the current permission configuration'))) {
-    reporter.space()
-    reporter.info(
-      'Permission review declined. The saved operator login is retained; current IAM configuration is not claimed.',
-    )
+  reporter.notice(
+    'The required AWS policies are not verified for this operator. Authentication success is not permission compliance. Continuing signs in as root to review the exact change; IAM is not modified until you approve the displayed changes, which are not automatically undone.',
+  )
+  if (!(await prompts.consent('Sign in as root to review required AWS policy changes now'))) {
+    reportDeclined(reporter)
     return 'declined'
   }
   checkCancellation(signal)
   const flow = await selectFlow(prompts)
   const bootstrap = await Bootstrap.maintain(directory, saved)
-  let foundationChanged = false
+  let policiesChanged = false
   try {
     reporter.section('Root sign-in')
     reporter.action(`Sign in as the root user of recorded AWS account ${saved.identity.accountId}.`)
     reporter.info('This separate root context does not replace or remove the saved ordinary operator login.')
     await inspectRoot(bootstrap, cli, flow, prompts, signal, reporter)
     const proposal = bootstrap.proposal()
-    const mode = reconciliationMode(
-      proposal.inspection.before?.prior ?? { policy: null, versions: [] },
-      proposal.permission,
-    )
-    foundationChanged = mode === 'enroll' || mode === 'replace'
-    reportProposal(reporter, proposal, saved.name)
-    if (!(await prompts.consent('Approve this AWS permission review'))) {
+    const modes = modesOf(proposal)
+    policiesChanged = POLICY_KEYS.some(key => modes[key] !== 'none')
+    reportPermissionChange(reporter, proposal)
+    // Declining before approval leaves no mutation authority to retain.
+    if (policiesChanged && !(await prompts.consent('Apply the displayed IAM policy changes'))) {
       await bootstrap.decline()
-      reporter.info('Permission approval declined. Root authentication was removed; the saved operator login is retained.')
+      reporter.row('verified', 'Root context', 'processes terminated and local authentication removed')
+      reportDeclined(reporter)
       return 'declined'
     }
-    await prompts.confirm('Confirm the AWS account', saved.identity.accountId)
+    // Approval of the displayed proposal is persisted as the immutable approval
+    // before any IAM mutation.
     await bootstrap.approve(proposal, signal)
     await bootstrap.apply(signal, iamProgress(reporter))
     await bootstrap.complete()
@@ -337,13 +308,13 @@ async function maintain(
   reporter.row(
     'verified',
     'IAM configuration',
-    foundationChanged
-      ? 'approved foundation changes freshly verified'
-      : 'matching live foundation configuration freshly verified; no IAM changes or version creation',
+    policiesChanged
+      ? 'approved policy changes freshly verified'
+      : 'matching live policy configuration freshly verified; no IAM changes or version creation',
   )
   reporter.row('verified', 'Root context', 'processes terminated and local authentication removed')
   reporter.row('verified', 'Saved operator login', 'retained')
-  return foundationChanged ? 'changed' : 'unchanged'
+  return policiesChanged ? 'changed' : 'unchanged'
 }
 
 function reportReadiness(reporter: Reporter, readiness: Readiness): void {
@@ -441,7 +412,7 @@ async function onboard(
     )
     await inspectRoot(bootstrap, cli, flow, prompts, signal, reporter)
     const proposal = bootstrap.proposal()
-    reportProposal(reporter, proposal, name)
+    reportSetup(reporter, proposal)
     await prompts.approve('Approve this AWS operator setup')
     await bootstrap.approve(proposal, signal)
     reporter.section('IAM setup')
@@ -559,13 +530,13 @@ export async function connect(options: AwsCommandOptions, reporter: Reporter): P
       reporter.info('Operator onboarding and the current approved IAM configuration were verified.')
       break
     case 'changed':
-      reporter.info('Permission review completed with verified foundation-policy changes; the operator identity, password, and MFA enrollment were preserved.')
+      reporter.info('Policy update completed with verified changes; the operator identity, password, and MFA enrollment were preserved.')
       break
     case 'unchanged':
-      reporter.info('Permission review freshly verified matching live foundation configuration without IAM changes or policy version creation.')
+      reporter.info('Policy update freshly verified matching live policy configuration without IAM changes or policy version creation.')
       break
     case 'declined':
-      reporter.info('Authentication is saved. Permission review was declined; current live IAM configuration is not claimed.')
+      reporter.info('Authentication is saved. Policy update was declined; current live IAM configuration is not claimed.')
       break
     case 'recorded':
       reporter.info('Authentication is saved. Matching last-verified metadata is retained; live IAM was not freshly inspected.')

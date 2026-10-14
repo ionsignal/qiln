@@ -1,13 +1,14 @@
 import type { DiagnosticFact } from '../../diagnostic/error'
 import { AWS_SPEC } from '../spec'
 import { deploymentName } from './alias'
+import { expectation, matches } from './expect'
 import { refusals, settled, stateOf } from './step'
-import { creates, creationPlan, expectation, matches, removalPlan, resourceId, resources, unreleased } from './topology'
+import { creationPlan, removalPlan, resourceId, resources, retained, unnamed, unreleased } from './topology'
 import type { Deployment } from './types'
 
 export type Phase =
   | 'approved'
-  | 'not-attempted'
+  | 'unattempted'
   | 'unresolved'
   | 'rejected'
   | 'blocked'
@@ -17,11 +18,16 @@ export type Phase =
   | 'created'
   | 'removing'
   | 'removed'
+  | 'retained'
   | 'absent'
 
-export type Effects = 'none' | 'outstanding'
+/**
+ * `retained` means nothing is unresolved, but a resource kept by design still
+ * exists. It is distinct from `none`, because that resource keeps incurring
+ * charges until it is deleted outside Qiln.
+ */
+export type Effects = 'none' | 'retained' | 'outstanding'
 export type Verification = 'verified' | 'not-verified' | 'uncertain'
-
 export interface Cleanup {
   status: 'not-needed' | 'eligible' | 'blocked'
   detail: string
@@ -29,16 +35,17 @@ export interface Cleanup {
 
 const DESCRIPTIONS: Record<Phase, string> = {
   approved: 'creation approved; not attempted',
-  'not-attempted': 'last mutation was not attempted; no mutating call was dispatched',
+  unattempted: 'last mutation was not attempted; no mutating call was dispatched',
   unresolved: 'mutation fenced; outcome unresolved',
   rejected: 'last mutation was definitively rejected by the provider',
   blocked: 'removal blocked by dependencies',
   returned: 'response retained; not yet verified by observation',
   uncertain: 'outcome uncertain',
-  partial: 'creation stopped after a verified step; network incomplete',
-  created: 'network created and observed',
+  partial: 'creation stopped after a verified step; deployment incomplete',
+  created: 'deployment created and observed',
   removing: 'removal partly verified; recorded resources remain',
   removed: 'all recorded resources removed and observed absent',
+  retained: 'removal verified; resources retained by design remain and were not removed',
   absent: 'recorded resources observed absent',
 }
 
@@ -54,6 +61,9 @@ export function phase(record: Deployment): Phase {
     return last.returned === null ? 'unresolved' : 'returned'
   }
   if (resources(record).length > 0 && unreleased(record).length === 0) {
+    if (retained(record).length > 0) {
+      return 'retained'
+    }
     return record.removals.length > 0 ? 'removed' : 'absent'
   }
   if (last.removal !== null) {
@@ -77,7 +87,7 @@ export function verification(record: Deployment): Verification {
     return 'uncertain'
   }
   const recordedPhase = phase(record)
-  return (recordedPhase === 'created' || recordedPhase === 'removed') &&
+  return (recordedPhase === 'created' || recordedPhase === 'removed' || recordedPhase === 'retained') &&
     record.latest !== null &&
     matches(expectation(record), record.latest)
     ? 'verified'
@@ -88,17 +98,17 @@ export function verification(record: Deployment): Verification {
  * Outstanding means resources or unresolved effects may remain, or a child may
  * still be active. A creation call whose identity was never retained may have
  * made a resource that Qiln cannot name, so it stays outstanding unless the
- * provider definitely refused it.
+ * provider definitely refused it. Retained resources are known and identified,
+ * so they are reported apart from unresolved effects.
  */
 export function effects(record: Deployment): Effects {
   if (record.termination === 'unconfirmed') {
     return 'outstanding'
   }
-  const unnamed = record.steps.some(step => {
-    const state = stateOf(step)
-    return creates(step.action) && (state === 'open' || state === 'uncertain')
-  })
-  return unnamed || unreleased(record).length > 0 ? 'outstanding' : 'none'
+  if (unnamed(record).length > 0 || unreleased(record).length > 0) {
+    return 'outstanding'
+  }
+  return retained(record).length > 0 ? 'retained' : 'none'
 }
 
 /**
@@ -115,7 +125,14 @@ export function cleanup(record: Deployment): Cleanup {
     return { status: 'blocked', detail: 'a recorded step is unresolved or uncertain, and Qiln never repeats it' }
   }
   if (removalPlan(record).length === 0) {
-    return { status: 'not-needed', detail: 'no recorded resource remains to remove' }
+    const kept = retained(record).length
+    return {
+      status: 'not-needed',
+      detail:
+        kept === 0
+          ? 'no recorded resource remains to remove'
+          : `no removable resource remains; ${kept} recorded ${kept === 1 ? 'resource is' : 'resources are'} retained by design and never removed by Qiln`,
+    }
   }
   const refused = refusals(record.steps)
   if (refused >= AWS_SPEC.deployment.maximumRefusals) {
@@ -123,7 +140,7 @@ export function cleanup(record: Deployment): Cleanup {
   }
   return {
     status: 'eligible',
-    detail: `${unreleased(record).length} recorded resources are not confirmed removed; removal needs a fresh observation and approval`,
+    detail: `${unreleased(record).length} recorded resources are not confirmed removed`,
   }
 }
 
@@ -134,20 +151,21 @@ export function removable(record: Deployment): boolean {
 export function deploymentFacts(record: Deployment): readonly DiagnosticFact[] {
   const { approval, binding } = record
   return [
-    ['Deployment', record.id],
-    ['Name', deploymentName(record.alias)],
-    ['Connection', record.connection],
     ['Account', binding.accountId],
     ['Operator', binding.operator.arn],
     ['Operator user ID', binding.operator.userId],
+    ['Name', deploymentName(record.alias)],
+    ['Deployment', record.id],
+    ['Connection', record.connection],
     ['Region', binding.region],
     ['CIDR', approval.cidr],
-    ['Zones', approval.zones.map(zone => zone.name).join(', ')],
     ['Administrator CIDR', approval.ingress[0].cidr],
+    ['Zones', approval.zones.map(zone => zone.name).join(', ')],
     ['VPC', resourceId(record, 'create-vpc') ?? 'no identity retained'],
+    ['Instance', resourceId(record, 'run-instances') ?? 'no identity retained'],
     [
       'Recorded resources',
-      `${resources(record).length} retained · ${unreleased(record).length} not confirmed removed`,
+      `${resources(record).length} recorded · ${unreleased(record).length} not confirmed removed · ${retained(record).length} retained by design`,
     ],
     ['Observed outcome', describe(record)],
     ['Recorded steps', String(record.steps.length)],

@@ -8,14 +8,9 @@ import { login, type AwsCli } from '../auth/login'
 import { Session } from '../auth/session'
 import { diagnostic } from '../errors'
 import { iamRecovery, originalCode, terminationConfirmed, type RecoveryOutcomes } from '../recovery'
-import {
-  FOUNDATION,
-  isGrant,
-  isSpec,
-  reconciliationMode,
-  specification,
-  type PolicyIdentity,
-} from '../foundation/policy'
+import { POLICY_KEYS, policyMap, type PolicyKey } from '../permission/keys'
+import { POLICY_LIMITS, isPolicy, policyArn, type PolicyIdentity } from '../permission/policy'
+import { isSpec, reconciliation, specification } from '../permission/spec'
 import { canonical, sameJson } from '../json'
 import { operatorArn } from '../operator'
 import { AWS_SPEC } from '../spec'
@@ -31,7 +26,6 @@ import {
   isInspection,
   isMutationResult,
   type Inspection,
-  type MutationAction,
   type MutationProgress,
   type MutationResult,
   type Pending,
@@ -287,15 +281,18 @@ export class Bootstrap {
     }
     const inspection = this.copyInspection()
     const permission = specification(this.current.accountId, this.current.name, this.current.region)
-    if (
-      this.current.kind === 'maintain' &&
-      inspection.before !== null &&
-      reconciliationMode(inspection.before.prior, permission) === 'replace' &&
-      inspection.before.prior.versions.length >= FOUNDATION.maximumVersions
-    ) {
-      throw new InstallerError({
-        code: 'AWS_PERMISSION_VERSION_LIMIT',
-      })
+    const before = inspection.before
+    if (this.current.kind === 'maintain' && before !== null) {
+      const modes = reconciliation(before.policies, permission)
+      if (
+        POLICY_KEYS.some(
+          key => modes[key] === 'replace' && before.policies[key].versions.length >= POLICY_LIMITS.maximumVersions,
+        )
+      ) {
+        throw new InstallerError({
+          code: 'AWS_PERMISSION_VERSION_LIMIT',
+        })
+      }
     }
     return {
       operationId: this.current.id,
@@ -326,23 +323,18 @@ export class Bootstrap {
         inspection: expected.inspection,
         permission: expected.permission,
       },
-      foundation: expected.inspection.before?.prior.policy ?? null,
+      policies: policyMap(key => expected.inspection.before?.policies[key].policy ?? null),
     })
   }
 
-  private requirePolicy(policy: PolicyIdentity): void {
+  private requirePolicy(key: PolicyKey, policy: PolicyIdentity): void {
     const approval = this.current.approval
     if (
       !approval ||
       this.current.accountId === null ||
-      !isGrant(
-        {
-          spec: approval.permission,
-          policy,
-        },
-        this.current.accountId,
-        this.current.name,
-      )
+      !isPolicy(policy) ||
+      policy.arn !== policyArn(this.current.accountId, this.current.name, key) ||
+      policy.sha256 !== approval.permission.policies[key].sha256
     ) {
       throw new InstallerError({
         code: 'AWS_CONTEXT_FAILED',
@@ -352,13 +344,13 @@ export class Bootstrap {
 
   private async retainResult(result: MutationResult): Promise<void> {
     const mutation = this.current.mutation
-    if (!mutation || !isMutationResult(result, mutation.action) || mutation.verifiedAt !== null) {
+    if (!mutation || !isMutationResult(result, mutation.action, mutation.key) || mutation.verifiedAt !== null) {
       throw new InstallerError({
         code: 'AWS_CONTEXT_FAILED',
       })
     }
     if (result.kind === 'policy') {
-      this.requirePolicy(result.policy)
+      this.requirePolicy(result.key, result.policy)
     }
     await this.persist({
       mutation: {
@@ -366,24 +358,25 @@ export class Bootstrap {
         returned: result,
       },
       ...(result.kind === 'operator' ? { operator: result.identity } : {}),
-      ...(result.kind === 'policy' ? { foundation: result.policy } : {}),
+      ...(result.kind === 'policy' ? { policies: { ...this.current.policies, [result.key]: result.policy } } : {}),
       ...(result.kind === 'password' ? { password: result.receipt } : {}),
     })
   }
 
   private async mutate(
-    action: MutationAction,
+    step: transitions.Step,
     signal: AbortSignal,
     onProgress?: (event: MutationProgress) => void,
   ): Promise<void> {
+    const { action, key } = step
     this.requireOpen()
     checkCancellation(signal)
     await this.persist({
       mutation: {
         id: randomUUID(),
         action,
+        key,
         approvedAt: new Date().toISOString(),
-        before: transitions.before(this.current, action),
         returned: null,
         verifiedAt: null,
       },
@@ -391,10 +384,11 @@ export class Bootstrap {
     })
     emitProgress(onProgress, {
       action,
+      key,
       phase: 'started',
     })
     const result = await this.call('mutate', signal)
-    if (!isMutationResult(result, action)) {
+    if (!isMutationResult(result, action, key)) {
       throw new InstallerError({
         code: 'AWS_CONTEXT_FAILED',
       })
@@ -405,7 +399,7 @@ export class Bootstrap {
     if (
       !mutation ||
       !mutation.returned ||
-      !isMutationResult(verified, action) ||
+      !isMutationResult(verified, action, key) ||
       !sameJson(verified, mutation.returned)
     ) {
       throw new InstallerError({
@@ -420,6 +414,7 @@ export class Bootstrap {
     })
     emitProgress(onProgress, {
       action,
+      key,
       phase: 'verified',
     })
   }
@@ -437,11 +432,11 @@ export class Bootstrap {
       })
     }
     while (true) {
-      const action = transitions.next(this.current)
-      if (action === null) {
+      const step = transitions.next(this.current)
+      if (step === null) {
         return
       }
-      await this.mutate(action, signal, onProgress)
+      await this.mutate(step, signal, onProgress)
     }
   }
 
@@ -499,16 +494,14 @@ export class Bootstrap {
     this.requireOpen()
     this.requireOperator(authentication)
     const result = await this.call('verify', signal)
-    if (
-      result.kind !== 'verified' ||
-      this.current.foundation === null ||
-      !sameJson(result.policy, this.current.foundation)
-    ) {
+    if (result.kind !== 'verified' || !sameJson(result.policies, this.current.policies)) {
       throw new InstallerError({
         code: 'AWS_CONTEXT_FAILED',
       })
     }
-    this.requirePolicy(result.policy)
+    for (const key of POLICY_KEYS) {
+      this.requirePolicy(key, result.policies[key])
+    }
     const approval = this.current.approval
     if (!approval) {
       throw new InstallerError({
@@ -518,8 +511,11 @@ export class Bootstrap {
     await this.persist({
       verified: {
         version: approval.permission.version,
-        policyVersion: result.policy.versionId,
-        sha256: result.policy.sha256,
+        sha256: approval.permission.sha256,
+        policies: policyMap(key => ({
+          policyVersion: result.policies[key].versionId,
+          sha256: result.policies[key].sha256,
+        })),
         verifiedAt: new Date().toISOString(),
       },
     })

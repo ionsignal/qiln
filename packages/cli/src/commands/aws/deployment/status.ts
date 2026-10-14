@@ -14,7 +14,7 @@ export async function status(options: AwsDeploymentOptions, reporter: Reporter):
     throw notFound(options.selector)
   }
   reportDeployment(reporter, record)
-  reporter.info('This status reads local evidence only. It did not authenticate, call AWS, or freshly observe the network.')
+  reporter.info('This status reads local evidence only. It did not authenticate, call AWS, or freshly observe any AWS resource.')
   if (record.steps.length > 0) {
     reporter.info(`To retain a fresh observation, run: qiln aws deployment inspect --id ${record.id}`)
   }

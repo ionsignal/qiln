@@ -9,55 +9,16 @@ import {
   type RouteTable,
   type SecurityGroup,
   type Subnet,
-  type Tag as ProviderTag,
   type Vpc,
 } from '@aws-sdk/client-ec2'
-import { InstallerError } from '../../diagnostic/error'
-import { expectation, groupSpec, matches, resourceId, type Expected } from '../deployment/topology'
-import {
-  isObservation,
-  requiredTags,
-  type Deployment,
-  type Observation,
-  type ObservedResource,
-  type Tag,
-} from '../deployment/types'
-import { collect, poll } from '../observe'
-import { AWS_SPEC } from '../spec'
-import type { Ec2 } from './client'
-import type { Kind } from '../deployment/graph'
-
-type Of<K extends Kind> = Extract<Expected, { kind: K }>
-
-const PAGES = {
-  maxPages: AWS_SPEC.deployment.maximumPages,
-  code: 'AWS_DEPLOYMENT_VERIFICATION_FAILED',
-} as const
-
-const OBSERVATION = {
-  ...AWS_SPEC.deployment.observation,
-  code: 'AWS_DEPLOYMENT_VERIFICATION_FAILED',
-} as const
+import type { Expected } from '../../deployment/expect'
+import { groupSpec, resourceId } from '../../deployment/topology'
+import type { Deployment, ObservedResource } from '../../deployment/types'
+import { collect } from '../../observe'
+import type { Ec2 } from '../client'
+import { byId, judge, listed, PAGES, tagFilters, tagged, type Candidate, type Of } from './shared'
 
 const ROUTE_FIELDS = ['DestinationCidrBlock', 'GatewayId', 'Origin', 'State']
-
-function unverified(): never {
-  throw new InstallerError({
-    code: 'AWS_DEPLOYMENT_VERIFICATION_FAILED',
-  })
-}
-
-function listed<T>(items: readonly T[] | undefined, next: string | undefined): readonly T[] {
-  return next === undefined ? (items ?? []) : unverified()
-}
-
-function byId(name: string, wanted: readonly { id: string }[]) {
-  return [{ Name: name, Values: wanted.map(item => item.id) }]
-}
-
-function tagged(actual: readonly ProviderTag[] | undefined, expected: readonly Tag[]): boolean {
-  return expected.every(tag => (actual ?? []).some(entry => entry.Key === tag.Key && entry.Value === tag.Value))
-}
 
 function onlyFields(value: object, allowed: readonly string[]): boolean {
   return Object.entries(value).every(([key, field]) => field === undefined || allowed.includes(key))
@@ -186,28 +147,6 @@ function groupMatches(record: Deployment, expected: Of<'group'>, group: Security
   )
 }
 
-/**
- * Absent optional fields are never read as success. A resource expected to be
- * gone is `present` while it exists at all, so deletion is only observed once
- * the provider stops listing it.
- */
-function judge<E extends { id: string; present: boolean }, T>(
-  kind: Kind,
-  wanted: readonly E[],
-  found: readonly T[],
-  idOf: (item: T) => string | undefined,
-  fits: (expected: E, actual: T) => boolean,
-): ObservedResource[] {
-  const byIdentity = new Map(found.map(item => [idOf(item), item] as const))
-  return wanted.map((item): ObservedResource => {
-    const actual = byIdentity.get(item.id)
-    if (actual === undefined) {
-      return { kind, id: item.id, state: 'absent' }
-    }
-    return { kind, id: item.id, state: !item.present || fits(item, actual) ? 'present' : 'changed' }
-  })
-}
-
 async function vpcs(ec2: Ec2, record: Deployment, wanted: Of<'vpc'>[], signal?: AbortSignal) {
   if (wanted.length === 0) {
     return []
@@ -282,55 +221,23 @@ async function groups(ec2: Ec2, record: Deployment, wanted: Of<'group'>[], signa
   )
 }
 
-/** One graph observation comprises several provider reads, not one atomic read. */
-async function snapshot(
+export async function observeNetwork(
   ec2: Ec2,
   record: Deployment,
   expected: readonly Expected[],
   signal?: AbortSignal,
-): Promise<Observation> {
-  const resources = [
+): Promise<ObservedResource[]> {
+  return [
     ...(await vpcs(ec2, record, expected.filter(item => item.kind === 'vpc'), signal)),
     ...(await subnets(ec2, record, expected.filter(item => item.kind === 'subnet'), signal)),
     ...(await gateways(ec2, record, expected.filter(item => item.kind === 'gateway'), signal)),
     ...(await routeTables(ec2, record, expected.filter(item => item.kind === 'route-table'), signal)),
     ...(await groups(ec2, record, expected.filter(item => item.kind === 'group'), signal)),
   ]
-  return { observedAt: new Date().toISOString(), resources }
 }
 
-/**
- * Judges every recorded resource against the ledger. With `wait` it polls
- * until the whole graph matches, through missing, transitional, and not yet
- * propagated states; without it, one read is returned as observed.
- */
-export async function observe(ec2: Ec2, record: Deployment, wait: boolean): Promise<Observation> {
-  const expected = expectation(record)
-  if (!wait) {
-    return await snapshot(ec2, record, expected)
-  }
-  const seen: { latest: Observation | undefined } = {
-    latest: undefined,
-  }
-  await poll(async signal => {
-    const observation = await snapshot(ec2, record, expected, signal)
-    seen.latest = observation
-    return matches(expected, observation)
-  }, OBSERVATION)
-  return seen.latest ?? unverified()
-}
-
-export async function candidates(ec2: Ec2, record: Deployment): Promise<Observation[]> {
-  const filters = [
-    {
-      Name: 'owner-id',
-      Values: [record.binding.accountId],
-    },
-    ...requiredTags(record.binding.operator.arn, record.id).map(tag => ({
-      Name: `tag:${tag.Key}`,
-      Values: [tag.Value],
-    })),
-  ]
+export async function networkCandidates(ec2: Ec2, record: Deployment): Promise<Candidate[]> {
+  const filters = [{ Name: 'owner-id', Values: [record.binding.accountId] }, ...tagFilters(record)]
   const found = await collect<Vpc>(async marker => {
     const response = await ec2.read((client, call) =>
       client.send(new DescribeVpcsCommand({ Filters: filters, MaxResults: 100, NextToken: marker }), call),
@@ -341,9 +248,9 @@ export async function candidates(ec2: Ec2, record: Deployment): Promise<Observat
       marker: response.NextToken,
     }
   }, PAGES)
-  const observations: unknown[] = found.map(vpc => ({
-    observedAt: new Date().toISOString(),
-    resources: [{ kind: 'vpc', id: vpc.VpcId, state: vpcMatches(record, vpc) ? 'present' : 'changed' }],
+  return found.map((vpc): Candidate => ({
+    kind: 'vpc',
+    id: vpc.VpcId,
+    state: vpcMatches(record, vpc) ? 'present' : 'changed',
   }))
-  return observations.every(isObservation) ? observations : unverified()
 }
