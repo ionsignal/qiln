@@ -48,6 +48,7 @@ export const status: HelpContent = {
   safety: [
     'Reads local deployment evidence only. No credentials are used and no AWS call is made, so it also works while another AWS operation holds the lock.',
     'The reported outcome is derived from retained facts. It does not establish the current state of AWS resources; use inspect for a fresh observation.',
+    'A recorded administrative key is reported by its fingerprint binding only. Local key files are not inspected, so their availability is unknown.',
   ],
 }
 
@@ -76,8 +77,9 @@ export const remove: HelpContent = {
     'Selecting a deployment by alias or ID grants nothing: removal still needs retained resource identities, confirmed prior child termination, an unspent refusal budget (at most three definitely refused removal steps), and no earlier step that is unresolved or uncertain. Only a definite earlier refusal permits another attempt; verified deletions never spend the budget.',
     'A fresh observation must match the recorded resources; otherwise removal is refused and no deletion call is made, including after partial external deletion or when a retained volume differs from its approved attachment or retention setting. If every removable resource is observed absent, no call is made either.',
     'After a separate yes/no approval that defaults to no, the displayed effects run serially in dependency order: disassociate and release the Elastic IP, terminate the instance, delete the AWS key pair, then remove the network. Each is one call followed by an observation. The run stops at the first refused or uncertain step; completed deletions are preserved, and another invocation needs a fresh observation and approval.',
+    'Progress is printed while removal runs: a working line before each step, an elapsed-time message every few seconds while a step or its observation is pending, and a verified line only after the observation agrees with the record and is retained. Waiting is not failure, and cancelling does not roll back; the retained record states what is known.',
     'The root volume and primary interface are deleted by AWS with the instance, and are reported only once observed absent. The data volume is retained by design: Qiln has no DeleteVolume or DetachVolume authority, so it is reported as retained, identified, and observed unattached, never as removed or absent. It keeps incurring charges until it is deleted outside Qiln.',
-    'This release creates, inspects, and deletes no local SSH key. Deleting the AWS key pair does not remove any key from the guest and is not SSH revocation. Disassociating an Elastic IP is not releasing it; each is verified separately.',
+    'Deleting the AWS key pair does not remove any key from the guest and is not SSH revocation. Removal never reads or deletes the local administrative key files: it reports the recorded key binding and does not check whether the files exist. Disassociating an Elastic IP is not releasing it; each is verified separately.',
     'AWS refusal because dependent resources remain is the only dependency gate; Qiln never removes dependents it did not record. Absence is observed and retained after each deletion.',
     'Removal uses the permission evidence recorded with the deployment and never forces a root permission review. It is not rolled back once attempted, and it does not reverse any effect outside the recorded resources.',
   ],

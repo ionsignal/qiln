@@ -4,10 +4,10 @@ import { findPin } from '../ami'
 import { configuration } from '../auth/credentials'
 import { sendEvidence } from '../child/evidence'
 import { expectation, matches } from '../deployment/expect'
+import { readPublicKey, type PublicKeyReader } from '../ssh/store'
 import { Ec2 } from './client'
 import { discover } from './discover'
 import { armDispatch } from './dispatch'
-import { keyReader, type KeyReader } from './key'
 import { mutate } from './mutate'
 import { candidates, observe } from './observe'
 import { authorizeDeployment, authorizePreparation, notAttempted, type Credentials } from './context'
@@ -34,6 +34,11 @@ async function withEc2<T>(
     credentials,
   })
   try {
+    // One application-level send() is one provider attempt only if the SDK does
+    // not retry, so the effective configuration is asserted before any call.
+    if ((await client.config.maxAttempts()) !== 1) {
+      return notAttempted()
+    }
     return await use(new Ec2(client, signal))
   } finally {
     client.destroy()
@@ -44,7 +49,7 @@ async function run(
   ec2: Ec2,
   record: Deployment,
   request: DeploymentRequest,
-  readKey: KeyReader,
+  readKey: PublicKeyReader,
   signal: AbortSignal,
 ): Promise<Result> {
   switch (request.kind) {
@@ -54,7 +59,7 @@ async function run(
         return notAttempted()
       }
       // One non-polled read must agree with the ledger before anything changes.
-      if (!matches(expectation(record), await observe(ec2, record, false, readKey))) {
+      if (!matches(expectation(record), await observe(ec2, record, false))) {
         return notAttempted()
       }
       const resourceId = await mutate(ec2, record, step, readKey)
@@ -76,7 +81,7 @@ async function run(
     case 'observe':
       return {
         kind: 'observation',
-        observation: await observe(ec2, record, request.wait, readKey),
+        observation: await observe(ec2, record, request.wait),
       }
     case 'candidates':
       return {
@@ -104,6 +109,7 @@ export async function execute(request: Request): Promise<Result> {
     )
   }
   const { root, record, region, credentials } = await authorizeDeployment(request, signal)
-  const readKey = keyReader(root, record.id)
+  // Only import dispatch reads the local public key, and only against the recorded binding.
+  const readKey: PublicKeyReader = () => readPublicKey(root, record)
   return await withEc2(region, credentials, signal, ec2 => run(ec2, record, request, readKey, signal))
 }

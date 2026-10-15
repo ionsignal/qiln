@@ -4,6 +4,7 @@ import { Session } from '../../../aws/auth/session'
 import type { DeploymentSelector } from '../../../aws/deployment/alias'
 import { requireBound } from '../../../aws/deployment/binding'
 import { Deployer } from '../../../aws/deployment/deployer'
+import type { ProgressSink } from '../../../aws/deployment/progress'
 import * as deployments from '../../../aws/deployment/records'
 import type { Deployment } from '../../../aws/deployment/types'
 import type { Dir } from '../../../state/files'
@@ -42,8 +43,13 @@ export async function openTarget(root: Dir, store: Dir, selector: DeploymentSele
   }
 }
 
-export async function authenticateDeployer(root: Dir, target: Target, signal: AbortSignal): Promise<Deployer> {
+export async function authenticateDeployer(
+  root: Dir,
+  target: Target,
+  signal: AbortSignal,
+  progress?: ProgressSink,
+): Promise<Deployer> {
   const session = await Session.open(target.directory, target.region)
   await authenticate(session, target.record.binding.operator, signal)
-  return Deployer.open(root, session, target.record)
+  return Deployer.open(root, session, target.record, progress)
 }

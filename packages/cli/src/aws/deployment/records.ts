@@ -60,6 +60,11 @@ async function openDirectory(root: Dir, id: string, create = false): Promise<Dir
   return await optional(() => openChildDir(store, id, ownership(), create), create)
 }
 
+export async function directoryOf(root: Dir, id: string): Promise<Dir> {
+  const directory = await openDirectory(root, id)
+  return directory ?? invalid()
+}
+
 async function load(directory: Dir): Promise<Deployment> {
   try {
     const snapshot = await readChild(directory, AWS_SPEC.state.deployment, {
@@ -112,6 +117,7 @@ export async function create(root: Dir, record: Deployment): Promise<void> {
   if (
     initial.steps.length !== 0 ||
     initial.removals.length !== 0 ||
+    initial.key !== null ||
     initial.implicit !== null ||
     initial.latest !== null ||
     initial.termination !== 'confirmed'

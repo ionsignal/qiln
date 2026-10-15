@@ -4,6 +4,7 @@ import { policyArn } from '../permission/policy'
 import { hasKeys, isRecord } from '../guards'
 import { sameJson } from '../json'
 import { operatorArn } from '../operator'
+import { isFingerprint } from '../ssh/key'
 import {
   isAccountId,
   isIdentity,
@@ -79,6 +80,18 @@ export interface Approval {
 }
 
 /**
+ * Identity of the locally generated administrative key. The fingerprint is the
+ * canonical SHA-256 form of the public key. It is the only key evidence that AWS
+ * observation compares against, so local key files are never needed to observe
+ * or remove AWS resources.
+ */
+export interface AdminKey {
+  algorithm: 'ed25519'
+  fingerprint: string
+  generatedAt: string
+}
+
+/**
  * `unattempted` and `rejected` are definite refusals of one call, `blocked`
  * is a removal refused for dependencies, and `uncertain` keeps any effect open.
  */
@@ -150,21 +163,24 @@ export interface Observation {
  * effects, and plans are derived from these facts and never stored. The alias
  * is local metadata, unique among records, and never an AWS tag. `implicit` is
  * set once, by the observation that verifies the launch, and never rewritten.
+ * `key` is set once, before any step, and never rewritten or regenerated.
  *
  * The `version` covers every constant, format rule, and graph declaration
  * order that the guards and the audit consult, such as the zone limit, tag and
- * key-name formats, and the creation and removal order. Changing any of them
- * needs a version bump and an explicit versioned reader. Records are never
- * migrated silently, and a stored launch plan is judged structurally, never
- * rebuilt from today's compute constants.
+ * key-name formats, the lifecycle invariants of the host plan, the
+ * administrative key binding, and the creation and removal order. Changing any
+ * of them needs a version bump and an explicit versioned reader. Records are
+ * never migrated silently, and a stored launch plan is judged structurally,
+ * never rebuilt from today's compute constants.
  */
 export interface Deployment {
-  version: 4
+  version: 5
   id: string
   alias: string
   connection: string
   binding: Binding
   approval: Approval
+  key: AdminKey | null
   termination: 'confirmed' | 'unconfirmed'
   steps: Step[]
   removals: Removal[]
@@ -343,6 +359,16 @@ function isApproval(value: unknown, binding: Binding, id: string): value is Appr
   )
 }
 
+function isAdminKey(value: unknown): value is AdminKey {
+  return (
+    isRecord(value) &&
+    hasKeys(value, ['algorithm', 'fingerprint', 'generatedAt']) &&
+    value.algorithm === 'ed25519' &&
+    isFingerprint(value.fingerprint) &&
+    isTimestamp(value.generatedAt)
+  )
+}
+
 function isFailure(value: unknown, action: Action): value is Failure {
   return (
     isRecord(value) &&
@@ -457,6 +483,7 @@ export function isDeployment(value: unknown): value is Deployment {
       'connection',
       'binding',
       'approval',
+      'key',
       'termination',
       'steps',
       'removals',
@@ -464,7 +491,7 @@ export function isDeployment(value: unknown): value is Deployment {
       'latest',
       'createdAt',
     ]) ||
-    value.version !== 4 ||
+    value.version !== 5 ||
     !isOperationId(value.id) ||
     typeof value.alias !== 'string' ||
     !validName(value.alias) ||
@@ -472,6 +499,7 @@ export function isDeployment(value: unknown): value is Deployment {
     !validName(value.connection) ||
     !isBinding(value.binding, value.connection) ||
     !isApproval(value.approval, value.binding, value.id) ||
+    (value.key !== null && !isAdminKey(value.key)) ||
     !isTermination(value.termination) ||
     !isSteps(value.steps) ||
     !isRemovals(value.removals) ||

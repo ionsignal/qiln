@@ -11,7 +11,7 @@ import {
 } from '@aws-sdk/client-ec2'
 import { resourceId } from '../../deployment/topology'
 import { collect } from '../../observe'
-import { sameFingerprint, type KeyReader } from '../key'
+import { sameFingerprint } from '../../ssh/key'
 import { byId, judge, listed, PAGES, tagFilters, tagged, type Candidate, type Of } from './shared'
 import type { Ec2 } from '../client'
 import type { Expected, Mapping } from '../../deployment/expect'
@@ -28,6 +28,7 @@ function targetOf(record: Deployment) {
   return {
     plan,
     tags,
+    key: record.key,
     keyName: host.keyName,
     zone: plan.zones[plan.hostSlot],
     accountId: record.binding.accountId,
@@ -139,16 +140,13 @@ async function instances(
   const seen = launched.find(item => item.instance.InstanceId === wanted[0].id)
   const implicit: Implicit | null = seen === undefined || isTerminated(seen) ? null : implicitOf(seen.instance)
   // Until the launch is verified, no ledger entry names the root volume and
-  // interface, so the ones the instance reports are judged here. Otherwise a
-  // launch could be verified around a root volume that fails its own rules.
-  if (
-    wanted[0].present &&
-    wanted[0].implicit === null &&
-    implicit !== null &&
-    resources[0].state === 'present' &&
-    !(await discoveredFit(ec2, target, implicit, signal))
-  ) {
-    return { resources: [{ ...resources[0], state: 'changed' }], implicit }
+  // interface, so the ones the instance reports are observed here and returned
+  // with their actual states. They face the rules they will face once recorded,
+  // so a launch is never verified around a root volume that fails them.
+  if (wanted[0].present && wanted[0].implicit === null && implicit !== null && resources[0].state === 'present') {
+    const discovered = await observeImplicit(ec2, target, implicit, signal)
+    const fits = discovered.every(item => item.state === 'present')
+    return { resources: [{ ...resources[0], state: fits ? 'present' : 'changed' }, ...discovered], implicit }
   }
   return { resources, implicit }
 }
@@ -239,18 +237,20 @@ async function interfaces(ec2: Ec2, target: Target, wanted: Of<'interface'>[], s
 }
 
 /**
- * Judges the root volume and primary interface that a launching instance
- * reports, by the same rules they face once recorded. Anything not found, or
- * not fitting, means the launch is not yet verifiable.
+ * Observes the root volume and primary interface that a launching instance
+ * reports, by the same rules they face once recorded. Their states are the
+ * actual observed ones: an identity that is not listed is absent, and one that
+ * does not fit is changed. Identities alone never establish presence.
  */
-async function discoveredFit(ec2: Ec2, target: Target, implicit: Implicit, signal?: AbortSignal): Promise<boolean> {
+async function observeImplicit(
+  ec2: Ec2,
+  target: Target,
+  implicit: Implicit,
+  signal?: AbortSignal,
+): Promise<ObservedResource[]> {
   const root: Of<'volume'> = { kind: 'volume', id: implicit.rootVolumeId, present: true, role: 'root', attached: true }
   const primary: Of<'interface'> = { kind: 'interface', id: implicit.interfaceId, present: true }
-  const judged = [
-    ...(await volumes(ec2, target, [root], signal)),
-    ...(await interfaces(ec2, target, [primary], signal)),
-  ]
-  return judged.every(item => item.state === 'present')
+  return [...(await volumes(ec2, target, [root], signal)), ...(await interfaces(ec2, target, [primary], signal))]
 }
 
 function addressMatches(target: Target, expected: Of<'address'>, address: Address): boolean {
@@ -282,14 +282,14 @@ async function addresses(ec2: Ec2, target: Target, wanted: Of<'address'>[], sign
 }
 
 /**
- * The local key is read only while the key pair is expected to exist, and the
- * comparison is against its fingerprint, not just the AWS key name.
+ * The comparison is against the fingerprint recorded in the deployment, never
+ * local key files, so a lost key cannot block observation or removal. Without
+ * a recorded key nothing can fit.
  */
-async function keyPairs(ec2: Ec2, target: Target, wanted: Of<'key-pair'>[], readKey: KeyReader, signal?: AbortSignal) {
+async function keyPairs(ec2: Ec2, target: Target, wanted: Of<'key-pair'>[], signal?: AbortSignal) {
   if (wanted.length === 0) {
     return []
   }
-  const fingerprint = wanted.some(item => item.present) ? (await readKey()).fingerprint : null
   const response = await ec2.read(
     (client, call) => client.send(new DescribeKeyPairsCommand({ Filters: byId('key-pair-id', wanted) }), call),
     signal,
@@ -300,10 +300,10 @@ async function keyPairs(ec2: Ec2, target: Target, wanted: Of<'key-pair'>[], read
     response.KeyPairs ?? [],
     pair => pair.KeyPairId,
     (_, pair) =>
-      fingerprint !== null &&
+      target.key !== null &&
       pair.KeyName === target.keyName &&
       pair.KeyType === target.plan.key.algorithm &&
-      sameFingerprint(pair.KeyFingerprint, fingerprint) &&
+      sameFingerprint(pair.KeyFingerprint, target.key.fingerprint) &&
       tagged(pair.Tags, target.tags),
   )
 }
@@ -316,11 +316,10 @@ export async function observeHost(
   ec2: Ec2,
   record: Deployment,
   expected: readonly Expected[],
-  readKey: KeyReader,
   signal?: AbortSignal,
 ): Promise<{ resources: ObservedResource[]; implicit: Implicit | null }> {
   const target = targetOf(record)
-  const pairs = await keyPairs(ec2, target, expected.filter(item => item.kind === 'key-pair'), readKey, signal)
+  const pairs = await keyPairs(ec2, target, expected.filter(item => item.kind === 'key-pair'), signal)
   const launched = await instances(ec2, target, expected.filter(item => item.kind === 'instance'), signal)
   const resources = [
     ...pairs,

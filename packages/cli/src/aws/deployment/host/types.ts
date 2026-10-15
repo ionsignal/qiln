@@ -1,10 +1,9 @@
-import { isImageId, type ImagePin } from '../../ami'
+import { isImageId, isSnapshotId, type ImagePin } from '../../ami'
 import { hasKeys, isRecord } from '../../guards'
 import { isAccountId, validRegion } from '../../types'
 import { validCidr } from '../cidr'
 import type { Ingress, Zone } from '../types'
 
-/** The reviewed root source, taken from the image's own root mapping. */
 export interface RootSource {
   deviceName: string
   snapshotId: string
@@ -81,8 +80,6 @@ export interface HostPlan {
   tagged: string[]
 }
 
-const SNAPSHOT_ID = /^snap-[0-9a-f]{8,17}$/
-
 const PLAN_KEYS = [
   'region',
   'pin',
@@ -101,6 +98,13 @@ const PLAN_KEYS = [
   'elasticIp',
   'tagged',
 ] as const
+
+/**
+ * Literals of the record version, not reads of today's spec. Generation always
+ * uses an empty passphrase, and the protection text never implies encryption.
+ */
+const KEY_PASSPHRASE = 'none'
+const KEY_PROTECTION = 'owner-only directory 0700, file 0600'
 
 function isText(value: unknown): value is string {
   return typeof value === 'string' && value.length >= 1 && value.length <= 256
@@ -157,8 +161,7 @@ function isRootVolume(value: unknown): value is RootVolume {
   return (
     isRecord(value) &&
     hasKeys(value, ['deviceName', 'snapshotId', 'volumeType', 'sizeGiB', 'iops', 'throughput', 'deleteOnTermination']) &&
-    typeof value.snapshotId === 'string' &&
-    SNAPSHOT_ID.test(value.snapshotId) &&
+    isSnapshotId(value.snapshotId) &&
     hasVolumeFields(value)
   )
 }
@@ -199,8 +202,8 @@ function isKeyPolicy(value: unknown): value is KeyPolicy {
     isRecord(value) &&
     hasKeys(value, ['algorithm', 'passphrase', 'protection']) &&
     isText(value.algorithm) &&
-    isText(value.passphrase) &&
-    isText(value.protection)
+    value.passphrase === KEY_PASSPHRASE &&
+    value.protection === KEY_PROTECTION
   )
 }
 
@@ -209,10 +212,13 @@ function isElasticIp(value: unknown): value is ElasticIp {
 }
 
 /**
- * Shape, bounds, and internal consistency only. Nothing here reads the compute
- * constants, so a stored plan keeps its meaning when they change; those
- * constants belong to the record version. Zone and ingress semantics are
- * judged by the approval guard, which requires them to equal its own.
+ * Shape, bounds, internal consistency, and the lifecycle invariants that every
+ * deployment must keep: one instance, root volume and primary interface deleted
+ * with it, a data volume retained on its own device name, and an Ed25519
+ * administrative key without a passphrase. These are literals of the record
+ * version, not today's compute constants, so a stored plan keeps its meaning
+ * when they change. Zone and ingress semantics are judged by the approval
+ * guard, which requires them to equal its own.
  */
 export function isHostPlan(value: unknown): value is HostPlan {
   if (!isRecord(value) || !hasKeys(value, PLAN_KEYS)) {
@@ -241,7 +247,7 @@ export function isHostPlan(value: unknown): value is HostPlan {
     validRegion(region) &&
     isPin(pin) &&
     isText(instanceType) &&
-    isPositive(count) &&
+    count === 1 &&
     isText(purchase) &&
     typeof cidr === 'string' &&
     validCidr(cidr) &&
@@ -260,6 +266,11 @@ export function isHostPlan(value: unknown): value is HostPlan {
     isKeyPolicy(key) &&
     isElasticIp(elasticIp) &&
     Array.isArray(tagged) &&
-    tagged.every(isText)
+    tagged.every(isText) &&
+    root.deleteOnTermination &&
+    network.deleteOnTermination &&
+    !data.deleteOnTermination &&
+    root.deviceName !== data.deviceName &&
+    key.algorithm === 'ed25519'
   )
 }

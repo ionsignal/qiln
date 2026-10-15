@@ -1,21 +1,9 @@
 import { randomUUID } from 'node:crypto'
-import { InstallerError, type InstallerErrorCode } from '../../diagnostic/error'
-import { checkCancellation } from '../../terminal/prompts'
-import { request, type ChildEvidence } from '../child/request'
-import {
-  isEvidence,
-  isReply,
-  type Acknowledgment,
-  type Evidence,
-  type Request,
-  type Result,
-} from '../ec2/protocol'
-import { diagnostic } from '../errors'
-import { deploymentRecovery, originalCode, terminationConfirmed } from '../recovery'
 import { AWS_SPEC } from '../spec'
 import { validCidr, validSource } from './cidr'
 import { expectation, matches } from './expect'
 import { deploymentFacts, removable } from './facts'
+import { notify, withWaiting, type Place, type ProgressSink, type ProgressTask } from './progress'
 import { stateOf } from './step'
 import { creationPlan, removalPlan, type Planned } from './topology'
 import {
@@ -28,6 +16,20 @@ import {
   type Observation,
   type Step,
 } from './types'
+import {
+  isEvidence,
+  isReply,
+  type Acknowledgment,
+  type Evidence,
+  type Request,
+  type Result,
+} from '../ec2/protocol'
+import { diagnostic } from '../errors'
+import { generateAdminKey } from '../ssh/generate'
+import { deploymentRecovery, originalCode, terminationConfirmed } from '../recovery'
+import { InstallerError, type InstallerErrorCode } from '../../diagnostic/error'
+import { checkCancellation } from '../../terminal/prompts'
+import { request, type ChildEvidence } from '../child/request'
 import * as records from './records'
 import type { Dir } from '../../state/files'
 import type { Session } from '../auth/session'
@@ -74,9 +76,10 @@ function outcomeOf(error: InstallerError): FailureOutcome {
  * copied from one frozen host plan, so the zones, administrator network, and
  * launch configuration the operator reviewed are the ones the record governs.
  * A plan exists only when nothing blocked the proposal. The idempotency tokens
- * are generated once, here, and are never regenerated for a retry. Callers gate
- * on managed permission state first. Deployments bind only the foundation
- * policy, which grants their authority.
+ * are generated once, here, and are never regenerated for a retry. The
+ * administrative key is generated after approval, so the proposal has none.
+ * Callers gate on managed permission state first. Deployments bind only the
+ * foundation policy, which grants their authority.
  */
 export function propose(connection: AwsConnection, plan: HostPlan, alias: string): Deployment {
   if (!validCidr(plan.cidr)) {
@@ -97,7 +100,7 @@ export function propose(connection: AwsConnection, plan: HostPlan, alias: string
   const id = randomUUID()
   const now = new Date().toISOString()
   return {
-    version: 4,
+    version: 5,
     id,
     alias,
     connection: connection.name,
@@ -124,6 +127,7 @@ export function propose(connection: AwsConnection, plan: HostPlan, alias: string
         volumeToken: randomUUID(),
       },
     },
+    key: null,
     termination: 'confirmed',
     steps: [],
     removals: [],
@@ -136,7 +140,9 @@ export function propose(connection: AwsConnection, plan: HostPlan, alias: string
 /**
  * Coordinates one deployment's provider work under the AWS-operation lock held
  * by the command. It owns the fence, the retention of returned evidence, and
- * the recovery report. Commands own approval presentation.
+ * the recovery report. Commands own approval presentation and progress
+ * rendering; the optional progress sink only observes and never decides an
+ * outcome.
  */
 export class Deployer {
   private fencedStepId: string | undefined
@@ -145,13 +151,19 @@ export class Deployer {
     private readonly root: Dir,
     private readonly session: Session,
     private current: Deployment,
+    private readonly progress?: ProgressSink,
   ) {}
 
-  public static open(root: Dir, session: Session, record: Deployment): Deployer {
-    return new Deployer(root, session, record)
+  public static open(root: Dir, session: Session, record: Deployment, progress?: ProgressSink): Deployer {
+    return new Deployer(root, session, record, progress)
   }
 
-  public static async approve(root: Dir, session: Session, proposal: Deployment): Promise<Deployer> {
+  public static async approve(
+    root: Dir,
+    session: Session,
+    proposal: Deployment,
+    progress?: ProgressSink,
+  ): Promise<Deployer> {
     const approvedAt = new Date().toISOString()
     const record: Deployment = {
       ...proposal,
@@ -162,7 +174,7 @@ export class Deployer {
       createdAt: approvedAt,
     }
     await records.create(root, record)
-    return new Deployer(root, session, record)
+    return new Deployer(root, session, record, progress)
   }
 
   public get record(): Deployment {
@@ -181,6 +193,43 @@ export class Deployer {
         retry: this.retry,
       })
     }
+  }
+
+  /**
+   * Creation is fresh-only. A record with any key, execution history, or removal
+   * history is never continued, replayed, or given another key. Refusing here,
+   * before any state change, keeps this command from touching the record.
+   */
+  private requireFresh(): void {
+    const { steps, removals, key } = this.current
+    if (steps.length !== 0 || removals.length !== 0 || key !== null) {
+      throw new InstallerError({
+        code: 'AWS_DEPLOYMENT_CREATE_REFUSED',
+        facts: deploymentFacts(this.current),
+        retry: this.retry,
+      })
+    }
+  }
+
+  /**
+   * Local work runs under the same unconfirmed-termination fence as provider
+   * work. The binding is persisted only after the pair validated, so a failure
+   * leaves the key directory without a binding: evidence that blocks any
+   * later generation rather than something Qiln repairs.
+   */
+  private async generateKey(signal: AbortSignal): Promise<void> {
+    const task: ProgressTask = { kind: 'key' }
+    notify(this.progress, { phase: 'working', task })
+    await this.persist({
+      termination: 'unconfirmed',
+    })
+    const directory = await records.directoryOf(this.root, this.current.id)
+    const key = await generateAdminKey(directory, this.current.id, signal)
+    await this.persist({
+      key,
+      termination: 'confirmed',
+    })
+    notify(this.progress, { phase: 'verified', task })
   }
 
   private async persist(changes: Partial<Deployment>): Promise<void> {
@@ -343,14 +392,18 @@ export class Deployer {
   /**
    * One fenced provider call, then its bounded verification. `removalApproval`
    * carries a new removal approval together with the first deletion step.
+   * `verified` is announced only after the verifying observation is persisted.
    */
   private async runStep(
     planned: Planned,
     removal: number | null,
     signal: AbortSignal,
+    place: Place,
     removalApproval: Partial<Deployment> = {},
   ): Promise<void> {
     checkCancellation(signal)
+    const task: ProgressTask = { kind: 'step', action: planned.action, slot: planned.slot, ...place }
+    notify(this.progress, { phase: 'working', task })
     const step: Step = {
       id: randomUUID(),
       action: planned.action,
@@ -367,29 +420,35 @@ export class Deployer {
       termination: 'unconfirmed',
       steps: [...this.current.steps, step],
     })
-    const result = await this.call(
-      {
-        kind: 'mutate',
-        deploymentId: this.current.id,
-        operationId: step.id,
-      },
-      signal,
-      this.evidence(step),
-    )
-    const returned = this.current.steps.at(-1)?.returned
-    if (result.kind !== 'done' || !returned || returned.resourceId !== result.resourceId) {
-      throw new InstallerError({
-        code: 'AWS_DEPLOYMENT_EVIDENCE_UNAVAILABLE',
-      })
-    }
-    await this.verify(signal)
+    await withWaiting(this.progress, task, async () => {
+      const result = await this.call(
+        {
+          kind: 'mutate',
+          deploymentId: this.current.id,
+          operationId: step.id,
+        },
+        signal,
+        this.evidence(step),
+      )
+      const returned = this.current.steps.at(-1)?.returned
+      if (result.kind !== 'done' || !returned || returned.resourceId !== result.resourceId) {
+        throw new InstallerError({
+          code: 'AWS_DEPLOYMENT_EVIDENCE_UNAVAILABLE',
+        })
+      }
+      await this.verify(signal)
+    })
+    notify(this.progress, { phase: 'verified', task })
   }
 
   public async create(signal: AbortSignal): Promise<void> {
     this.requireReady()
+    this.requireFresh()
     try {
-      for (const planned of creationPlan(this.current.approval)) {
-        await this.runStep(planned, null, signal)
+      await this.generateKey(signal)
+      const plan = creationPlan(this.current.approval)
+      for (const [index, planned] of plan.entries()) {
+        await this.runStep(planned, null, signal, { position: index + 1, total: plan.length })
       }
     } catch (error: unknown) {
       return await this.fail(error)
@@ -444,13 +503,16 @@ export class Deployer {
       })
     }
     const attempt = this.current.removals.length
+    const total = removalPlan(this.current).length
+    let position = 0
     let removalApproval: Partial<Deployment> = {
       latest: approved,
       removals: [...this.current.removals, { approvedAt: new Date().toISOString(), observation: approved }],
     }
     try {
       for (let next = removalPlan(this.current).at(0); next !== undefined; next = removalPlan(this.current).at(0)) {
-        await this.runStep(next, attempt, signal, removalApproval)
+        position += 1
+        await this.runStep(next, attempt, signal, { position, total }, removalApproval)
         removalApproval = {}
       }
     } catch (error: unknown) {

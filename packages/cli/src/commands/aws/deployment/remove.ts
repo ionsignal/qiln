@@ -7,6 +7,7 @@ import { removalPlan, retained, unreleased } from '../../../aws/deployment/topol
 import { requireAwsHost } from '../../../aws/host'
 import { Prompts, withCancellation } from '../../../terminal/prompts'
 import { withConfirmedOperation } from '../shared'
+import { progressSink } from './progress'
 import { lifecycleOf, observationSummary, reportDeployment } from './report'
 import { authenticateDeployer, openTarget } from './shared'
 import type { Deployment, Observation } from '../../../aws/deployment/types'
@@ -17,7 +18,8 @@ const EFFECTS: Partial<Record<Action, string>> = {
   'disassociate-address': 'Disassociate the Elastic IP from the primary network interface.',
   'release-address': 'Release the Elastic IP allocation.',
   'terminate-instance': 'Terminate the instance. AWS deletes its root volume and primary interface with it.',
-  'delete-key-pair': 'Delete the AWS key pair. Guest authorized keys are unaffected, and this release creates and deletes no local SSH key.',
+  'delete-key-pair':
+    'Delete the AWS key pair. This is not guest SSH revocation: guest authorized keys are unaffected, and Qiln neither reads nor deletes the local administrative key files.',
   'delete-group': 'Delete the security group.',
   'disassociate-subnet': 'Disassociate the route table from each subnet.',
   'delete-subnet': 'Delete each subnet.',
@@ -39,7 +41,6 @@ function refusal(record: Deployment, observation?: Observation): InstallerError 
   })
 }
 
-/** Only the fresh observation just retained is a completed action, so it alone carries a badge. */
 function reportTarget(reporter: Reporter, record: Deployment, observation: Observation): void {
   const kept = retained(record)
   const effects = [...new Set(removalPlan(record).map(({ action }) => EFFECTS[action] ?? action))]
@@ -91,7 +92,7 @@ export async function remove(options: AwsDeploymentOptions, reporter: Reporter):
         }
         throw refusal(target.record)
       }
-      const deployer = await authenticateDeployer(root, target, signal)
+      const deployer = await authenticateDeployer(root, target, signal, progressSink(reporter))
       const observation = await deployer.observe(signal)
       const record = deployer.record
       if (unreleased(record).length === 0) {
@@ -105,6 +106,7 @@ export async function remove(options: AwsDeploymentOptions, reporter: Reporter):
       }
       reportTarget(reporter, record, observation)
       await prompts.approve('Remove the displayed deployment resources')
+      reporter.space()
       await deployer.remove(observation, signal)
       reportDeployment(reporter, deployer.record)
       return retained(deployer.record).length === 0

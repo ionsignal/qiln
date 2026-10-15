@@ -324,6 +324,25 @@ export async function readChild(directory: Dir, name: string, options: ReadOptio
 }
 
 /**
+ * Flushes the contents of one regular child to storage. The file is validated
+ * through the retained handle but its bytes are never read, so this is safe for
+ * private keys. Synchronizing the directory does not replace this.
+ */
+export async function syncChild(directory: Dir, name: string, options: ReadOptions): Promise<void> {
+  assertSizeOptions(options)
+  const path = directory.child(name)
+  const handle = await openNoFollow(path, FILE_FLAGS, 'file')
+  try {
+    const metadata = await handle.stat()
+    validate(metadata, 'file', path, options)
+    validateSize(metadata, path, options)
+    await handle.sync()
+  } finally {
+    await handle.close()
+  }
+}
+
+/**
  * Validates one direct state-directory entry without following a symlink.
  */
 export async function inspectChild(directory: Dir, name: string, options: InspectOptions = {}): Promise<FileKind> {

@@ -12,12 +12,12 @@ import {
   type CreateVolumeCommandInput,
   type RunInstancesCommandInput,
 } from '@aws-sdk/client-ec2'
+import { notAttempted } from '../context'
+import { contradicts, need, receipt, tags, unavailable } from './shared'
 import type { Action } from '../../deployment/graph'
 import type { Deployment, Step } from '../../deployment/types'
+import type { PublicKeyReader } from '../../ssh/store'
 import type { Ec2 } from '../client'
-import { notAttempted } from '../context'
-import type { KeyReader } from '../key'
-import { contradicts, need, receipt, tags, unavailable } from './shared'
 
 const HOST_ACTIONS = [
   'import-key-pair',
@@ -38,9 +38,9 @@ export function isHostAction(action: Action): action is HostAction {
   return HOST_ACTIONS.some(candidate => candidate === action)
 }
 
-// The plan stores Qiln-normalized strings; the provider models want their enums.
-// The plan is valid only when rebuilt from reviewed constants, so these casts
-// narrow values that were already fixed at approval.
+// The plan stores Qiln-normalized strings that were fixed at approval and
+// judged structurally by the record guard; the provider models want their
+// enums, so these casts only narrow those stored values.
 type InstanceTypeName = NonNullable<RunInstancesCommandInput['InstanceType']>
 type LaunchMetadata = NonNullable<RunInstancesCommandInput['MetadataOptions']>
 type VolumeType = NonNullable<CreateVolumeCommandInput['VolumeType']>
@@ -73,7 +73,6 @@ function launchInput(record: Deployment): RunInstancesCommandInput {
         DeleteOnTermination: network.deleteOnTermination,
       },
     ],
-    // No snapshot is named: the image's own root snapshot is inherited and verified afterwards.
     BlockDeviceMappings: [
       {
         DeviceName: root.deviceName,
@@ -107,7 +106,12 @@ function launchInput(record: Deployment): RunInstancesCommandInput {
  * named by any mutation response; they are learned from the observation that
  * verifies the launch.
  */
-export async function mutateHost(ec2: Ec2, record: Deployment, step: Step, readKey: KeyReader): Promise<string | null> {
+export async function mutateHost(
+  ec2: Ec2,
+  record: Deployment,
+  step: Step,
+  readKey: PublicKeyReader,
+): Promise<string | null> {
   const { host } = record.approval
   const { plan } = host
   switch (step.action) {

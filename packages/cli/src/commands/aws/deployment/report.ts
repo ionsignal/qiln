@@ -1,10 +1,10 @@
-import type { DiagnosticFact } from '../../../diagnostic/error'
 import { deploymentName } from '../../../aws/deployment/alias'
-import { cleanup, phase, type Phase } from '../../../aws/deployment/facts'
-import type { Disposition } from '../../../aws/deployment/graph'
+import { cleanup, keyDisclosure, phase, type Phase } from '../../../aws/deployment/facts'
 import { removalOutcome } from '../../../aws/deployment/outcome'
 import { refusals } from '../../../aws/deployment/step'
 import { released, resourceId, resources, retained, unreleased, type Resource } from '../../../aws/deployment/topology'
+import type { Disposition } from '../../../aws/deployment/graph'
+import type { DiagnosticFact } from '../../../diagnostic/error'
 import type { Deployment, Observation, ObservedState } from '../../../aws/deployment/types'
 import type { Reporter, TableCell, Tone } from '../../../terminal/reporter'
 
@@ -126,6 +126,12 @@ export function reportDeployment(reporter: Reporter, record: Deployment): void {
     ['Approved CIDR', record.approval.cidr],
     ['Zones', record.approval.zones.map(zone => zone.name).join(', ')],
     ['Administrator CIDR', record.approval.ingress[0].cidr],
+    [
+      'Administrative key',
+      record.key === null
+        ? keyDisclosure(record)
+        : `${record.key.algorithm} · ${keyDisclosure(record)} · generated ${record.key.generatedAt}`,
+    ],
     [historical ? 'VPC (historical)' : 'VPC', resourceId(record, 'create-vpc') ?? 'no identity retained'],
     ['Instance', resourceId(record, 'run-instances') ?? 'no identity retained'],
     [
@@ -157,6 +163,11 @@ export function reportDeployment(reporter: Reporter, record: Deployment): void {
   reporter.facts(facts)
   reporter.space()
   reporter.info(state.text)
+  if (record.key !== null) {
+    reporter.info(
+      'Removal never deletes the local key files, and deleting the AWS key pair is not guest SSH revocation.',
+    )
+  }
   if (unresolved) {
     reporter.notice(
       'Resources or unresolved effects may remain. No replay, adoption, deletion, rollback, or automatic recovery was attempted.',

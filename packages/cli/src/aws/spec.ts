@@ -114,12 +114,15 @@ export const AWS_SPEC = Object.freeze({
     config: 'config',
     credentials: 'credentials',
     cache: 'cache',
+    ssh: 'ssh',
+    privateKey: 'admin',
     publicKey: 'admin.pub',
   },
   limits: {
     record: 65_536,
     config: 65_536,
     cache: 262_144,
+    privateKey: 4_096,
     publicKey: 4_096,
   },
 })

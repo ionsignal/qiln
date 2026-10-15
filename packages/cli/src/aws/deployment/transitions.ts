@@ -27,6 +27,22 @@ function requireFixedFields(current: Deployment, updated: Deployment): void {
 }
 
 /**
+ * The administrative key binding is set once, before any step exists, and is
+ * never rewritten, dropped, or replaced.
+ */
+function requireKey(current: Deployment, updated: Deployment): void {
+  if (current.key !== null) {
+    if (!sameJson(current.key, updated.key)) {
+      return invalid()
+    }
+    return
+  }
+  if (updated.key !== null && (current.steps.length !== 0 || updated.steps.length !== 0)) {
+    return invalid()
+  }
+}
+
+/**
  * Evidence is set once. A response cannot be added after a recorded failure
  * (the record guard already forbids both), and a failure never rewrites a response.
  */
@@ -67,7 +83,8 @@ function requireRemovalApproval(current: Deployment, updated: Deployment, previo
 
 /**
  * A new step is open, follows the fixed plan, and starts only after the previous
- * step was verified. Creation never resumes once any removal exists.
+ * step was verified. Creation never resumes once any removal exists, and never
+ * starts without the administrative key binding.
  */
 function requireNewStep(current: Deployment, updated: Deployment, step: Step): void {
   const previous = current.steps.at(-1)
@@ -77,6 +94,7 @@ function requireNewStep(current: Deployment, updated: Deployment, step: Step): v
   if (step.removal === null) {
     const planned = creationPlan(updated.approval).at(current.steps.length)
     if (
+      updated.key === null ||
       current.removals.length !== 0 ||
       updated.removals.length !== 0 ||
       planned?.action !== step.action ||
@@ -159,6 +177,7 @@ function requireImplicit(current: Deployment, updated: Deployment): void {
  */
 export function requireTransition(current: Deployment, updated: Deployment): void {
   requireFixedFields(current, updated)
+  requireKey(current, updated)
   requireSteps(current, updated)
   requireRemovals(current, updated)
   requireObservations(current, updated)

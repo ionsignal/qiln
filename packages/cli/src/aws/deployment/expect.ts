@@ -1,6 +1,6 @@
-import type { Action } from './graph'
 import { resourceId, resources, stepOf } from './topology'
-import type { Deployment, Implicit, Ingress, Observation } from './types'
+import type { Action } from './graph'
+import type { Deployment, Implicit, Ingress, Observation, ObservedResource } from './types'
 
 export interface Association {
   subnetId: string
@@ -123,13 +123,47 @@ function instanceAgrees(expected: readonly Expected[], observation: Observation)
   )
 }
 
+/**
+ * The instance is expected present, but its launch is not verified yet, so no
+ * ledger entry names the root volume and primary interface that AWS created.
+ */
+function launching(expected: readonly Expected[]): boolean {
+  const instance = expected.find(item => item.kind === 'instance')
+  return instance !== undefined && instance.present && instance.implicit === null
+}
+
+/**
+ * Every resource an agreeing observation must report, with its state. A
+ * launching instance also reports its root volume and interface, present, so
+ * the observation that verifies the launch is complete for the ledger that the
+ * same write then records. Null means those two were not reported at all.
+ */
+function wantedStates(expected: readonly Expected[], observation: Observation): ObservedResource[] | null {
+  const states = expected.map(
+    (item): ObservedResource => ({ kind: item.kind, id: item.id, state: item.present ? 'present' : 'absent' }),
+  )
+  if (!launching(expected)) {
+    return states
+  }
+  const { implicit } = observation
+  if (implicit === null) {
+    return null
+  }
+  return [
+    ...states,
+    { kind: 'volume', id: implicit.rootVolumeId, state: 'present' },
+    { kind: 'interface', id: implicit.interfaceId, state: 'present' },
+  ]
+}
+
 export function matches(expected: readonly Expected[], observation: Observation): boolean {
+  const wanted = wantedStates(expected, observation)
   return (
-    observation.resources.length === expected.length &&
-    expected.every(item =>
+    wanted !== null &&
+    observation.resources.length === wanted.length &&
+    wanted.every(item =>
       observation.resources.some(
-        observed =>
-          observed.kind === item.kind && observed.id === item.id && observed.state === (item.present ? 'present' : 'absent'),
+        observed => observed.kind === item.kind && observed.id === item.id && observed.state === item.state,
       ),
     ) &&
     instanceAgrees(expected, observation)

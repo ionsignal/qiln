@@ -1,7 +1,7 @@
 import { IMPLICIT, undoes } from './graph'
 import { settled, stateOf } from './step'
 import { creationPlan, resources, stepOf } from './topology'
-import type { Deployment, Step } from './types'
+import type { Deployment, ObservedResource, Step } from './types'
 
 /**
  * Cross-field consistency of a record whose shape is already valid. These are
@@ -59,6 +59,22 @@ function timed(record: Deployment): boolean {
   })
 }
 
+/**
+ * No step exists without the administrative key binding, and the key is
+ * generated after approval and before the first step.
+ */
+function keyed(record: Deployment): boolean {
+  const { key, steps, approval } = record
+  if (key === null) {
+    return steps.length === 0
+  }
+  return (
+    key.algorithm === approval.host.plan.key.algorithm &&
+    approval.approvedAt <= key.generatedAt &&
+    (steps.length === 0 || key.generatedAt <= steps[0].fencedAt)
+  )
+}
+
 function identified(record: Deployment): boolean {
   const { implicit } = record
   const ids = [
@@ -79,14 +95,25 @@ function discovered(record: Deployment): boolean {
   return (stepOf(record, IMPLICIT.parent)?.verifiedAt != null) === (record.implicit !== null)
 }
 
+/**
+ * Every observed resource is recorded, except that before the launch is
+ * verified the observation also carries the instance's root volume and
+ * interface, which are the two named by its own `implicit` relationship.
+ */
 function observedKnown(record: Deployment): boolean {
   const { latest, implicit } = record
   if (latest === null) {
     return true
   }
   const known = resources(record)
+  const launching = implicit === null ? latest.implicit : null
+  const isKnown = (item: ObservedResource) =>
+    known.some(resource => resource.kind === item.kind && resource.id === item.id) ||
+    (launching !== null &&
+      ((item.kind === 'volume' && item.id === launching.rootVolumeId) ||
+        (item.kind === 'interface' && item.id === launching.interfaceId)))
   return (
-    latest.resources.every(item => known.some(resource => resource.kind === item.kind && resource.id === item.id)) &&
+    latest.resources.every(isKnown) &&
     (implicit === null ||
       latest.implicit === null ||
       (implicit.rootVolumeId === latest.implicit.rootVolumeId && implicit.interfaceId === latest.implicit.interfaceId))
@@ -99,6 +126,7 @@ export function isConsistent(record: Deployment): boolean {
     inPlan(record) &&
     ordered(record.steps) &&
     timed(record) &&
+    keyed(record) &&
     identified(record) &&
     undone(record) &&
     discovered(record) &&

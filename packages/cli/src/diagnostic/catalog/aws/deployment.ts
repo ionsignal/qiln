@@ -63,6 +63,21 @@ export const awsDeploymentDiagnostics = Object.freeze({
     'Use this command to review the proposed host, its findings, the intended removal contract, and the intended storage retention and SSH credential handling.',
     'Retained deployments remain available through qiln aws deployment list, status, inspect, and remove.',
   ),
+  AWS_DEPLOYMENT_CREATE_REFUSED: entry(
+    'Deployment creation was refused locally',
+    'Creation runs once, from an approved record that has no administrative key, no recorded provider steps, and no removal history. Qiln never continues, replays, or regenerates abandoned work. This command attempted no new AWS mutation and changed nothing. It does not clear earlier effects or establish that no AWS resources exist.',
+    'Inspect the displayed deployment evidence with qiln aws deployment status.',
+    'If AWS resources may remain, use qiln aws deployment inspect, and remove only what the record names.',
+    'A new deployment needs a new alias; aliases are never reused.',
+  ),
+  AWS_DEPLOYMENT_KEY_GENERATION_FAILED: entry(
+    'Administrative SSH key generation did not complete',
+    'Qiln generates one Ed25519 key pair locally, under a protected directory bound to this deployment, before any AWS step. It requires ssh-keygen on PATH and stops before creating any key storage when that is missing. The pair is validated, and both files are flushed to storage, before it is recorded. No new AWS mutation was attempted. This does not establish that no AWS resources exist from earlier work. Partial key files, if any, are retained as evidence and are never repaired, regenerated, or replaced, so this deployment cannot be continued.',
+    'Inspect the displayed protected key directory, if one is shown, and the recorded child termination.',
+    'Confirm that no ssh-keygen process remains active before removing anything. ssh-keygen is required only to generate this key; install the OpenSSH client tools through an approved procedure if it was not found.',
+    'Create a new deployment with a new alias after the cause is resolved.',
+    'Do not delete deployment evidence or lock files to bypass this state.',
+  ),
   AWS_DEPLOYMENT_INGRESS_INVALID: entry(
     'Administrator network is invalid',
     'The administrator CIDR must be a canonical IPv4 network with no host bits and a prefix from /1 to /32. The whole internet (/0) is refused. It controls only SSH access to the host security group.',

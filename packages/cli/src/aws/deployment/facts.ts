@@ -76,6 +76,16 @@ export function describe(record: Deployment): string {
   return DESCRIPTIONS[phase(record)]
 }
 
+/**
+ * The single wording for the administrative key. A binding discloses its
+ * fingerprint, and neither case claims anything about the local files.
+ */
+export function keyDisclosure(record: Deployment): string {
+  return record.key === null
+    ? 'no key recorded; partial files may exist'
+    : `SHA256:${record.key.fingerprint} recorded; local-file availability was not inspected`
+}
+
 export function verification(record: Deployment): Verification {
   if (
     record.termination === 'unconfirmed' ||
@@ -160,6 +170,7 @@ export function deploymentFacts(record: Deployment): readonly DiagnosticFact[] {
     ['Region', binding.region],
     ['CIDR', approval.cidr],
     ['Administrator CIDR', approval.ingress[0].cidr],
+    ['Administrative key', keyDisclosure(record)],
     ['Zones', approval.zones.map(zone => zone.name).join(', ')],
     ['VPC', resourceId(record, 'create-vpc') ?? 'no identity retained'],
     ['Instance', resourceId(record, 'run-instances') ?? 'no identity retained'],

@@ -1,5 +1,5 @@
 import { expectation, matches } from './expect'
-import { effects } from './facts'
+import { effects, keyDisclosure } from './facts'
 import type { Disposition, Kind } from './graph'
 import { released, resources, type Resource } from './topology'
 import type { Deployment } from './types'
@@ -80,6 +80,22 @@ function network(record: Deployment): Outcome {
     : { label, state: 'pending', detail: `${remaining.length} of ${recorded.length} recorded resources not confirmed removed` }
 }
 
+/**
+ * Removal never reads or deletes the local administrative key files, so only
+ * the recorded binding is reported. Their availability was not checked.
+ */
+function localKey(record: Deployment): Outcome {
+  const label = 'Local admin key'
+  if (record.key === null) {
+    return { label, state: 'none', detail: keyDisclosure(record) }
+  }
+  return {
+    label,
+    state: 'retained',
+    detail: `${keyDisclosure(record)}. Qiln never deletes the local key files.`,
+  }
+}
+
 function unresolved(record: Deployment): Outcome {
   const label = 'Unresolved effects'
   return effects(record) === 'outstanding'
@@ -98,8 +114,9 @@ export function removalOutcome(record: Deployment): Outcome[] {
       record,
       'AWS key pair',
       find(record, 'key-pair'),
-      'deleted; this release creates, inspects, and deletes no local SSH key, and guest authorized keys are unaffected',
+      'deleted and observed absent; this is not guest SSH revocation, and guest authorized keys are unaffected',
     ),
+    localKey(record),
     network(record),
     unresolved(record),
   ]
