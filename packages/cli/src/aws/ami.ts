@@ -2,6 +2,7 @@ import { InstallerError } from '../diagnostic/error'
 import { isAccountId } from './types'
 
 const IMAGE_ID = /^ami-[0-9a-f]{8,17}$/
+const SNAPSHOT_ID = /^snap-[0-9a-f]{8,17}$/
 
 export interface ImagePin {
   imageId: string
@@ -10,6 +11,14 @@ export interface ImagePin {
 
 export function isImageId(value: unknown): value is string {
   return typeof value === 'string' && IMAGE_ID.test(value)
+}
+
+/**
+ * The one snapshot-ID rule, shared by discovery, proposal evaluation and
+ * durable-plan validation. Syntax does not prove that the snapshot exists.
+ */
+export function isSnapshotId(value: unknown): value is string {
+  return typeof value === 'string' && SNAPSHOT_ID.test(value)
 }
 
 /**

@@ -1,5 +1,5 @@
 import { AWS_SPEC } from '../../spec'
-import { isImageId } from '../../ami'
+import { isImageId, isSnapshotId } from '../../ami'
 import { hasKeys, isRecord } from '../../guards'
 import { isAccountId, isTimestamp } from '../../types'
 import { isPlacement } from '../types'
@@ -89,7 +89,7 @@ const nullableFlag = nullable(flag)
 const texts = list(text, 32)
 
 const imageEbs = record({
-  snapshotId: nullableText,
+  snapshotId: nullable(scalar('snapshot ID', isSnapshotId)),
   volumeSizeGiB: nullableCount,
   volumeType: nullableText,
   iops: nullableCount,

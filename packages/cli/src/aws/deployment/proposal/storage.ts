@@ -1,4 +1,5 @@
 import { AWS_SPEC } from '../../spec'
+import { isSnapshotId } from '../../ami'
 import type { RootSource } from '../host/types'
 import type { Finding, ImageDevice, ImageEvidence } from './types'
 
@@ -38,12 +39,13 @@ export interface ImageStorage {
 }
 
 /**
- * The launch freezes the image's own root snapshot, so the root must name one.
- * The compute policy allows exactly one root size, and a snapshot-backed volume
- * cannot be smaller than its snapshot, so a larger advertised root is a
- * contradiction that would be refused at launch. Every mapping is classified,
- * and anything that would add durable storage or cannot be recognized blocks
- * rather than being silently admitted.
+ * The launch freezes the image's own root snapshot, so the root must name one
+ * that passes the same snapshot-ID rule as the durable plan. The compute policy
+ * allows exactly one root size, and a snapshot-backed volume cannot be smaller
+ * than its snapshot, so a larger advertised root is a contradiction that would
+ * be refused at launch. Every mapping is classified, and anything that would
+ * add durable storage or cannot be recognized blocks rather than being
+ * silently admitted.
  */
 export function storageOf(image: ImageEvidence | null): ImageStorage {
   if (image === null) {
@@ -52,13 +54,14 @@ export function storageOf(image: ImageEvidence | null): ImageStorage {
   const devicesOf = (kind: DeviceClass) => image.devices.filter(device => classify(device, image.rootDeviceName) === kind)
   const roots = devicesOf('root')
   const rootDevice = roots.length === 1 ? roots[0] : undefined
-  const snapshotId = rootDevice?.ebs?.snapshotId ?? null
+  const reportedSnapshot = rootDevice?.ebs?.snapshotId
+  const snapshotId = isSnapshotId(reportedSnapshot) ? reportedSnapshot : null
   const sizeGiB = rootDevice?.ebs?.volumeSizeGiB ?? null
   const requirements: readonly Requirement[] = [
     [rootDevice !== undefined, 'The image root mapping is missing or ambiguous.'],
     [
       rootDevice === undefined || snapshotId !== null,
-      'The image root mapping has no snapshot, so the reviewed root source cannot be preserved.',
+      'The image root mapping has no valid snapshot, so the reviewed root source cannot be preserved.',
     ],
     [rootDevice === undefined || sizeGiB !== null, 'The image root mapping does not report a size.'],
     [
