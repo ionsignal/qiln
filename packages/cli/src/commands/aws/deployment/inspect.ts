@@ -1,13 +1,20 @@
-import { expectation, matches } from '../../../aws/deployment/expect'
-import { resources } from '../../../aws/deployment/topology'
-import type { Observation } from '../../../aws/deployment/types'
-import { requireAwsHost } from '../../../aws/host'
-import type { AwsDeploymentOptions } from '../../../input'
-import { withCancellation } from '../../../terminal/prompts'
-import type { Reporter } from '../../../terminal/reporter'
-import { withConfirmedOperation } from '../shared'
 import { reportDeployment } from './report'
 import { authenticateDeployer, openTarget } from './shared'
+import { expectation, matches } from '../../../aws/deployment/expect'
+import { resources, unnamed } from '../../../aws/deployment/topology'
+import { requireAwsHost } from '../../../aws/host'
+import { withCancellation } from '../../../terminal/prompts'
+import { withConfirmedOperation } from '../shared'
+import type { Reporter } from '../../../terminal/reporter'
+import type { AwsDeploymentOptions } from '../../../input'
+import type { Deployment, Observation } from '../../../aws/deployment/types'
+
+function unrecorded(record: Deployment, candidates: readonly Observation[]): Observation[] {
+  const known = resources(record)
+  return candidates.filter(candidate =>
+    candidate.resources.every(item => !known.some(resource => resource.kind === item.kind && resource.id === item.id)),
+  )
+}
 
 function reportCandidates(reporter: Reporter, candidates: readonly Observation[]): void {
   reporter.section('Tagged candidate resources')
@@ -31,18 +38,25 @@ export async function inspect(options: AwsDeploymentOptions, reporter: Reporter)
         reportDeployment(reporter, target.record)
         return 'Nothing to observe: creation was approved but never attempted.'
       }
-      const deployer = await authenticateDeployer(root, target, signal)
-      if (resources(target.record).length > 0) {
-        const observation = await deployer.observe(signal)
-        reportDeployment(reporter, deployer.record)
-        return matches(expectation(deployer.record), observation)
-          ? 'Fresh observation retained; it matches the record. It does not establish public reachability or launch readiness.'
-          : 'Fresh observation retained; it differs from the record. Nothing was changed.'
+      const recorded = resources(target.record).length > 0
+      if (!recorded && unnamed(target.record).length === 0) {
+        reportDeployment(reporter, target.record)
+        return 'Nothing to observe: no resource identity was retained and no creation outcome is unresolved.'
       }
-      const candidates = await deployer.candidates(signal)
-      reportDeployment(reporter, deployer.record)
-      reportCandidates(reporter, candidates)
-      return 'No resource identity was retained; candidates were displayed only.'
+      const deployer = await authenticateDeployer(root, target, signal)
+      const observation = recorded ? await deployer.observe(signal) : null
+      const candidates = unnamed(deployer.record).length > 0 ? await deployer.candidates(signal) : null
+      const record = deployer.record
+      reportDeployment(reporter, record)
+      if (candidates !== null) {
+        reportCandidates(reporter, unrecorded(record, candidates))
+      }
+      if (observation === null) {
+        return 'No resource identity was retained; candidates were displayed only.'
+      }
+      return matches(expectation(record), observation)
+        ? 'Fresh observation retained; it matches the record. It does not establish public reachability or launch readiness.'
+        : 'Fresh observation retained; it differs from the record. Nothing was changed.'
     })
   })
   reporter.summary(message)
