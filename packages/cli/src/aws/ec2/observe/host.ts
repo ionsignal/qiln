@@ -12,8 +12,9 @@ import {
 import { resourceId } from '../../deployment/topology'
 import { collect } from '../../observe'
 import { sameFingerprint } from '../../ssh/key'
-import { byId, judge, listed, PAGES, tagFilters, tagged, type Candidate, type Of } from './shared'
+import { byId, judge, listed, PAGES, tagFilters, tagged, unverified } from './shared'
 import type { Ec2 } from '../client'
+import type { Candidate, Of } from './shared'
 import type { Expected, Mapping } from '../../deployment/expect'
 import type { Deployment, Implicit, ObservedResource } from '../../deployment/types'
 
@@ -222,9 +223,15 @@ async function interfaces(ec2: Ec2, target: Target, wanted: Of<'interface'>[], s
   if (wanted.length === 0) {
     return []
   }
+  const subnetId = target.subnetId ?? unverified()
   const response = await ec2.read(
     (client, call) =>
-      client.send(new DescribeNetworkInterfacesCommand({ Filters: byId('network-interface-id', wanted) }), call),
+      client.send(
+        new DescribeNetworkInterfacesCommand({
+          Filters: [...byId('network-interface-id', wanted), { Name: 'subnet-id', Values: [subnetId] }],
+        }),
+        call,
+      ),
     signal,
   )
   return judge(
