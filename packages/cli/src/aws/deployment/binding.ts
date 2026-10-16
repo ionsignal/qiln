@@ -6,7 +6,8 @@ import type { Deployment } from './types'
 /**
  * Matches immutable identities, creation identity and policy identity. A
  * connection name alone never establishes that a deployment belongs to it.
- * Deployments bind only the foundation policy, which grants their authority.
+ * Deployments bind only the foundation policy, which every managed connection
+ * has enrolled.
  */
 export function requireBound(connection: AwsConnection | null, record: Deployment): AwsConnection {
   const managed = connection?.managed

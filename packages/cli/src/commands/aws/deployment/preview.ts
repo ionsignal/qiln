@@ -1,11 +1,11 @@
-import type { DiagnosticFact } from '../../../diagnostic/error'
-import type { ImagePin } from '../../../aws/ami'
-import { deploymentName } from '../../../aws/deployment/alias'
-import type { HostPlan } from '../../../aws/deployment/host/types'
-import type { HostProposal, ImageDevice, ImageEvidence, InstanceTypeEvidence } from '../../../aws/deployment/proposal/types'
 import { AWS_SPEC } from '../../../aws/spec'
+import { deploymentName } from '../../../aws/deployment/alias'
+import type { ImagePin } from '../../../aws/ami'
 import type { AwsIdentity } from '../../../aws/types'
 import type { Reporter } from '../../../terminal/reporter'
+import type { DiagnosticFact } from '../../../diagnostic/error'
+import type { HostPlan } from '../../../aws/deployment/host/types'
+import type { HostProposal, ImageDevice, ImageEvidence, InstanceTypeEvidence } from '../../../aws/deployment/proposal/types'
 
 const { compute } = AWS_SPEC
 
@@ -171,12 +171,11 @@ function accessFacts(plan: HostPlan): DiagnosticFact[] {
   return [
     [
       'Admin SSH key',
-      `One ${key.algorithm} OpenSSH key per deployment, generated locally and bound to the deployment ID. Passphrase: ${key.passphrase}. The private key stays in protected local state (${key.protection}) and is not otherwise encrypted; AWS receives only the public half.`,
+      `One ${key.algorithm} OpenSSH key per deployment, generated locally after approval and bound to the deployment ID by fingerprint. Passphrase: ${key.passphrase}. The private key stays in protected local state (${key.protection}) and is not otherwise encrypted; AWS receives only the public half, as a key pair.`,
     ],
-    ['Login user', 'ubuntu'],
     [
-      'Host identity',
-      "Verified separately from the client key, against host-key fingerprints read through authenticated AWS console output, before authentication. Missing evidence blocks verified SSH. This preview generates and imports nothing.",
+      'SSH access',
+      'Qiln does not connect to the host in this release. The key is imported for the launch only: no SSH connection, host-identity verification, or guest inspection occurs.',
     ],
   ]
 }
@@ -225,11 +224,11 @@ function removalFacts(plan: HostPlan): DiagnosticFact[] {
  * is shown beside the region and appears even when AWS did not return the image.
  */
 export function reportProposal(reporter: Reporter, proposal: HostProposal, target: PreviewTarget): void {
-  reporter.section('Proposed GPU host — execution unavailable')
+  reporter.section('Proposed GPU host')
   reporter.facts([
     ['Account', target.identity.accountId],
     ['Operator', target.identity.arn],
-    ['Local alias', `${deploymentName(target.alias)} (not reserved)`],
+    ['Local alias', `${deploymentName(target.alias)} (reserved when approved)`],
     ['Permission region', proposal.region],
     [
       'Pinned AMI',
@@ -238,7 +237,7 @@ export function reportProposal(reporter: Reporter, proposal: HostProposal, targe
     ['Discovered', proposal.discoveredAt],
   ])
   reporter.space()
-  reporter.info('Read-only preview. Nothing below has been created, approved, or reserved.')
+  reporter.info('Proposal from read-only discovery. Nothing below has been created, approved, or reserved yet.')
   reporter.section('Observed in AWS (read-only, point in time)')
   reporter.facts([...imageFacts(proposal.image, proposal.pin), ...instanceFacts(proposal.instanceType)])
   reporter.section('Documented by AWS (not verified on a host)')
@@ -275,5 +274,32 @@ export function reportProposal(reporter: Reporter, proposal: HostProposal, targe
   )
   reporter.info(
     'No instance profile, operator-credential delivery, host preparation, Qiln installation, HTTPS service, or capsule-service readiness is included.',
+  )
+}
+
+/**
+ * States what approval starts. Counts and settings come from the frozen plan,
+ * so this screen cannot describe a different launch than the record will govern.
+ */
+export function reportCreationEffects(reporter: Reporter, plan: HostPlan): void {
+  const { data } = plan
+  reporter.section('Creation approval')
+  reporter.facts([
+    ['Network', `one VPC ${plan.cidr} · one subnet in each of ${plan.zones.length} zones · internet gateway · route table · one security group`],
+    ['Access key', `generate one local ${plan.key.algorithm} key and import its public half to AWS as a key pair`],
+    ['Host', `launch ${plan.count} ${plan.instanceType} (${plan.purchase})`],
+    ['Storage', `create and attach one ${data.sizeGiB} GiB data volume · ${termination(data.deleteOnTermination)}`],
+    ['Public address', 'allocate and associate one Elastic IP'],
+    ['Verification', 'each step is followed by an observation, then AWS instance health is read'],
+  ])
+  reporter.space()
+  reporter.notice(
+    'Approval creates billable AWS resources immediately. It is not spend protection and no cost estimate is shown. The data volume is retained by removal and keeps incurring charges until it is deleted outside Qiln.',
+  )
+  reporter.notice(
+    'Cancelling or a failure does not roll back. Completed and uncertain effects are retained as evidence and are never replayed automatically.',
+  )
+  reporter.notice(
+    'Success means AWS provisioning and health verified. Qiln does not connect to the instance, so SSH access, host identity, guest compatibility, CUDA, and readiness are not established.',
   )
 }

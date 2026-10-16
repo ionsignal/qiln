@@ -16,6 +16,7 @@ export type Phase =
   | 'uncertain'
   | 'partial'
   | 'created'
+  | 'healthy'
   | 'removing'
   | 'removed'
   | 'retained'
@@ -42,7 +43,8 @@ const DESCRIPTIONS: Record<Phase, string> = {
   returned: 'response retained; not yet verified by observation',
   uncertain: 'outcome uncertain',
   partial: 'creation stopped after a verified step; deployment incomplete',
-  created: 'deployment created and observed',
+  created: 'provisioned; AWS health not verified',
+  healthy: 'AWS provisioning and health verified',
   removing: 'removal partly verified; recorded resources remain',
   removed: 'all recorded resources removed and observed absent',
   retained: 'removal verified; resources retained by design remain and were not removed',
@@ -69,7 +71,10 @@ export function phase(record: Deployment): Phase {
   if (last.removal !== null) {
     return 'removing'
   }
-  return record.steps.length === creationPlan(record.approval).length ? 'created' : 'partial'
+  if (record.steps.length !== creationPlan(record.approval).length) {
+    return 'partial'
+  }
+  return record.health === null ? 'created' : 'healthy'
 }
 
 export function describe(record: Deployment): string {
@@ -86,6 +91,16 @@ export function keyDisclosure(record: Deployment): string {
     : `SHA256:${record.key.fingerprint} recorded; local-file availability was not inspected`
 }
 
+/**
+ * The single wording for AWS health. Retained health is point-in-time
+ * evidence, not a statement about the current state of the instance.
+ */
+export function healthDisclosure(record: Deployment): string {
+  return record.health === null
+    ? 'not verified'
+    : `running with system, instance and attached-EBS checks ok at ${record.health.checkedAt}; point-in-time AWS status only`
+}
+
 export function verification(record: Deployment): Verification {
   if (
     record.termination === 'unconfirmed' ||
@@ -97,7 +112,10 @@ export function verification(record: Deployment): Verification {
     return 'uncertain'
   }
   const recordedPhase = phase(record)
-  return (recordedPhase === 'created' || recordedPhase === 'removed' || recordedPhase === 'retained') &&
+  return (recordedPhase === 'created' ||
+    recordedPhase === 'healthy' ||
+    recordedPhase === 'removed' ||
+    recordedPhase === 'retained') &&
     record.latest !== null &&
     matches(expectation(record), record.latest)
     ? 'verified'
@@ -174,6 +192,7 @@ export function deploymentFacts(record: Deployment): readonly DiagnosticFact[] {
     ['Zones', approval.zones.map(zone => zone.name).join(', ')],
     ['VPC', resourceId(record, 'create-vpc') ?? 'no identity retained'],
     ['Instance', resourceId(record, 'run-instances') ?? 'no identity retained'],
+    ['AWS health', healthDisclosure(record)],
     [
       'Recorded resources',
       `${resources(record).length} recorded · ${unreleased(record).length} not confirmed removed · ${retained(record).length} retained by design`,

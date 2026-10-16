@@ -13,12 +13,14 @@ import {
   type Deployment,
   type Failure,
   type FailureOutcome,
+  type Health,
   type Observation,
   type Step,
 } from './types'
 import {
   isEvidence,
   isReply,
+  requestDeadlineMs,
   type Acknowledgment,
   type Evidence,
   type Request,
@@ -79,7 +81,7 @@ function outcomeOf(error: InstallerError): FailureOutcome {
  * are generated once, here, and are never regenerated for a retry. The
  * administrative key is generated after approval, so the proposal has none.
  * Callers gate on managed permission state first. Deployments bind only the
- * foundation policy, which grants their authority.
+ * foundation policy, which every managed connection has enrolled.
  */
 export function propose(connection: AwsConnection, plan: HostPlan, alias: string): Deployment {
   if (!validCidr(plan.cidr)) {
@@ -100,7 +102,7 @@ export function propose(connection: AwsConnection, plan: HostPlan, alias: string
   const id = randomUUID()
   const now = new Date().toISOString()
   return {
-    version: 5,
+    version: 6,
     id,
     alias,
     connection: connection.name,
@@ -133,6 +135,7 @@ export function propose(connection: AwsConnection, plan: HostPlan, alias: string
     removals: [],
     implicit: null,
     latest: null,
+    health: null,
     createdAt: now,
   }
 }
@@ -283,7 +286,7 @@ export class Deployer {
       })
     }
     const reply = await request(AWS_SPEC.children.ec2, this.session.credentialEnvironment(), input, isReply, signal, {
-      timeoutMs: AWS_SPEC.deployment.requestTimeoutMs,
+      timeoutMs: requestDeadlineMs(input),
       evidence,
     })
     await this.persist({
@@ -344,8 +347,8 @@ export class Deployer {
   /**
    * A failure is recorded only on the step this instance fenced, and only while
    * it is open. Any other failure, such as a verification or observation
-   * failure after a retained response, or an observation of an older open
-   * step, changes only the termination evidence.
+   * failure after a retained response, or a health failure after the last
+   * step was verified, changes only the termination evidence.
    */
   private async close(failure: InstallerError, confirmed: boolean): Promise<void> {
     const termination: Deployment['termination'] = confirmed ? 'confirmed' : 'unconfirmed'
@@ -441,6 +444,41 @@ export class Deployer {
     notify(this.progress, { phase: 'verified', task })
   }
 
+  /**
+   * One read-only AWS health read, not a ledger step: it has no fence, receipt,
+   * or removal. Only a passing read is retained, in a write that changes
+   * nothing else. With `wait` an exhausted budget is an error; without it a
+   * non-passing read returns null and records nothing.
+   */
+  private async recordHealth(wait: boolean, signal: AbortSignal): Promise<Health | null> {
+    checkCancellation(signal)
+    const task: ProgressTask = { kind: 'health' }
+    notify(this.progress, { phase: 'working', task })
+    const result = await withWaiting(this.progress, task, () =>
+      this.call(
+        {
+          kind: 'health',
+          deploymentId: this.current.id,
+          wait,
+        },
+        signal,
+      ),
+    )
+    if (result.kind !== 'health') {
+      throw new InstallerError({
+        code: 'AWS_CONTEXT_FAILED',
+      })
+    }
+    if (result.health === null) {
+      return null
+    }
+    await this.persist({
+      health: result.health,
+    })
+    notify(this.progress, { phase: 'verified', task })
+    return result.health
+  }
+
   public async create(signal: AbortSignal): Promise<void> {
     this.requireReady()
     this.requireFresh()
@@ -450,6 +488,20 @@ export class Deployer {
       for (const [index, planned] of plan.entries()) {
         await this.runStep(planned, null, signal, { position: index + 1, total: plan.length })
       }
+      await this.recordHealth(true, signal)
+    } catch (error: unknown) {
+      return await this.fail(error)
+    }
+  }
+
+  /**
+   * One non-polling health read of a fully created deployment. Used to retain
+   * health evidence after a creation whose wait was exhausted.
+   */
+  public async health(signal: AbortSignal): Promise<Health | null> {
+    this.requireReady()
+    try {
+      return await this.recordHealth(false, signal)
     } catch (error: unknown) {
       return await this.fail(error)
     }

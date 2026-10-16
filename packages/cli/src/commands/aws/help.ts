@@ -8,7 +8,7 @@ export const group: HelpContent = {
     'Connect an existing non-root IAM operator or explicitly approve root bootstrap to create one dedicated operator with console access, Sign-In permission, scoped password/MFA self-service, and separate regional foundation (networking) and compute policies.',
     'A saved Qiln-created operator can receive a root-authenticated policy update. It needs two yes/no approvals: consent to sign in as root and review, then approval of the displayed changes. Its immutable identity, password, MFA enrollment, creation identity, and saved ordinary operator login are preserved. Unsupported local layouts are not adopted or migrated.',
     'Root authentication is accepted only in separate approved bootstrap contexts. SSO and assumed-role onboarding are not available. Connecting never provisions or removes infrastructure; provisioning requires separate approval.',
-    'The deployment group previews one proposed GPU host (execution unavailable) and inspects, lists, and removes retained deployments. Removal deliberately retains the data volume, which keeps incurring charges until it is deleted outside Qiln. See qiln aws deployment --help.',
+    'The deployment group creates one approved GPU host (AWS provisioning and health verified only; Qiln does not connect to it) and inspects, lists, and removes retained deployments. Removal deliberately retains the data volume, which keeps incurring charges until it is deleted outside Qiln. See qiln aws deployment --help.',
   ],
 }
 
@@ -45,7 +45,7 @@ export const connect: HelpContent = {
     'IAM inspection does not atomically exclude another administrator. Stop concurrent IAM changes; observed inconsistencies block execution.',
     'No infrastructure or deployed Qiln services are provisioned.',
     'Completed pending evidence is removed after publication. Saved bindings and last-verified permission metadata describe the verified configuration, not current IAM correctness or safe launch inputs. Completed new onboarding requires password replacement, not operator MFA enrollment.',
-    'Connect performs no EC2 discovery. Read-only GPU host discovery belongs to qiln aws deployment create, which previews a proposal and creates nothing. No quota, capacity, host compatibility, or deployment readiness is established.',
+    'Connect performs no EC2 discovery. Read-only GPU host discovery belongs to qiln aws deployment create, which displays a proposal and creates nothing until its own separate approval. No quota, capacity, host compatibility, or deployment readiness is established by connect.',
     'Connect is refused while any deployment records unconfirmed child termination; see qiln aws deployment --help.',
   ],
 }

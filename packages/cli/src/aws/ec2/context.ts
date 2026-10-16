@@ -1,21 +1,21 @@
 import { basename, dirname } from 'node:path'
 import { GetCallerIdentityCommand, STSClient } from '@aws-sdk/client-sts'
+import { AWS_SPEC } from '../spec'
+import { userId } from '../host'
 import { InstallerError } from '../../diagnostic/error'
 import { openChildDir, openDir, type Dir } from '../../state/files'
 import { configuration, credentials } from '../auth/credentials'
 import { requireIdentity, verifyIdentity } from '../auth/identity'
-import * as connections from '../connection/records'
 import { requireBound } from '../deployment/binding'
 import { expectation } from '../deployment/expect'
-import * as deployments from '../deployment/records'
 import { stateOf } from '../deployment/step'
-import { unnamed } from '../deployment/topology'
-import type { Deployment } from '../deployment/types'
-import { userId } from '../host'
+import { healthDue, unnamed } from '../deployment/topology'
 import { requireOperationLock } from '../root'
-import { AWS_SPEC } from '../spec'
+import * as connections from '../connection/records'
+import * as deployments from '../deployment/records'
 import type { AwsIdentity } from '../types'
 import type { DeploymentRequest } from './protocol'
+import type { Deployment } from '../deployment/types'
 
 export type Credentials = Awaited<ReturnType<typeof credentials>>
 
@@ -110,6 +110,12 @@ function requireAuthority(record: Deployment, request: DeploymentRequest): void 
     case 'candidates':
       // Only a creation whose identity was never retained can leave a resource to look for.
       if (unnamed(record).length === 0) {
+        return notAttempted()
+      }
+      return
+    case 'health':
+      // Health is read only for a fully created deployment that has no health evidence yet.
+      if (!healthDue(record)) {
         return notAttempted()
       }
       return

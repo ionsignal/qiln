@@ -33,20 +33,25 @@ export const AWS_SPEC = Object.freeze({
     maximumZones: 6,
     maximumSteps: 64,
     maximumRefusals: 3,
-    // Instance start and termination, and the interface deletion that follows
-    // it, outlast network resources. These budgets are provisional until an
-    // operator walkthrough measures them. The poll must stay inside the child
-    // request deadline minus its 5 second reserve.
-    requestTimeoutMs: 300_000,
+    reserveMs: 5_000,
     maximumPages: 20,
+    requestTimeoutMs: 300_000,
     observation: Object.freeze({
       timeoutMs: 240_000,
       delayMs: 3_000,
       attempts: 80,
     }),
+    health: Object.freeze({
+      requestTimeoutMs: 660_000,
+      observation: Object.freeze({
+        timeoutMs: 600_000,
+        delayMs: 5_000,
+        attempts: 120,
+      }),
+    }),
   }),
   compute: Object.freeze({
-    instanceType: 'g7e.12xlarge',
+    instanceType: 't3.medium',
     storage: Object.freeze({
       volumeType: 'gp3',
       iops: 3_000,

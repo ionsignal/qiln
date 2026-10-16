@@ -3,7 +3,7 @@ import { sameJson } from '../json'
 import { AWS_SPEC } from '../spec'
 import { expectation, matches } from './expect'
 import { refusals, settled, stateOf } from './step'
-import { creationPlan, removalPlan } from './topology'
+import { creationPlan, creationVerified, removalPlan, resourceId } from './topology'
 import type { Deployment, Step } from './types'
 
 const FIXED_FIELDS = ['version', 'id', 'alias', 'connection', 'binding', 'approval', 'createdAt'] as const
@@ -172,6 +172,32 @@ function requireImplicit(current: Deployment, updated: Deployment): void {
 }
 
 /**
+ * Health is set once and never rewritten or dropped. The write that sets it
+ * changes nothing else, and happens only with every creation step verified,
+ * no removal, and confirmed child termination.
+ */
+function requireHealth(current: Deployment, updated: Deployment): void {
+  if (current.health !== null) {
+    if (!sameJson(current.health, updated.health)) {
+      return invalid()
+    }
+    return
+  }
+  if (updated.health === null) {
+    return
+  }
+  if (
+    !creationVerified(current) ||
+    current.removals.length !== 0 ||
+    current.termination !== 'confirmed' ||
+    updated.health.instanceId !== resourceId(current, 'run-instances') ||
+    !sameJson({ ...current, health: updated.health }, updated)
+  ) {
+    return invalid()
+  }
+}
+
+/**
  * The journal's write rule: one record may replace another only through a
  * permitted step. Both records are already validated by their guard.
  */
@@ -182,4 +208,5 @@ export function requireTransition(current: Deployment, updated: Deployment): voi
   requireRemovals(current, updated)
   requireObservations(current, updated)
   requireImplicit(current, updated)
+  requireHealth(current, updated)
 }

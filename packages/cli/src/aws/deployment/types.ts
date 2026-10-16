@@ -159,22 +159,38 @@ export interface Observation {
 }
 
 /**
+ * Point-in-time AWS status evidence for the recorded instance. Only a passing
+ * read is ever retained, so the guard accepts nothing but these literals. It
+ * says nothing about reachability, SSH access, or guest state.
+ */
+export interface Health {
+  instanceId: string
+  checkedAt: string
+  instanceState: 'running'
+  system: 'ok'
+  instance: 'ok'
+  attachedEbs: 'ok'
+}
+
+/**
  * Accounting and recovery evidence, not a resumable checkpoint. Phases,
  * effects, and plans are derived from these facts and never stored. The alias
  * is local metadata, unique among records, and never an AWS tag. `implicit` is
  * set once, by the observation that verifies the launch, and never rewritten.
  * `key` is set once, before any step, and never rewritten or regenerated.
+ * `health` is set once, after every creation step is verified and before any
+ * removal, in a write that changes nothing else.
  *
  * The `version` covers every constant, format rule, and graph declaration
  * order that the guards and the audit consult, such as the zone limit, tag and
  * key-name formats, the lifecycle invariants of the host plan, the
- * administrative key binding, and the creation and removal order. Changing any
- * of them needs a version bump and an explicit versioned reader. Records are
- * never migrated silently, and a stored launch plan is judged structurally,
- * never rebuilt from today's compute constants.
+ * administrative key binding, the health evidence, and the creation and
+ * removal order. Changing any of them needs a version bump and an explicit
+ * versioned reader. Records are never migrated silently, and a stored launch
+ * plan is judged structurally, never rebuilt from today's compute constants.
  */
 export interface Deployment {
-  version: 5
+  version: 6
   id: string
   alias: string
   connection: string
@@ -186,6 +202,7 @@ export interface Deployment {
   removals: Removal[]
   implicit: ImplicitEvidence | null
   latest: Observation | null
+  health: Health | null
   createdAt: string
 }
 
@@ -460,6 +477,20 @@ export function isObservation(value: unknown): value is Observation {
   )
 }
 
+export function isHealth(value: unknown): value is Health {
+  return (
+    isRecord(value) &&
+    hasKeys(value, ['instanceId', 'checkedAt', 'instanceState', 'system', 'instance', 'attachedEbs']) &&
+    typeof value.instanceId === 'string' &&
+    KIND_IDS.instance.test(value.instanceId) &&
+    isTimestamp(value.checkedAt) &&
+    value.instanceState === 'running' &&
+    value.system === 'ok' &&
+    value.instance === 'ok' &&
+    value.attachedEbs === 'ok'
+  )
+}
+
 function isRemoval(value: unknown): value is Removal {
   return (
     isRecord(value) &&
@@ -489,9 +520,10 @@ export function isDeployment(value: unknown): value is Deployment {
       'removals',
       'implicit',
       'latest',
+      'health',
       'createdAt',
     ]) ||
-    value.version !== 5 ||
+    value.version !== 6 ||
     !isOperationId(value.id) ||
     typeof value.alias !== 'string' ||
     !validName(value.alias) ||
@@ -505,6 +537,7 @@ export function isDeployment(value: unknown): value is Deployment {
     !isRemovals(value.removals) ||
     (value.implicit !== null && !isImplicitEvidence(value.implicit)) ||
     (value.latest !== null && !isObservation(value.latest)) ||
+    (value.health !== null && !isHealth(value.health)) ||
     !isTimestamp(value.createdAt)
   ) {
     return false

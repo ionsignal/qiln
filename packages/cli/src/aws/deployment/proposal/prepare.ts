@@ -1,10 +1,10 @@
-import { InstallerError } from '../../../diagnostic/error'
-import type { Session } from '../../auth/session'
-import { request } from '../../child/request'
-import { isReply, type Request } from '../../ec2/protocol'
-import { AWS_SPEC } from '../../spec'
 import { issueFacts } from './failure'
+import { AWS_SPEC } from '../../spec'
+import { InstallerError } from '../../../diagnostic/error'
+import { request } from '../../child/request'
+import { isReply, requestDeadlineMs, type Request } from '../../ec2/protocol'
 import type { Discovery } from './types'
+import type { Session } from '../../auth/session'
 
 /**
  * Read-only discovery of launch prerequisites. There is no deployment yet, so
@@ -14,7 +14,7 @@ import type { Discovery } from './types'
 export async function prepare(session: Session, signal: AbortSignal): Promise<Discovery> {
   const input: Request = { kind: 'prepare' }
   const reply = await request(AWS_SPEC.children.ec2, session.credentialEnvironment(), input, isReply, signal, {
-    timeoutMs: AWS_SPEC.deployment.requestTimeoutMs,
+    timeoutMs: requestDeadlineMs(input),
   })
   if (!reply.ok) {
     throw new InstallerError({

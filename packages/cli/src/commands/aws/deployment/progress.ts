@@ -32,15 +32,38 @@ const LABELS: Record<Action, string> = {
 }
 
 function title(task: ProgressTask): string {
-  return task.kind === 'key' ? 'Admin SSH key' : `Step ${task.position}/${task.total}`
+  switch (task.kind) {
+    case 'key':
+      return 'Admin SSH key'
+    case 'health':
+      return 'AWS health'
+    case 'step':
+      return `Step ${task.position}/${task.total}`
+  }
 }
 
 function subject(task: ProgressTask): string {
-  if (task.kind === 'key') {
-    return 'Generate the local administrative SSH key'
+  switch (task.kind) {
+    case 'key':
+      return 'Generate the local administrative SSH key'
+    case 'health':
+      return 'Check AWS instance and attached-EBS status'
+    case 'step': {
+      const label = LABELS[task.action]
+      return task.slot > 0 ? `${label} #${task.slot + 1}` : label
+    }
   }
-  const label = LABELS[task.action]
-  return task.slot > 0 ? `${label} #${task.slot + 1}` : label
+}
+
+function verifiedDetail(task: ProgressTask): string {
+  switch (task.kind) {
+    case 'key':
+      return 'key pair validated and binding recorded'
+    case 'health':
+      return 'running with system, instance and attached-EBS checks ok; point-in-time AWS status only'
+    case 'step':
+      return 'observation agrees with the record'
+  }
 }
 
 export function progressSink(reporter: Reporter): ProgressSink {
@@ -54,11 +77,7 @@ export function progressSink(reporter: Reporter): ProgressSink {
         reporter.info(`Waiting on '${subject(task)}' · ${Math.round(event.elapsedMs / 1000)}s elapsed.`)
         return
       case 'verified':
-        reporter.row(
-          'verified',
-          title(task),
-          `${subject(task)} · ${task.kind === 'key' ? 'key pair validated and binding recorded' : 'observation agrees with the record'}`,
-        )
+        reporter.row('verified', title(task), `${subject(task)} · ${verifiedDetail(task)}`)
         return
     }
   }

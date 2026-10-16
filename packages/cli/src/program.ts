@@ -146,7 +146,7 @@ export function createProgram(handlers: ProgramHandlers, output: ProgramOutput):
   if (awsHandlers) {
     const aws = program
       .command('aws')
-      .description('Manage Qiln-owned local AWS operator connections, a read-only GPU host preview, and retained deployments.')
+      .description('Manage Qiln-owned local AWS operator connections and approved GPU host deployments.')
       .summary('Manage AWS connections and deployments.')
     describeHelp(aws, awsHelp.group)
     const connect = aws
@@ -186,13 +186,13 @@ export function createProgram(handlers: ProgramHandlers, output: ProgramOutput):
     )
     const deployment = aws
       .command('deployment')
-      .description('Preview one proposed AWS GPU host, and inspect or remove retained deployments bound to a Qiln-managed operator.')
-      .summary('Preview a GPU host; manage retained deployments.')
+      .description('Create one approved AWS GPU host, and inspect or remove retained deployments bound to a Qiln-managed operator.')
+      .summary('Create a GPU host; manage retained deployments.')
     describeHelp(deployment, deploymentHelp.group)
     const create = deployment
       .command('create')
-      .description('Preview one proposed GPU host from read-only AWS discovery. Execution is unavailable and nothing is created.')
-      .summary('Preview one proposed GPU host.')
+      .description('Review one proposed GPU host from read-only AWS discovery and, after approval, provision it and verify AWS health.')
+      .summary('Create one approved GPU host.')
     addSingleOption(
       create,
       new Option('--name <name>', `Select the connection (default: ${AWS_SPEC.defaultName}).`),
@@ -201,7 +201,7 @@ export function createProgram(handlers: ProgramHandlers, output: ProgramOutput):
       create,
       new Option(
         '--alias <alias>',
-        `Select the local alias shown in the proposal (default: ${AWS_SPEC.deployment.defaultName}).`,
+        `Select the local alias for the deployment (default: ${AWS_SPEC.deployment.defaultName}).`,
       ),
     )
     describeHelp(create, deploymentHelp.create)
@@ -231,7 +231,7 @@ export function createProgram(handlers: ProgramHandlers, output: ProgramOutput):
     list.action(() => awsHandlers.deployment.list(program.opts<GlobalOptions>().color))
     const inspect = deployment
       .command('inspect')
-      .description('Authenticate as the recorded operator, observe the recorded resources, and retain the observation.')
+      .description('Authenticate as the recorded operator, observe the recorded resources, and retain the observation and, when due, one AWS health read.')
       .summary('Retain a fresh observation.')
     addSelectorOptions(inspect)
     describeHelp(inspect, deploymentHelp.inspect)

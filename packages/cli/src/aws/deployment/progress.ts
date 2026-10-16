@@ -17,11 +17,15 @@ export interface StepTask extends Place {
   slot: number
 }
 
+export interface HealthTask {
+  kind: 'health'
+}
+
 /**
- * Key generation is a local stage, not an action of the deployment graph, so
- * it is a task of its own.
+ * Key generation and the AWS health check are stages of their own, not
+ * actions of the deployment graph, so each is a task of its own.
  */
-export type ProgressTask = KeyTask | StepTask
+export type ProgressTask = KeyTask | StepTask | HealthTask
 
 /**
  * `working` precedes the activity, `waiting` repeats while it lasts, and

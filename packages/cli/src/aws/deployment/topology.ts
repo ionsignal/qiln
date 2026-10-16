@@ -68,6 +68,23 @@ export function resourceId(record: Deployment, action: Action, slot = 0): string
 }
 
 /**
+ * Every planned creation step exists and is verified. Creation steps precede
+ * removal steps and run in plan order, so the count alone identifies the plan.
+ */
+export function creationVerified(record: Deployment): boolean {
+  const creations = record.steps.filter(step => step.removal === null)
+  return creations.length === creationPlan(record.approval).length && creations.every(step => stateOf(step) === 'verified')
+}
+
+/**
+ * Creation is complete, nothing has been removed, and no AWS health evidence
+ * is retained yet.
+ */
+export function healthDue(record: Deployment): boolean {
+  return creationVerified(record) && record.removals.length === 0 && record.health === null
+}
+
+/**
  * Removal order, derived from the ledger alone: only resources whose creation
  * response was retained, and only those not yet verified removed. Declaration
  * order of the removal table is the plan order.

@@ -1,18 +1,18 @@
 import { basename } from 'node:path'
-import { InstallerError } from '../../diagnostic/error'
-import { openChildDir, readChild, writeChild, type Dir } from '../../state/files'
+import { isConsistent } from './audit'
+import { requireTransition } from './transitions'
+import { AWS_SPEC } from '../spec'
 import { sameIdentity } from '../auth/identity'
 import { stateFailure } from '../errors'
 import { isErrorCode } from '../guards'
 import { userId } from '../host'
 import { encodeRecord } from '../json'
 import { requireOperationLock } from '../root'
-import { AWS_SPEC } from '../spec'
 import { isOperationId, type AwsIdentity } from '../types'
-import type { DeploymentSelector } from './alias'
-import { isConsistent } from './audit'
-import { requireTransition } from './transitions'
+import { InstallerError } from '../../diagnostic/error'
+import { openChildDir, readChild, writeChild, type Dir } from '../../state/files'
 import { isDeployment, type Deployment } from './types'
+import type { DeploymentSelector } from './alias'
 
 function invalid(): never {
   throw new InstallerError({
@@ -87,7 +87,6 @@ async function load(directory: Dir): Promise<Deployment> {
   }
 }
 
-/** Evidence is never pruned, so a record that would outgrow its bound is refused before writing. */
 async function write(directory: Dir, record: Deployment): Promise<void> {
   const bytes = encodeRecord(parse(record), 'AWS_DEPLOYMENT_STATE_INVALID')
   try {
@@ -120,6 +119,7 @@ export async function create(root: Dir, record: Deployment): Promise<void> {
     initial.key !== null ||
     initial.implicit !== null ||
     initial.latest !== null ||
+    initial.health !== null ||
     initial.termination !== 'confirmed'
   ) {
     return invalid()

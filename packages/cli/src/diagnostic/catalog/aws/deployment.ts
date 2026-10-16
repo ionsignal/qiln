@@ -21,28 +21,29 @@ export const awsDeploymentDiagnostics = Object.freeze({
   ),
   AWS_DEPLOYMENT_ALIAS_TAKEN: entry(
     'Deployment alias is already used',
-    'Aliases are unique among all retained deployment records, including removed ones, because Qiln never deletes deployment evidence. No approval was requested and nothing was created.',
+    'Aliases are unique among all retained deployment records, including removed ones, because Qiln never deletes deployment evidence. The alias is checked before the proposal and again when the approval is saved. No deployment record was created for this alias and no AWS resource was created.',
     'Run qiln aws deployment list to see the aliases in use.',
     'Choose another alias with --alias.',
   ),
   AWS_DEPLOYMENT_PERMISSION_REQUIRED: entry(
     'AWS deployment requires current verified permissions',
-    'Previewing a deployment requires a Qiln-created operator with enrolled foundation and compute policies and a recorded verification that matches the current permission requirement. Authentication success and older metadata do not establish current permissions. The compute policy grants EC2 authority to launch and terminate instances, create volumes, manage Elastic IPs, and import and delete key pairs. Those permissions can be exercised outside Qiln: a deployment record is a Qiln execution gate, not an AWS authorization boundary. This requirement does not approve spending.',
+    'Creating a deployment requires a Qiln-created operator with enrolled foundation and compute policies and a recorded verification that matches the current permission requirement. Authentication success and older metadata do not establish current permissions. The compute policy grants EC2 authority to launch and terminate instances, create volumes, manage Elastic IPs, and import and delete key pairs. Those permissions can be exercised outside Qiln: a deployment record is a Qiln execution gate, not an AWS authorization boundary. This requirement does not approve spending.',
     'Run qiln aws connect with the same connection name. Connect signs in as root only to review, displays the exact policy changes, and modifies IAM only after you approve those displayed changes.',
-    'A connection verified under an earlier requirement needs a policy update before it can preview a deployment.',
-    'Arbitrary existing IAM users remain authentication-only and cannot preview or create deployments.',
+    'A connection verified under an earlier requirement needs a policy update before it can create a deployment.',
+    'Arbitrary existing IAM users remain authentication-only and cannot create deployments.',
   ),
   AWS_DEPLOYMENT_IMAGE_NOT_INDEXED: entry(
     'No reviewed AMI is indexed for this region',
-    'Qiln inspects only an AMI that was reviewed and committed for the managed permission region. This region has no reviewed entry, so the preview stopped locally before any input, authentication, or AWS call. Qiln never searches for an image, follows a moving latest alias, refreshes the index automatically, or substitutes another image or region.',
+    'Qiln inspects only an AMI that was reviewed and committed for the managed permission region. This region has no reviewed entry, so the command stopped locally before any input, authentication, or AWS call. Qiln never searches for an image, follows a moving latest alias, refreshes the index automatically, or substitutes another image or region.',
     'Use a connection whose managed permission region has a reviewed entry in this Qiln release.',
     'A new region requires a reviewed image ID and numeric publisher account to be added to Qiln by its maintainers; it cannot be supplied from the command line.',
   ),
   AWS_DEPLOYMENT_IMAGE_UNAVAILABLE: entry(
     'The reviewed AMI is not available',
-    'AWS reported the reviewed AMI ID as malformed, not found, or unavailable in the permission region. A not-found answer can also result from account-level Allowed AMIs restrictions or regional visibility, so it does not prove that the image does not exist. This is distinct from access denial and from transient failures. The inspection only reads; nothing was approved, reserved, or created, and Qiln never substitutes another image.',
+    'AWS reported the reviewed AMI ID as malformed, not found, or unavailable in the permission region. A not-found answer can also result from account-level Allowed AMIs restrictions or regional visibility, so it does not prove that the image does not exist. This is distinct from access denial and from transient failures. During discovery nothing is approved, reserved, or created. If AWS refuses the launch itself, that call launched nothing, and earlier recorded resources remain until they are removed. Qiln never substitutes another image.',
     'Check the account’s Allowed AMIs settings and that the permission region is enabled for the account.',
     'If the image was deregistered or withdrawn, a maintainer must review and commit a replacement entry in a new Qiln release.',
+    'If a launch was refused, clean up any resources already created with qiln aws deployment remove.',
   ),
   AWS_DEPLOYMENT_DISCOVERY_FAILED: entry(
     'AWS launch prerequisite discovery did not complete',
@@ -56,12 +57,6 @@ export const awsDeploymentDiagnostics = Object.freeze({
     'Read-only discovery completed, but at least one displayed blocker means the proposed host could not be launched as reviewed. No approval prompt was offered, and no approval, alias, SSH key, or AWS resource was created. An image or instance type that was not returned means it was not visible to this account and region, not that it does not exist.',
     'Review the displayed blockers against the recorded permission region and the account’s visible images and zones.',
     'Qiln never substitutes another image, distribution, architecture, region, or Availability Zone. Retry after the cause has been resolved outside Qiln.',
-  ),
-  AWS_DEPLOYMENT_EXECUTION_UNAVAILABLE: entry(
-    'GPU host deployment execution is unavailable',
-    'Deployment execution is not implemented. No approval was saved, no SSH credentials were generated, no alias was reserved, and no AWS resources were created. The displayed proposal is a point-in-time read-only preview; it does not reserve capacity or establish that a launch would succeed.',
-    'Use this command to review the proposed host, its findings, the intended removal contract, and the intended storage retention and SSH credential handling.',
-    'Retained deployments remain available through qiln aws deployment list, status, inspect, and remove.',
   ),
   AWS_DEPLOYMENT_CREATE_REFUSED: entry(
     'Deployment creation was refused locally',
@@ -127,6 +122,13 @@ export const awsDeploymentDiagnostics = Object.freeze({
     'A bounded observation ended without the expected result or returned an incompatible response. A recorded mutation may already have completed, and Qiln did not repeat it. An exhausted budget does not prove that the mutation failed, that a resource is absent, or who changed it. A running instance is not a verified healthy or reachable host.',
     'Inspect the retained deployment evidence, then inspect the recorded deployment again when ready.',
     'Compare actual AWS resources with the recorded account, region, and deployment tag before any manual recovery.',
+  ),
+  AWS_DEPLOYMENT_HEALTH_UNVERIFIED: entry(
+    'AWS instance health was not verified',
+    'Every creation step was verified, but the bounded wait for AWS to report the recorded instance running with passing system status, instance status, and attached-EBS status ended without that result. The resources exist and keep incurring charges, including the retained data volume. An exhausted budget does not show that the instance is unhealthy, and passing status checks would not establish that the host is ready, reachable, SSH-accessible, or guest-compatible. No health evidence was retained, and nothing was repeated or rolled back.',
+    'Run qiln aws deployment inspect to observe the recorded resources and make one further health read. Evidence is retained only if that read passes.',
+    'Run qiln aws deployment remove when the resources are no longer wanted. The retained data volume must be deleted outside Qiln.',
+    'Do not delete deployment evidence or lock files to bypass this state.',
   ),
   AWS_DEPLOYMENT_EVIDENCE_UNAVAILABLE: entry(
     'Step response evidence was not retained',

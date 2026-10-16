@@ -85,8 +85,8 @@ export interface Finding {
 
 /**
  * The in-memory host proposal. It is never persisted and is separate from the
- * durable network-only Deployment record. The plan is the complete frozen
- * launch configuration and exists only when no finding blocks. Instance-store
+ * durable Deployment record. The plan is the complete frozen launch
+ * configuration and exists only when no finding blocks. Instance-store
  * mappings are ephemeral, are not part of the durable plan, and are kept only
  * for display.
  */

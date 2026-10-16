@@ -1,5 +1,4 @@
 import { EC2Client } from '@aws-sdk/client-ec2'
-import { AWS_SPEC } from '../spec'
 import { findPin } from '../ami'
 import { configuration } from '../auth/credentials'
 import { sendEvidence } from '../child/evidence'
@@ -8,10 +7,18 @@ import { readPublicKey, type PublicKeyReader } from '../ssh/store'
 import { Ec2 } from './client'
 import { discover } from './discover'
 import { armDispatch } from './dispatch'
+import { observeHealth } from './health'
 import { mutate } from './mutate'
 import { candidates, observe } from './observe'
 import { authorizeDeployment, authorizePreparation, notAttempted, type Credentials } from './context'
-import { isAcknowledgment, type DeploymentRequest, type Evidence, type Request, type Result } from './protocol'
+import {
+  childDeadlineMs,
+  isAcknowledgment,
+  type DeploymentRequest,
+  type Evidence,
+  type Request,
+  type Result,
+} from './protocol'
 import type { Deployment } from '../deployment/types'
 
 function retain(evidence: Evidence, signal: AbortSignal): Promise<void> {
@@ -88,6 +95,11 @@ async function run(
         kind: 'candidates',
         candidates: await candidates(ec2, record),
       }
+    case 'health':
+      return {
+        kind: 'health',
+        health: await observeHealth(ec2, record, request.wait),
+      }
   }
 }
 
@@ -97,7 +109,7 @@ export async function execute(request: Request): Promise<Result> {
   if (request.kind === 'mutate') {
     armDispatch()
   }
-  const signal = AbortSignal.timeout(AWS_SPEC.deployment.requestTimeoutMs - 5_000)
+  const signal = AbortSignal.timeout(childDeadlineMs(request))
   if (request.kind === 'prepare') {
     const { region, credentials } = await authorizePreparation(signal)
     const pin = findPin(region) ?? notAttempted()

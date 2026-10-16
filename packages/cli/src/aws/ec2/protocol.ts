@@ -1,10 +1,11 @@
+import { AWS_SPEC } from '../spec'
 import { hasKeys, isRecord } from '../guards'
 import { COMMON_CODES, replyGuard, type Certainty, type ChildReply } from '../child/protocol'
-import { isObservation, type Observation } from '../deployment/types'
+import { isHealth, isObservation, type Health, type Observation } from '../deployment/types'
 import { isDiscovery } from '../deployment/proposal/schema'
-import type { Discovery } from '../deployment/proposal/types'
 import { isIssue, type Issue } from '../deployment/proposal/failure'
 import { isOperationId, isTimestamp } from '../types'
+import type { Discovery } from '../deployment/proposal/types'
 
 export type Request =
   | {
@@ -23,6 +24,11 @@ export type Request =
   | {
       kind: 'candidates'
       deploymentId: string
+    }
+  | {
+      kind: 'health'
+      deploymentId: string
+      wait: boolean
     }
 
 export type DeploymentRequest = Exclude<Request, { kind: 'prepare' }>
@@ -43,6 +49,10 @@ export type Result =
   | {
       kind: 'candidates'
       candidates: Observation[]
+    }
+  | {
+      kind: 'health'
+      health: Health | null
     }
 
 export interface Evidence {
@@ -66,6 +76,7 @@ export const FAILURES = [
   'AWS_DEPLOYMENT_CAPACITY',
   'AWS_DEPLOYMENT_BLOCKED',
   'AWS_DEPLOYMENT_VERIFICATION_FAILED',
+  'AWS_DEPLOYMENT_HEALTH_UNVERIFIED',
   'AWS_DEPLOYMENT_EVIDENCE_UNAVAILABLE',
   'AWS_DEPLOYMENT_DISCOVERY_FAILED',
   'AWS_DEPLOYMENT_IMAGE_UNAVAILABLE',
@@ -74,10 +85,27 @@ export const FAILURES = [
 const DISCOVERY_CODE = 'AWS_DEPLOYMENT_DISCOVERY_FAILED'
 
 export const CODES = [...COMMON_CODES, ...FAILURES] as const
-
 export type Code = (typeof CODES)[number]
 
 type DiscoveryCode = typeof DISCOVERY_CODE
+
+/**
+ * The parent's supervision deadline for one request. Only a polling health
+ * wait needs more than the ordinary budget.
+ */
+export function requestDeadlineMs(request: Request): number {
+  return request.kind === 'health' && request.wait
+    ? AWS_SPEC.deployment.health.requestTimeoutMs
+    : AWS_SPEC.deployment.requestTimeoutMs
+}
+
+/**
+ * The child's own abort deadline. It ends earlier than the parent's, so the
+ * child can classify its failure and transmit it first.
+ */
+export function childDeadlineMs(request: Request): number {
+  return requestDeadlineMs(request) - AWS_SPEC.deployment.reserveMs
+}
 
 /**
  * A discovery failure may also carry the first field of evidence that failed
@@ -107,6 +135,7 @@ export function isRequest(value: unknown): value is Request {
         isOperationId(value.operationId)
       )
     case 'observe':
+    case 'health':
       return (
         hasKeys(value, ['kind', 'deploymentId', 'wait']) &&
         isOperationId(value.deploymentId) &&
@@ -158,6 +187,8 @@ function isResult(value: unknown): value is Result {
         Array.isArray(value.candidates) &&
         value.candidates.every(isObservation)
       )
+    case 'health':
+      return hasKeys(value, ['kind', 'health']) && (value.health === null || isHealth(value.health))
     default:
       return false
   }

@@ -1,5 +1,5 @@
 import { deploymentName } from '../../../aws/deployment/alias'
-import { cleanup, keyDisclosure, phase, type Phase } from '../../../aws/deployment/facts'
+import { cleanup, healthDisclosure, keyDisclosure, phase, type Phase } from '../../../aws/deployment/facts'
 import { removalOutcome } from '../../../aws/deployment/outcome'
 import { refusals } from '../../../aws/deployment/step'
 import { released, resourceId, resources, retained, unreleased, type Resource } from '../../../aws/deployment/topology'
@@ -56,8 +56,13 @@ const STATES: Record<Phase, RecordedState> = {
   },
   created: {
     label: 'Created',
+    tone: 'warning',
+    text: 'The recorded resources were provisioned and observed, but AWS health is not verified. They remain, and keep incurring charges, until they are removed.',
+  },
+  healthy: {
+    label: 'AWS provisioning and health verified',
     tone: 'success',
-    text: 'The recorded resources were created and observed. They remain until they are removed.',
+    text: 'The recorded resources were provisioned and observed, and AWS reported the instance running with passing system, instance, and attached-EBS status. This is point-in-time evidence, not SSH access, guest compatibility, CUDA capability, or readiness. The resources remain until they are removed.',
   },
   removing: { label: 'Partly removed', tone: 'warning', text: 'Removal is partly verified; recorded resources remain.' },
   removed: { label: 'Removed', tone: 'success', text: 'All recorded resources were removed and observed absent.' },
@@ -134,6 +139,7 @@ export function reportDeployment(reporter: Reporter, record: Deployment): void {
     ],
     [historical ? 'VPC (historical)' : 'VPC', resourceId(record, 'create-vpc') ?? 'no identity retained'],
     ['Instance', resourceId(record, 'run-instances') ?? 'no identity retained'],
+    ['AWS health', healthDisclosure(record)],
     [
       'Recorded resources',
       `${resources(record).length} recorded · ${unreleased(record).length} not confirmed removed · ${retained(record).length} retained by design`,

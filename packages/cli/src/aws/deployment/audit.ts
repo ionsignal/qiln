@@ -1,6 +1,6 @@
 import { IMPLICIT, undoes } from './graph'
 import { settled, stateOf } from './step'
-import { creationPlan, resources, stepOf } from './topology'
+import { creationPlan, creationVerified, resources, stepOf } from './topology'
 import type { Deployment, ObservedResource, Step } from './types'
 
 /**
@@ -96,6 +96,28 @@ function discovered(record: Deployment): boolean {
 }
 
 /**
+ * Health evidence exists only for a fully created deployment, names the
+ * launched instance, is no older than the launch verification, and precedes
+ * every removal.
+ */
+function healthRecorded(record: Deployment): boolean {
+  const { health, implicit, steps } = record
+  if (health === null) {
+    return true
+  }
+  const launch = stepOf(record, IMPLICIT.parent)
+  if (launch === undefined || launch.verifiedAt === null || implicit === null) {
+    return false
+  }
+  return (
+    creationVerified(record) &&
+    health.instanceId === launch.returned?.resourceId &&
+    health.checkedAt >= launch.verifiedAt &&
+    steps.every(step => step.removal === null || step.fencedAt >= health.checkedAt)
+  )
+}
+
+/**
  * Every observed resource is recorded, except that before the launch is
  * verified the observation also carries the instance's root volume and
  * interface, which are the two named by its own `implicit` relationship.
@@ -130,6 +152,7 @@ export function isConsistent(record: Deployment): boolean {
     identified(record) &&
     undone(record) &&
     discovered(record) &&
+    healthRecorded(record) &&
     observedKnown(record)
   )
 }
