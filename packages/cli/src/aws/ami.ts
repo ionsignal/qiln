@@ -22,12 +22,13 @@ export function isSnapshotId(value: unknown): value is string {
 }
 
 /**
- * Reviewed AMI per permission region.
+ * Reviewed AMI per deployment region.
  */
 const AMI_INDEX: Readonly<Record<string, ImagePin>> = Object.freeze({
   'us-west-2': {
-    imageId: 'ami-00650bfc1df7d064c',
-    ownerId: '898082745236',
+    // imageId: 'ami-00650bfc1df7d064c', // (x86)
+    imageId: 'ami-04eb8855dfe658eda', // (ARM)
+    ownerId: '099720109477',
   },
 })
 

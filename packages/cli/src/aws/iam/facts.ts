@@ -21,7 +21,7 @@ export function pendingFacts(record: Pending): readonly DiagnosticFact[] {
     ['Operator', record.operator?.arn ?? 'creation not verified'],
     ['Operator user ID', record.operator?.userId ?? 'not recorded'],
     ['Creation identity', record.creationId],
-    ['Permission region', record.region],
+    ['Deployment region', record.region],
     ['Approved requirement', String(record.approval?.permission.version ?? 'not approved')],
     [
       'Outstanding mutation',

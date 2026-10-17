@@ -1,17 +1,18 @@
 import { allow, render, type Conditions, type Statement } from './statement'
 
 /**
- * This document prepares regional networking authority, not a launch or
- * removal request. Deleting VPCs, subnets, internet gateways, route tables, and
- * security groups is limited to resources tagged for this operator, and VPC
- * deletion additionally requires the managed-by and deployment tags, so the
- * deployment record remains the per-deployment gate. Launch, instance, storage,
- * key, and address authority lives in the compute policy. Allows combine across
- * policies, so the two documents must never overlap. Reads for every resource
- * type stay here.
+ * This document prepares networking authority across all commercial AWS
+ * regions, not a launch or removal request. The deployment region recorded by
+ * Qiln is an execution gate, not an IAM boundary. Deleting VPCs, subnets,
+ * internet gateways, route tables, and security groups is limited to resources
+ * tagged for this operator, and VPC deletion additionally requires the
+ * managed-by and deployment tags, so the deployment record remains the
+ * per-deployment gate. Launch, instance, storage, key, and address authority
+ * lives in the compute policy. Allows combine across policies, so the two
+ * documents must never overlap. Reads for every resource type stay here.
  */
-export function foundationPolicy(accountId: string, region: string): string {
-  const resource = (type: string) => `arn:aws:ec2:${region}:${accountId}:${type}/*`
+export function foundationPolicy(accountId: string): string {
+  const resource = (type: string) => `arn:aws:ec2:*:${accountId}:${type}/*`
   const principal = '${aws:PrincipalArn}'
   const requested: Conditions = {
     StringEquals: {
@@ -53,6 +54,8 @@ export function foundationPolicy(accountId: string, region: string): string {
     'security-group-rule',
   ].map(resource)
   const statements: Statement[] = [
+    // Many Describe actions have no resource-level authorization, so they
+    // require '*' and carry no region condition.
     allow(
       [
         'DescribeRegions',
@@ -76,11 +79,6 @@ export function foundationPolicy(accountId: string, region: string): string {
         'DescribeKeyPairs',
       ],
       '*',
-      {
-        StringEquals: {
-          'ec2:Region': region,
-        },
-      },
     ),
     allow(['CreateVpc'], resource('vpc'), vpcRequested),
     // VPC deletion keeps the stronger managed-by and deployment tag fence.

@@ -3,9 +3,8 @@ import { isSnapshotId } from '../../ami'
 import type { RootSource } from '../host/types'
 import type { Finding, ImageDevice, ImageEvidence } from './types'
 
-const { storage: policy, launch } = AWS_SPEC.compute
-
 const INSTANCE_STORE_NAME = /^ephemeral[0-9]+$/
+const { storage: defaults, launch } = AWS_SPEC.compute
 
 type Requirement = readonly [passed: boolean, message: string]
 
@@ -40,9 +39,9 @@ export interface ImageStorage {
 
 /**
  * The launch freezes the image's own root snapshot, so the root must name one
- * that passes the same snapshot-ID rule as the durable plan. The compute policy
- * allows exactly one root size, and a snapshot-backed volume cannot be smaller
- * than its snapshot, so a larger advertised root is a contradiction that would
+ * that passes the same snapshot-ID rule as the durable plan. The plan uses
+ * exactly one root size, and a snapshot-backed volume cannot be smaller than
+ * its snapshot, so a larger advertised root is a contradiction that would
  * be refused at launch. Every mapping is classified, and anything that would
  * add durable storage or cannot be recognized blocks rather than being
  * silently admitted.
@@ -65,8 +64,8 @@ export function storageOf(image: ImageEvidence | null): ImageStorage {
     ],
     [rootDevice === undefined || sizeGiB !== null, 'The image root mapping does not report a size.'],
     [
-      sizeGiB === null || sizeGiB <= policy.rootSizeGiB,
-      `The ${sizeGiB} GiB image root exceeds the ${policy.rootSizeGiB} GiB that the compute policy authorizes, so the launch would be refused.`,
+      sizeGiB === null || sizeGiB <= defaults.rootSizeGiB,
+      `The ${sizeGiB} GiB image root exceeds the ${defaults.rootSizeGiB} GiB root size planned for this launch, so the launch would be refused.`,
     ],
     [devicesOf('ebs').length === 0, 'The image has additional EBS mappings that the proposed launch does not account for.'],
     [devicesOf('unknown').length === 0, 'The image has block device mappings that Qiln cannot classify.'],

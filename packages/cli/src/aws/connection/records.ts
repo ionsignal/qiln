@@ -102,7 +102,7 @@ function requireBindings(connection: AwsConnection | null, operation: Pending): 
     !sameIdentity(connection.identity, operation.operator) ||
     managed === null ||
     managed.creationId !== operation.creationId ||
-    managed.permissionRegion !== operation.region
+    managed.deploymentRegion !== operation.region
   ) {
     throw new InstallerError({
       code: 'AWS_PERMISSION_STATE_INVALID',
@@ -238,7 +238,7 @@ export async function save(directory: Dir, connection: AwsConnection): Promise<v
       (previous.managed !== null &&
         connection.managed !== null &&
         (previous.managed.creationId !== connection.managed.creationId ||
-          previous.managed.permissionRegion !== connection.managed.permissionRegion ||
+          previous.managed.deploymentRegion !== connection.managed.deploymentRegion ||
           !keepsBindings(previous.managed.policies, connection.managed.policies))))
   ) {
     throw new InstallerError({

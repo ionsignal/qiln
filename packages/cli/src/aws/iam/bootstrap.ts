@@ -280,7 +280,7 @@ export class Bootstrap {
       })
     }
     const inspection = this.copyInspection()
-    const permission = specification(this.current.accountId, this.current.name, this.current.region)
+    const permission = specification(this.current.accountId, this.current.name)
     const before = inspection.before
     if (this.current.kind === 'maintain' && before !== null) {
       const modes = reconciliation(before.policies, permission)
@@ -298,6 +298,7 @@ export class Bootstrap {
       operationId: this.current.id,
       kind: this.current.kind,
       operatorArn: this.current.operator?.arn ?? operatorArn(this.current.accountId, this.current.name),
+      deploymentRegion: this.current.region,
       inspection,
       permission,
     }

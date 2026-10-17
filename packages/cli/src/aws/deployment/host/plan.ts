@@ -33,14 +33,14 @@ export function planOf(inputs: PlanInputs): HostPlan | null {
     throughput: storage.throughput,
   }
   return {
+    zones,
+    hostSlot,
     region: inputs.region,
     pin: { imageId: inputs.pin.imageId, ownerId: inputs.pin.ownerId },
-    instanceType: compute.instanceType,
+    instanceType: compute.defaultInstanceType,
     count: launch.count,
     purchase: launch.purchase,
     cidr: deployment.defaultCidr,
-    zones,
-    hostSlot,
     ingress: ingressRules(inputs.administrator),
     root: {
       deviceName: inputs.root.deviceName,

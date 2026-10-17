@@ -1,5 +1,5 @@
+import { AWS_RECORD_VERSION, AWS_SPEC } from '../../aws/spec'
 import { InstallerError } from '../../diagnostic/error'
-import * as connections from '../../aws/connection/records'
 import { terminationConfirmed } from '../../aws/recovery'
 import { Bootstrap } from '../../aws/iam/bootstrap'
 import { canonical } from '../../aws/json'
@@ -8,17 +8,11 @@ import { ready, type MutationProgress, type Proposal, type Readiness } from '../
 import { POLICY_KEYS } from '../../aws/permission/keys'
 import { currentRequirement, reviewRequired } from '../../aws/permission/spec'
 import { requireIdentity } from '../../aws/auth/identity'
-import * as awsLogin from '../../aws/auth/login'
-import * as tools from '../../aws/tools'
 import { removeAuth, Session } from '../../aws/auth/session'
-import { AWS_SPEC } from '../../aws/spec'
 import { openExistingConnections } from '../../aws/root'
 import { requireAwsHost } from '../../aws/host'
-import type { AwsAuthentication, AwsConnection, LoginFlow } from '../../aws/types'
 import { resolveAwsName, validateAwsRegion, type AwsCommandOptions } from '../../input'
-import type { Dir } from '../../state/files'
 import { checkCancellation, Prompts, withCancellation } from '../../terminal/prompts'
-import type { Reporter } from '../../terminal/reporter'
 import { modesOf, policyLabel, reportPermissionChange } from './review'
 import {
   authenticate,
@@ -27,6 +21,12 @@ import {
   requireAvailable,
   withConfirmedOperation,
 } from './shared'
+import * as awsLogin from '../../aws/auth/login'
+import * as tools from '../../aws/tools'
+import * as connections from '../../aws/connection/records'
+import type { Dir } from '../../state/files'
+import type { Reporter } from '../../terminal/reporter'
+import type { AwsAuthentication, AwsConnection, LoginFlow } from '../../aws/types'
 
 type PermissionOutcome = 'not-applicable' | 'recorded' | 'declined' | 'changed' | 'unchanged'
 
@@ -327,8 +327,6 @@ function reportReadiness(reporter: Reporter, readiness: Readiness): void {
   )
   reporter.row('verified', 'Operator MFA', `${readiness.mfaDevices} configured device(s) · optional`)
   reporter.row('verified', 'Access keys', `${readiness.accessKeys} permanent access keys`)
-  reporter.space()
-  reporter.info('Operator MFA enrollment is optional. Configured devices do not prove that this session used MFA.')
   if (!passwordReplaced) {
     reporter.action('Replace the initial operator password in the AWS browser, then recheck.')
   }
@@ -363,9 +361,9 @@ async function connectOperator(
     }
     checkCancellation(signal)
     const connection: AwsConnection = {
-      version: 2,
       name,
       region,
+      version: AWS_RECORD_VERSION.connection,
       identity: authentication.identity,
       createdAt: saved?.createdAt ?? new Date().toISOString(),
       managed: saved?.managed ?? null,
@@ -399,7 +397,9 @@ async function onboard(
       facts: [['Connection', 'Initial onboarding requires an empty current-layout connection directory.']],
     })
   }
-  const region = validateAwsRegion(await prompts.text('Default AWS region', AWS_SPEC.defaultRegion))
+  const region = validateAwsRegion(
+    await prompts.text('Deployment region (fixed for this connection; also the initial default login region)', AWS_SPEC.defaultRegion),
+  )
   const flow = await selectFlow(prompts)
   const bootstrap = await Bootstrap.onboard(directory, name, region)
   let operatorStarted = false
@@ -416,7 +416,6 @@ async function onboard(
     await prompts.approve('Approve this AWS operator setup')
     await bootstrap.approve(proposal, signal)
     reporter.section('IAM setup')
-    reporter.info('Applying the approved IAM configuration. Completed steps appear below.')
     await bootstrap.createOperator(signal, iamProgress(reporter))
     const operator = bootstrap.record.operator
     if (!operator) {
@@ -491,7 +490,6 @@ async function onboard(
   }
   reporter.row('verified', 'IAM configuration', 'current approved operator configuration freshly verified')
   reporter.row('verified', 'Root context', 'processes terminated and local authentication removed before publication')
-  reporter.info('Immutable resource bindings and last-verified permission metadata were saved; completed pending evidence was removed.')
 }
 
 export async function connect(options: AwsCommandOptions, reporter: Reporter): Promise<void> {

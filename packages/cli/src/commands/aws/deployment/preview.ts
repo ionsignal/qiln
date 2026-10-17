@@ -66,7 +66,7 @@ function imageFacts(image: ImageEvidence | null, pin: ImagePin): DiagnosticFact[
 
 function instanceFacts(instance: InstanceTypeEvidence | null): DiagnosticFact[] {
   if (instance === null) {
-    return [['Instance type', `${compute.instanceType} was not returned for this region`]]
+    return [['Instance type', `${compute.defaultInstanceType} was not returned for this region`]]
   }
   const gpus = instance.gpus.map(gpu => `${gpu.count} x ${gpu.manufacturer} ${gpu.name}, ${gpu.memoryMiB} MiB each`)
   return [
@@ -224,12 +224,12 @@ function removalFacts(plan: HostPlan): DiagnosticFact[] {
  * is shown beside the region and appears even when AWS did not return the image.
  */
 export function reportProposal(reporter: Reporter, proposal: HostProposal, target: PreviewTarget): void {
-  reporter.section('Proposed GPU host')
+  reporter.section('Proposed host')
   reporter.facts([
     ['Account', target.identity.accountId],
     ['Operator', target.identity.arn],
     ['Local alias', `${deploymentName(target.alias)} (reserved when approved)`],
-    ['Permission region', proposal.region],
+    ['Deployment region', proposal.region],
     [
       'Pinned AMI',
       `${proposal.pin.imageId} · owner ${proposal.pin.ownerId} · committed index entry for ${proposal.region}; not searched or substituted`,

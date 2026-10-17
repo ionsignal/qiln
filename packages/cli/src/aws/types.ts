@@ -44,9 +44,13 @@ export interface PermissionMetadata {
   verifiedAt: string
 }
 
+/**
+ * `deploymentRegion` is the immutable concrete deployment target. It is
+ * independent of the editable login default in `AwsConnection.region`.
+ */
 export interface ManagedOperator {
   creationId: string
-  permissionRegion: string
+  deploymentRegion: string
   policies: PolicyBindings<PolicyBinding>
   verified: PermissionMetadata
 }
@@ -165,10 +169,10 @@ export function isPermissionMetadata(value: unknown): value is PermissionMetadat
 export function isManagedOperator(value: unknown): value is ManagedOperator {
   return (
     isRecord(value) &&
-    hasKeys(value, ['creationId', 'permissionRegion', 'policies', 'verified']) &&
+    hasKeys(value, ['creationId', 'deploymentRegion', 'policies', 'verified']) &&
     isOperationId(value.creationId) &&
-    typeof value.permissionRegion === 'string' &&
-    validRegion(value.permissionRegion) &&
+    typeof value.deploymentRegion === 'string' &&
+    validRegion(value.deploymentRegion) &&
     isBindings(value.policies, isPolicyBinding) &&
     isPermissionMetadata(value.verified) &&
     enrolledKeys(value.policies).join() === enrolledKeys(value.verified.policies).join()

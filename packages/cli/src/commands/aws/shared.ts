@@ -156,7 +156,7 @@ export function reportPermissionMetadata(reporter: Reporter, connection: AwsConn
     return
   }
   const verified = managed.verified
-  reporter.row('verified', 'Permission region', managed.permissionRegion)
+  reporter.row('verified', 'Deployment region', managed.deploymentRegion)
   for (const key of POLICY_KEYS) {
     const policy = managed.policies[key]
     if (policy === undefined) {

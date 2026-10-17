@@ -17,7 +17,7 @@ export function requireBound(connection: AwsConnection | null, record: Deploymen
     connection.name !== record.connection ||
     !sameIdentity(connection.identity, record.binding.operator) ||
     managed.creationId !== record.binding.creationId ||
-    managed.permissionRegion !== record.binding.region ||
+    managed.deploymentRegion !== record.binding.region ||
     managed.policies.foundation.arn !== record.binding.foundation.arn ||
     managed.policies.foundation.id !== record.binding.foundation.id
   ) {

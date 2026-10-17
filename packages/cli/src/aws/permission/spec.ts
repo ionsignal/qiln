@@ -1,7 +1,6 @@
-import { InstallerError } from '../../diagnostic/error'
 import { hasKeys, isRecord } from '../guards'
 import { canonical, sameJson } from '../json'
-import { validRegion, type AwsConnection } from '../types'
+import type { AwsConnection } from '../types'
 import { computePolicy } from './compute'
 import { foundationPolicy } from './foundation'
 import { POLICY_KEYS, policyMap, type PolicyMap } from './keys'
@@ -14,11 +13,10 @@ import {
   type PolicySnapshot,
 } from './policy'
 
-export const PERMISSION_VERSION = 6
+export const PERMISSION_VERSION = 1
 
 export interface PermissionEvidence {
   version: number
-  region: string
   policies: PolicyMap<PolicyDocument>
   sha256: string
 }
@@ -29,30 +27,21 @@ export interface PermissionSpec extends PermissionEvidence {
 
 export type Mode = 'enroll' | 'replace' | 'none'
 
-const BUILDERS: PolicyMap<(accountId: string, region: string) => string> = {
+const BUILDERS: PolicyMap<(accountId: string) => string> = {
   foundation: foundationPolicy,
   compute: computePolicy,
-}
-
-function invalid(): never {
-  throw new InstallerError({
-    code: 'AWS_PERMISSION_STATE_INVALID',
-  })
 }
 
 function setDigest(policies: PolicyMap<PolicyDocument>): string {
   return digest(canonical(policyMap(key => policies[key].sha256)))
 }
 
-export function specification(accountId: string, connection: string, region: string): PermissionSpec {
+export function specification(accountId: string, connection: string): PermissionSpec {
   for (const key of POLICY_KEYS) {
     policyArn(accountId, connection, key)
   }
-  if (!validRegion(region)) {
-    return invalid()
-  }
   const policies = policyMap(key => {
-    const document = BUILDERS[key](accountId, region)
+    const document = BUILDERS[key](accountId)
     return {
       document,
       sha256: digest(document),
@@ -60,7 +49,6 @@ export function specification(accountId: string, connection: string, region: str
   })
   return {
     version: PERMISSION_VERSION,
-    region,
     policies,
     sha256: setDigest(policies),
   }
@@ -77,12 +65,10 @@ function isDocuments(value: unknown): value is PolicyMap<PolicyDocument> {
 export function isEvidence(value: unknown): value is PermissionEvidence {
   return (
     isRecord(value) &&
-    hasKeys(value, ['version', 'region', 'policies', 'sha256']) &&
+    hasKeys(value, ['version', 'policies', 'sha256']) &&
     typeof value.version === 'number' &&
     Number.isSafeInteger(value.version) &&
     value.version >= 1 &&
-    typeof value.region === 'string' &&
-    validRegion(value.region) &&
     isDocuments(value.policies) &&
     value.sha256 === setDigest(value.policies)
   )
@@ -93,7 +79,7 @@ export function isSpec(value: unknown, accountId: string, connection: string): v
     return false
   }
   try {
-    return sameJson(value, specification(accountId, connection, value.region))
+    return sameJson(value, specification(accountId, connection))
   } catch {
     return false
   }
@@ -114,7 +100,7 @@ export function currentRequirement(connection: AwsConnection): PermissionSpec | 
   if (!connection.managed) {
     return null
   }
-  return specification(connection.identity.accountId, connection.name, connection.managed.permissionRegion)
+  return specification(connection.identity.accountId, connection.name)
 }
 
 /**

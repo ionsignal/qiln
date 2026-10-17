@@ -49,7 +49,7 @@ function reportTarget(reporter: Reporter, record: Deployment, observation: Obser
     ['Deployment', record.id],
     ['Name', deploymentName(record.alias)],
     ['Account', record.binding.accountId],
-    ['Region', record.binding.region],
+    ['Deployment region', record.binding.region],
     ['CIDR', record.approval.cidr],
     ...[...unreleased(record), ...kept].map((resource): DiagnosticFact => [resource.kind, `${resource.id} · ${lifecycleOf(resource)}`]),
     ...record.approval.tags.map((tag): DiagnosticFact => ['Tag', `${tag.Key}=${tag.Value}`]),

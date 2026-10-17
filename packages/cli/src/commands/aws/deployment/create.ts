@@ -1,5 +1,6 @@
 import { findPin } from '../../../aws/ami'
 import { POLICY_KEYS, enrolledKeys } from '../../../aws/permission/keys'
+import { requireEnvelope } from '../../../aws/permission/envelope'
 import { Session } from '../../../aws/auth/session'
 import { deploymentName } from '../../../aws/deployment/alias'
 import { validSource } from '../../../aws/deployment/cidr'
@@ -43,7 +44,7 @@ function requireCurrentPermissions(connection: AwsConnection): ManagedOperator {
 }
 
 /**
- * Provisions one approved GPU host. Discovery and evaluation are read-only, and
+ * Provisions one approved host. Discovery and evaluation are read-only, and
  * nothing is saved, reserved, generated, or created until the single approval.
  * After it, the immutable approval is retained and the fenced creation steps
  * and the AWS health read run under the operation lock. Success establishes
@@ -51,6 +52,7 @@ function requireCurrentPermissions(connection: AwsConnection): ManagedOperator {
  */
 export async function create(options: AwsDeploymentCreateOptions, reporter: Reporter): Promise<void> {
   requireAwsHost()
+  requireEnvelope()
   const name = resolveAwsName(options)
   const retry = `qiln aws deployment create --name ${name} --alias ${options.alias}`
   const message = await withCancellation(async signal => {
@@ -72,12 +74,12 @@ export async function create(options: AwsDeploymentCreateOptions, reporter: Repo
       const managed = requireCurrentPermissions(connection)
       // An unindexed region stops here, before any prompt, authentication, or
       // AWS read. The credential child resolves the same entry on its own.
-      const pin = findPin(managed.permissionRegion)
+      const pin = findPin(managed.deploymentRegion)
       if (pin === null) {
         throw new InstallerError({
           code: 'AWS_DEPLOYMENT_IMAGE_NOT_INDEXED',
           facts: [
-            ['Permission region', managed.permissionRegion],
+            ['Deployment region', managed.deploymentRegion],
             ['Reviewed release', AWS_SPEC.compute.image.name],
           ],
         })
@@ -97,13 +99,13 @@ export async function create(options: AwsDeploymentCreateOptions, reporter: Repo
       reporter.section('AWS authentication')
       reportAuthentication(reporter, authentication)
       const discovery = await prepare(session, signal)
-      const proposal = evaluate(discovery, { region: managed.permissionRegion, administrator, pin })
+      const proposal = evaluate(discovery, { region: managed.deploymentRegion, administrator, pin })
       reportProposal(reporter, proposal, { alias: options.alias, identity: connection.identity })
       if (isBlocked(proposal)) {
         throw new InstallerError({
           code: 'AWS_DEPLOYMENT_PREREQUISITES_BLOCKED',
           facts: [
-            ['Region', proposal.region],
+            ['Deployment region', proposal.region],
             ['Blockers', String(proposal.findings.filter(finding => finding.severity === 'blocker').length)],
           ],
           retry,
@@ -117,7 +119,7 @@ export async function create(options: AwsDeploymentCreateOptions, reporter: Repo
         })
       }
       reportCreationEffects(reporter, plan)
-      await prompts.approve('Approve the displayed GPU host and create its AWS resources')
+      await prompts.approve('Approve the displayed host and create its AWS resources')
       const deployer = await Deployer.approve(
         root,
         session,

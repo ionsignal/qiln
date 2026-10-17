@@ -8,7 +8,7 @@ import { removeAuth } from '../auth/session'
 import { userId } from '../host'
 import { sameJson } from '../json'
 import { read, requireLock, write } from './journal'
-import { AWS_SPEC } from '../spec'
+import { AWS_RECORD_VERSION, AWS_SPEC } from '../spec'
 import { POLICY_KEYS, bindingEntries, policyMap, type PolicyBindings, type PolicyMap } from '../permission/keys'
 import * as connections from '../connection/records'
 import type { Pending } from './types'
@@ -45,11 +45,11 @@ async function begin(directory: Dir, name: string, region: string, saved: AwsCon
   }
   const id = randomUUID()
   const record: Pending = {
-    version: 1,
     id,
     name,
-    kind: saved === null ? 'onboard' : 'maintain',
     region,
+    version: AWS_RECORD_VERSION.pending,
+    kind: saved === null ? 'onboard' : 'maintain',
     accountId: saved?.identity.accountId ?? null,
     creationId: saved?.managed?.creationId ?? id,
     operator: saved === null ? null : { ...saved.identity },
@@ -75,7 +75,7 @@ export async function maintain(directory: Dir, saved: AwsConnection): Promise<Pe
   if (!saved.managed) {
     return invalid()
   }
-  return await begin(directory, saved.name, saved.managed.permissionRegion, saved)
+  return await begin(directory, saved.name, saved.managed.deploymentRegion, saved)
 }
 
 export async function cleanRoot(directory: Dir, operationId: string): Promise<void> {
@@ -146,20 +146,20 @@ export async function publish(directory: Dir, record: Pending): Promise<AwsConne
     (!saved ||
       !sameIdentity(saved.identity, record.operator) ||
       saved.managed?.creationId !== record.creationId ||
-      saved.managed.permissionRegion !== record.region ||
+      saved.managed.deploymentRegion !== record.region ||
       !keepsBindings(saved.managed.policies, record.policies))
   ) {
     return invalid()
   }
   const connection: AwsConnection = {
-    version: 2,
+    version: AWS_RECORD_VERSION.connection,
     name: record.name,
     region: saved?.region ?? record.region,
     identity: { ...record.operator },
     createdAt: saved?.createdAt ?? record.startedAt,
     managed: {
       creationId: record.creationId,
-      permissionRegion: record.region,
+      deploymentRegion: record.region,
       policies: bindings(record.policies),
       verified: structuredClone(record.verified),
     },
@@ -193,7 +193,7 @@ export async function removePending(directory: Dir, record: Pending): Promise<vo
       !saved ||
       !sameIdentity(saved.identity, record.operator) ||
       saved.managed?.creationId !== record.creationId ||
-      saved.managed.permissionRegion !== record.region ||
+      saved.managed.deploymentRegion !== record.region ||
       !sameJson(saved.managed.policies, bindings(record.policies)) ||
       !sameJson(saved.managed.verified, record.verified)
     ) {

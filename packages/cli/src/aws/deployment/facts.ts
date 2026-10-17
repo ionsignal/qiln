@@ -185,7 +185,7 @@ export function deploymentFacts(record: Deployment): readonly DiagnosticFact[] {
     ['Name', deploymentName(record.alias)],
     ['Deployment', record.id],
     ['Connection', record.connection],
-    ['Region', binding.region],
+    ['Deployment region', binding.region],
     ['CIDR', approval.cidr],
     ['Administrator CIDR', approval.ingress[0].cidr],
     ['Administrative key', keyDisclosure(record)],

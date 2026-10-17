@@ -5,6 +5,7 @@ import { operatorArn } from '../operator'
 import { isPolicyKey, POLICY_KEYS, type PolicyKey, type PolicyMap } from '../permission/keys'
 import { isPolicy, isSnapshots, policyArn, type PolicyIdentity, type PolicySnapshot } from '../permission/policy'
 import { isEvidence, type PermissionEvidence, type PermissionSpec } from '../permission/spec'
+import { AWS_RECORD_VERSION } from '../spec'
 import {
   isAccountId,
   isIdentity,
@@ -50,7 +51,6 @@ export interface Readiness {
   accessKeys: number
 }
 
-/** Observed or expected state of the operator's managed policy set. */
 export interface PermissionInspection {
   signIn: PolicyReview
   login: LoginObservation | null
@@ -76,10 +76,15 @@ export interface Inspection {
 
 export type OperationKind = 'onboard' | 'maintain'
 
+/**
+ * `deploymentRegion` is the target the connection will record. It is displayed
+ * independently of the permission scope, which is not regional.
+ */
 export interface Proposal {
   operationId: string
   kind: OperationKind
   operatorArn: string
+  deploymentRegion: string
   inspection: Inspection
   permission: PermissionSpec
 }
@@ -155,7 +160,7 @@ export interface Mutation {
 }
 
 export interface Pending {
-  version: 1
+  version: typeof AWS_RECORD_VERSION.pending
   id: string
   name: string
   kind: OperationKind
@@ -349,7 +354,7 @@ export function isPending(value: unknown): value is Pending {
       'failureCode',
       'startedAt',
     ]) ||
-    value.version !== 1 ||
+    value.version !== AWS_RECORD_VERSION.pending ||
     !isOperationId(value.id) ||
     typeof value.name !== 'string' ||
     !validName(value.name) ||
@@ -399,7 +404,6 @@ export function isPending(value: unknown): value is Pending {
   }
   if (
     approval.inspection.root.identity.accountId !== accountId ||
-    approval.permission.region !== value.region ||
     (value.kind === 'onboard' ? approval.inspection.before !== null : approval.inspection.before?.login == null)
   ) {
     return false

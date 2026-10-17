@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { AWS_SPEC } from '../spec'
+import { AWS_RECORD_VERSION, AWS_SPEC } from '../spec'
 import { validCidr, validSource } from './cidr'
 import { expectation, matches } from './expect'
 import { deploymentFacts, removable } from './facts'
@@ -96,22 +96,22 @@ export function propose(connection: AwsConnection, plan: HostPlan, alias: string
     })
   }
   const managed = connection.managed
-  if (!managed || plan.region !== managed.permissionRegion) {
+  if (!managed || plan.region !== managed.deploymentRegion) {
     return invalid()
   }
   const id = randomUUID()
   const now = new Date().toISOString()
   return {
-    version: 6,
     id,
     alias,
+    version: AWS_RECORD_VERSION.deployment,
     connection: connection.name,
     binding: {
       accountId: connection.identity.accountId,
       operator: { ...connection.identity },
       creationId: managed.creationId,
       foundation: { ...managed.policies.foundation },
-      region: managed.permissionRegion,
+      region: managed.deploymentRegion,
     },
     approval: {
       approvedAt: now,

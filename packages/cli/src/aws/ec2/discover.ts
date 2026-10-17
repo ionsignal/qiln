@@ -132,7 +132,7 @@ async function findImage(ec2: Ec2, pin: ImagePin) {
 
 async function findInstanceType(ec2: Ec2) {
   const response = await ec2.read((client, call) =>
-    client.send(new DescribeInstanceTypesCommand({ InstanceTypes: [compute.instanceType] }), call),
+    client.send(new DescribeInstanceTypesCommand({ InstanceTypes: [compute.defaultInstanceType] }), call),
   )
   const types = response.InstanceTypes ?? []
   if (response.NextToken || types.length > 1) {
@@ -165,7 +165,7 @@ async function listOfferedZoneIds(ec2: Ec2) {
       client.send(
         new DescribeInstanceTypeOfferingsCommand({
           LocationType: 'availability-zone-id',
-          Filters: [{ Name: 'instance-type', Values: [compute.instanceType] }],
+          Filters: [{ Name: 'instance-type', Values: [compute.defaultInstanceType] }],
           MaxResults: 100,
           NextToken: marker,
         }),
@@ -179,7 +179,7 @@ async function listOfferedZoneIds(ec2: Ec2) {
     }
   }, PAGES)
   return offerings.flatMap(offering =>
-    offering.InstanceType === compute.instanceType && offering.Location !== undefined ? [offering.Location] : [],
+    offering.InstanceType === compute.defaultInstanceType && offering.Location !== undefined ? [offering.Location] : [],
   )
 }
 

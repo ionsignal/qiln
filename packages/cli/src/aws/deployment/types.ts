@@ -1,4 +1,4 @@
-import { AWS_SPEC } from '../spec'
+import { AWS_RECORD_VERSION, AWS_SPEC } from '../spec'
 import { isInstallerErrorCode, type InstallerErrorCode } from '../../diagnostic/error'
 import { policyArn } from '../permission/policy'
 import { hasKeys, isRecord } from '../guards'
@@ -185,12 +185,15 @@ export interface Health {
  * order that the guards and the audit consult, such as the zone limit, tag and
  * key-name formats, the lifecycle invariants of the host plan, the
  * administrative key binding, the health evidence, and the creation and
- * removal order. Changing any of them needs a version bump and an explicit
- * versioned reader. Records are never migrated silently, and a stored launch
- * plan is judged structurally, never rebuilt from today's compute constants.
+ * removal order. Version 1 is the baseline of a one-time disposable
+ * development reset, before any release, so no earlier layout has a reader.
+ * From the first release, changing any of them needs a version bump and an
+ * explicit versioned reader. Records are never migrated silently, and a stored
+ * launch plan is judged structurally, never rebuilt from today's compute
+ * constants or checked against today's permission ceilings.
  */
 export interface Deployment {
-  version: 6
+  version: typeof AWS_RECORD_VERSION.deployment
   id: string
   alias: string
   connection: string
@@ -523,7 +526,7 @@ export function isDeployment(value: unknown): value is Deployment {
       'health',
       'createdAt',
     ]) ||
-    value.version !== 6 ||
+    value.version !== AWS_RECORD_VERSION.deployment ||
     !isOperationId(value.id) ||
     typeof value.alias !== 'string' ||
     !validName(value.alias) ||

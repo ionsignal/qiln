@@ -146,7 +146,7 @@ export function createProgram(handlers: ProgramHandlers, output: ProgramOutput):
   if (awsHandlers) {
     const aws = program
       .command('aws')
-      .description('Manage Qiln-owned local AWS operator connections and approved GPU host deployments.')
+      .description('Manage Qiln-owned local AWS operator connections and approved host deployments.')
       .summary('Manage AWS connections and deployments.')
     describeHelp(aws, awsHelp.group)
     const connect = aws
@@ -186,13 +186,13 @@ export function createProgram(handlers: ProgramHandlers, output: ProgramOutput):
     )
     const deployment = aws
       .command('deployment')
-      .description('Create one approved AWS GPU host, and inspect or remove retained deployments bound to a Qiln-managed operator.')
-      .summary('Create a GPU host; manage retained deployments.')
+      .description('Create one approved AWS host, and inspect or remove retained deployments bound to a Qiln-managed operator.')
+      .summary('Create a host; manage retained deployments.')
     describeHelp(deployment, deploymentHelp.group)
     const create = deployment
       .command('create')
-      .description('Review one proposed GPU host from read-only AWS discovery and, after approval, provision it and verify AWS health.')
-      .summary('Create one approved GPU host.')
+      .description('Review one proposed host from read-only AWS discovery and, after approval, provision it and verify AWS health.')
+      .summary('Create one approved host.')
     addSingleOption(
       create,
       new Option('--name <name>', `Select the connection (default: ${AWS_SPEC.defaultName}).`),

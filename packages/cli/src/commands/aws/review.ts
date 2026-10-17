@@ -42,12 +42,17 @@ export function reportPermissionChange(reporter: Reporter, proposal: Proposal): 
   const changed = POLICY_KEYS.filter(key => modes[key] !== 'none')
   const facts: DiagnosticFact[] = [
     ['Operator', proposal.operatorArn],
-    ['Region', proposal.permission.region],
+    ['EC2 permission scope', 'all commercial AWS regions'],
+    ['Deployment region', proposal.deploymentRegion],
+    ['Default/login region', 'independent of the permission scope; editable by reconnecting and never changes the deployment region'],
     ...POLICY_KEYS.map((key): DiagnosticFact => [policyLabel(key), describeMode(modes[key], proposal, key)]),
   ]
   for (const key of changed) {
-    const { changes, reads } = summarize(proposal.permission.policies[key].document)
+    const { changes, reads, launchTypes } = summarize(proposal.permission.policies[key].document)
     facts.push([`${title(key)} grants`, changes.join(', ')], [`${title(key)} reads`, `${reads} read-only actions`])
+    if (launchTypes.length > 0) {
+      facts.push([`${title(key)} launch types`, `${launchTypes.length} permitted: ${launchTypes.join(', ')}`])
+    }
   }
   reporter.section('Permission change')
   reporter.facts(facts)
@@ -56,27 +61,33 @@ export function reportPermissionChange(reporter: Reporter, proposal: Proposal): 
     reporter.info('No IAM change is required. The live policies will be freshly verified.')
     return
   }
-  const { instanceType, storage } = AWS_SPEC.compute
+  const { volumes } = AWS_SPEC.permission
   reporter.info(
-    'Listed grants are the complete actions of each changed policy document, taken from the exact document that is approved and saved. Region, resource, and tag conditions narrow them.',
+    'Listed grants are the complete actions of each changed policy document, taken from the exact document that is approved and saved. Resource and tag conditions narrow them; EC2 resources are matched in every commercial AWS region and read actions carry no region restriction.',
   )
   reporter.space()
   reporter.line(
-    `- Compute: launch and terminate operator-tagged ${instanceType} On-Demand instances; create ${storage.rootSizeGiB} GiB root and ${storage.dataSizeGiB} GiB data ${storage.volumeType} volumes and attach the data volume; allocate, associate, and release tagged Elastic IPs; import and delete administrative key pairs.`,
+    `- Compute: launch operator-tagged On-Demand instances of the listed launch types only; terminate operator-tagged instances of any type; create ${volumes.types.join(', ')} volumes within the volume ceilings and attach the data volume; allocate, associate, and release tagged Elastic IPs; import and delete administrative key pairs.`,
+  )
+  reporter.line(
+    `- Volume ceilings per request: launch-created (root) volume up to ${volumes.maximumRootGiB} GiB, data volume up to ${volumes.maximumDataGiB} GiB, and each up to ${volumes.maximumIops} IOPS and ${volumes.maximumThroughput} MiB/s. They limit individual requests, not aggregate storage or spending. Each deployment approves and retains its exact volume settings, so changing deployment defaults within these ceilings needs no permission review.`,
+  )
+  reporter.line(
+    '- Launch types are permission scope only. Each deployment approves and retains its exact type, and catalog membership establishes no AMI compatibility, GPU capability, regional offering, or capacity.',
   )
   reporter.line(
     '- No volume deletion, detachment, resize, or snapshot authority: a retained data volume must be deleted outside Qiln. No KMS authority and no encryption requirement; account encryption defaults still apply.',
   )
   reporter.line(
-    '- VPC deletion authority covers any VPC in this account and region tagged with the operator ARN, qiln:managed-by=qiln-cli, and a nonempty qiln:deployment value, not only one deployment ID.',
+    '- VPC deletion authority covers any VPC in this account, in any commercial region, tagged with the operator ARN, qiln:managed-by=qiln-cli, and a nonempty qiln:deployment value, not only one deployment ID.',
   )
   reporter.line(
-    '- Deletion authority for subnets, internet gateways, route tables, and security groups covers any such resource in this account and region tagged with the operator ARN, not only one deployment.',
+    '- Deletion authority for subnets, internet gateways, route tables, and security groups covers any such resource in this account, in any commercial region, tagged with the operator ARN, not only one deployment.',
   )
-  reporter.line('- Deployment commands do not use compute authority yet. Connect does not create or remove infrastructure.')
+  reporter.line('- Connect does not create or remove infrastructure.')
   reporter.space()
   reporter.notice(
-    'These permissions can be exercised with this operator’s credentials outside Qiln. A deployment record is a Qiln execution gate, not an AWS authorization boundary. Neither policy approves provisioning or spending.',
+    'These permissions can be exercised with this operator’s credentials outside Qiln, in any commercial AWS region. The recorded deployment region is a Qiln execution gate, not an AWS regional authorization boundary. All-region authority does not enable opt-in regions or establish service availability. Neither policy approves provisioning or spending.',
   )
   reporter.notice('IAM changes are not automatically undone if setup fails.')
 }

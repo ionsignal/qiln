@@ -28,25 +28,27 @@ function blockers(requirements: readonly Requirement[]): Finding[] {
 }
 
 /**
- * An omitted AMI boot mode has the documented x86 default, legacy BIOS.
- * uefi-preferred selects UEFI when the instance supports it and otherwise
- * legacy BIOS. Any other value must be a mode the instance lists, and an
- * unrecognized value never passes. A missing instance type is reported by its
- * own finding.
+ * An omitted AMI boot mode uses the documented architecture default: UEFI for
+ * arm64 and legacy BIOS for x86_64. uefi-preferred selects UEFI when the instance
+ * supports it and otherwise legacy BIOS. Any other value must be a mode the
+ * instance lists, and an unrecognized mode or default architecture never passes.
+ * A missing instance type is reported by its own finding.
  */
-function bootable(bootMode: string | null, instance: InstanceTypeEvidence | null): boolean {
+function bootable(image: ImageEvidence, instance: InstanceTypeEvidence | null): boolean {
   if (instance === null) {
     return true
   }
-  const modes = instance.bootModes
-  switch (bootMode) {
+  const supportedModes = instance.bootModes
+  switch (image.bootMode) {
     case null:
-      return modes.includes('legacy-bios')
+      return image.architecture === 'arm64'
+        ? supportedModes.includes('uefi')
+        : image.architecture === 'x86_64' && supportedModes.includes('legacy-bios')
     case 'uefi-preferred':
-      return modes.includes('uefi') || modes.includes('legacy-bios')
+      return supportedModes.includes('uefi') || supportedModes.includes('legacy-bios')
     case 'uefi':
     case 'legacy-bios':
-      return modes.includes(bootMode)
+      return supportedModes.includes(image.bootMode)
     default:
       return false
   }
@@ -68,13 +70,17 @@ function imageFindings(
     [image.id === pin.imageId, 'The returned image is not the reviewed AMI.'],
     [image.ownerId === pin.ownerId, 'The image owner is not the reviewed publisher account.'],
     [image.name === compute.image.name, 'The image name does not match the reviewed release.'],
-    [image.architecture === compute.image.architecture, 'The image architecture is not x86_64.'],
+    [image.architecture === compute.image.architecture, `The image architecture is not ${compute.image.architecture}.`],
+    [
+      instance === null || instance.architectures.includes(image.architecture),
+      'The image architecture is not supported by the instance type.',
+    ],
     [image.state === 'available', 'The image is not in the available state.'],
     [image.imageType === 'machine', 'The image is not a machine image.'],
     [image.rootDeviceType === 'ebs', 'The image does not use an EBS root device.'],
     [image.virtualizationType === 'hvm', 'The image does not use HVM virtualization.'],
     [image.enaSupport === true, 'The image does not advertise ENA support.'],
-    [bootable(image.bootMode, instance), 'The image boot mode is not supported by the instance type.'],
+    [bootable(image, instance), 'The image boot mode is not supported by the instance type.'],
   ])
   if (image.deprecationTime !== null) {
     findings.push({
@@ -90,11 +96,10 @@ function imageFindings(
 
 function instanceFindings(instance: InstanceTypeEvidence | null): Finding[] {
   if (instance === null) {
-    return [{ severity: 'blocker', message: `${compute.instanceType} was not returned for this region.` }]
+    return [{ severity: 'blocker', message: `${compute.defaultInstanceType} was not returned for this region.` }]
   }
   return blockers([
-    [instance.name === compute.instanceType, 'The returned instance type is not the requested type.'],
-    [instance.architectures.includes('x86_64'), 'The instance type does not support x86_64.'],
+    [instance.name === compute.defaultInstanceType, 'The returned instance type is not the requested type.'],
     [instance.usageClasses.includes('on-demand'), 'The instance type does not support On-Demand usage.'],
     [instance.rootDeviceTypes.includes('ebs'), 'The instance type does not support an EBS root device.'],
     [instance.virtualizationTypes.includes('hvm'), 'The instance type does not support HVM.'],
@@ -102,7 +107,6 @@ function instanceFindings(instance: InstanceTypeEvidence | null): Finding[] {
       instance.enaSupport === 'supported' || instance.enaSupport === 'required',
       'The instance type does not explicitly report ENA support.',
     ],
-    [instance.gpus.some(gpu => gpu.manufacturer === 'NVIDIA'), 'The instance type reports no NVIDIA GPU.'],
   ])
 }
 
@@ -137,7 +141,7 @@ export function evaluate(discovery: Discovery, inputs: Inputs): HostProposal {
       ],
       [available.length > 0, 'No standard Availability Zone reports available.'],
       [available.length <= deployment.maximumZones, `More than ${deployment.maximumZones} standard Availability Zones are available.`],
-      [hostZone !== null, `${compute.instanceType} is not offered in any available standard Availability Zone.`],
+      [hostZone !== null, `${compute.defaultInstanceType} is not offered in any available standard Availability Zone.`],
     ]),
     ...storageFindings,
   ]

@@ -127,7 +127,7 @@ export function reportDeployment(reporter: Reporter, record: Deployment): void {
     ['Connection', record.connection],
     ['Account', record.binding.accountId],
     ['Operator', record.binding.operator.arn],
-    ['Region', record.binding.region],
+    ['Deployment region', record.binding.region],
     ['Approved CIDR', record.approval.cidr],
     ['Zones', record.approval.zones.map(zone => zone.name).join(', ')],
     ['Administrator CIDR', record.approval.ingress[0].cidr],
@@ -175,16 +175,19 @@ export function reportDeployment(reporter: Reporter, record: Deployment): void {
     )
   }
   if (unresolved) {
+    reporter.space()
     reporter.notice(
       'Resources or unresolved effects may remain. No replay, adoption, deletion, rollback, or automatic recovery was attempted.',
     )
   }
   if (retained(record).length > 0) {
+    reporter.space()
     reporter.notice(
       'Retained resources are never deleted by Qiln. They keep incurring charges for as long as they exist, including after the instance is terminated, until they are deleted outside Qiln.',
     )
   }
   if (record.latest?.resources.some(resource => resource.state === 'absent')) {
+    reporter.space()
     reporter.notice('Absence never proves who deleted a resource.')
   }
   reportResources(reporter, record)

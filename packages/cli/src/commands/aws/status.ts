@@ -55,7 +55,7 @@ export async function status(options: AwsCommandOptions, reporter: Reporter): Pr
           throw error
         }
         reportAuthentication(reporter, authentication)
-        reporter.row('verified', 'Default region', connection.region)
+        reporter.row('verified', 'Default/login region', connection.region)
         reportPermissionMetadata(reporter, connection)
         if (reviewRequired(connection)) {
           reporter.notice('Current permission requirements need a renewed root review. Reconnect to offer that review.')

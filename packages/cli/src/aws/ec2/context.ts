@@ -124,7 +124,7 @@ function requireAuthority(record: Deployment, request: DeploymentRequest): void 
 
 /**
  * Connection-level authority for read-only preparation, which runs before any
- * deployment exists. It targets the managed permission region, not the
+ * deployment exists. It targets the recorded deployment region, not the
  * editable login region that only supplies credentials.
  */
 export async function authorizePreparation(signal: AbortSignal): Promise<Authority> {
@@ -134,7 +134,7 @@ export async function authorizePreparation(signal: AbortSignal): Promise<Authori
     return notAttempted()
   }
   return {
-    region: connection.managed.permissionRegion,
+    region: connection.managed.deploymentRegion,
     credentials: await authenticate(connection.region, connection.identity, signal),
   }
 }
