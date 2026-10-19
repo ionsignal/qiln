@@ -103,7 +103,7 @@
     "vfonts": "0.0.3",
     "vike": "0.4.268",
     "vite": "8.3.4",
-    "vue": "3.5.43",
+    "vue": "3.5.44",
     "yaml": "2.9.1",
     "zod": "4.6.7"
   },
@@ -119,7 +119,7 @@
     "prettier": "3.9.10",
     "prettier-plugin-jsdoc": "1.8.1",
     "rimraf": "6.1.3",
-    "tsc-alias": "1.9.7",
+    "tsc-alias": "1.9.8",
     "typescript": "6.0.3",
     "vitest": "5.0.5",
     "vue-tsc": "3.3.13"
