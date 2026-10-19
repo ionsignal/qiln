@@ -5,7 +5,7 @@ import { released, resources, type Resource } from './topology'
 import type { Deployment } from './types'
 
 /**
- * - done: removed and observed absent, or absent without being established as removed by Qiln.
+ * - done: removed and observed absent, absent without being established as removed by Qiln, or handed off to a later deployment.
  * - retained: present by design, identified, and not removed by Qiln.
  * - pending: not confirmed.
  * - none: nothing recorded for this row.
@@ -43,12 +43,20 @@ function removal(record: Deployment, label: string, resource: Resource | undefin
  * A retained volume is reported as retained only once the host is gone and a
  * matching observation found it present and unattached. It is never reported
  * as absent, and it keeps incurring charges until it is deleted outside Qiln.
+ * A volume handed off to a later deployment is that deployment's to report.
  */
 function dataVolume(record: Deployment): Outcome {
   const label = 'Data volume'
-  const volume = find(record, 'volume', 'retained')
+  const volume = find(record, 'volume', 'retained') ?? find(record, 'volume', 'handed-off')
   if (volume === undefined) {
     return { label, state: 'none', detail: 'no identity recorded' }
+  }
+  if (record.handoff !== null) {
+    return {
+      label,
+      state: 'done',
+      detail: `${volume.id} handed off to deployment ${record.handoff.to}; no longer observed by this record`,
+    }
   }
   if (released(record, volume)) {
     return { label, state: 'done', detail: `${volume.id} observed absent; Qiln holds no authority to delete it` }

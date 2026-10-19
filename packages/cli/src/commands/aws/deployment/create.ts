@@ -3,10 +3,13 @@ import { POLICY_KEYS, enrolledKeys } from '../../../aws/permission/keys'
 import { requireEnvelope } from '../../../aws/permission/envelope'
 import { Session } from '../../../aws/auth/session'
 import { deploymentName } from '../../../aws/deployment/alias'
+import { requireBound } from '../../../aws/deployment/binding'
 import { validSource } from '../../../aws/deployment/cidr'
 import { Deployer, propose } from '../../../aws/deployment/deployer'
+import { expectation, matches } from '../../../aws/deployment/expect'
 import { evaluate, isBlocked } from '../../../aws/deployment/proposal/evaluate'
 import { prepare } from '../../../aws/deployment/proposal/prepare'
+import { reusable, type Reuse } from '../../../aws/deployment/reuse'
 import { reviewRequired } from '../../../aws/permission/spec'
 import { requireAwsHost } from '../../../aws/host'
 import { requireKeygen } from '../../../aws/ssh/generate'
@@ -17,9 +20,11 @@ import { resolveAwsName, type AwsDeploymentCreateOptions } from '../../../input'
 import { authenticate, reportAuthentication, requireAvailable, withConfirmedOperation } from '../shared'
 import { reportCreationEffects, reportProposal } from './preview'
 import { progressSink } from './progress'
-import { reportDeployment } from './report'
+import { observationSummary, reportDeployment } from './report'
 import * as deployments from '../../../aws/deployment/records'
 import * as connections from '../../../aws/connection/records'
+import type { Dir } from '../../../state/files'
+import type { Deployment } from '../../../aws/deployment/types'
 import type { AwsConnection, ManagedOperator } from '../../../aws/types'
 import type { Reporter } from '../../../terminal/reporter'
 
@@ -44,11 +49,42 @@ function requireCurrentPermissions(connection: AwsConnection): ManagedOperator {
 }
 
 /**
+ * Reuse is offered for approval only after a fresh read of the previous
+ * deployment agrees with its record, which includes the retained volume being
+ * available and unattached with its recorded configuration and tags. This is
+ * the existing inspect path, so it needs no new child request or permission.
+ */
+async function requireVolumeAvailable(
+  root: Dir,
+  session: Session,
+  previous: Deployment,
+  reuse: Reuse,
+  signal: AbortSignal,
+): Promise<void> {
+  const deployer = Deployer.open(root, session, previous)
+  const observation = await deployer.observe(signal)
+  if (!matches(expectation(deployer.record), observation)) {
+    throw new InstallerError({
+      code: 'AWS_DEPLOYMENT_REUSE_REFUSED',
+      facts: [
+        ['Previous deployment', previous.id],
+        ['Volume', reuse.volumeId],
+        ['Observed resources', observationSummary(observation)],
+      ],
+      retry: `qiln aws deployment inspect --id ${previous.id}`,
+    })
+  }
+}
+
+/**
  * Provisions one approved host. Discovery and evaluation are read-only, and
  * nothing is saved, reserved, generated, or created until the single approval.
- * After it, the immutable approval is retained and the fenced creation steps
- * and the AWS health read run under the operation lock. Success establishes
- * AWS provisioning and health only; Qiln never connects to the instance.
+ * When the alias takes over a removed deployment that retained its data volume,
+ * the operator explicitly chooses between a new volume and reusing that one;
+ * the choice is part of the same approval. After it, the immutable approval is
+ * retained and the fenced creation steps and the AWS health read run under the
+ * operation lock. Success establishes AWS provisioning and health only; Qiln
+ * never connects to the instance.
  */
 export async function create(options: AwsDeploymentCreateOptions, reporter: Reporter): Promise<void> {
   requireAwsHost()
@@ -58,9 +94,7 @@ export async function create(options: AwsDeploymentCreateOptions, reporter: Repo
   const message = await withCancellation(async signal => {
     const prompts = new Prompts(signal, 'qiln aws deployment create', reporter)
     return await withConfirmedOperation(false, async ({ root, connections: store }) => {
-      // A taken alias is refused early so the operator does not review a
-      // proposal that could not be approved. The record write checks it again.
-      await deployments.requireFreeAlias(root, options.alias)
+      const previous = await deployments.predecessor(root, options.alias)
       const directory = await connections.open(store, name)
       await requireAvailable(directory)
       const connection = await connections.read(directory, name)
@@ -94,13 +128,36 @@ export async function create(options: AwsDeploymentCreateOptions, reporter: Repo
           retry,
         })
       }
+      const offer = previous === null ? null : reusable(previous)
+      let reuse: Reuse | null = null
+      if (offer !== null) {
+        const choice = await prompts.select('Data storage', [
+          'Create a new data volume',
+          `Reuse ${offer.volumeId} from the previously removed deployment`,
+        ])
+        reuse = choice === 1 ? offer : null
+      }
       const session = await Session.open(directory, connection.region)
       const authentication = await authenticate(session, connection.identity, signal)
       reporter.section('AWS authentication')
       reportAuthentication(reporter, authentication)
+      if (previous !== null && reuse !== null) {
+        requireBound(connection, previous)
+        await requireVolumeAvailable(root, session, previous, reuse, signal)
+        reporter.section('Retained data volume')
+        reporter.row(
+          'verified',
+          'Volume',
+          `${reuse.volumeId} from deployment ${previous.id} · fresh observation agrees with the record · available and unattached`,
+        )
+      }
       const discovery = await prepare(session, signal)
-      const proposal = evaluate(discovery, { region: managed.deploymentRegion, administrator, pin })
-      reportProposal(reporter, proposal, { alias: options.alias, identity: connection.identity })
+      const proposal = evaluate(discovery, { region: managed.deploymentRegion, administrator, pin, reuse })
+      reportProposal(reporter, proposal, {
+        alias: options.alias,
+        identity: connection.identity,
+        previous: previous?.id ?? null,
+      })
       if (isBlocked(proposal)) {
         throw new InstallerError({
           code: 'AWS_DEPLOYMENT_PREREQUISITES_BLOCKED',
@@ -118,12 +175,12 @@ export async function create(options: AwsDeploymentCreateOptions, reporter: Repo
           retry,
         })
       }
-      reportCreationEffects(reporter, plan)
+      reportCreationEffects(reporter, plan, proposal.reuse)
       await prompts.approve('Approve the displayed host and create its AWS resources')
       const deployer = await Deployer.approve(
         root,
         session,
-        propose(connection, plan, options.alias),
+        propose(connection, plan, options.alias, previous?.id ?? null, proposal.reuse),
         progressSink(reporter),
       )
       reporter.space()

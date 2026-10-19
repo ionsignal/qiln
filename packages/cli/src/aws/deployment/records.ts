@@ -1,7 +1,9 @@
 import { basename } from 'node:path'
-import { isConsistent } from './audit'
-import { requireTransition } from './transitions'
 import { AWS_SPEC } from '../spec'
+import { isConsistent } from './audit'
+import { vacated } from './facts'
+import { reusable } from './reuse'
+import { requireTransition } from './transitions'
 import { sameIdentity } from '../auth/identity'
 import { stateFailure } from '../errors'
 import { isErrorCode } from '../guards'
@@ -79,7 +81,6 @@ async function load(directory: Dir): Promise<Deployment> {
     }
     return record
   } catch (error: unknown) {
-    // A missing or unreadable record never establishes that no effects occurred.
     if (error instanceof InstallerError) {
       throw error
     }
@@ -97,17 +98,41 @@ async function write(directory: Dir, record: Deployment): Promise<void> {
 }
 
 /**
- * Aliases stay taken after removal because records are never deleted. The
- * authoritative check runs again inside `create` under the operation lock.
+ * The records of one alias form a chain through their explicit `previous`
+ * links, never through timestamps. The newest is the one record that no other
+ * record names as its predecessor. Anything but one unbroken chain with a
+ * single root and a single tip fails closed.
  */
-export async function requireFreeAlias(root: Dir, alias: string): Promise<void> {
-  if ((await find(root, { kind: 'alias', value: alias })) !== null) {
+async function tipOf(root: Dir, alias: string): Promise<Deployment | null> {
+  const chain = (await list(root)).filter(record => record.alias === alias)
+  if (chain.length === 0) {
+    return null
+  }
+  const ids = new Set(chain.map(record => record.id))
+  const tips = chain.filter(record => !chain.some(other => other.previous === record.id))
+  const roots = chain.filter(record => record.previous === null || !ids.has(record.previous))
+  if (tips.length !== 1 || roots.length !== 1 || roots[0].previous !== null) {
+    return invalid()
+  }
+  return tips[0]
+}
+
+/**
+ * An alias can be taken over only when its newest deployment has verified
+ * removal and nothing remains unresolved. Returns that deployment, or null when
+ * the alias is unused. The authoritative check runs again inside `create` under
+ * the operation lock.
+ */
+export async function predecessor(root: Dir, alias: string): Promise<Deployment | null> {
+  const tip = await tipOf(root, alias)
+  if (tip !== null && !vacated(tip)) {
     throw new InstallerError({
       code: 'AWS_DEPLOYMENT_ALIAS_TAKEN',
       facts: [['Alias', alias]],
       retry: 'qiln aws deployment list',
     })
   }
+  return tip
 }
 
 export async function create(root: Dir, record: Deployment): Promise<void> {
@@ -120,16 +145,29 @@ export async function create(root: Dir, record: Deployment): Promise<void> {
     initial.implicit !== null ||
     initial.latest !== null ||
     initial.health !== null ||
+    initial.handoff !== null ||
     initial.termination !== 'confirmed'
   ) {
     return invalid()
   }
-  await requireFreeAlias(root, initial.alias)
+  const previous = await predecessor(root, initial.alias)
+  const { volume } = initial.approval.host
+  if (
+    (previous?.id ?? null) !== initial.previous ||
+    (volume.kind === 'reuse' && (previous === null || reusable(previous)?.volumeId !== volume.volumeId))
+  ) {
+    return invalid()
+  }
   const directory = await openDirectory(root, initial.id, true)
   if (!directory || (await directory.list()).length !== 0) {
     return invalid()
   }
   await write(directory, initial)
+  // The successor's record is written first, so a failure before this handoff
+  // leaves the volume claimed by the chain tip rather than claimed twice.
+  if (volume.kind === 'reuse' && previous !== null) {
+    await save(root, { ...previous, handoff: { to: initial.id, at: new Date().toISOString() } })
+  }
 }
 
 /**
@@ -149,7 +187,7 @@ export async function find(root: Dir, selector: DeploymentSelector): Promise<Dep
   if (selector.kind === 'id') {
     return await read(root, selector.value)
   }
-  return (await list(root)).find(record => record.alias === selector.value) ?? null
+  return await tipOf(root, selector.value)
 }
 
 /**

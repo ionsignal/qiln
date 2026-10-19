@@ -14,6 +14,7 @@ import {
 } from '@aws-sdk/client-ec2'
 import { notAttempted } from '../context'
 import { contradicts, need, receipt, tags, unavailable } from './shared'
+import { dataVolumeId } from '../../deployment/topology'
 import type { Action } from '../../deployment/graph'
 import type { Deployment, Step } from '../../deployment/types'
 import type { PublicKeyReader } from '../../ssh/store'
@@ -139,13 +140,17 @@ export async function mutateHost(
     }
     case 'create-volume': {
       const { data } = plan
+      const { volume } = host
+      if (volume.kind !== 'new') {
+        return notAttempted()
+      }
       const command = new CreateVolumeCommand({
         AvailabilityZone: plan.zones[plan.hostSlot].name,
         Size: data.sizeGiB,
         VolumeType: data.volumeType as VolumeType,
         Iops: data.iops,
         Throughput: data.throughput,
-        ClientToken: host.volumeToken,
+        ClientToken: volume.token,
         TagSpecifications: tags(record, 'volume'),
       })
       const response = await ec2.write((client, call) => client.send(command, call))
@@ -153,7 +158,7 @@ export async function mutateHost(
     }
     case 'attach-volume': {
       const instanceId = need(record, 'run-instances')
-      const volumeId = need(record, 'create-volume')
+      const volumeId = dataVolumeId(record) ?? notAttempted()
       const command = new AttachVolumeCommand({
         InstanceId: instanceId,
         VolumeId: volumeId,

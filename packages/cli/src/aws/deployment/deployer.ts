@@ -37,6 +37,7 @@ import type { Dir } from '../../state/files'
 import type { Session } from '../auth/session'
 import type { Certainty } from '../child/protocol'
 import type { HostPlan } from './host/types'
+import type { Reuse } from './reuse'
 import type { AwsConnection } from '../types'
 
 /**
@@ -80,10 +81,19 @@ function outcomeOf(error: InstallerError): FailureOutcome {
  * A plan exists only when nothing blocked the proposal. The idempotency tokens
  * are generated once, here, and are never regenerated for a retry. The
  * administrative key is generated after approval, so the proposal has none.
- * Callers gate on managed permission state first. Deployments bind only the
- * foundation policy, which every managed connection has enrolled.
+ * `previous` is the immutable ID of the deployment whose alias this one takes
+ * over. A `reuse` attaches that deployment's retained data volume by identity,
+ * with its original tags, instead of creating a new one; it must come from
+ * `previous`. Callers gate on managed permission state first. Deployments bind
+ * only the foundation policy, which every managed connection has enrolled.
  */
-export function propose(connection: AwsConnection, plan: HostPlan, alias: string): Deployment {
+export function propose(
+  connection: AwsConnection,
+  plan: HostPlan,
+  alias: string,
+  previous: string | null,
+  reuse: Reuse | null,
+): Deployment {
   if (!validCidr(plan.cidr)) {
     throw new InstallerError({
       code: 'INTERNAL_ERROR',
@@ -104,6 +114,7 @@ export function propose(connection: AwsConnection, plan: HostPlan, alias: string
   return {
     id,
     alias,
+    previous,
     version: AWS_RECORD_VERSION.deployment,
     connection: connection.name,
     binding: {
@@ -126,7 +137,10 @@ export function propose(connection: AwsConnection, plan: HostPlan, alias: string
         plan: structuredClone(plan),
         keyName: hostKeyName(id),
         launchToken: randomUUID(),
-        volumeToken: randomUUID(),
+        volume:
+          reuse === null
+            ? { kind: 'new', token: randomUUID() }
+            : { kind: 'reuse', from: reuse.from, volumeId: reuse.volumeId, tags: structuredClone(reuse.tags) },
       },
     },
     key: null,
@@ -136,6 +150,7 @@ export function propose(connection: AwsConnection, plan: HostPlan, alias: string
     implicit: null,
     latest: null,
     health: null,
+    handoff: null,
     createdAt: now,
   }
 }

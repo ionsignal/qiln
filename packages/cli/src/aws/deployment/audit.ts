@@ -1,6 +1,6 @@
 import { IMPLICIT, undoes } from './graph'
 import { settled, stateOf } from './step'
-import { creationPlan, creationVerified, resources, stepOf } from './topology'
+import { creationPlan, creationVerified, dataVolumeId, resources, stepOf, unnamed, unreleased } from './topology'
 import type { Deployment, ObservedResource, Step } from './types'
 
 /**
@@ -77,9 +77,11 @@ function keyed(record: Deployment): boolean {
 
 function identified(record: Deployment): boolean {
   const { implicit } = record
+  const { volume } = record.approval.host
   const ids = [
     ...record.steps.flatMap(step => step.returned?.resourceId ?? []),
     ...(implicit === null ? [] : [implicit.rootVolumeId, implicit.interfaceId]),
+    ...(volume.kind === 'reuse' ? [volume.volumeId] : []),
   ]
   return new Set(ids).size === ids.length
 }
@@ -114,6 +116,22 @@ function healthRecorded(record: Deployment): boolean {
     health.instanceId === launch.returned?.resourceId &&
     health.checkedAt >= launch.verifiedAt &&
     steps.every(step => step.removal === null || step.fencedAt >= health.checkedAt)
+  )
+}
+
+/**
+ * A handoff lets go of the identified data volume to another deployment, so
+ * nothing else of this record may still be outstanding.
+ */
+function handedOff(record: Deployment): boolean {
+  const { handoff } = record
+  return (
+    handoff === null ||
+    (handoff.to !== record.id &&
+      dataVolumeId(record) !== null &&
+      record.termination === 'confirmed' &&
+      unnamed(record).length === 0 &&
+      unreleased(record).length === 0)
   )
 }
 
@@ -153,6 +171,7 @@ export function isConsistent(record: Deployment): boolean {
     undone(record) &&
     discovered(record) &&
     healthRecorded(record) &&
+    handedOff(record) &&
     observedKnown(record)
   )
 }

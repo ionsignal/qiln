@@ -1,4 +1,4 @@
-import { resourceId, resources, stepOf } from './topology'
+import { dataVolumeId, resourceId, resources, stepOf } from './topology'
 import type { Action } from './graph'
 import type { Deployment, Implicit, Ingress, Observation, ObservedResource } from './types'
 
@@ -29,7 +29,8 @@ export interface Mapping {
  * `mappings` is the exact set of EBS mappings it may report: any other mapping
  * is never adopted and makes the instance changed. A data volume stays present
  * after termination, and `attached` says whether it should still be attached
- * to the instance.
+ * to the instance. A volume handed off to a later deployment is no longer
+ * expected here.
  */
 export type Expected =
   | { kind: 'vpc'; id: string; present: boolean }
@@ -65,7 +66,7 @@ export function expectation(record: Deployment): Expected[] {
     ...(dataAttached
       ? [
           {
-            volumeId: resourceId(record, 'create-volume'),
+            volumeId: dataVolumeId(record),
             deviceName: data.deviceName,
             deleteOnTermination: data.deleteOnTermination,
           },
@@ -77,7 +78,8 @@ export function expectation(record: Deployment): Expected[] {
     associationId === null || found === null || returned('disassociate-address')
       ? null
       : { id: associationId, interfaceId: found.interfaceId }
-  return resources(record).map(({ kind, id, slot, disposition, removal }): Expected => {
+  const active = resources(record).filter(({ disposition }) => disposition !== 'handed-off')
+  return active.map(({ kind, id, slot, disposition, removal }): Expected => {
     const present = removal?.returned == null
     switch (kind) {
       case 'vpc':

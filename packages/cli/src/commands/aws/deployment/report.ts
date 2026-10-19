@@ -1,5 +1,5 @@
 import { deploymentName } from '../../../aws/deployment/alias'
-import { cleanup, healthDisclosure, keyDisclosure, phase, type Phase } from '../../../aws/deployment/facts'
+import { cleanup, healthDisclosure, keyDisclosure, phase, volumeDisclosure, type Phase } from '../../../aws/deployment/facts'
 import { removalOutcome } from '../../../aws/deployment/outcome'
 import { refusals } from '../../../aws/deployment/step'
 import { released, resourceId, resources, retained, unreleased, type Resource } from '../../../aws/deployment/topology'
@@ -19,6 +19,7 @@ const LIFECYCLES: Record<Disposition, string> = {
   removed: 'removed by Qiln',
   retained: 'retained by design',
   implicit: 'deleted with the instance',
+  'handed-off': 'handed off to a later deployment',
 }
 const RECOVERY: RecordedState = {
   label: 'Recovery required',
@@ -71,6 +72,11 @@ const STATES: Record<Phase, RecordedState> = {
     tone: 'warning',
     text: 'Removal was verified. Resources retained by design remain, are not removed by Qiln, and continue to incur charges until they are deleted outside Qiln.',
   },
+  'handed-off': {
+    label: 'Volume handed off',
+    tone: 'neutral',
+    text: 'Removal was verified. The retained data volume was handed off to a later deployment, which now answers for it. This record no longer observes that volume.',
+  },
   absent: { label: 'Absent', tone: 'neutral', text: 'All recorded resources were observed absent.' },
 }
 
@@ -91,6 +97,9 @@ export function observationSummary(observation: Observation): string {
 }
 
 function recordedOutcome(record: Deployment, resource: Resource): TableCell {
+  if (resource.disposition === 'handed-off') {
+    return 'handed off; not observed by this record'
+  }
   if (released(record, resource)) {
     return 'observed absent'
   }
@@ -139,6 +148,7 @@ export function reportDeployment(reporter: Reporter, record: Deployment): void {
     ],
     [historical ? 'VPC (historical)' : 'VPC', resourceId(record, 'create-vpc') ?? 'no identity retained'],
     ['Instance', resourceId(record, 'run-instances') ?? 'no identity retained'],
+    ['Data volume', volumeDisclosure(record)],
     ['AWS health', healthDisclosure(record)],
     [
       'Recorded resources',

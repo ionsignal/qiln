@@ -9,7 +9,7 @@ import {
   type NetworkInterface,
   type Volume,
 } from '@aws-sdk/client-ec2'
-import { resourceId } from '../../deployment/topology'
+import { dataTags, resourceId } from '../../deployment/topology'
 import { collect } from '../../observe'
 import { sameFingerprint } from '../../ssh/key'
 import { byId, judge, listed, PAGES, tagFilters, tagged, unverified } from './shared'
@@ -31,6 +31,7 @@ function targetOf(record: Deployment) {
     tags,
     key: record.key,
     keyName: host.keyName,
+    dataTags: dataTags(record),
     zone: plan.zones[plan.hostSlot],
     accountId: record.binding.accountId,
     vpcId: resourceId(record, 'create-vpc'),
@@ -156,10 +157,12 @@ async function instances(
  * The root volume is checked against its snapshot-backed launch mapping, and
  * the data volume against its retention setting. Whether the data volume is
  * attached or unattached follows the ledger: after termination it must be
- * present and unattached, never absent.
+ * present and unattached, never absent. The data volume carries its own tags,
+ * which are not this deployment's when the volume is reused.
  */
 function volumeMatches(target: Target, expected: Of<'volume'>, volume: Volume): boolean {
   const spec = expected.role === 'root' ? target.plan.root : target.plan.data
+  const tags = expected.role === 'root' ? target.tags : target.dataTags
   const attachments = volume.Attachments ?? []
   const attachment = attachments[0]
   const attachedAsPlanned =
@@ -174,7 +177,7 @@ function volumeMatches(target: Target, expected: Of<'volume'>, volume: Volume): 
     volume.Iops === spec.iops &&
     volume.Throughput === spec.throughput &&
     volume.AvailabilityZone === target.zone.name &&
-    tagged(volume.Tags, target.tags) &&
+    tagged(volume.Tags, tags) &&
     (expected.role !== 'root' || volume.SnapshotId === target.plan.root.snapshotId) &&
     (expected.attached
       ? volume.State === 'in-use' && attachedAsPlanned

@@ -6,7 +6,7 @@ import { refusals, settled, stateOf } from './step'
 import { creationPlan, creationVerified, removalPlan, resourceId } from './topology'
 import type { Deployment, Step } from './types'
 
-const FIXED_FIELDS = ['version', 'id', 'alias', 'connection', 'binding', 'approval', 'createdAt'] as const
+const FIXED_FIELDS = ['version', 'id', 'alias', 'previous', 'connection', 'binding', 'approval', 'createdAt'] as const
 
 function invalid(): never {
   throw new InstallerError({
@@ -198,6 +198,23 @@ function requireHealth(current: Deployment, updated: Deployment): void {
 }
 
 /**
+ * A handoff is set once and never rewritten or dropped. The write that sets it
+ * changes nothing else. Whether the record is settled enough to let go of its
+ * volume is judged by the record audit.
+ */
+function requireHandoff(current: Deployment, updated: Deployment): void {
+  if (current.handoff !== null) {
+    if (!sameJson(current.handoff, updated.handoff)) {
+      return invalid()
+    }
+    return
+  }
+  if (updated.handoff !== null && !sameJson({ ...current, handoff: updated.handoff }, updated)) {
+    return invalid()
+  }
+}
+
+/**
  * The journal's write rule: one record may replace another only through a
  * permitted step. Both records are already validated by their guard.
  */
@@ -209,4 +226,5 @@ export function requireTransition(current: Deployment, updated: Deployment): voi
   requireObservations(current, updated)
   requireImplicit(current, updated)
   requireHealth(current, updated)
+  requireHandoff(current, updated)
 }

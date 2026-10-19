@@ -5,6 +5,7 @@ import type { AwsIdentity } from '../../../aws/types'
 import type { Reporter } from '../../../terminal/reporter'
 import type { DiagnosticFact } from '../../../diagnostic/error'
 import type { HostPlan } from '../../../aws/deployment/host/types'
+import type { Reuse } from '../../../aws/deployment/reuse'
 import type { HostProposal, ImageDevice, ImageEvidence, InstanceTypeEvidence } from '../../../aws/deployment/proposal/types'
 
 const { compute } = AWS_SPEC
@@ -12,6 +13,7 @@ const { compute } = AWS_SPEC
 export interface PreviewTarget {
   alias: string
   identity: AwsIdentity
+  previous: string | null
 }
 
 function list(values: readonly string[]): string {
@@ -103,7 +105,7 @@ function networkFacts(plan: HostPlan, proposal: HostProposal, target: PreviewTar
     ['Instance', `${plan.count} ${plan.instanceType} · ${plan.purchase} · default tenancy`],
     [
       'Availability Zone',
-      `${host.name} (${host.id}) · offered in selected AZ; capacity unverified; never changed automatically`,
+      `${host.name} (${host.id}) · ${proposal.reuse === null ? 'offered in selected AZ' : 'fixed by the retained data volume; offered in this AZ'}; capacity unverified; never changed automatically`,
     ],
     ['Host subnet', host.cidr],
     ['VPC CIDR', plan.cidr],
@@ -146,17 +148,44 @@ function instanceStorageFact(proposal: HostProposal): DiagnosticFact {
   ]
 }
 
+/**
+ * A reused volume is named by identity and keeps its original tags. The
+ * previous deployment is shown by its immutable ID, never only by its alias.
+ */
+function dataVolumeFacts(plan: HostPlan, reuse: Reuse | null): DiagnosticFact[] {
+  const { data } = plan
+  if (reuse === null) {
+    return [
+      [
+        'Data volume',
+        `${volumeSummary(data)} · attached as ${data.deviceName} · ${termination(data.deleteOnTermination)} (expected from the attach-time default and verified after attach; Qiln cannot change it)`,
+      ],
+    ]
+  }
+  return [
+    [
+      'Data volume',
+      `reuse ${reuse.volumeId} · ${volumeSummary(data)} · attached as ${data.deviceName} · ${termination(data.deleteOnTermination)} (verified after attach; Qiln cannot change it)`,
+    ],
+    [
+      'Previous deployment',
+      `${reuse.from} · removal verified, and a fresh AWS read found the volume available and unattached`,
+    ],
+    [
+      'Volume tags',
+      'The original tags are kept, so the volume stays tagged for the previous deployment. Nothing is retagged, copied, resized, or replaced, and its contents were not inspected.',
+    ],
+  ]
+}
+
 function storageFacts(plan: HostPlan, proposal: HostProposal): DiagnosticFact[] {
-  const { root, data } = plan
+  const { root } = plan
   return [
     [
       'Root volume',
       `${volumeSummary(root)} · ${root.deviceName} from snapshot ${root.snapshotId} · ${termination(root.deleteOnTermination)} (set at launch)`,
     ],
-    [
-      'Data volume',
-      `${volumeSummary(data)} · attached as ${data.deviceName} · ${termination(data.deleteOnTermination)} (expected from the attach-time default and verified after attach; Qiln cannot change it)`,
-    ],
+    ...dataVolumeFacts(plan, proposal.reuse),
     instanceStorageFact(proposal),
     ['Encryption', 'No KMS authority or encryption requirement; account defaults and the image snapshot settings apply.'],
     [
@@ -224,11 +253,17 @@ function removalFacts(plan: HostPlan): DiagnosticFact[] {
  * is shown beside the region and appears even when AWS did not return the image.
  */
 export function reportProposal(reporter: Reporter, proposal: HostProposal, target: PreviewTarget): void {
+  const name = deploymentName(target.alias)
   reporter.section('Proposed host')
   reporter.facts([
     ['Account', target.identity.accountId],
     ['Operator', target.identity.arn],
-    ['Local alias', `${deploymentName(target.alias)} (reserved when approved)`],
+    [
+      'Local alias',
+      target.previous === null
+        ? `${name} (reserved when approved)`
+        : `${name} (taken over from deployment ${target.previous} when approved; the older record stays available by ID)`,
+    ],
     ['Deployment region', proposal.region],
     [
       'Pinned AMI',
@@ -281,14 +316,19 @@ export function reportProposal(reporter: Reporter, proposal: HostProposal, targe
  * States what approval starts. Counts and settings come from the frozen plan,
  * so this screen cannot describe a different launch than the record will govern.
  */
-export function reportCreationEffects(reporter: Reporter, plan: HostPlan): void {
+export function reportCreationEffects(reporter: Reporter, plan: HostPlan, reuse: Reuse | null): void {
   const { data } = plan
   reporter.section('Creation approval')
   reporter.facts([
     ['Network', `one VPC ${plan.cidr} · one subnet in each of ${plan.zones.length} zones · internet gateway · route table · one security group`],
     ['Access key', `generate one local ${plan.key.algorithm} key and import its public half to AWS as a key pair`],
     ['Host', `launch ${plan.count} ${plan.instanceType} (${plan.purchase})`],
-    ['Storage', `create and attach one ${data.sizeGiB} GiB data volume · ${termination(data.deleteOnTermination)}`],
+    [
+      'Storage',
+      reuse === null
+        ? `create and attach one ${data.sizeGiB} GiB data volume · ${termination(data.deleteOnTermination)}`
+        : `attach existing data volume ${reuse.volumeId} from deployment ${reuse.from} · no new volume is created · ${termination(data.deleteOnTermination)}`,
+    ],
     ['Public address', 'allocate and associate one Elastic IP'],
     ['Verification', 'each step is followed by an observation, then AWS instance health is read'],
   ])
@@ -296,6 +336,11 @@ export function reportCreationEffects(reporter: Reporter, plan: HostPlan): void 
   reporter.notice(
     'Approval creates billable AWS resources immediately. It is not spend protection and no cost estimate is shown. The data volume is retained by removal and keeps incurring charges until it is deleted outside Qiln.',
   )
+  if (reuse !== null) {
+    reporter.notice(
+      `Approval also records that deployment ${reuse.from} hands ${reuse.volumeId} off to this one: its removal evidence is unchanged, but it stops reporting the volume. Qiln does not inspect or verify the volume's contents.`,
+    )
+  }
   reporter.notice(
     'Cancelling or a failure does not roll back. Completed and uncertain effects are retained as evidence and are never replayed automatically.',
   )

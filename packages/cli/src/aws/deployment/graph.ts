@@ -93,8 +93,9 @@ export type Direction = 'creation' | 'removal'
  * - removed: Qiln deletes it.
  * - retained: it stays by design.
  * - implicit: AWS creates and deletes it together with the instance.
+ * - handed-off: it stays by design, and a later deployment now answers for it.
  */
-export type Disposition = 'removed' | 'retained' | 'implicit'
+export type Disposition = 'removed' | 'retained' | 'implicit' | 'handed-off'
 
 /**
  * Resources that AWS creates and deletes together with the instance. No

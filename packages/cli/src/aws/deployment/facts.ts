@@ -20,6 +20,7 @@ export type Phase =
   | 'removing'
   | 'removed'
   | 'retained'
+  | 'handed-off'
   | 'absent'
 
 /**
@@ -48,6 +49,7 @@ const DESCRIPTIONS: Record<Phase, string> = {
   removing: 'removal partly verified; recorded resources remain',
   removed: 'all recorded resources removed and observed absent',
   retained: 'removal verified; resources retained by design remain and were not removed',
+  'handed-off': 'removal verified; the retained data volume was handed off to a later deployment',
   absent: 'recorded resources observed absent',
 }
 
@@ -65,6 +67,9 @@ export function phase(record: Deployment): Phase {
   if (resources(record).length > 0 && unreleased(record).length === 0) {
     if (retained(record).length > 0) {
       return 'retained'
+    }
+    if (record.handoff !== null) {
+      return 'handed-off'
     }
     return record.removals.length > 0 ? 'removed' : 'absent'
   }
@@ -92,6 +97,21 @@ export function keyDisclosure(record: Deployment): string {
 }
 
 /**
+ * The single wording for the data volume's origin and, once it happened, its
+ * handoff. A reused volume keeps the tags of the deployment that created it.
+ */
+export function volumeDisclosure(record: Deployment): string {
+  const { volume } = record.approval.host
+  const source =
+    volume.kind === 'reuse'
+      ? `reuses ${volume.volumeId} from deployment ${volume.from}; its original tags are kept`
+      : 'created by this deployment'
+  return record.handoff === null
+    ? source
+    : `${source}; handed off to deployment ${record.handoff.to} at ${record.handoff.at}`
+}
+
+/**
  * The single wording for AWS health. Retained health is point-in-time
  * evidence, not a statement about the current state of the instance.
  */
@@ -115,7 +135,8 @@ export function verification(record: Deployment): Verification {
   return (recordedPhase === 'created' ||
     recordedPhase === 'healthy' ||
     recordedPhase === 'removed' ||
-    recordedPhase === 'retained') &&
+    recordedPhase === 'retained' ||
+    recordedPhase === 'handed-off') &&
     record.latest !== null &&
     matches(expectation(record), record.latest)
     ? 'verified'
@@ -137,6 +158,19 @@ export function effects(record: Deployment): Effects {
     return 'outstanding'
   }
   return retained(record).length > 0 ? 'retained' : 'none'
+}
+
+/**
+ * Whether the record's removal was verified and nothing remains unresolved, so
+ * that a later deployment may take over its alias. Resources kept by design,
+ * or already handed off, do not prevent it.
+ */
+export function vacated(record: Deployment): boolean {
+  const recordedPhase = phase(record)
+  return (
+    (recordedPhase === 'removed' || recordedPhase === 'retained' || recordedPhase === 'handed-off') &&
+    effects(record) !== 'outstanding'
+  )
 }
 
 /**
@@ -192,6 +226,7 @@ export function deploymentFacts(record: Deployment): readonly DiagnosticFact[] {
     ['Zones', approval.zones.map(zone => zone.name).join(', ')],
     ['VPC', resourceId(record, 'create-vpc') ?? 'no identity retained'],
     ['Instance', resourceId(record, 'run-instances') ?? 'no identity retained'],
+    ['Data volume', volumeDisclosure(record)],
     ['AWS health', healthDisclosure(record)],
     [
       'Recorded resources',

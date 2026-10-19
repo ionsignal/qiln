@@ -12,7 +12,7 @@ import {
   type Shape,
 } from './graph'
 import { stateOf } from './step'
-import type { Approval, Deployment, Ingress, Placement, Step, Zone } from './types'
+import type { Approval, Deployment, Ingress, Placement, Step, Tag, Zone } from './types'
 
 export interface Planned {
   action: Action
@@ -23,9 +23,9 @@ export interface Resource {
   kind: Kind
   id: string
   slot: number
-  disposition: Disposition
-  created: Step
+  seen: Step | undefined
   removal: Step | undefined
+  disposition: Disposition
 }
 
 function range(count: number): number[] {
@@ -54,9 +54,16 @@ export function allocate(vpcCidr: string, zones: readonly Placement[]): Zone[] {
     .map((zone, index) => ({ id: zone.id, name: zone.name, cidr: subnetCidr(vpcCidr, index) }))
 }
 
-export function creationPlan(approval: Pick<Approval, 'zones' | 'ingress'>): Planned[] {
+/**
+ * A reused data volume already exists, so its creation is not a step of this
+ * deployment: no creation is planned and none is ever recorded for it.
+ */
+export function creationPlan(approval: Pick<Approval, 'zones' | 'ingress' | 'host'>): Planned[] {
   const shape = shapeOf(approval)
-  return CREATION_ACTIONS.flatMap(action => range(slotCount(action, shape)).map(slot => ({ action, slot })))
+  const reused = approval.host.volume.kind === 'reuse'
+  return CREATION_ACTIONS.flatMap(action =>
+    reused && action === 'create-volume' ? [] : range(slotCount(action, shape)).map(slot => ({ action, slot })),
+  )
 }
 
 export function stepOf(record: Deployment, action: Action, slot = 0): Step | undefined {
@@ -65,6 +72,24 @@ export function stepOf(record: Deployment, action: Action, slot = 0): Step | und
 
 export function resourceId(record: Deployment, action: Action, slot = 0): string | null {
   return stepOf(record, action, slot)?.returned?.resourceId ?? null
+}
+
+/**
+ * The data volume's identity: the volume this deployment created, or the one
+ * it reuses from a previous deployment.
+ */
+export function dataVolumeId(record: Deployment): string | null {
+  const { volume } = record.approval.host
+  return volume.kind === 'reuse' ? volume.volumeId : resourceId(record, 'create-volume')
+}
+
+/**
+ * The tags the data volume carries. A reused volume keeps its original tags,
+ * which belong to the deployment that created it.
+ */
+export function dataTags(record: Deployment): Tag[] {
+  const { volume } = record.approval.host
+  return volume.kind === 'reuse' ? volume.tags : record.approval.tags
 }
 
 /**
@@ -117,12 +142,27 @@ export function unnamed(record: Deployment): Step[] {
 /**
  * Every resource with a retained identity. The root volume and primary
  * interface join once the launch verification has observed them; they belong
- * to the instance's creation and removal steps.
+ * to the instance's creation and removal steps. A reused data volume is named
+ * by the approval, so it is recorded from the start.
  */
 export function resources(record: Deployment): Resource[] {
   const shape = shapeOf(record.approval)
+  const { volume } = record.approval.host
+  const retention: Disposition = record.handoff === null ? 'retained' : 'handed-off'
   const explicit = RESOURCES.flatMap(({ kind, create, remove }) =>
     range(slotCount(create, shape)).flatMap((slot): Resource[] => {
+      if (create === 'create-volume' && volume.kind === 'reuse') {
+        return [
+          {
+            kind,
+            id: volume.volumeId,
+            slot,
+            disposition: retention,
+            seen: stepOf(record, 'attach-volume'),
+            removal: undefined,
+          },
+        ]
+      }
       const created = stepOf(record, create, slot)
       const id = created?.returned?.resourceId
       if (created === undefined || !id) {
@@ -133,8 +173,8 @@ export function resources(record: Deployment): Resource[] {
           kind,
           id,
           slot,
-          disposition: remove === null ? 'retained' : 'removed',
-          created,
+          seen: created,
+          disposition: remove === null ? retention : 'removed',
           removal: remove === null ? undefined : stepOf(record, remove, slot),
         },
       ]
@@ -151,7 +191,7 @@ export function resources(record: Deployment): Resource[] {
       id: kind === 'volume' ? implicit.rootVolumeId : implicit.interfaceId,
       slot: 0,
       disposition: 'implicit',
-      created: host,
+      seen: host,
       removal: stepOf(record, IMPLICIT.removal),
     }),
   )
@@ -162,18 +202,25 @@ export function resources(record: Deployment): Resource[] {
  * Removal is confirmed by a verified deletion step, or by absence observed
  * after the resource was seen present. Absence alone never proves who deleted it.
  */
-export function released(record: Deployment, { kind, id, created, removal }: Resource): boolean {
+export function released(record: Deployment, { kind, id, seen, removal }: Resource): boolean {
   if (removal?.verifiedAt != null) {
     return true
   }
   return (
-    created.verifiedAt !== null &&
+    seen?.verifiedAt != null &&
     (record.latest?.resources.some(item => item.kind === kind && item.id === id && item.state === 'absent') ?? false)
   )
 }
 
+/**
+ * Resources that Qiln or AWS is expected to delete. Retained and handed-off
+ * resources are never counted here.
+ */
 export function unreleased(record: Deployment): Resource[] {
-  return resources(record).filter(resource => resource.disposition !== 'retained' && !released(record, resource))
+  return resources(record).filter(
+    resource =>
+      (resource.disposition === 'removed' || resource.disposition === 'implicit') && !released(record, resource),
+  )
 }
 
 export function retained(record: Deployment): Resource[] {

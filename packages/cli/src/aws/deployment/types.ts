@@ -60,11 +60,21 @@ export interface Ingress {
   cidr: string
 }
 
+/**
+ * Where the data volume comes from. A new volume is created under an
+ * idempotency token. A reused volume is the retained volume of a previous
+ * deployment, recorded by identity and by the tags it already carries. This
+ * deployment never creates it, so no creation receipt exists for it.
+ */
+export type VolumeSource =
+  | { kind: 'new'; token: string }
+  | { kind: 'reuse'; from: string; volumeId: string; tags: Tag[] }
+
 export interface HostIntent {
   plan: HostPlan
   keyName: string
   launchToken: string
-  volumeToken: string
+  volume: VolumeSource
 }
 
 export interface Approval {
@@ -173,13 +183,25 @@ export interface Health {
 }
 
 /**
+ * The retained data volume of this deployment now belongs to a later
+ * deployment, which answers for it. Historical removal evidence is untouched.
+ */
+export interface Handoff {
+  to: string
+  at: string
+}
+
+/**
  * Accounting and recovery evidence, not a resumable checkpoint. Phases,
  * effects, and plans are derived from these facts and never stored. The alias
- * is local metadata, unique among records, and never an AWS tag. `implicit` is
- * set once, by the observation that verifies the launch, and never rewritten.
- * `key` is set once, before any step, and never rewritten or regenerated.
- * `health` is set once, after every creation step is verified and before any
- * removal, in a write that changes nothing else.
+ * is local metadata and never an AWS tag. `previous` is the immutable ID of the
+ * deployment whose alias this one takes over; it is set at approval and never
+ * rewritten. `implicit` is set once, by the observation that verifies the
+ * launch, and never rewritten. `key` is set once, before any step, and never
+ * rewritten or regenerated. `health` is set once, after every creation step is
+ * verified and before any removal, in a write that changes nothing else.
+ * `handoff` is set once, in a write that changes nothing else, after removal
+ * left the data volume retained and a later deployment took it over.
  *
  * The `version` covers every constant, format rule, and graph declaration
  * order that the guards and the audit consult, such as the zone limit, tag and
@@ -196,6 +218,7 @@ export interface Deployment {
   version: typeof AWS_RECORD_VERSION.deployment
   id: string
   alias: string
+  previous: string | null
   connection: string
   binding: Binding
   approval: Approval
@@ -206,6 +229,7 @@ export interface Deployment {
   implicit: ImplicitEvidence | null
   latest: Observation | null
   health: Health | null
+  handoff: Handoff | null
   createdAt: string
 }
 
@@ -339,20 +363,54 @@ function isBinding(value: unknown, connection: string): value is Binding {
 }
 
 /**
+ * A reused volume is identified by the previous deployment and the volume ID.
+ * Its tags are recorded verbatim, because they are the original creator's and
+ * may differ from this deployment's.
+ */
+function isVolumeSource(value: unknown): value is VolumeSource {
+  if (!isRecord(value)) {
+    return false
+  }
+  switch (value.kind) {
+    case 'new':
+      return hasKeys(value, ['kind', 'token']) && isOperationId(value.token)
+    case 'reuse':
+      return (
+        hasKeys(value, ['kind', 'from', 'volumeId', 'tags']) &&
+        isOperationId(value.from) &&
+        typeof value.volumeId === 'string' &&
+        KIND_IDS.volume.test(value.volumeId) &&
+        isTags(value.tags)
+      )
+    default:
+      return false
+  }
+}
+
+function isHandoff(value: unknown): value is Handoff {
+  return (
+    isRecord(value) &&
+    hasKeys(value, ['to', 'at']) &&
+    isOperationId(value.to) &&
+    isTimestamp(value.at)
+  )
+}
+
+/**
  * The plan is judged structurally here, and `isApproval` then requires it to
  * agree with the approval. It is never rebuilt from today's constants. Tokens
- * are UUIDs, well inside the 64-character ClientToken limit, and the two calls
- * never share one.
+ * are UUIDs, well inside the 64-character ClientToken limit, and the launch and
+ * a new volume's creation never share one.
  */
 function isHostIntent(value: unknown, id: string): value is HostIntent {
   return (
     isRecord(value) &&
-    hasKeys(value, ['plan', 'keyName', 'launchToken', 'volumeToken']) &&
+    hasKeys(value, ['plan', 'keyName', 'launchToken', 'volume']) &&
     isHostPlan(value.plan) &&
     value.keyName === hostKeyName(id) &&
     isOperationId(value.launchToken) &&
-    isOperationId(value.volumeToken) &&
-    value.launchToken !== value.volumeToken
+    isVolumeSource(value.volume) &&
+    (value.volume.kind !== 'new' || value.launchToken !== value.volume.token)
   )
 }
 
@@ -514,6 +572,7 @@ export function isDeployment(value: unknown): value is Deployment {
       'version',
       'id',
       'alias',
+      'previous',
       'connection',
       'binding',
       'approval',
@@ -524,12 +583,14 @@ export function isDeployment(value: unknown): value is Deployment {
       'implicit',
       'latest',
       'health',
+      'handoff',
       'createdAt',
     ]) ||
     value.version !== AWS_RECORD_VERSION.deployment ||
     !isOperationId(value.id) ||
     typeof value.alias !== 'string' ||
     !validName(value.alias) ||
+    (value.previous !== null && !isOperationId(value.previous)) ||
     typeof value.connection !== 'string' ||
     !validName(value.connection) ||
     !isBinding(value.binding, value.connection) ||
@@ -541,6 +602,7 @@ export function isDeployment(value: unknown): value is Deployment {
     (value.implicit !== null && !isImplicitEvidence(value.implicit)) ||
     (value.latest !== null && !isObservation(value.latest)) ||
     (value.health !== null && !isHealth(value.health)) ||
+    (value.handoff !== null && !isHandoff(value.handoff)) ||
     !isTimestamp(value.createdAt)
   ) {
     return false
@@ -548,7 +610,12 @@ export function isDeployment(value: unknown): value is Deployment {
   const approval = value.approval
   const removals = value.removals
   const shape = shapeOf(approval)
-  return value.steps.every(
-    step => step.slot < slotCount(step.action, shape) && (step.removal === null || step.removal < removals.length),
+  const { volume } = approval.host
+  return (
+    (volume.kind !== 'reuse' || volume.from === value.previous) &&
+    value.previous !== value.id &&
+    value.steps.every(
+      step => step.slot < slotCount(step.action, shape) && (step.removal === null || step.removal < removals.length),
+    )
   )
 }

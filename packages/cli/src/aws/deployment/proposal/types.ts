@@ -1,5 +1,6 @@
 import type { ImagePin } from '../../ami'
 import type { HostPlan } from '../host/types'
+import type { Reuse } from '../reuse'
 import type { Placement } from '../types'
 
 export interface ImageEbs {
@@ -88,7 +89,8 @@ export interface Finding {
  * durable Deployment record. The plan is the complete frozen launch
  * configuration and exists only when no finding blocks. Instance-store
  * mappings are ephemeral, are not part of the durable plan, and are kept only
- * for display.
+ * for display. `reuse` is the retained data volume the operator chose to
+ * attach, or null when a new one is created.
  */
 export interface HostProposal {
   region: string
@@ -98,6 +100,7 @@ export interface HostProposal {
   instanceType: InstanceTypeEvidence | null
   excludedZones: ZoneEvidence[]
   instanceStore: ImageDevice[]
+  reuse: Reuse | null
   plan: HostPlan | null
   findings: Finding[]
 }
