@@ -46,7 +46,7 @@ export default defineConfig(() => {
         checks: {
           pluginTimings: false,
         },
-        external: [/^node:/, /^@aws-sdk\//, 'commander'],
+        external: [/^node:/, /^@aws-sdk\//, 'commander', 'ssh2'],
         output: {
           preserveModules: false,
           exports: 'named',

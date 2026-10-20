@@ -28,10 +28,13 @@
     "@aws-sdk/client-iam": "3.1150.0",
     "@aws-sdk/client-sts": "3.1150.0",
     "@aws-sdk/credential-providers": "3.1150.0",
-    "commander": "15.0.0"
+    "commander": "15.0.0",
+    "ssh2": "1.17.0",
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@types/node": "22.20.3",
+    "@types/ssh2": "1.17.0",
     "typescript": "6.0.3",
     "vite": "8.3.4",
     "vite-plugin-dts": "5.1.2"
