@@ -1,12 +1,12 @@
-import { InstallerError, type DiagnosticFact } from '../../diagnostic/error'
+import { AWS_SPEC } from '../spec'
+import { userId } from '../host'
 import { findExecutable } from '../../process'
+import { InstallerError, type DiagnosticFact } from '../../diagnostic/error'
 import { inspectChild, openChildDir, readChild, syncChild, type Dir } from '../../state/files'
+import { parsePublicKey } from '../../ssh/key'
 import { runSetup } from '../child/setup'
 import { SupervisedProcessError } from '../child/supervise'
 import type { AdminKey } from '../deployment/types'
-import { userId } from '../host'
-import { AWS_SPEC } from '../spec'
-import { parsePublicKey } from './key'
 
 const GENERATION_TIMEOUT_MS = 30_000
 const OUTPUT_LIMIT_BYTES = 16_384
@@ -101,7 +101,6 @@ async function generate(directory: Dir, deploymentId: string, location: string, 
   if (!exactly(await ssh.list(), [state.privateKey, state.publicKey])) {
     throw failure('The protected SSH directory does not contain exactly the generated key pair.', location)
   }
-  // Qiln never reads private-key bytes; ownership and mode are all it checks.
   const kind = await inspectChild(ssh, state.privateKey, {
     owner: userId(),
     fileMode: 0o600,
@@ -120,8 +119,6 @@ async function generate(directory: Dir, deploymentId: string, location: string, 
   if (parsed === null) {
     throw failure('The generated public key is not a canonical Ed25519 OpenSSH public key.', location)
   }
-  // The public file is not trusted on its own: the private half must derive
-  // the same key blob.
   const derived = await runSetup(keygen, ['-y', '-P', '', '-f', privatePath], {
     environment,
     signal,
@@ -132,8 +129,6 @@ async function generate(directory: Dir, deploymentId: string, location: string, 
   if (derivedKey === null || !derivedKey.blob.equals(parsed.blob)) {
     throw failure('The private and public key halves do not agree.', location)
   }
-  // Directory synchronization does not flush file contents, so each file is
-  // flushed first and the directory entries after.
   await syncChild(ssh, state.privateKey, { owner: userId(), mode: 0o600, minSize: 1, maxSize: limits.privateKey })
   await syncChild(ssh, state.publicKey, { owner: userId(), mode: 0o600, minSize: 1, maxSize: limits.publicKey })
   await ssh.sync()

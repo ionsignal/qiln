@@ -1,10 +1,10 @@
 import { AWS_RECORD_VERSION, AWS_SPEC } from '../spec'
 import { isInstallerErrorCode, type InstallerErrorCode } from '../../diagnostic/error'
-import { policyArn } from '../permission/policy'
 import { hasKeys, isRecord } from '../guards'
 import { sameJson } from '../json'
 import { operatorArn } from '../operator'
-import { isFingerprint } from '../ssh/key'
+import { policyArn } from '../permission/policy'
+import { isFingerprint } from '../../ssh/key'
 import {
   isAccountId,
   isIdentity,
@@ -30,8 +30,9 @@ import {
   type Action,
   type Kind,
 } from './graph'
-import { isHostPlan, type HostPlan } from './host/types'
 import { shapeOf } from './topology'
+import { isHostKey, type HostKey } from './hostkey'
+import { isHostPlan, type HostPlan } from './host/types'
 
 export interface Tag {
   Key: string
@@ -197,22 +198,25 @@ export interface Handoff {
  * is local metadata and never an AWS tag. `previous` is the immutable ID of the
  * deployment whose alias this one takes over; it is set at approval and never
  * rewritten. `implicit` is set once, by the observation that verifies the
- * launch, and never rewritten. `key` is set once, before any step, and never
- * rewritten or regenerated. `health` is set once, after every creation step is
- * verified and before any removal, in a write that changes nothing else.
- * `handoff` is set once, in a write that changes nothing else, after removal
- * left the data volume retained and a later deployment took it over.
+ * launch, and never rewritten. `adminKey` is set once, before any step, and
+ * never rewritten or regenerated. `health` is set once, after every creation
+ * step is verified and before any removal, in a write that changes nothing
+ * else. `hostKey` is set once in the same way, as the server's pinned SSH host
+ * key. It is AWS-reported console evidence, not guest attestation, and it is
+ * distinct from `adminKey`. `handoff` is set once, in a write that changes
+ * nothing else, after removal left the data volume retained and a later
+ * deployment took it over.
  *
  * The `version` covers every constant, format rule, and graph declaration
  * order that the guards and the audit consult, such as the zone limit, tag and
  * key-name formats, the lifecycle invariants of the host plan, the
- * administrative key binding, the health evidence, and the creation and
- * removal order. Version 1 is the baseline of a one-time disposable
- * development reset, before any release, so no earlier layout has a reader.
- * From the first release, changing any of them needs a version bump and an
- * explicit versioned reader. Records are never migrated silently, and a stored
- * launch plan is judged structurally, never rebuilt from today's compute
- * constants or checked against today's permission ceilings.
+ * administrative key binding, the health evidence, the host-key pin, and the
+ * creation and removal order. Version 1 is the baseline of a one-time
+ * disposable development reset, before any release, so no earlier layout has a
+ * reader. From the first release, changing any of them needs a version bump
+ * and an explicit versioned reader. Records are never migrated silently, and a
+ * stored launch plan is judged structurally, never rebuilt from today's
+ * compute constants or checked against today's permission ceilings.
  */
 export interface Deployment {
   version: typeof AWS_RECORD_VERSION.deployment
@@ -222,7 +226,8 @@ export interface Deployment {
   connection: string
   binding: Binding
   approval: Approval
-  key: AdminKey | null
+  adminKey: AdminKey | null
+  hostKey: HostKey | null
   termination: 'confirmed' | 'unconfirmed'
   steps: Step[]
   removals: Removal[]
@@ -576,7 +581,8 @@ export function isDeployment(value: unknown): value is Deployment {
       'connection',
       'binding',
       'approval',
-      'key',
+      'adminKey',
+      'hostKey',
       'termination',
       'steps',
       'removals',
@@ -595,13 +601,14 @@ export function isDeployment(value: unknown): value is Deployment {
     !validName(value.connection) ||
     !isBinding(value.binding, value.connection) ||
     !isApproval(value.approval, value.binding, value.id) ||
-    (value.key !== null && !isAdminKey(value.key)) ||
+    (value.adminKey !== null && !isAdminKey(value.adminKey)) ||
     !isTermination(value.termination) ||
     !isSteps(value.steps) ||
     !isRemovals(value.removals) ||
     (value.implicit !== null && !isImplicitEvidence(value.implicit)) ||
     (value.latest !== null && !isObservation(value.latest)) ||
     (value.health !== null && !isHealth(value.health)) ||
+    (value.hostKey !== null && !isHostKey(value.hostKey)) ||
     (value.handoff !== null && !isHandoff(value.handoff)) ||
     !isTimestamp(value.createdAt)
   ) {

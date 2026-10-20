@@ -2,6 +2,7 @@ import { AWS_SPEC } from '../spec'
 import { hasKeys, isRecord } from '../guards'
 import { COMMON_CODES, replyGuard, type Certainty, type ChildReply } from '../child/protocol'
 import { isHealth, isObservation, type Health, type Observation } from '../deployment/types'
+import { isHostKey, type HostKey } from '../deployment/hostkey'
 import { isDiscovery } from '../deployment/proposal/schema'
 import { isIssue, type Issue } from '../deployment/proposal/failure'
 import { isOperationId, isTimestamp } from '../types'
@@ -30,6 +31,10 @@ export type Request =
       deploymentId: string
       wait: boolean
     }
+  | {
+      kind: 'host-key'
+      deploymentId: string
+    }
 
 export type DeploymentRequest = Exclude<Request, { kind: 'prepare' }>
 
@@ -54,6 +59,10 @@ export type Result =
       kind: 'health'
       health: Health | null
     }
+  | {
+      kind: 'host-key'
+      hostKey: HostKey
+    }
 
 export interface Evidence {
   kind: 'step-returned'
@@ -77,6 +86,7 @@ export const FAILURES = [
   'AWS_DEPLOYMENT_BLOCKED',
   'AWS_DEPLOYMENT_VERIFICATION_FAILED',
   'AWS_DEPLOYMENT_HEALTH_UNVERIFIED',
+  'AWS_DEPLOYMENT_HOST_KEY_UNVERIFIED',
   'AWS_DEPLOYMENT_EVIDENCE_UNAVAILABLE',
   'AWS_DEPLOYMENT_DISCOVERY_FAILED',
   'AWS_DEPLOYMENT_IMAGE_UNAVAILABLE',
@@ -91,9 +101,12 @@ type DiscoveryCode = typeof DISCOVERY_CODE
 
 /**
  * The parent's supervision deadline for one request. Only a polling health
- * wait needs more than the ordinary budget.
+ * wait and a host-key read need more than the ordinary budget.
  */
 export function requestDeadlineMs(request: Request): number {
+  if (request.kind === 'host-key') {
+    return AWS_SPEC.deployment.hostKey.requestTimeoutMs
+  }
   return request.kind === 'health' && request.wait
     ? AWS_SPEC.deployment.health.requestTimeoutMs
     : AWS_SPEC.deployment.requestTimeoutMs
@@ -142,6 +155,7 @@ export function isRequest(value: unknown): value is Request {
         typeof value.wait === 'boolean'
       )
     case 'candidates':
+    case 'host-key':
       return hasKeys(value, ['kind', 'deploymentId']) && isOperationId(value.deploymentId)
     default:
       return false
@@ -189,6 +203,8 @@ function isResult(value: unknown): value is Result {
       )
     case 'health':
       return hasKeys(value, ['kind', 'health']) && (value.health === null || isHealth(value.health))
+    case 'host-key':
+      return hasKeys(value, ['kind', 'hostKey']) && isHostKey(value.hostKey)
     default:
       return false
   }

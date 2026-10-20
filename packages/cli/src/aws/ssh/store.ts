@@ -1,9 +1,9 @@
+import { AWS_SPEC } from '../spec'
+import { userId } from '../host'
+import { parsePublicKey } from '../../ssh/key'
 import { InstallerError } from '../../diagnostic/error'
 import { openChildDir, readChild, type Dir } from '../../state/files'
 import type { Deployment } from '../deployment/types'
-import { userId } from '../host'
-import { AWS_SPEC } from '../spec'
-import { parsePublicKey } from './key'
 
 export interface PublicKeyFile {
   bytes: Uint8Array
@@ -36,7 +36,7 @@ export async function openSshDir(root: Dir, deploymentId: string): Promise<Dir> 
  */
 export async function readPublicKey(root: Dir, record: Deployment): Promise<PublicKeyFile> {
   try {
-    if (record.key === null) {
+    if (record.adminKey === null) {
       return refuse()
     }
     const directory = await openSshDir(root, record.id)
@@ -48,7 +48,7 @@ export async function readPublicKey(root: Dir, record: Deployment): Promise<Publ
     })
     const text = new TextDecoder('utf-8', { fatal: true }).decode(snapshot.bytes).trim()
     const key = parsePublicKey(text)
-    if (key === null || key.fingerprint !== record.key.fingerprint) {
+    if (key === null || key.fingerprint !== record.adminKey.fingerprint) {
       return refuse()
     }
     return { bytes: snapshot.bytes, fingerprint: key.fingerprint }

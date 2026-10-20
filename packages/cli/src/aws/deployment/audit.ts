@@ -1,6 +1,15 @@
 import { IMPLICIT, undoes } from './graph'
 import { settled, stateOf } from './step'
-import { creationPlan, creationVerified, dataVolumeId, resources, stepOf, unnamed, unreleased } from './topology'
+import {
+  creationPlan,
+  creationVerified,
+  dataVolumeId,
+  resourceId,
+  resources,
+  stepOf,
+  unnamed,
+  unreleased,
+} from './topology'
 import type { Deployment, ObservedResource, Step } from './types'
 
 /**
@@ -64,14 +73,14 @@ function timed(record: Deployment): boolean {
  * generated after approval and before the first step.
  */
 function keyed(record: Deployment): boolean {
-  const { key, steps, approval } = record
-  if (key === null) {
+  const { adminKey, steps, approval } = record
+  if (adminKey === null) {
     return steps.length === 0
   }
   return (
-    key.algorithm === approval.host.plan.key.algorithm &&
-    approval.approvedAt <= key.generatedAt &&
-    (steps.length === 0 || key.generatedAt <= steps[0].fencedAt)
+    adminKey.algorithm === approval.host.plan.key.algorithm &&
+    approval.approvedAt <= adminKey.generatedAt &&
+    (steps.length === 0 || adminKey.generatedAt <= steps[0].fencedAt)
   )
 }
 
@@ -116,6 +125,29 @@ function healthRecorded(record: Deployment): boolean {
     health.instanceId === launch.returned?.resourceId &&
     health.checkedAt >= launch.verifiedAt &&
     steps.every(step => step.removal === null || step.fencedAt >= health.checkedAt)
+  )
+}
+
+/**
+ * The host-key pin exists only for a fully created deployment, names the
+ * launched instance and the allocated address, is no older than the launch
+ * verification, and precedes every removal.
+ */
+function hostKeyRecorded(record: Deployment): boolean {
+  const { hostKey, steps } = record
+  if (hostKey === null) {
+    return true
+  }
+  const launch = stepOf(record, IMPLICIT.parent)
+  if (launch === undefined || launch.verifiedAt === null) {
+    return false
+  }
+  return (
+    creationVerified(record) &&
+    hostKey.instanceId === launch.returned?.resourceId &&
+    hostKey.allocationId === resourceId(record, 'allocate-address') &&
+    hostKey.observedAt >= launch.verifiedAt &&
+    steps.every(step => step.removal === null || step.fencedAt >= hostKey.observedAt)
   )
 }
 
@@ -171,6 +203,7 @@ export function isConsistent(record: Deployment): boolean {
     undone(record) &&
     discovered(record) &&
     healthRecorded(record) &&
+    hostKeyRecorded(record) &&
     handedOff(record) &&
     observedKnown(record)
   )

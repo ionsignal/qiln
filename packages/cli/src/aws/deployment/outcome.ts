@@ -94,7 +94,7 @@ function network(record: Deployment): Outcome {
  */
 function localKey(record: Deployment): Outcome {
   const label = 'Local admin key'
-  if (record.key === null) {
+  if (record.adminKey === null) {
     return { label, state: 'none', detail: keyDisclosure(record) }
   }
   return {

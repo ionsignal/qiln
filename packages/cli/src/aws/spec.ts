@@ -50,6 +50,19 @@ export const AWS_SPEC = Object.freeze({
         attempts: 120,
       }),
     }),
+    hostKey: Object.freeze({
+      requestTimeoutMs: 660_000,
+      observation: Object.freeze({
+        timeoutMs: 600_000,
+        delayMs: 10_000,
+        attempts: 60,
+      }),
+    }),
+    ssh: Object.freeze({
+      connectTimeoutMs: 20_000,
+      commandTimeoutMs: 30_000,
+      maxOutputBytes: 16_384,
+    }),
   }),
   permission: Object.freeze({
     instanceTypes: Object.freeze([
@@ -163,14 +176,7 @@ export const AWS_SPEC = Object.freeze({
       // name: 'Deep Learning Base OSS Nvidia Driver GPU AMI (Ubuntu 26.04) 20261006',
       // release: '20261006',
       // owner: 'amazon',
-      // architecture: 'x86_64',
-      documentation: 'https://docs.aws.amazon.com/dlami/latest/devguide/aws-deep-learning-ami-gpubaseoss-ul2604-2026-10-08.html',
-      documented: Object.freeze({
-        os: 'Ubuntu 26.04.1 LTS',
-        driver: 'NVIDIA 595.91.07',
-        cuda: 'CUDA 13.3 at /usr/local/cuda-13.3/',
-        kernel: '7.0.0-1014-aws',
-      }),
+      // architecture: 'x86_64',      
     }),
     discovery: Object.freeze({
       maximumDevices: 32,

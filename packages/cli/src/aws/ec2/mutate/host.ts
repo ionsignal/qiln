@@ -55,7 +55,7 @@ function launchInput(record: Deployment): RunInstancesCommandInput {
   const { approval } = record
   const { host } = approval
   const { plan } = host
-  const { metadata, network, root } = plan
+  const { bootstrap, metadata, network, root } = plan
   return {
     ImageId: plan.pin.imageId,
     InstanceType: plan.instanceType as InstanceTypeName,
@@ -93,6 +93,7 @@ function launchInput(record: Deployment): RunInstancesCommandInput {
       HttpProtocolIpv6: metadata.httpProtocolIpv6 as LaunchMetadata['HttpProtocolIpv6'],
       InstanceMetadataTags: metadata.instanceMetadataTags as LaunchMetadata['InstanceMetadataTags'],
     },
+    UserData: Buffer.from(bootstrap.cloudConfig, 'utf8').toString('base64'),
     TagSpecifications: [
       ...tags(record, 'instance'),
       ...tags(record, 'volume'),

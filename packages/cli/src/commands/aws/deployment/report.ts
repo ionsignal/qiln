@@ -1,5 +1,13 @@
 import { deploymentName } from '../../../aws/deployment/alias'
-import { cleanup, healthDisclosure, keyDisclosure, phase, volumeDisclosure, type Phase } from '../../../aws/deployment/facts'
+import {
+  cleanup,
+  healthDisclosure,
+  hostKeyDisclosure,
+  keyDisclosure,
+  phase,
+  volumeDisclosure,
+  type Phase,
+} from '../../../aws/deployment/facts'
 import { removalOutcome } from '../../../aws/deployment/outcome'
 import { refusals } from '../../../aws/deployment/step'
 import { released, resourceId, resources, retained, unreleased, type Resource } from '../../../aws/deployment/topology'
@@ -63,7 +71,7 @@ const STATES: Record<Phase, RecordedState> = {
   healthy: {
     label: 'AWS provisioning and health verified',
     tone: 'success',
-    text: 'The recorded resources were provisioned and observed, and AWS reported the instance running with passing system, instance, and attached-EBS status. This is point-in-time evidence, not SSH access, guest compatibility, CUDA capability, or readiness. The resources remain until they are removed.',
+    text: 'The recorded resources were provisioned and observed, and AWS reported the instance running with passing system, instance, and attached-EBS status. This is point-in-time evidence, not SSH access, guest compatibility, or readiness. The resources remain until they are removed.',
   },
   removing: { label: 'Partly removed', tone: 'warning', text: 'Removal is partly verified; recorded resources remain.' },
   removed: { label: 'Removed', tone: 'success', text: 'All recorded resources were removed and observed absent.' },
@@ -140,12 +148,14 @@ export function reportDeployment(reporter: Reporter, record: Deployment): void {
     ['Approved CIDR', record.approval.cidr],
     ['Zones', record.approval.zones.map(zone => zone.name).join(', ')],
     ['Administrator CIDR', record.approval.ingress[0].cidr],
+    ['Administrator account', record.approval.host.plan.bootstrap.user],
     [
       'Administrative key',
-      record.key === null
+      record.adminKey === null
         ? keyDisclosure(record)
-        : `${record.key.algorithm} · ${keyDisclosure(record)} · generated ${record.key.generatedAt}`,
+        : `${record.adminKey.algorithm} · ${keyDisclosure(record)} · generated ${record.adminKey.generatedAt}`,
     ],
+    ['SSH host key', hostKeyDisclosure(record)],
     [historical ? 'VPC (historical)' : 'VPC', resourceId(record, 'create-vpc') ?? 'no identity retained'],
     ['Instance', resourceId(record, 'run-instances') ?? 'no identity retained'],
     ['Data volume', volumeDisclosure(record)],
@@ -179,7 +189,7 @@ export function reportDeployment(reporter: Reporter, record: Deployment): void {
   reporter.facts(facts)
   reporter.space()
   reporter.info(state.text)
-  if (record.key !== null) {
+  if (record.adminKey !== null) {
     reporter.info(
       'Removal never deletes the local key files, and deleting the AWS key pair is not guest SSH revocation.',
     )

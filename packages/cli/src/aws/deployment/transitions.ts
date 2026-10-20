@@ -3,7 +3,7 @@ import { sameJson } from '../json'
 import { AWS_SPEC } from '../spec'
 import { expectation, matches } from './expect'
 import { refusals, settled, stateOf } from './step'
-import { creationPlan, creationVerified, removalPlan, resourceId } from './topology'
+import { creationPlan, creationVerified, hostKeyDue, removalPlan, resourceId } from './topology'
 import type { Deployment, Step } from './types'
 
 const FIXED_FIELDS = ['version', 'id', 'alias', 'previous', 'connection', 'binding', 'approval', 'createdAt'] as const
@@ -30,14 +30,14 @@ function requireFixedFields(current: Deployment, updated: Deployment): void {
  * The administrative key binding is set once, before any step exists, and is
  * never rewritten, dropped, or replaced.
  */
-function requireKey(current: Deployment, updated: Deployment): void {
-  if (current.key !== null) {
-    if (!sameJson(current.key, updated.key)) {
+function requireAdminKey(current: Deployment, updated: Deployment): void {
+  if (current.adminKey !== null) {
+    if (!sameJson(current.adminKey, updated.adminKey)) {
       return invalid()
     }
     return
   }
-  if (updated.key !== null && (current.steps.length !== 0 || updated.steps.length !== 0)) {
+  if (updated.adminKey !== null && (current.steps.length !== 0 || updated.steps.length !== 0)) {
     return invalid()
   }
 }
@@ -94,7 +94,7 @@ function requireNewStep(current: Deployment, updated: Deployment, step: Step): v
   if (step.removal === null) {
     const planned = creationPlan(updated.approval).at(current.steps.length)
     if (
-      updated.key === null ||
+      updated.adminKey === null ||
       current.removals.length !== 0 ||
       updated.removals.length !== 0 ||
       planned?.action !== step.action ||
@@ -198,6 +198,32 @@ function requireHealth(current: Deployment, updated: Deployment): void {
 }
 
 /**
+ * The host-key pin is set once and never rewritten or dropped. The write that
+ * sets it changes nothing else, and happens only when a pin is due: every
+ * creation step verified, no removal, the administrative key bound, and
+ * confirmed child termination.
+ */
+function requireHostKey(current: Deployment, updated: Deployment): void {
+  if (current.hostKey !== null) {
+    if (!sameJson(current.hostKey, updated.hostKey)) {
+      return invalid()
+    }
+    return
+  }
+  if (updated.hostKey === null) {
+    return
+  }
+  if (
+    !hostKeyDue(current) ||
+    current.termination !== 'confirmed' ||
+    updated.hostKey.instanceId !== resourceId(current, 'run-instances') ||
+    !sameJson({ ...current, hostKey: updated.hostKey }, updated)
+  ) {
+    return invalid()
+  }
+}
+
+/**
  * A handoff is set once and never rewritten or dropped. The write that sets it
  * changes nothing else. Whether the record is settled enough to let go of its
  * volume is judged by the record audit.
@@ -220,11 +246,12 @@ function requireHandoff(current: Deployment, updated: Deployment): void {
  */
 export function requireTransition(current: Deployment, updated: Deployment): void {
   requireFixedFields(current, updated)
-  requireKey(current, updated)
+  requireAdminKey(current, updated)
   requireSteps(current, updated)
   requireRemovals(current, updated)
   requireObservations(current, updated)
   requireImplicit(current, updated)
   requireHealth(current, updated)
+  requireHostKey(current, updated)
   requireHandoff(current, updated)
 }

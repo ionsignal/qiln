@@ -21,11 +21,15 @@ export interface HealthTask {
   kind: 'health'
 }
 
+export interface HostKeyTask {
+  kind: 'host-key'
+}
+
 /**
- * Key generation and the AWS health check are stages of their own, not
- * actions of the deployment graph, so each is a task of its own.
+ * Key generation, the AWS health check, and the host-key read are stages of
+ * their own, not actions of the deployment graph, so each is a task of its own.
  */
-export type ProgressTask = KeyTask | StepTask | HealthTask
+export type ProgressTask = KeyTask | StepTask | HealthTask | HostKeyTask
 
 /**
  * `working` precedes the activity, `waiting` repeats while it lasts, and

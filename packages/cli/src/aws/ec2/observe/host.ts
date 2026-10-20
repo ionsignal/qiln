@@ -11,7 +11,7 @@ import {
 } from '@aws-sdk/client-ec2'
 import { dataTags, resourceId } from '../../deployment/topology'
 import { collect } from '../../observe'
-import { sameFingerprint } from '../../ssh/key'
+import { sameFingerprint } from '../../../ssh/key'
 import { byId, judge, listed, PAGES, tagFilters, tagged, unverified } from './shared'
 import type { Ec2 } from '../client'
 import type { Candidate, Of } from './shared'
@@ -29,8 +29,8 @@ function targetOf(record: Deployment) {
   return {
     plan,
     tags,
-    key: record.key,
     keyName: host.keyName,
+    adminKey: record.adminKey,
     dataTags: dataTags(record),
     zone: plan.zones[plan.hostSlot],
     accountId: record.binding.accountId,
@@ -310,10 +310,10 @@ async function keyPairs(ec2: Ec2, target: Target, wanted: Of<'key-pair'>[], sign
     response.KeyPairs ?? [],
     pair => pair.KeyPairId,
     (_, pair) =>
-      target.key !== null &&
+      target.adminKey !== null &&
       pair.KeyName === target.keyName &&
       pair.KeyType === target.plan.key.algorithm &&
-      sameFingerprint(pair.KeyFingerprint, target.key.fingerprint) &&
+      sameFingerprint(pair.KeyFingerprint, target.adminKey.fingerprint) &&
       tagged(pair.Tags, target.tags),
   )
 }

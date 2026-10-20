@@ -110,6 +110,21 @@ export function healthDue(record: Deployment): boolean {
 }
 
 /**
+ * Creation is complete, nothing has been removed, and the administrative key
+ * is bound, so an SSH connection could be attempted.
+ */
+export function sshReady(record: Deployment): boolean {
+  return creationVerified(record) && record.removals.length === 0 && record.adminKey !== null
+}
+
+/**
+ * SSH could be attempted, but no host-key pin is retained yet.
+ */
+export function hostKeyDue(record: Deployment): boolean {
+  return sshReady(record) && record.hostKey === null
+}
+
+/**
  * Removal order, derived from the ledger alone: only resources whose creation
  * response was retained, and only those not yet verified removed. Declaration
  * order of the removal table is the plan order.

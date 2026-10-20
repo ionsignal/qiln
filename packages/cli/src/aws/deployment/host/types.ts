@@ -3,6 +3,7 @@ import { hasKeys, isRecord } from '../../guards'
 import { isAccountId, validRegion } from '../../types'
 import { validCidr } from '../cidr'
 import type { Ingress, Zone } from '../types'
+import { isBootstrap, type Bootstrap } from './bootstrap'
 
 export interface RootSource {
   deviceName: string
@@ -58,7 +59,8 @@ export interface ElasticIp {
 /**
  * The complete launch configuration, frozen from reviewed evidence. The host
  * zone is a slot into `zones` and is never changed or replaced by another zone.
- * There is deliberately no instance profile. Qiln-normalized shapes only: the
+ * There is deliberately no instance profile. The bootstrap is the exact
+ * cloud-init user-data the launch sends. Qiln-normalized shapes only: the
  * provider mapping belongs to `ec2/`.
  */
 export interface HostPlan {
@@ -76,6 +78,7 @@ export interface HostPlan {
   network: PrimaryInterface
   metadata: Metadata
   key: KeyPolicy
+  bootstrap: Bootstrap
   elasticIp: ElasticIp
   tagged: string[]
 }
@@ -95,6 +98,7 @@ const PLAN_KEYS = [
   'network',
   'metadata',
   'key',
+  'bootstrap',
   'elasticIp',
   'tagged',
 ] as const
@@ -214,11 +218,11 @@ function isElasticIp(value: unknown): value is ElasticIp {
 /**
  * Shape, bounds, internal consistency, and the lifecycle invariants that every
  * deployment must keep: one instance, root volume and primary interface deleted
- * with it, a data volume retained on its own device name, and an Ed25519
- * administrative key without a passphrase. These are literals of the record
- * version, not today's compute constants, so a stored plan keeps its meaning
- * when they change. Zone and ingress semantics are judged by the approval
- * guard, which requires them to equal its own.
+ * with it, a data volume retained on its own device name, an Ed25519
+ * administrative key without a passphrase, and the exact approved bootstrap.
+ * These are literals of the record version, not today's compute constants, so
+ * a stored plan keeps its meaning when they change. Zone and ingress semantics
+ * are judged by the approval guard, which requires them to equal its own.
  */
 export function isHostPlan(value: unknown): value is HostPlan {
   if (!isRecord(value) || !hasKeys(value, PLAN_KEYS)) {
@@ -239,6 +243,7 @@ export function isHostPlan(value: unknown): value is HostPlan {
     network,
     metadata,
     key,
+    bootstrap,
     elasticIp,
     tagged,
   } = value
@@ -264,6 +269,7 @@ export function isHostPlan(value: unknown): value is HostPlan {
     isPrimaryInterface(network) &&
     isMetadata(metadata) &&
     isKeyPolicy(key) &&
+    isBootstrap(bootstrap) &&
     isElasticIp(elasticIp) &&
     Array.isArray(tagged) &&
     tagged.every(isText) &&

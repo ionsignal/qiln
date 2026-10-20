@@ -141,7 +141,8 @@ export async function create(root: Dir, record: Deployment): Promise<void> {
   if (
     initial.steps.length !== 0 ||
     initial.removals.length !== 0 ||
-    initial.key !== null ||
+    initial.adminKey !== null ||
+    initial.hostKey !== null ||
     initial.implicit !== null ||
     initial.latest !== null ||
     initial.health !== null ||

@@ -37,6 +37,8 @@ function title(task: ProgressTask): string {
       return 'Admin SSH key'
     case 'health':
       return 'AWS health'
+    case 'host-key':
+      return 'SSH host key'
     case 'step':
       return `Step ${task.position}/${task.total}`
   }
@@ -48,6 +50,8 @@ function subject(task: ProgressTask): string {
       return 'Generate the local administrative SSH key'
     case 'health':
       return 'Check AWS instance and attached-EBS status'
+    case 'host-key':
+      return 'Read the server host key from AWS console output'
     case 'step': {
       const label = LABELS[task.action]
       return task.slot > 0 ? `${label} #${task.slot + 1}` : label
@@ -61,6 +65,8 @@ function verifiedDetail(task: ProgressTask): string {
       return 'key pair validated and binding recorded'
     case 'health':
       return 'running with system, instance and attached-EBS checks ok; point-in-time AWS status only'
+    case 'host-key':
+      return 'Ed25519 fingerprint retained as AWS-reported console evidence; not guest attestation'
     case 'step':
       return 'observation agrees with the record'
   }

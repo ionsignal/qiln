@@ -40,6 +40,7 @@ export interface ProgramHandlers {
       status(options: AwsDeploymentOptions, color: ColorMode): void | Promise<void>
       list(color: ColorMode): void | Promise<void>
       inspect(options: AwsDeploymentOptions, color: ColorMode): void | Promise<void>
+      ssh(options: AwsDeploymentOptions, color: ColorMode): void | Promise<void>
       remove(options: AwsDeploymentOptions, color: ColorMode): void | Promise<void>
     }
   }
@@ -238,6 +239,18 @@ export function createProgram(handlers: ProgramHandlers, output: ProgramOutput):
     inspect.action(() =>
       awsHandlers.deployment.inspect(
         convertAwsDeploymentOptions(inspect.opts<AwsDeploymentInput>()),
+        program.opts<GlobalOptions>().color,
+      ),
+    )
+    const ssh = deployment
+      .command('ssh')
+      .description('Retain the server host-key pin if needed, then verify the pinned host key and administrative key by running one fixed read-only command over SSH.')
+      .summary('Verify SSH access with a pinned host key.')
+    addSelectorOptions(ssh)
+    describeHelp(ssh, deploymentHelp.ssh)
+    ssh.action(() =>
+      awsHandlers.deployment.ssh(
+        convertAwsDeploymentOptions(ssh.opts<AwsDeploymentInput>()),
         program.opts<GlobalOptions>().color,
       ),
     )

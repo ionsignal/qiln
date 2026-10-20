@@ -133,6 +133,13 @@ export async function run(argumentsList: readonly string[]): Promise<number> {
             reporter.header('aws deployment inspect', 'fresh deployment observation')
             await aws.deployment.inspect(options, reporter)
           },
+          async ssh(options, color) {
+            command = 'aws'
+            reporter = new Reporter({ color })
+            assertUnprivilegedInvocation()
+            reporter.header('aws deployment ssh', 'pinned SSH login check')
+            await aws.deployment.ssh(options, reporter)
+          },
           async remove(options, color) {
             command = 'aws'
             reporter = new Reporter({ color })
@@ -178,8 +185,6 @@ export async function run(argumentsList: readonly string[]): Promise<number> {
       return 1
     }
     reporter.failure(error instanceof ProcessExecutionError ? processFailure(error, command) : error)
-    // Recovery diagnostics expose outstanding work without changing the
-    // original cancellation exit status.
     if (isCancellation(error)) {
       return 130
     }

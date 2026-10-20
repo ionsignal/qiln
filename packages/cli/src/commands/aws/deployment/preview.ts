@@ -86,15 +86,17 @@ function instanceFacts(instance: InstanceTypeEvidence | null): DiagnosticFact[] 
   ]
 }
 
-function documentedFacts(): DiagnosticFact[] {
-  const { documented, release, documentation } = compute.image
+/**
+ * Only what the repository pins for the image. None of it is observed on a
+ * host, so it carries no verified badge.
+ */
+function reviewedFacts(): DiagnosticFact[] {
+  const { name, release, owner, architecture } = compute.image
   return [
+    ['Image name', name],
     ['Release', release],
-    ['OS', documented.os],
-    ['NVIDIA driver', documented.driver],
-    ['CUDA', documented.cuda],
-    ['Kernel', documented.kernel],
-    ['Documentation', documentation],
+    ['Publisher account', owner],
+    ['Architecture', architecture],
   ]
 }
 
@@ -196,15 +198,24 @@ function storageFacts(plan: HostPlan, proposal: HostProposal): DiagnosticFact[] 
 }
 
 function accessFacts(plan: HostPlan): DiagnosticFact[] {
-  const { key } = plan
+  const { key, bootstrap } = plan
   return [
     [
       'Admin SSH key',
       `One ${key.algorithm} OpenSSH key per deployment, generated locally after approval and bound to the deployment ID by fingerprint. Passphrase: ${key.passphrase}. The private key stays in protected local state (${key.protection}) and is not otherwise encrypted; AWS receives only the public half, as a key pair.`,
     ],
     [
+      'Admin account',
+      `${bootstrap.user} · password locked · SSH password authentication disabled · passwordless sudo`,
+    ],
+    ['Admin login', 'SSH key from the AWS key pair, supplied through instance metadata'],
+    [
+      'Cloud-init',
+      `declarative user-data, sent exactly as approved · SHA-256 ${bootstrap.sha256} · no commands, packages, storage, private keys, or credentials · effective guest settings are not verified`,
+    ],
+    [
       'SSH access',
-      'Qiln does not connect to the host in this release. The key is imported for the launch only: no SSH connection, host-identity verification, or guest inspection occurs.',
+      'Create and inspect make no SSH connection. The key is imported for the launch only: no host-identity verification or guest inspection occurs.',
     ],
   ]
 }
@@ -245,9 +256,9 @@ function removalFacts(plan: HostPlan): DiagnosticFact[] {
 }
 
 /**
- * Renders the in-memory proposal. Observed AWS metadata, documented release
+ * Renders the in-memory proposal. Observed AWS metadata, reviewed repository
  * expectations, and intended future behavior sit in separate sections, and no
- * documented or intended value carries a verified badge. Intended behavior is
+ * reviewed or intended value carries a verified badge. Intended behavior is
  * rendered only from the frozen plan, which exists only when nothing blocks.
  * The pinned AMI comes from the committed regional index, not from AWS, so it
  * is shown beside the region and appears even when AWS did not return the image.
@@ -275,11 +286,11 @@ export function reportProposal(reporter: Reporter, proposal: HostProposal, targe
   reporter.info('Proposal from read-only discovery. Nothing below has been created, approved, or reserved yet.')
   reporter.section('Observed in AWS (read-only, point in time)')
   reporter.facts([...imageFacts(proposal.image, proposal.pin), ...instanceFacts(proposal.instanceType)])
-  reporter.section('Documented by AWS (not verified on a host)')
-  reporter.facts(documentedFacts())
+  reporter.section('Reviewed by Qiln (not verified on a host)')
+  reporter.facts(reviewedFacts())
   reporter.space()
   reporter.info(
-    'These are release-note expectations, not observed guest state. The image also includes an SSM agent; Qiln grants no instance profile and does not use SSM.',
+    'These are the reviewed repository expectations for the pinned image, not observed guest state. Qiln grants no instance profile and does not use SSM.',
   )
   const { plan } = proposal
   if (plan === null) {
@@ -322,7 +333,7 @@ export function reportCreationEffects(reporter: Reporter, plan: HostPlan, reuse:
   reporter.facts([
     ['Network', `one VPC ${plan.cidr} · one subnet in each of ${plan.zones.length} zones · internet gateway · route table · one security group`],
     ['Access key', `generate one local ${plan.key.algorithm} key and import its public half to AWS as a key pair`],
-    ['Host', `launch ${plan.count} ${plan.instanceType} (${plan.purchase})`],
+    ['Host', `launch ${plan.count} ${plan.instanceType} (${plan.purchase}) with the reviewed cloud-init user-data`],
     [
       'Storage',
       reuse === null
@@ -345,6 +356,6 @@ export function reportCreationEffects(reporter: Reporter, plan: HostPlan, reuse:
     'Cancelling or a failure does not roll back. Completed and uncertain effects are retained as evidence and are never replayed automatically.',
   )
   reporter.notice(
-    'Success means AWS provisioning and health verified. Qiln does not connect to the instance, so SSH access, host identity, guest compatibility, CUDA, and readiness are not established.',
+    'Success means AWS provisioning and health verified. Create makes no SSH connection, so SSH access, host identity, guest compatibility, and readiness are not established.',
   )
 }

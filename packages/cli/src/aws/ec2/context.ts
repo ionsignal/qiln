@@ -9,8 +9,8 @@ import { requireIdentity, verifyIdentity } from '../auth/identity'
 import { requireBound } from '../deployment/binding'
 import { expectation } from '../deployment/expect'
 import { stateOf } from '../deployment/step'
-import { healthDue, unnamed } from '../deployment/topology'
 import { requireOperationLock } from '../root'
+import { healthDue, hostKeyDue, unnamed } from '../deployment/topology'
 import * as connections from '../connection/records'
 import * as deployments from '../deployment/records'
 import type { AwsIdentity } from '../types'
@@ -116,6 +116,12 @@ function requireAuthority(record: Deployment, request: DeploymentRequest): void 
     case 'health':
       // Health is read only for a fully created deployment that has no health evidence yet.
       if (!healthDue(record)) {
+        return notAttempted()
+      }
+      return
+    case 'host-key':
+      // The host key is read only for a fully created deployment that has no retained pin yet.
+      if (!hostKeyDue(record)) {
         return notAttempted()
       }
       return

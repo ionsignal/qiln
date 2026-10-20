@@ -2,6 +2,7 @@ import type { ImagePin } from '../../ami'
 import { AWS_SPEC } from '../../spec'
 import { allocate, ingressRules } from '../topology'
 import type { Placement } from '../types'
+import { bootstrapOf } from './bootstrap'
 import type { HostPlan, RootSource } from './types'
 
 const { compute, deployment } = AWS_SPEC
@@ -58,6 +59,7 @@ export function planOf(inputs: PlanInputs): HostPlan | null {
     network: { ...launch.network },
     metadata: { ...launch.metadata },
     key: { ...launch.key },
+    bootstrap: bootstrapOf(),
     elasticIp: { ...launch.elasticIp },
     tagged: [...launch.tagged],
   }

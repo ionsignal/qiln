@@ -138,6 +138,19 @@ export const awsDeploymentDiagnostics = Object.freeze({
     'Run qiln aws deployment remove when the resources are no longer wanted. The retained data volume must be deleted outside Qiln.',
     'Do not delete deployment evidence or lock files to bypass this state.',
   ),
+  AWS_DEPLOYMENT_HOST_KEY_UNVERIFIED: entry(
+    'SSH host key was not verified',
+    'Every creation step was verified, but Qiln could not establish exactly one Ed25519 host-key fingerprint for the recorded instance from AWS console output. The bounded wait ended without a complete fingerprint block, the output was malformed or contained conflicting fingerprints, or the recorded Elastic IP association did not match the record. Console output is evidence reported by AWS about the guest, not an AWS-signed certificate or guest attestation. An exhausted budget does not show that no host key exists. No pin was retained, nothing was repeated or rolled back, and Qiln never falls back to accepting an unverified key on first use.',
+    'Retry after the instance has finished its first boot, because console output can be empty or absent early on.',
+    'If the output conflicts or is malformed, inspect the instance and the recorded deployment before any further attempt.',
+    'Do not replace retained evidence or accept an unverified key to bypass this state.',
+  ),
+  AWS_DEPLOYMENT_ACCESS_REFUSED: entry(
+    'SSH access was refused locally',
+    'Before connecting, Qiln requires the deployment’s protected administrative private key to be present with owner-only permissions and to derive exactly the fingerprint recorded for the deployment. Something did not match, so no connection was attempted. This command changed nothing: no key was generated, replaced, or repaired, and no evidence was rewritten.',
+    'Inspect the displayed deployment evidence with qiln aws deployment status.',
+    'Do not replace the administrative key or the retained evidence to bypass this state.',
+  ),
   AWS_DEPLOYMENT_EVIDENCE_UNAVAILABLE: entry(
     'Step response evidence was not retained',
     'The provider call may have completed, but its returned identity could not be validated or retained locally. Network creation calls carry no idempotency token, and the instance and data-volume creations carry one only to guard a single dispatch. Qiln never repeats an uncertain mutation, adopts candidate resources, or treats an empty listing as proof.',

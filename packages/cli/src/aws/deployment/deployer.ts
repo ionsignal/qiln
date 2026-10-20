@@ -36,6 +36,7 @@ import * as records from './records'
 import type { Dir } from '../../state/files'
 import type { Session } from '../auth/session'
 import type { Certainty } from '../child/protocol'
+import type { HostKey } from './hostkey'
 import type { HostPlan } from './host/types'
 import type { Reuse } from './reuse'
 import type { AwsConnection } from '../types'
@@ -143,7 +144,8 @@ export function propose(
             : { kind: 'reuse', from: reuse.from, volumeId: reuse.volumeId, tags: structuredClone(reuse.tags) },
       },
     },
-    key: null,
+    adminKey: null,
+    hostKey: null,
     termination: 'confirmed',
     steps: [],
     removals: [],
@@ -219,8 +221,8 @@ export class Deployer {
    * before any state change, keeps this command from touching the record.
    */
   private requireFresh(): void {
-    const { steps, removals, key } = this.current
-    if (steps.length !== 0 || removals.length !== 0 || key !== null) {
+    const { steps, removals, adminKey } = this.current
+    if (steps.length !== 0 || removals.length !== 0 || adminKey !== null) {
       throw new InstallerError({
         code: 'AWS_DEPLOYMENT_CREATE_REFUSED',
         facts: deploymentFacts(this.current),
@@ -242,9 +244,9 @@ export class Deployer {
       termination: 'unconfirmed',
     })
     const directory = await records.directoryOf(this.root, this.current.id)
-    const key = await generateAdminKey(directory, this.current.id, signal)
+    const adminKey = await generateAdminKey(directory, this.current.id, signal)
     await this.persist({
-      key,
+      adminKey,
       termination: 'confirmed',
     })
     notify(this.progress, { phase: 'verified', task })
@@ -517,6 +519,43 @@ export class Deployer {
     this.requireReady()
     try {
       return await this.recordHealth(false, signal)
+    } catch (error: unknown) {
+      return await this.fail(error)
+    }
+  }
+
+  /**
+   * Retains the server's Ed25519 host key as the pin for later SSH handshakes.
+   * Like health, it is a read-only AWS read rather than a ledger step: it has no
+   * fence, receipt, or removal, and the pin is retained in a write that changes
+   * nothing else. The evidence is AWS-reported console output, not guest
+   * attestation. An exhausted wait is an error that records nothing.
+   */
+  public async hostKey(signal: AbortSignal): Promise<HostKey> {
+    this.requireReady()
+    try {
+      checkCancellation(signal)
+      const task: ProgressTask = { kind: 'host-key' }
+      notify(this.progress, { phase: 'working', task })
+      const result = await withWaiting(this.progress, task, () =>
+        this.call(
+          {
+            kind: 'host-key',
+            deploymentId: this.current.id,
+          },
+          signal,
+        ),
+      )
+      if (result.kind !== 'host-key') {
+        throw new InstallerError({
+          code: 'AWS_CONTEXT_FAILED',
+        })
+      }
+      await this.persist({
+        hostKey: result.hostKey,
+      })
+      notify(this.progress, { phase: 'verified', task })
+      return result.hostKey
     } catch (error: unknown) {
       return await this.fail(error)
     }

@@ -91,9 +91,20 @@ export function describe(record: Deployment): string {
  * fingerprint, and neither case claims anything about the local files.
  */
 export function keyDisclosure(record: Deployment): string {
-  return record.key === null
+  return record.adminKey === null
     ? 'no key recorded; partial files may exist'
-    : `SHA256:${record.key.fingerprint} recorded; local-file availability was not inspected`
+    : `SHA256:${record.adminKey.fingerprint} recorded; local-file availability was not inspected`
+}
+
+/**
+ * The single wording for the server's host-key pin. It is AWS-reported console
+ * evidence, not an AWS-signed certificate or guest attestation.
+ */
+export function hostKeyDisclosure(record: Deployment): string {
+  const { hostKey } = record
+  return hostKey === null
+    ? 'not retained'
+    : `SHA256:${hostKey.fingerprint} (${hostKey.algorithm}) for ${hostKey.address} · AWS console evidence from ${hostKey.consoleAt}, retained ${hostKey.observedAt}; not guest attestation`
 }
 
 /**
@@ -222,7 +233,9 @@ export function deploymentFacts(record: Deployment): readonly DiagnosticFact[] {
     ['Deployment region', binding.region],
     ['CIDR', approval.cidr],
     ['Administrator CIDR', approval.ingress[0].cidr],
+    ['Administrator account', approval.host.plan.bootstrap.user],
     ['Administrative key', keyDisclosure(record)],
+    ['SSH host key', hostKeyDisclosure(record)],
     ['Zones', approval.zones.map(zone => zone.name).join(', ')],
     ['VPC', resourceId(record, 'create-vpc') ?? 'no identity retained'],
     ['Instance', resourceId(record, 'run-instances') ?? 'no identity retained'],

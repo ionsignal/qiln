@@ -83,8 +83,8 @@ async function requireVolumeAvailable(
  * the operator explicitly chooses between a new volume and reusing that one;
  * the choice is part of the same approval. After it, the immutable approval is
  * retained and the fenced creation steps and the AWS health read run under the
- * operation lock. Success establishes AWS provisioning and health only; Qiln
- * never connects to the instance.
+ * operation lock. Success establishes AWS provisioning and health only; create
+ * makes no SSH connection to the instance.
  */
 export async function create(options: AwsDeploymentCreateOptions, reporter: Reporter): Promise<void> {
   requireAwsHost()
