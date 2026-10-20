@@ -98,9 +98,9 @@ async function run(
         kind: 'health',
         health: await observeHealth(ec2, record, request.wait),
       }
-    case 'host-key':
+    case 'hostkey':
       return {
-        kind: 'host-key',
+        kind: 'hostkey',
         hostKey: await observeHostKey(ec2, record),
       }
   }

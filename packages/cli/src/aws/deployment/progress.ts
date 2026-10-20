@@ -22,7 +22,7 @@ export interface HealthTask {
 }
 
 export interface HostKeyTask {
-  kind: 'host-key'
+  kind: 'hostkey'
 }
 
 /**

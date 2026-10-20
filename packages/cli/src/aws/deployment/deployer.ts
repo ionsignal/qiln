@@ -535,18 +535,18 @@ export class Deployer {
     this.requireReady()
     try {
       checkCancellation(signal)
-      const task: ProgressTask = { kind: 'host-key' }
+      const task: ProgressTask = { kind: 'hostkey' }
       notify(this.progress, { phase: 'working', task })
       const result = await withWaiting(this.progress, task, () =>
         this.call(
           {
-            kind: 'host-key',
+            kind: 'hostkey',
             deploymentId: this.current.id,
           },
           signal,
         ),
       )
-      if (result.kind !== 'host-key') {
+      if (result.kind !== 'hostkey') {
         throw new InstallerError({
           code: 'AWS_CONTEXT_FAILED',
         })

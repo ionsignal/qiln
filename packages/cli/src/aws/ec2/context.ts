@@ -119,7 +119,7 @@ function requireAuthority(record: Deployment, request: DeploymentRequest): void 
         return notAttempted()
       }
       return
-    case 'host-key':
+    case 'hostkey':
       // The host key is read only for a fully created deployment that has no retained pin yet.
       if (!hostKeyDue(record)) {
         return notAttempted()

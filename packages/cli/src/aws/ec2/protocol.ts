@@ -32,7 +32,7 @@ export type Request =
       wait: boolean
     }
   | {
-      kind: 'host-key'
+      kind: 'hostkey'
       deploymentId: string
     }
 
@@ -60,7 +60,7 @@ export type Result =
       health: Health | null
     }
   | {
-      kind: 'host-key'
+      kind: 'hostkey'
       hostKey: HostKey
     }
 
@@ -104,7 +104,7 @@ type DiscoveryCode = typeof DISCOVERY_CODE
  * wait and a host-key read need more than the ordinary budget.
  */
 export function requestDeadlineMs(request: Request): number {
-  if (request.kind === 'host-key') {
+  if (request.kind === 'hostkey') {
     return AWS_SPEC.deployment.hostKey.requestTimeoutMs
   }
   return request.kind === 'health' && request.wait
@@ -155,7 +155,7 @@ export function isRequest(value: unknown): value is Request {
         typeof value.wait === 'boolean'
       )
     case 'candidates':
-    case 'host-key':
+    case 'hostkey':
       return hasKeys(value, ['kind', 'deploymentId']) && isOperationId(value.deploymentId)
     default:
       return false
@@ -203,7 +203,7 @@ function isResult(value: unknown): value is Result {
       )
     case 'health':
       return hasKeys(value, ['kind', 'health']) && (value.health === null || isHealth(value.health))
-    case 'host-key':
+    case 'hostkey':
       return hasKeys(value, ['kind', 'hostKey']) && isHostKey(value.hostKey)
     default:
       return false
