@@ -1,26 +1,34 @@
-import { InstallerError, type DiagnosticFact, type InstallerErrorCode, type InstallerErrorOptions } from '../diagnostic/error'
+import {
+  InstallerError,
+  type DiagnosticFact,
+  type InstallerErrorCode,
+  type InstallerErrorOptions,
+} from '../diagnostic/error'
 
-export type SshFailureKind = 'connection' | 'host-key' | 'authentication' | 'command' | 'cancelled'
+export type SshFailureKind = 'connection' | 'hostkey' | 'authentication' | 'command' | 'transfer' | 'cancelled'
 
 const CODES = {
   connection: 'SSH_CONNECTION_FAILED',
-  'host-key': 'SSH_HOST_KEY_MISMATCH',
+  hostkey: 'SSH_HOST_KEY_MISMATCH',
   authentication: 'SSH_AUTHENTICATION_FAILED',
   command: 'SSH_COMMAND_FAILED',
+  transfer: 'SSH_TRANSFER_FAILED',
   cancelled: 'COMMAND_CANCELLED',
 } as const satisfies Record<SshFailureKind, InstallerErrorCode>
 
 export interface SshErrorOptions {
   kind: SshFailureKind
-  commandStarted?: boolean
+  remoteStarted?: boolean
   facts?: readonly DiagnosticFact[]
 }
 
-function describe({ kind, commandStarted = false, facts = [] }: SshErrorOptions): InstallerErrorOptions {
+function describe({ kind, remoteStarted = false, facts = [] }: SshErrorOptions): InstallerErrorOptions {
   const details: DiagnosticFact[] = [['Failure category', kind], ...facts]
-  if (commandStarted) {
-    // Closing the connection does not prove that the remote command stopped.
-    details.push(['Remote outcome', 'uncertain; the command may have started, and its effects were not confirmed or undone'])
+  if (remoteStarted) {
+    details.push([
+      'Remote outcome',
+      'uncertain; the command or transfer may have started, and its effects were not confirmed or undone',
+    ])
   }
   return {
     code: CODES[kind],
@@ -35,11 +43,11 @@ function describe({ kind, commandStarted = false, facts = [] }: SshErrorOptions)
  */
 export class SshError extends InstallerError {
   public readonly kind: SshFailureKind
-  public readonly commandStarted: boolean
+  public readonly remoteStarted: boolean
 
   constructor(options: SshErrorOptions) {
     super(describe(options))
     this.kind = options.kind
-    this.commandStarted = options.commandStarted ?? false
+    this.remoteStarted = options.remoteStarted ?? false
   }
 }

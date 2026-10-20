@@ -1,8 +1,17 @@
 import { Client } from 'ssh2'
-import type { DiagnosticFact } from '../diagnostic/error'
 import { SshError } from './failure'
 import { fingerprintOf } from './key'
-import { parseOptions, type SshOptions } from './options'
+import { Link } from './link'
+import {
+  execLimitsSchema,
+  parseLimits,
+  parseOptions,
+  uploadLimitsSchema,
+  type ExecLimits,
+  type SshOptions,
+} from './options'
+import { uploadFile, type UploadOptions, type UploadResult } from './upload'
+import type { DiagnosticFact } from '../diagnostic/error'
 
 export interface CommandResult {
   exitCode: number
@@ -13,41 +22,20 @@ export interface CommandResult {
 /**
  * A command is a fixed string without stdin. A nonzero exit code is a result
  * for the caller to judge. Only a missing exit status, the deadline, the output
- * limit, cancellation, or a lost connection is a failure.
+ * limit, cancellation, or a lost connection is a failure. Limits default to the
+ * connection options and may be overridden per command.
+ *
+ * An upload creates one new remote file exclusively and is judged complete only
+ * after its remote close. Any failure invalidates the connection, so later
+ * calls fail as a lost connection.
  */
 export interface Remote {
-  exec(command: string): Promise<CommandResult>
+  exec(command: string, limits?: Partial<ExecLimits>): Promise<CommandResult>
+  upload(localPath: string, remotePath: string, request: UploadOptions): Promise<UploadResult>
 }
 
 interface Handshake {
   observed: string | undefined
-}
-
-/**
- * Connection-wide failure latch. It is set before a connection is destroyed,
- * so pending work fails with its own classification instead of being decided
- * by whichever library event happens to arrive first. Once set, it stays set.
- */
-class Link {
-  public lost = false
-  private readonly watchers = new Set<() => void>()
-
-  public lose(): void {
-    if (this.lost) {
-      return
-    }
-    this.lost = true
-    for (const watcher of [...this.watchers]) {
-      watcher()
-    }
-  }
-
-  public watch(watcher: () => void): () => void {
-    this.watchers.add(watcher)
-    return () => {
-      this.watchers.delete(watcher)
-    }
-  }
 }
 
 function levelOf(error: unknown): unknown {
@@ -93,7 +81,7 @@ function connectionFailure(error: unknown, options: SshOptions, handshake: Hands
   }
   if (handshake.observed !== undefined && handshake.observed !== options.fingerprint) {
     return new SshError({
-      kind: 'host-key',
+      kind: 'hostkey',
       facts: [
         ['Pinned fingerprint', `SHA256:${options.fingerprint}`],
         ['Observed fingerprint', `SHA256:${handshake.observed}`],
@@ -108,8 +96,13 @@ function connectionFailure(error: unknown, options: SshOptions, handshake: Hands
 
 function createRemote(client: Client, options: SshOptions, signal: AbortSignal, link: Link): Remote {
   return {
-    exec: command =>
-      new Promise<CommandResult>((resolve, reject) => {
+    exec: async (command, overrides = {}) => {
+      const limits = parseLimits(execLimitsSchema, {
+        timeoutMs: options.commandTimeoutMs,
+        maxOutputBytes: options.maxOutputBytes,
+        ...overrides,
+      })
+      return await new Promise<CommandResult>((resolve, reject) => {
         if (signal.aborted) {
           reject(new SshError({ kind: 'cancelled' }))
           return
@@ -122,7 +115,7 @@ function createRemote(client: Client, options: SshOptions, signal: AbortSignal, 
         const stderr: Buffer[] = []
         let received = 0
         let settled = false
-        const timer = setTimeout(() => fail('timeout'), options.commandTimeoutMs)
+        const timer = setTimeout(() => fail('timeout'), limits.timeoutMs)
         const fail = (reason: string) => {
           if (settled) {
             return
@@ -135,7 +128,7 @@ function createRemote(client: Client, options: SshOptions, signal: AbortSignal, 
           reject(
             new SshError({
               kind: signal.aborted ? 'cancelled' : 'command',
-              commandStarted: true,
+              remoteStarted: true,
               facts: [['Command failure', reason]],
             }),
           )
@@ -146,7 +139,7 @@ function createRemote(client: Client, options: SshOptions, signal: AbortSignal, 
             return
           }
           received += chunk.byteLength
-          if (received > options.maxOutputBytes) {
+          if (received > limits.maxOutputBytes) {
             fail('output limit exceeded')
             return
           }
@@ -194,7 +187,24 @@ function createRemote(client: Client, options: SshOptions, signal: AbortSignal, 
         } catch {
           fail('request not accepted')
         }
-      }),
+      })
+    },
+    upload: async (localPath, remotePath, request) => {
+      const limits = parseLimits(uploadLimitsSchema, {
+        timeoutMs: request.timeoutMs,
+        bytes: request.bytes,
+      })
+      if (signal.aborted) {
+        throw new SshError({ kind: 'cancelled' })
+      }
+      if (link.lost) {
+        throw new SshError({ kind: 'connection', facts: endpointFacts(options) })
+      }
+      return await uploadFile(client, link, signal, localPath, remotePath, {
+        ...limits,
+        onProgress: request.onProgress,
+      })
+    },
   }
 }
 
