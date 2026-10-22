@@ -1,4 +1,5 @@
 import { awsConnectionDiagnostics } from './aws/connection'
+import { awsDeliveryDiagnostics } from './aws/delivery'
 import { awsDeploymentDiagnostics } from './aws/deployment'
 import { awsIamDiagnostics } from './aws/iam'
 import { awsToolDiagnostics } from './aws/tools'
@@ -21,6 +22,7 @@ export const catalog = Object.freeze({
   ...awsConnectionDiagnostics,
   ...awsIamDiagnostics,
   ...awsDeploymentDiagnostics,
+  ...awsDeliveryDiagnostics,
   ...sshDiagnostics,
 })
 
@@ -34,6 +36,7 @@ const domainCodeCount = [
   awsConnectionDiagnostics,
   awsIamDiagnostics,
   awsDeploymentDiagnostics,
+  awsDeliveryDiagnostics,
   sshDiagnostics,
 ].reduce((total, domain) => total + Object.keys(domain).length, 0)
 
