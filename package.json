@@ -69,6 +69,9 @@
     "fsevents": false,
     "cpu-features": false
   },
+  "overrides": {
+    "braces": "npm:@franciscosolis/braces@3.1.1"
+  },
   "dependencies": {
     "@css-render/vue3-ssr": "0.15.14",
     "@fastify/autoload": "6.5.1",
