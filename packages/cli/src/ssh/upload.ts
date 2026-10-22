@@ -152,14 +152,15 @@ export async function uploadFile(
   const expired = new Promise<never>((_resolve, reject) => {
     stop.signal.addEventListener('abort', () => reject(new Refusal(reason ?? 'the transfer ended')), { once: true })
   })
+  void expired.catch(() => undefined)
   const unwatch = link.watch(() => abort('the connection was lost'))
   const timer = setTimeout(() => abort('the transfer deadline was exceeded'), options.timeoutMs)
   const meter = createMeter(options.bytes, options.onProgress)
   try {
     sftp = await openSftp(client, stop.signal, () => abort('the SFTP channel failed'))
     reader = createReadStream(localPath)
-    const writer = sftp.createWriteStream(remotePath, { flags: 'wx', mode: 0o600, autoClose: true })
     started = true
+    const writer = sftp.createWriteStream(remotePath, { flags: 'wx', mode: 0o600, autoClose: true })
     const closed = new Promise<void>((resolve, reject) => {
       writer.once('close', () => resolve())
       writer.on('error', reject)
@@ -167,8 +168,6 @@ export async function uploadFile(
     await Promise.race([Promise.all([pipeline(reader, meter.stream, writer, { signal: stop.signal }), closed]), expired])
     return { bytes: meter.sent(), sha256: meter.digest() }
   } catch (error: unknown) {
-    // The cause is fixed before the shared link is invalidated, so watchers
-    // cannot replace it with a less specific one.
     const why = reason ?? (error instanceof Refusal ? error.reason : 'the local read or remote write failed')
     reason = why
     link.lose()
