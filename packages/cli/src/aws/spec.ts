@@ -131,7 +131,7 @@ export const AWS_SPEC = Object.freeze({
     }),
   }),
   compute: Object.freeze({
-    defaultInstanceType: 'i8g.large',
+    defaultInstanceType: 'i8g.xlarge',
     storage: Object.freeze({
       volumeType: 'gp3',
       iops: 3_000,
