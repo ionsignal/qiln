@@ -79,7 +79,6 @@ function toolProgress(reporter: Reporter): (event: tools.Progress) => void {
 }
 
 function iamProgress(reporter: Reporter): (event: MutationProgress) => void {
-  // Policy actions are labeled with their key at report time.
   const steps: Record<MutationProgress['action'], { label: string; detail: string }> = {
     'create-user': {
       label: 'Operator',
@@ -283,23 +282,22 @@ async function maintain(
   let policiesChanged = false
   try {
     reporter.section('Root sign-in')
-    reporter.action(`Sign in as the root user of recorded AWS account ${saved.identity.accountId}.`)
     reporter.info('This separate root context does not replace or remove the saved ordinary operator login.')
+    reporter.space()
+    reporter.action(`Sign in as the root user of recorded AWS account ${saved.identity.accountId}.`)
     await inspectRoot(bootstrap, cli, flow, prompts, signal, reporter)
     const proposal = bootstrap.proposal()
     const modes = modesOf(proposal)
     policiesChanged = POLICY_KEYS.some(key => modes[key] !== 'none')
     reportPermissionChange(reporter, proposal)
-    // Declining before approval leaves no mutation authority to retain.
     if (policiesChanged && !(await prompts.consent('Apply the displayed IAM policy changes'))) {
       await bootstrap.decline()
       reporter.row('verified', 'Root context', 'processes terminated and local authentication removed')
       reportDeclined(reporter)
       return 'declined'
     }
-    // Approval of the displayed proposal is persisted as the immutable approval
-    // before any IAM mutation.
     await bootstrap.approve(proposal, signal)
+    reporter.section('IAM update')
     await bootstrap.apply(signal, iamProgress(reporter))
     await bootstrap.complete()
   } catch (error: unknown) {
@@ -528,7 +526,7 @@ export async function connect(options: AwsCommandOptions, reporter: Reporter): P
       reporter.info('Operator onboarding and the current approved IAM configuration were verified.')
       break
     case 'changed':
-      reporter.info('Policy update completed with verified changes; the operator identity, password, and MFA enrollment were preserved.')
+      reporter.info('Policy update completed with verified changes.')
       break
     case 'unchanged':
       reporter.info('Policy update freshly verified matching live policy configuration without IAM changes or policy version creation.')

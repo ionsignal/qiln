@@ -44,7 +44,7 @@ export function reportPermissionChange(reporter: Reporter, proposal: Proposal): 
     ['Operator', proposal.operatorArn],
     ['EC2 permission scope', 'all commercial AWS regions'],
     ['Deployment region', proposal.deploymentRegion],
-    ['Default/login region', 'independent of the permission scope; editable by reconnecting and never changes the deployment region'],
+    ['Login region', 'independent of the permission scope; editable by reconnecting and never changes the deployment region'],
     ...POLICY_KEYS.map((key): DiagnosticFact => [policyLabel(key), describeMode(modes[key], proposal, key)]),
   ]
   for (const key of changed) {
