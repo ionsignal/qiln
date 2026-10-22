@@ -1,5 +1,5 @@
-import { utils } from 'ssh2'
 import { fingerprintOf } from './key'
+import { ssh2Utils } from './ssh2'
 
 interface ParsedPrivateKey {
   type: string
@@ -26,7 +26,7 @@ function isParsedKey(value: unknown): value is ParsedPrivateKey {
  */
 export function privateKeyFingerprint(privateKey: Buffer): string | null {
   try {
-    const parsed: unknown = utils.parseKey(privateKey)
+    const parsed: unknown = ssh2Utils.parseKey(privateKey)
     const keys: unknown[] = Array.isArray(parsed) ? parsed : [parsed]
     const [key] = keys
     if (keys.length !== 1 || !isParsedKey(key) || key.type !== 'ssh-ed25519' || !key.isPrivateKey()) {

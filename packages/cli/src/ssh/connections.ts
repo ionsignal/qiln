@@ -1,4 +1,4 @@
-import { Client } from 'ssh2'
+
 import { SshError } from './failure'
 import { fingerprintOf } from './key'
 import { Link } from './link'
@@ -10,7 +10,9 @@ import {
   type ExecLimits,
   type SshOptions,
 } from './options'
+import { SshClient } from './ssh2'
 import { uploadFile, type UploadOptions, type UploadResult } from './upload'
+import type { Client } from 'ssh2'
 import type { DiagnosticFact } from '../diagnostic/error'
 
 export interface CommandResult {
@@ -224,7 +226,7 @@ export async function withSsh<T>(
   if (signal.aborted) {
     throw new SshError({ kind: 'cancelled' })
   }
-  const client = new Client()
+  const client = new SshClient()
   const handshake: Handshake = { observed: undefined }
   const link = new Link()
   client.on('error', () => link.lose())
