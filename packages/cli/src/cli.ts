@@ -133,12 +133,26 @@ export async function run(argumentsList: readonly string[]): Promise<number> {
             reporter.header('aws deployment inspect', 'fresh deployment observation')
             await aws.deployment.inspect(options, reporter)
           },
-          async ssh(options, color) {
+          async verify(options, color) {
             command = 'aws'
             reporter = new Reporter({ color })
             assertUnprivilegedInvocation()
-            reporter.header('aws deployment ssh', 'pinned SSH login check')
-            await aws.deployment.ssh(options, reporter)
+            reporter.header('aws deployment verify', 'read-only guest baseline')
+            await aws.deployment.verify(options, reporter)
+          },
+          async push(options, color) {
+            command = 'aws'
+            reporter = new Reporter({ color })
+            assertUnprivilegedInvocation()
+            reporter.header('aws deployment push', 'local source delivery')
+            await aws.deployment.push(options, reporter)
+          },
+          ssh(_options, color) {
+            command = 'aws'
+            reporter = new Reporter({ color })
+            assertUnprivilegedInvocation()
+            reporter.header('aws deployment ssh', 'interactive session (unavailable)')
+            aws.deployment.ssh()
           },
           async remove(options, color) {
             command = 'aws'

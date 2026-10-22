@@ -4,6 +4,7 @@ import { InstallerError } from './diagnostic/error'
 import {
   convertAwsDeploymentCreateOptions,
   convertAwsDeploymentOptions,
+  convertAwsDeploymentPushOptions,
   convertAwsOptions,
   convertUpOptions,
 } from './input'
@@ -18,6 +19,8 @@ import type {
   AwsDeploymentCreateOptions,
   AwsDeploymentInput,
   AwsDeploymentOptions,
+  AwsDeploymentPushInput,
+  AwsDeploymentPushOptions,
   AwsInput,
   UpInput,
 } from './input'
@@ -40,6 +43,8 @@ export interface ProgramHandlers {
       status(options: AwsDeploymentOptions, color: ColorMode): void | Promise<void>
       list(color: ColorMode): void | Promise<void>
       inspect(options: AwsDeploymentOptions, color: ColorMode): void | Promise<void>
+      verify(options: AwsDeploymentOptions, color: ColorMode): void | Promise<void>
+      push(options: AwsDeploymentPushOptions, color: ColorMode): void | Promise<void>
       ssh(options: AwsDeploymentOptions, color: ColorMode): void | Promise<void>
       remove(options: AwsDeploymentOptions, color: ColorMode): void | Promise<void>
     }
@@ -242,10 +247,38 @@ export function createProgram(handlers: ProgramHandlers, output: ProgramOutput):
         program.opts<GlobalOptions>().color,
       ),
     )
+    const verify = deployment
+      .command('verify')
+      .description('Retain the server host-key pin if needed, then run fixed read-only probes over the pinned SSH connection and report whether the guest meets the basic baseline.')
+      .summary('Verify the basic guest baseline.')
+    addSelectorOptions(verify)
+    describeHelp(verify, deploymentHelp.verify)
+    verify.action(() =>
+      awsHandlers.deployment.verify(
+        convertAwsDeploymentOptions(verify.opts<AwsDeploymentInput>()),
+        program.opts<GlobalOptions>().color,
+      ),
+    )
+    const push = deployment
+      .command('push')
+      .description('Deliver the current local development source of the invoking Git checkout to a fresh directory on the recorded host after approval, without installing or activating it.')
+      .summary('Deliver the local development source.')
+    addSelectorOptions(push)
+    addSingleOption(
+      push,
+      new Option('--source <source>', 'Select what to deliver: local (default) or release (unavailable).'),
+    )
+    describeHelp(push, deploymentHelp.push)
+    push.action(() =>
+      awsHandlers.deployment.push(
+        convertAwsDeploymentPushOptions(push.opts<AwsDeploymentPushInput>()),
+        program.opts<GlobalOptions>().color,
+      ),
+    )
     const ssh = deployment
       .command('ssh')
-      .description('Retain the server host-key pin if needed, then verify the pinned host key and administrative key by running one fixed read-only command over SSH.')
-      .summary('Verify SSH access with a pinned host key.')
+      .description('Reserved for an interactive administrative session. It is not available yet and stops with an explanation.')
+      .summary('Unavailable: interactive administrative SSH.')
     addSelectorOptions(ssh)
     describeHelp(ssh, deploymentHelp.ssh)
     ssh.action(() =>

@@ -29,6 +29,16 @@ export interface AwsDeploymentOptions {
   selector: DeploymentSelector
 }
 
+export type PushSource = 'local' | 'release'
+
+export interface AwsDeploymentPushInput extends AwsDeploymentInput {
+  source?: string
+}
+
+export interface AwsDeploymentPushOptions extends AwsDeploymentOptions {
+  source: PushSource
+}
+
 export function convertAwsOptions(input: AwsInput): AwsCommandOptions {
   if (input.name === undefined) {
     return {}
@@ -89,6 +99,29 @@ export function convertAwsDeploymentOptions(input: AwsDeploymentInput): AwsDeplo
   }
   return {
     selector: { kind: 'alias', value: validateAwsAlias(input.alias ?? AWS_SPEC.deployment.defaultName) },
+  }
+}
+
+/**
+ * `release` is recognized so that the push command itself can refuse it. The
+ * source is a plain string rather than a Commander choice, because a Commander
+ * argument error is always reported as an invalid color mode.
+ */
+export function convertAwsDeploymentPushOptions(input: AwsDeploymentPushInput): AwsDeploymentPushOptions {
+  const { source = 'local', ...selection } = input
+  if (source !== 'local' && source !== 'release') {
+    throw new InstallerError({
+      code: 'INVALID_ARGUMENT',
+      facts: [
+        ['Option', '--source'],
+        ['Observed', 'The source must be local or release.'],
+      ],
+      retry: 'qiln aws deployment --help',
+    })
+  }
+  return {
+    ...convertAwsDeploymentOptions(selection),
+    source,
   }
 }
 
