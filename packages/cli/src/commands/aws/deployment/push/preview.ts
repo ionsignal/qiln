@@ -1,7 +1,7 @@
 import { deploymentName } from '../../../../aws/deployment/alias'
 import { MIB, SOURCE_SPEC } from '../../../../source/spec'
 import type { DiagnosticFact } from '../../../../diagnostic/error'
-import type { Destination } from '../../../../guest/deliver'
+import type { Destination } from '../../../../remote/deliver'
 import type { Archive } from '../../../../source/archive'
 import type { Selection } from '../../../../source/select'
 import type { Reporter } from '../../../../terminal/reporter'

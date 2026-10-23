@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { InstallerError } from '../diagnostic/error'
 import { SshError } from '../ssh/failure'
+import { shellCommand } from './shell'
 import type { Archive } from '../source/archive'
 import type { Remote } from '../ssh/connections'
 
@@ -68,13 +69,6 @@ export function fresh(): Destination {
   }
 }
 
-/**
- * Scripts contain no single quotes, so they travel as one literal argument.
- */
-function shell(script: string): string {
-  return `/bin/sh -c '${script}'`
-}
-
 async function guarded<T>(stage: Stage, destination: Destination, run: () => Promise<T>): Promise<T> {
   try {
     return await run()
@@ -92,7 +86,7 @@ async function guarded<T>(stage: Stage, destination: Destination, run: () => Pro
  */
 export async function tools(remote: Remote, destination: Destination): Promise<void> {
   const script = `for tool in ${TOOLS.join(' ')}; do command -v "$tool" >/dev/null 2>&1 || { echo "$tool"; exit 1; }; done`
-  const result = await guarded('tools', destination, () => remote.exec(shell(script)))
+  const result = await guarded('tools', destination, () => remote.exec(shellCommand(script)))
   if (result.exitCode !== 0) {
     const missing = TOOLS.find(tool => tool === result.stdout.trim())
     throw new DeliveryError(
@@ -146,7 +140,7 @@ function prepareReason(code: number): string {
 }
 
 export async function prepare(remote: Remote, destination: Destination): Promise<void> {
-  const result = await guarded('prepare', destination, () => remote.exec(shell(prepareScript(destination))))
+  const result = await guarded('prepare', destination, () => remote.exec(shellCommand(prepareScript(destination))))
   if (result.exitCode !== 0) {
     throw new DeliveryError('prepare', destination, prepareReason(result.exitCode))
   }
@@ -175,8 +169,8 @@ export async function upload(
 }
 
 /**
- * Agreement establishes byte identity of the uploaded archive, not safe
- * archive structure.
+ * Agreement establishes byte identity of the uploaded archive. It says nothing
+ * about the archive's structure, and the members are never inspected.
  */
 export async function digest(remote: Remote, destination: Destination, archive: Archive): Promise<void> {
   const result = await guarded('digest', destination, () => remote.exec(`sha256sum -- ${destination.archive}`))
@@ -194,8 +188,10 @@ export async function digest(remote: Remote, destination: Destination, archive: 
 
 /**
  * Runs without sudo. The flags constrain ownership and permission restoration
- * only; safe member paths and the absence of links are guaranteed when the
- * source is selected.
+ * only. Source selection refuses links and unusual paths with pathname checks
+ * and a scan before and after packaging; those reduce races but are not
+ * race-proof capture or containment, and the archive members are not
+ * inspected here.
  */
 export async function extract(remote: Remote, destination: Destination): Promise<void> {
   const command = `umask 022 && tar --no-same-owner --no-same-permissions -xzf ${destination.archive} -C ${destination.source}`

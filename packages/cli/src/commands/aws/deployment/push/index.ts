@@ -1,43 +1,17 @@
-import { InstallerError, type DiagnosticFact } from '../../../../diagnostic/error'
+import { InstallerError } from '../../../../diagnostic/error'
 import { requireAwsHost } from '../../../../aws/host'
-import { runBaseline, unmetChecks } from '../../../../guest/baseline'
 import { withArchive, type Archive } from '../../../../source/archive'
 import { selectSource } from '../../../../source/select'
 import { Prompts, withCancellation } from '../../../../terminal/prompts'
 import { withConfirmedOperation } from '../../shared'
 import { openAccess, withRemote } from '../access'
+import { requireBaseline } from '../baseline'
 import { openTarget } from '../shared'
 import { mib, reportPush } from './preview'
-import * as deliver from '../../../../guest/deliver'
+import * as deliver from '../../../../remote/deliver'
 import type { AwsDeploymentPushOptions } from '../../../../input'
 import type { Remote } from '../../../../ssh/connections'
 import type { Reporter } from '../../../../terminal/reporter'
-
-/**
- * Delivery starts only from a guest whose baseline passed. Every check is
- * shown, and nothing is written on the guest when one is not met.
- */
-async function requireBaseline(
-  reporter: Reporter,
-  remote: Remote,
-  account: string,
-  deploymentId: string,
-): Promise<void> {
-  const checks = await runBaseline(remote, account)
-  reporter.facts(checks.map((check): DiagnosticFact => [check.label, `${check.status} · ${check.detail}`]))
-  const unmet = unmetChecks(checks)
-  if (unmet.length > 0) {
-    throw new InstallerError({
-      code: 'AWS_DEPLOYMENT_VERIFY_FAILED',
-      facts: [
-        ['Deployment', deploymentId],
-        ['Not passed', unmet.map(check => `${check.label} (${check.status})`).join(', ')],
-        ['Delivery', 'nothing was uploaded or written on the guest'],
-      ],
-      retry: `qiln aws deployment verify --id ${deploymentId}`,
-    })
-  }
-}
 
 async function transfer(
   reporter: Reporter,
@@ -90,7 +64,10 @@ export async function push(options: AwsDeploymentPushOptions, reporter: Reporter
         reporter.section('Guest baseline')
         reporter.row('working', 'Connecting', `${username}@${host}:${port} · pinned host key SHA256:${fingerprint}`)
         await withRemote(root, access, signal, async remote => {
-          await requireBaseline(reporter, remote, username, record.id)
+          await requireBaseline(reporter, remote, username, record.id, [
+            'Delivery',
+            'nothing was uploaded or written on the guest',
+          ])
           reporter.section('Source delivery')
           await transfer(reporter, remote, archive, destination)
         })

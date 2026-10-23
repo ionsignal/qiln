@@ -128,7 +128,7 @@ const PROBES: readonly Probe[] = [
   },
   { id: 'os-release', label: 'Operating system', command: 'cat /etc/os-release', judge: judgeOsRelease },
   { id: 'architecture', label: 'Architecture', command: 'uname -m', judge: judgeArchitecture },
-  { id: 'login', label: 'Administrative login', command: 'id -un', judge: judgeLogin },
+  { id: 'login', label: 'Admin login', command: 'id -un', judge: judgeLogin },
   { id: 'sudo', label: 'Sudo', command: 'sudo -n -u root -- /usr/bin/id -u', judge: judgeSudo },
 ]
 
@@ -136,7 +136,8 @@ const PROBES: readonly Probe[] = [
  * Runs the fixed read-only probes in order. A nonzero result does not stop
  * independent probes. A failed command channel destroys the connection, so the
  * remaining probes are not run. The interrupted probe is unverified when it
- * may have started. Cancellation propagates to the caller.
+ * may have started. Cancellation propagates to the caller, which receives no
+ * partial report.
  */
 export async function runBaseline(remote: Remote, account: string): Promise<Check[]> {
   const checks: Check[] = []
@@ -164,8 +165,18 @@ export async function runBaseline(remote: Remote, account: string): Promise<Chec
 }
 
 /**
- * Every check except the architecture observation must have passed.
+ * The status each check must have for the baseline to be met. The
+ * architecture is only ever observed, never passed, so its probe failing or
+ * being unverified still leaves the baseline unmet.
  */
+const REQUIRED_STATUS: Record<CheckId, CheckStatus> = {
+  'cloud-init': 'passed',
+  'os-release': 'passed',
+  architecture: 'observed',
+  login: 'passed',
+  sudo: 'passed',
+}
+
 export function unmetChecks(checks: readonly Check[]): Check[] {
-  return checks.filter(check => check.id !== 'architecture' && check.status !== 'passed')
+  return checks.filter(check => check.status !== REQUIRED_STATUS[check.id])
 }

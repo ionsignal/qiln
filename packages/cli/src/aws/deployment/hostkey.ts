@@ -7,7 +7,7 @@ import { KIND_IDS } from './graph'
  * A version-1 literal shape, like the other retained evidence. `source` names
  * the only channel that supplied it: the guest's console output as reported by
  * AWS. It is not an AWS-signed certificate or guest attestation, and it is
- * distinct from both the administrative login key and the EC2 key-pair
+ * distinct from both the admin login key and the EC2 key-pair
  * fingerprint.
  */
 export const hostKeySchema = z.strictObject({
