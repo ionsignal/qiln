@@ -17,13 +17,25 @@ export interface Listing {
   untracked: string[]
 }
 
-async function runGit(executable: string, directory: string, args: readonly string[]): Promise<ProcessResult> {
+/**
+ * An interrupted git process resolves with a null exit code instead of
+ * rejecting, so cancellation is checked before any result or failure is
+ * interpreted. Otherwise an interrupt would be reported as a source problem.
+ */
+async function runGit(
+  executable: string,
+  directory: string,
+  args: readonly string[],
+  signal: AbortSignal,
+): Promise<ProcessResult> {
+  let result: ProcessResult
   try {
-    return await runProcess(executable, ['-C', directory, ...args], {
+    result = await runProcess(executable, ['-C', directory, ...args], {
       timeoutMs: SOURCE_SPEC.git.timeoutMs,
       maxOutputBytes: SOURCE_SPEC.git.maxOutputBytes,
     })
   } catch (error: unknown) {
+    checkCancellation(signal)
     if (error instanceof ProcessExecutionError) {
       throw new InstallerError({
         code: PROCESS_CODES[error.kind],
@@ -33,14 +45,35 @@ async function runGit(executable: string, directory: string, args: readonly stri
     }
     throw error
   }
+  checkCancellation(signal)
+  return result
 }
 
-async function listOutput(executable: string, root: string, args: readonly string[], what: string): Promise<string> {
-  const result = await runGit(executable, root, args)
+async function listOutput(
+  executable: string,
+  root: string,
+  args: readonly string[],
+  what: string,
+  signal: AbortSignal,
+): Promise<string> {
+  const result = await runGit(executable, root, args, signal)
   if (result.exitCode !== 0) {
     throw refuse(`Git could not list ${what}.`)
   }
   return result.stdout
+}
+
+/**
+ * The preflight runs its own git calls, so an interrupted one must not be
+ * reported as a problem with the checkout.
+ */
+async function checkoutRoot(location: string, executable: string, signal: AbortSignal): Promise<string> {
+  try {
+    return (await validateSourcePreflight(location, executable)).sourceRoot
+  } catch (error: unknown) {
+    checkCancellation(signal)
+    throw error
+  }
 }
 
 /**
@@ -105,7 +138,7 @@ export async function listSource(directory: string, signal: AbortSignal): Promis
     throw missingTool('git')
   }
   checkCancellation(signal)
-  const top = await runGit(executable, directory, ['rev-parse', '--show-toplevel'])
+  const top = await runGit(executable, directory, ['rev-parse', '--show-toplevel'], signal)
   const location = top.stdout.trim()
   if (top.exitCode !== 0 || location === '') {
     throw new InstallerError({
@@ -114,25 +147,22 @@ export async function listSource(directory: string, signal: AbortSignal): Promis
       retry: 'qiln aws deployment push',
     })
   }
-  const { sourceRoot: root } = await validateSourcePreflight(location, executable)
-  checkCancellation(signal)
-  const sparse = await runGit(executable, root, ['config', '--bool', '--get', 'core.sparseCheckout'])
-  // Exit 1 means the setting is absent, which is the normal case.
+  const root = await checkoutRoot(location, executable, signal)
+  const sparse = await runGit(executable, root, ['config', '--bool', '--get', 'core.sparseCheckout'], signal)
   if (sparse.exitCode !== 0 && sparse.exitCode !== 1) {
     throw refuse('Git could not read its sparse-checkout setting.')
   }
   if (sparse.exitCode === 0 && sparse.stdout.trim() === 'true') {
     throw refuse('Sparse checkouts are not supported, because omitted files would silently be missing from the package.')
   }
-  checkCancellation(signal)
-  if ((await listOutput(executable, root, ['ls-files', '--unmerged', '-z'], 'unmerged paths')) !== '') {
+  if ((await listOutput(executable, root, ['ls-files', '--unmerged', '-z'], 'unmerged paths', signal)) !== '') {
     throw refuse('The working tree has unresolved merge conflicts.')
   }
-  checkCancellation(signal)
-  const tracked = trackedPaths(await listOutput(executable, root, ['ls-files', '-v', '-z', '--cached'], 'tracked files'))
-  checkCancellation(signal)
+  const tracked = trackedPaths(
+    await listOutput(executable, root, ['ls-files', '-v', '-z', '--cached'], 'tracked files', signal),
+  )
   const untracked = records(
-    await listOutput(executable, root, ['ls-files', '--others', '--exclude-standard', '-z'], 'untracked files'),
+    await listOutput(executable, root, ['ls-files', '--others', '--exclude-standard', '-z'], 'untracked files', signal),
   )
   if (tracked.length + untracked.length > SOURCE_SPEC.limits.entries) {
     throw refuse(`More than ${SOURCE_SPEC.limits.entries} paths were enumerated.`)
