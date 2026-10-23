@@ -70,6 +70,7 @@
     "cpu-features": false
   },
   "overrides": {
+    "ip-address": "^10.7.4",
     "braces": "npm:@franciscosolis/braces@3.1.1"
   },
   "dependencies": {
@@ -77,10 +78,10 @@
     "@fastify/autoload": "6.5.1",
     "@fastify/compress": "9.2.2",
     "@fastify/cookie": "11.1.3",
-    "@fastify/middie": "9.3.5",
-    "@fastify/multipart": "10.1.4",
+    "@fastify/middie": "9.3.6",
+    "@fastify/multipart": "10.1.6",
     "@fastify/rate-limit": "11.2.1",
-    "@fastify/static": "10.1.6",
+    "@fastify/static": "10.1.7",
     "@fastify/websocket": "11.3.4",
     "@mdi/js": "7.4.47",
     "@nats-io/transport-node": "3.4.0",
@@ -92,7 +93,7 @@
     "@trpc/server": "11.19.0",
     "@vue-flow/core": "1.48.2",
     "bcrypt": "6.0.0",
-    "c12": "4.0.0-rc.2",
+    "c12": "4.0.0-rc.3",
     "close-with-grace": "2.5.0",
     "drizzle-orm": "1.0.0-rc.4",
     "fastify": "5.12.7",
@@ -122,7 +123,7 @@
     "prettier": "3.9.10",
     "prettier-plugin-jsdoc": "1.8.1",
     "rimraf": "6.1.3",
-    "tsc-alias": "1.9.8",
+    "tsc-alias": "1.9.9",
     "typescript": "6.0.3",
     "vitest": "5.0.5",
     "vue-tsc": "3.3.13"
