@@ -173,8 +173,10 @@ async function capture(
 
 /**
  * Captures the selection into one private `.tar.gz`, then lends it to `use`
- * (approval and upload) and removes the work directory afterwards. The
- * directory is kept only when tar termination is unconfirmed, because tar may
+ * (approval and upload) and removes the work directory afterwards. Removal is
+ * best-effort: a failure to remove it is ignored and never changes the outcome
+ * of `use`, including a delivery that already succeeded. The directory is
+ * deliberately kept only when tar termination is unconfirmed, because tar may
  * still be writing into it. `directory` is the invoking directory, which is
  * rescanned after packaging to detect edits.
  */
