@@ -9,6 +9,7 @@ import { incusDiagnostics } from './incus'
 import { installationDiagnostics } from './installation'
 import { sshDiagnostics } from './ssh'
 import { stateDiagnostics } from './state'
+import { zfsDiagnostics } from './zfs'
 
 export type { DiagnosticDefinition } from './define'
 
@@ -24,6 +25,7 @@ export const catalog = Object.freeze({
   ...awsDeploymentDiagnostics,
   ...awsDeliveryDiagnostics,
   ...sshDiagnostics,
+  ...zfsDiagnostics,
 })
 
 const domainCodeCount = [
@@ -38,6 +40,7 @@ const domainCodeCount = [
   awsDeploymentDiagnostics,
   awsDeliveryDiagnostics,
   sshDiagnostics,
+  zfsDiagnostics,
 ].reduce((total, domain) => total + Object.keys(domain).length, 0)
 
 if (Object.keys(catalog).length !== domainCodeCount) {
