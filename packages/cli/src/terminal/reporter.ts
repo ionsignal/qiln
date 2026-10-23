@@ -228,6 +228,16 @@ export class Reporter {
     this.message('Notice', message, ['yellow', 'bold'])
   }
 
+  public notices(messages: readonly string[]): void {
+    if (messages.length === 0) {
+      return
+    }
+    this.space()
+    for (const message of messages) {
+      this.notice(message)
+    }
+  }
+
   public info(message: string): void {
     this.message('Info', message, 'cyan')
   }

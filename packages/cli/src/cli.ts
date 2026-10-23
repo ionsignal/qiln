@@ -1,4 +1,3 @@
-import * as aws from './commands/aws'
 import { diagnostic as awsDiagnostic, isCancellation } from './aws/errors'
 import { CommanderError } from 'commander'
 import { doctor } from './commands/doctor'
@@ -7,6 +6,7 @@ import { InstallerError } from './diagnostic/error'
 import { ProcessExecutionError } from './process'
 import { createProgram, parserFailure, type GlobalOptions } from './program'
 import { Reporter, type OutputStream } from './terminal/reporter'
+import * as aws from './commands/aws'
 
 type OperationalCommand = 'doctor' | 'up' | 'aws'
 
@@ -139,6 +139,13 @@ export async function run(argumentsList: readonly string[]): Promise<number> {
             assertUnprivilegedInvocation()
             reporter.header('aws deployment verify', 'read-only guest baseline')
             await aws.deployment.verify(options, reporter)
+          },
+          async prepare(options, color) {
+            command = 'aws'
+            reporter = new Reporter({ color })
+            assertUnprivilegedInvocation()
+            reporter.header('aws deployment prepare', 'approved ZFS prerequisites')
+            await aws.deployment.prepare(options, reporter)
           },
           async push(options, color) {
             command = 'aws'

@@ -10,7 +10,9 @@ import {
 } from '../../../aws/deployment/facts'
 import { removalOutcome } from '../../../aws/deployment/outcome'
 import { refusals } from '../../../aws/deployment/step'
+import { prepared, unsettled, zfsFacts } from '../../../aws/deployment/zfs/facts'
 import { released, resourceId, resources, retained, unreleased, type Resource } from '../../../aws/deployment/topology'
+import type { ZfsRecord } from '../../../aws/deployment/zfs/types'
 import type { Disposition } from '../../../aws/deployment/graph'
 import type { DiagnosticFact } from '../../../diagnostic/error'
 import type { Deployment, Observation, ObservedState } from '../../../aws/deployment/types'
@@ -194,25 +196,59 @@ export function reportDeployment(reporter: Reporter, record: Deployment): void {
       'Removal never deletes the local key files, and deleting the AWS key pair is not guest SSH revocation.',
     )
   }
-  if (unresolved) {
-    reporter.space()
-    reporter.notice(
-      'Resources or unresolved effects may remain. No replay, adoption, deletion, rollback, or automatic recovery was attempted.',
-    )
-  }
-  if (retained(record).length > 0) {
-    reporter.space()
-    reporter.notice(
-      'Retained resources are never deleted by Qiln. They keep incurring charges for as long as they exist, including after the instance is terminated, until they are deleted outside Qiln.',
-    )
-  }
-  if (record.latest?.resources.some(resource => resource.state === 'absent')) {
-    reporter.space()
-    reporter.notice('Absence never proves who deleted a resource.')
-  }
+  reporter.notices([
+    ...(unresolved
+      ? [
+          'Resources or unresolved effects may remain. No replay, adoption, deletion, rollback, or automatic recovery was attempted.',
+        ]
+      : []),
+    ...(retained(record).length > 0
+      ? [
+          'Retained resources are never deleted by Qiln. They keep incurring charges for as long as they exist, including after the instance is terminated, until they are deleted outside Qiln.',
+        ]
+      : []),
+    ...(record.latest?.resources.some(resource => resource.state === 'absent')
+      ? ['Absence never proves who deleted a resource.']
+      : []),
+  ])
   reportResources(reporter, record)
   if (record.removals.length > 0) {
     reporter.section('Removal outcome')
     reporter.facts(removalOutcome(record).map((row): DiagnosticFact => [row.label, `${row.state} · ${row.detail}`]))
   }
+}
+
+/**
+ * Retained preparation evidence only. Absence is not a statement about the host
+ * or its data volume.
+ */
+export function reportZfs(reporter: Reporter, preparation: ZfsRecord | null): void {
+  reporter.section('ZFS preparation')
+  if (preparation === null) {
+    reporter.info('No ZFS preparation evidence is retained. This does not establish the state of the host or its data volume.')
+    return
+  }
+  reporter.facts([
+    ...zfsFacts(preparation),
+    [
+      'Storage preparation',
+      prepared(preparation)
+        ? 'pool verified and scrub timer verified when last recorded; not freshly observed'
+        : 'not complete',
+    ],
+    ['Recorded steps', String(preparation.steps.length)],
+  ])
+  if (unsettled(preparation).length > 0) {
+    reporter.space()
+    reporter.notice(
+      'A preparation step has no verified outcome. Interrupted remote work may already have completed, and nothing was replayed, resumed, or rolled back.',
+    )
+  }
+}
+
+export function reportZfsUnreadable(reporter: Reporter): void {
+  reporter.section('ZFS preparation')
+  reporter.notice(
+    'The ZFS preparation evidence is unreadable or incompatible, so conflicting work is refused. It was not repaired, migrated, or discarded.',
+  )
 }

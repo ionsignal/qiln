@@ -1,5 +1,6 @@
 import type { Action } from '../../../aws/deployment/graph'
 import type { ProgressSink, ProgressTask } from '../../../aws/deployment/progress'
+import type { StepAction } from '../../../remote/zfs/spec'
 import type { Reporter } from '../../../terminal/reporter'
 
 const LABELS: Record<Action, string> = {
@@ -31,6 +32,17 @@ const LABELS: Record<Action, string> = {
   'delete-vpc': 'Delete VPC',
 }
 
+const ZFS_LABELS: Record<StepAction, string> = {
+  'install-packages': 'Install the approved ZFS packages',
+  'write-arc': 'Write the ZFS ARC limit file',
+  'load-module': 'Load the ZFS kernel module',
+  'apply-arc': 'Apply the running ZFS ARC limit',
+  'create-pool': 'Create the ZFS pool',
+  'import-pool': 'Import the ZFS pool',
+  'export-pool': 'Export the ZFS pool',
+  'enable-scrub': 'Enable the monthly ZFS scrub timer',
+}
+
 function title(task: ProgressTask): string {
   switch (task.kind) {
     case 'key':
@@ -39,6 +51,8 @@ function title(task: ProgressTask): string {
       return 'AWS health'
     case 'hostkey':
       return 'SSH host key'
+    case 'zfs':
+      return 'ZFS'
     case 'step':
       return `Step ${task.position}/${task.total}`
   }
@@ -52,6 +66,8 @@ function subject(task: ProgressTask): string {
       return 'Check AWS instance and attached-EBS status'
     case 'hostkey':
       return 'Read the server host key from AWS console output'
+    case 'zfs':
+      return ZFS_LABELS[task.action]
     case 'step': {
       const label = LABELS[task.action]
       return task.slot > 0 ? `${label} #${task.slot + 1}` : label
@@ -67,6 +83,8 @@ function verifiedDetail(task: ProgressTask): string {
       return 'running with system, instance and attached-EBS checks ok; point-in-time AWS status only'
     case 'hostkey':
       return 'Ed25519 fingerprint retained as AWS-reported console evidence; not guest attestation'
+    case 'zfs':
+      return 'a fresh inspection agrees with the approved result'
     case 'step':
       return 'observation agrees with the record'
   }

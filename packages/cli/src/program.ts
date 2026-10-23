@@ -44,6 +44,7 @@ export interface ProgramHandlers {
       list(color: ColorMode): void | Promise<void>
       inspect(options: AwsDeploymentOptions, color: ColorMode): void | Promise<void>
       verify(options: AwsDeploymentOptions, color: ColorMode): void | Promise<void>
+      prepare(options: AwsDeploymentOptions, color: ColorMode): void | Promise<void>
       push(options: AwsDeploymentPushOptions, color: ColorMode): void | Promise<void>
       ssh(options: AwsDeploymentOptions, color: ColorMode): void | Promise<void>
       remove(options: AwsDeploymentOptions, color: ColorMode): void | Promise<void>
@@ -58,8 +59,6 @@ export interface ProgramOutput {
 function addSingleOption(command: Command, option: Option): void {
   let supplied = false
   command.addOption(option)
-  // Commander owns option recognition and value parsing. Its option event
-  // enforces single occurrence without introducing another argv parser.
   command.on(`option:${option.name()}`, () => {
     if (supplied) {
       const flag = `--${option.name()}`
@@ -259,6 +258,18 @@ export function createProgram(handlers: ProgramHandlers, output: ProgramOutput):
         program.opts<GlobalOptions>().color,
       ),
     )
+    const prepare = deployment
+      .command('prepare')
+      .description('Retain the server host-key pin if needed, then read the host over the pinned SSH connection, display each ZFS preparation plan for the recorded data volume, and, after separate approval of each, apply it: first the prerequisites, then one single-disk pool, created or imported by its recorded GUID, with its monthly scrub timer.')
+      .summary('Prepare ZFS storage after approval.')
+    addSelectorOptions(prepare)
+    describeHelp(prepare, deploymentHelp.prepare)
+    prepare.action(() =>
+      awsHandlers.deployment.prepare(
+        convertAwsDeploymentOptions(prepare.opts<AwsDeploymentInput>()),
+        program.opts<GlobalOptions>().color,
+      ),
+    )
     const push = deployment
       .command('push')
       .description('Deliver the current local development source of the invoking Git checkout to a fresh directory on the recorded host after approval, without installing or activating it.')
@@ -289,7 +300,7 @@ export function createProgram(handlers: ProgramHandlers, output: ProgramOutput):
     )
     const remove = deployment
       .command('remove')
-      .description('Approve and remove the removable recorded resources, then observe and retain their absence. Retained storage is not removed.')
+      .description('Approve and remove the removable recorded resources, then observe and retain their absence. A ZFS pool recorded as imported is exported first under its own approval. Retained storage is not removed.')
       .summary('Remove one approved deployment.')
     addSelectorOptions(remove)
     describeHelp(remove, deploymentHelp.remove)

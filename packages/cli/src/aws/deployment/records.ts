@@ -4,16 +4,18 @@ import { isConsistent } from './audit'
 import { vacated } from './facts'
 import { reusable } from './reuse'
 import { requireTransition } from './transitions'
-import { sameIdentity } from '../auth/identity'
 import { stateFailure } from '../errors'
 import { isErrorCode } from '../guards'
 import { userId } from '../host'
 import { encodeRecord } from '../json'
 import { requireOperationLock } from '../root'
-import { isOperationId, type AwsIdentity } from '../types'
+import { sameIdentity } from '../auth/identity'
+import { requirePoolReleased } from './zfs/facts'
 import { InstallerError } from '../../diagnostic/error'
+import { isOperationId, type AwsIdentity } from '../types'
 import { openChildDir, readChild, writeChild, type Dir } from '../../state/files'
 import { isDeployment, type Deployment } from './types'
+import * as zfs from './zfs/records'
 import type { DeploymentSelector } from './alias'
 
 function invalid(): never {
@@ -159,13 +161,14 @@ export async function create(root: Dir, record: Deployment): Promise<void> {
   ) {
     return invalid()
   }
+  if (volume.kind === 'reuse' && previous !== null) {
+    requirePoolReleased(await zfs.read(await directoryOf(root, previous.id), previous), previous.id)
+  }
   const directory = await openDirectory(root, initial.id, true)
   if (!directory || (await directory.list()).length !== 0) {
     return invalid()
   }
   await write(directory, initial)
-  // The successor's record is written first, so a failure before this handoff
-  // leaves the volume claimed by the chain tip rather than claimed twice.
   if (volume.kind === 'reuse' && previous !== null) {
     await save(root, { ...previous, handoff: { to: initial.id, at: new Date().toISOString() } })
   }

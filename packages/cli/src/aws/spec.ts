@@ -2,6 +2,7 @@ export const AWS_RECORD_VERSION = Object.freeze({
   connection: 1,
   pending: 1,
   deployment: 1,
+  zfs: 1,
 })
 
 export const AWS_SPEC = Object.freeze({
@@ -190,6 +191,7 @@ export const AWS_SPEC = Object.freeze({
     lock: 'connections.lock',
     connection: 'connection.json',
     deployment: 'deployment.json',
+    zfs: 'zfs.json',
     pending: 'pending.json',
     root: 'root',
     auth: 'auth',
@@ -202,6 +204,7 @@ export const AWS_SPEC = Object.freeze({
   },
   limits: {
     record: 65_536,
+    zfs: 131_072,
     config: 65_536,
     cache: 262_144,
     privateKey: 4_096,

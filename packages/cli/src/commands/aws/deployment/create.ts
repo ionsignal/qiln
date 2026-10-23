@@ -1,7 +1,9 @@
-import { findPin } from '../../../aws/ami'
+
+import { AWS_SPEC } from '../../../aws/spec'
 import { POLICY_KEYS, enrolledKeys } from '../../../aws/permission/keys'
-import { requireEnvelope } from '../../../aws/permission/envelope'
+import { findPin } from '../../../aws/ami'
 import { Session } from '../../../aws/auth/session'
+import { requireEnvelope } from '../../../aws/permission/envelope'
 import { deploymentName } from '../../../aws/deployment/alias'
 import { requireBound } from '../../../aws/deployment/binding'
 import { validSource } from '../../../aws/deployment/cidr'
@@ -10,10 +12,10 @@ import { expectation, matches } from '../../../aws/deployment/expect'
 import { evaluate, isBlocked } from '../../../aws/deployment/proposal/evaluate'
 import { prepare } from '../../../aws/deployment/proposal/prepare'
 import { reusable, type Reuse } from '../../../aws/deployment/reuse'
+import { requirePoolReleased } from '../../../aws/deployment/zfs/facts'
 import { reviewRequired } from '../../../aws/permission/spec'
 import { requireAwsHost } from '../../../aws/host'
 import { requireKeygen } from '../../../aws/ssh/generate'
-import { AWS_SPEC } from '../../../aws/spec'
 import { Prompts, withCancellation } from '../../../terminal/prompts'
 import { InstallerError } from '../../../diagnostic/error'
 import { resolveAwsName, type AwsDeploymentCreateOptions } from '../../../input'
@@ -23,6 +25,7 @@ import { progressSink } from './progress'
 import { observationSummary, reportDeployment } from './report'
 import * as deployments from '../../../aws/deployment/records'
 import * as connections from '../../../aws/connection/records'
+import * as lineage from '../../../aws/deployment/zfs/lineage'
 import type { Dir } from '../../../state/files'
 import type { Deployment } from '../../../aws/deployment/types'
 import type { AwsConnection, ManagedOperator } from '../../../aws/types'
@@ -136,6 +139,9 @@ export async function create(options: AwsDeploymentCreateOptions, reporter: Repo
           `Reuse ${offer.volumeId} from the previously removed deployment`,
         ])
         reuse = choice === 1 ? offer : null
+      }
+      if (previous !== null && reuse !== null) {
+        requirePoolReleased(await lineage.evidence(root, previous), previous.id)
       }
       const session = await Session.open(directory, connection.region)
       const authentication = await authenticate(session, connection.identity, signal)

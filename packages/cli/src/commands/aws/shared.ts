@@ -1,18 +1,20 @@
 import { join } from 'node:path'
-import { InstallerError, type DiagnosticFact } from '../../diagnostic/error'
-import * as connections from '../../aws/connection/records'
-import { deploymentFacts, effects } from '../../aws/deployment/facts'
-import * as deployments from '../../aws/deployment/records'
-import type { Deployment } from '../../aws/deployment/types'
+import { AWS_SPEC } from '../../aws/spec'
+import { POLICY_KEYS } from '../../aws/permission/keys'
 import { diagnostic } from '../../aws/errors'
-import { authRecovery, deploymentRecovery, iamRecovery, terminationConfirmed } from '../../aws/recovery'
 import { pendingFacts } from '../../aws/iam/facts'
+import { InstallerError, type DiagnosticFact } from '../../diagnostic/error'
+import { deploymentFacts, effects } from '../../aws/deployment/facts'
+import { requirePoolSettled } from '../../aws/deployment/zfs/facts'
+import { authRecovery, deploymentRecovery, iamRecovery, terminationConfirmed } from '../../aws/recovery'
 import { requireAuthentication } from '../../aws/auth/identity'
 import { removeAuth, Session } from '../../aws/auth/session'
-import type { Pending } from '../../aws/iam/types'
-import { POLICY_KEYS } from '../../aws/permission/keys'
 import { withAwsOperation, type AwsState } from '../../aws/root'
-import { AWS_SPEC } from '../../aws/spec'
+import * as connections from '../../aws/connection/records'
+import * as deployments from '../../aws/deployment/records'
+import * as lineage from '../../aws/deployment/zfs/lineage'
+import type { Pending } from '../../aws/iam/types'
+import type { Deployment } from '../../aws/deployment/types'
 import type { AwsAuthentication, AwsConnection, AwsIdentity } from '../../aws/types'
 import type { Dir } from '../../state/files'
 import type { Reporter } from '../../terminal/reporter'
@@ -83,8 +85,9 @@ export async function withConfirmedOperation<T>(create: boolean, run: (state: Aw
 
 /**
  * Local removal discards the managed binding, so it is refused while retained
- * deployment evidence indicates that resources or unresolved effects may remain.
- * Returns the settled deployments, which stay on disk after removal.
+ * deployment evidence indicates that resources or unresolved effects may remain,
+ * including an unsettled pool-affecting ZFS step. Returns the settled
+ * deployments, which stay on disk after removal.
  */
 export async function requireSettledDeployments(root: Dir, identity: AwsIdentity): Promise<Deployment[]> {
   const bound = await deployments.bound(root, identity)
@@ -104,6 +107,9 @@ export async function requireSettledDeployments(root: Dir, identity: AwsIdentity
       ],
       retry: `qiln aws deployment status --id ${first.id}`,
     })
+  }
+  for (const record of bound) {
+    requirePoolSettled(await lineage.evidence(root, record), record.id)
   }
   return bound
 }

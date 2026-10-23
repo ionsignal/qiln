@@ -2,17 +2,26 @@ import { InstallerError, type DiagnosticFact } from '../../../diagnostic/error'
 import { deploymentName } from '../../../aws/deployment/alias'
 import { expectation, matches } from '../../../aws/deployment/expect'
 import { cleanup, deploymentFacts, removable } from '../../../aws/deployment/facts'
-import type { Action } from '../../../aws/deployment/graph'
-import { removalPlan, retained, unreleased } from '../../../aws/deployment/topology'
+import { removalPlan, retained, sshReady, unreleased } from '../../../aws/deployment/topology'
+import { poolState, requirePoolReleased, requirePoolSettled } from '../../../aws/deployment/zfs/facts'
+import { Preparer } from '../../../aws/deployment/zfs/prepare'
+import { targetOf } from '../../../aws/deployment/zfs/target'
 import { requireAwsHost } from '../../../aws/host'
 import { Prompts, withCancellation } from '../../../terminal/prompts'
 import { withConfirmedOperation } from '../shared'
+import { openAccess, withRemote } from './access'
+import { requireBaseline } from './baseline'
+import { approvalLabel, reportPlan } from './prepare/preview'
 import { progressSink } from './progress'
 import { lifecycleOf, observationSummary, reportDeployment } from './report'
-import { authenticateDeployer, openTarget } from './shared'
+import { authenticateDeployer, openTarget, type Target } from './shared'
+import * as lineage from '../../../aws/deployment/zfs/lineage'
+import type { DeploymentSelector } from '../../../aws/deployment/alias'
+import type { Action } from '../../../aws/deployment/graph'
+import type { Dir } from '../../../state/files'
+import type { Reporter } from '../../../terminal/reporter'
 import type { Deployment, Observation } from '../../../aws/deployment/types'
 import type { AwsDeploymentOptions } from '../../../input'
-import type { Reporter } from '../../../terminal/reporter'
 
 const EFFECTS: Partial<Record<Action, string>> = {
   'disassociate-address': 'Disassociate the Elastic IP from the primary network interface.',
@@ -78,13 +87,68 @@ function reportTarget(reporter: Reporter, record: Deployment, observation: Obser
   reporter.notice('Removal is not rolled back. Absence is observed afterwards and never proves who deleted a resource.')
 }
 
+/**
+ * Freshly checks the recorded pool over the pinned SSH connection, so a
+ * successor host can import it without force. A pool still imported is exported
+ * under its own default-no approval, and one observed absent only corroborates
+ * the retained export evidence. Declining leaves the host untouched, and an
+ * unreachable host refuses removal. Opening access may retain a host-key pin
+ * through its own deployer, so the target is read again afterwards and the
+ * caller never holds a stale record.
+ */
+async function checkPool(
+  root: Dir,
+  store: Dir,
+  selector: DeploymentSelector,
+  target: Target,
+  prompts: Prompts,
+  reporter: Reporter,
+  signal: AbortSignal,
+): Promise<Target> {
+  const { record } = target
+  const retry = `qiln aws deployment remove --id ${record.id}`
+  const zfsTarget = targetOf(record)
+  if (zfsTarget === null) {
+    throw new InstallerError({
+      code: 'INTERNAL_ERROR',
+      retry,
+    })
+  }
+  const access = await openAccess(root, target, retry, reporter, signal)
+  const recorded = await lineage.pool(root, record)
+  const { host, port, username, fingerprint } = access.options
+  reporter.section('ZFS host check')
+  reporter.row('working', 'Connecting', `${username}@${host}:${port} · pinned host key SHA256:${fingerprint}`)
+  await withRemote(root, access, signal, async remote => {
+    await requireBaseline(reporter, remote, username, record.id, [
+      'Removal',
+      'no ZFS check or export was completed and no AWS resource was changed',
+    ])
+    const preparer = await Preparer.open({
+      root,
+      deployment: record,
+      target: zfsTarget,
+      recorded,
+      remote,
+      hooks: {
+        show: (observation, plan) => reportPlan(reporter, { observation, plan, target: zfsTarget }),
+        approve: plan => prompts.approve(approvalLabel(plan)),
+        progress: progressSink(reporter),
+      },
+    })
+    await preparer.release(signal)
+  })
+  return await openTarget(root, store, selector)
+}
+
 export async function remove(options: AwsDeploymentOptions, reporter: Reporter): Promise<void> {
   requireAwsHost()
   const { selector } = options
   const message = await withCancellation(async signal => {
     const prompts = new Prompts(signal, `qiln aws deployment remove --${selector.kind} ${selector.value}`, reporter)
     return await withConfirmedOperation(false, async ({ root, connections: store }) => {
-      const target = await openTarget(root, store, selector)
+      let target = await openTarget(root, store, selector)
+      requirePoolSettled(await lineage.evidence(root, target.record), target.record.id)
       if (!removable(target.record)) {
         if (cleanup(target.record).status === 'not-needed' && retained(target.record).length > 0) {
           reportDeployment(reporter, target.record)
@@ -92,6 +156,11 @@ export async function remove(options: AwsDeploymentOptions, reporter: Reporter):
         }
         throw refusal(target.record)
       }
+      const poolOnRecord = poolState(await lineage.evidence(root, target.record))
+      if ((poolOnRecord === 'imported' || poolOnRecord === 'exported') && sshReady(target.record)) {
+        target = await checkPool(root, store, selector, target, prompts, reporter, signal)
+      }
+      requirePoolReleased(await lineage.evidence(root, target.record), target.record.id)
       const deployer = await authenticateDeployer(root, target, signal, progressSink(reporter))
       const observation = await deployer.observe(signal)
       const record = deployer.record

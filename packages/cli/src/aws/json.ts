@@ -37,11 +37,12 @@ export function sameJson(left: unknown, right: unknown): boolean {
 
 /**
  * Evidence is never pruned, so a record that would outgrow its read bound is
- * refused before writing rather than persisted unreadable.
+ * refused before writing rather than persisted unreadable. The bound defaults
+ * to the deployment record's and is passed explicitly by other record kinds.
  */
-export function encodeRecord(value: unknown, code: InstallerErrorCode): Buffer {
+export function encodeRecord(value: unknown, code: InstallerErrorCode, limit: number = AWS_SPEC.limits.record): Buffer {
   const bytes = Buffer.from(`${JSON.stringify(value, null, 2)}\n`)
-  if (bytes.byteLength > AWS_SPEC.limits.record) {
+  if (bytes.byteLength > limit) {
     throw new InstallerError({
       code,
     })
