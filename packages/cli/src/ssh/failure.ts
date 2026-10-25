@@ -5,13 +5,14 @@ import {
   type InstallerErrorOptions,
 } from '../diagnostic/error'
 
-export type SshFailureKind = 'connection' | 'hostkey' | 'authentication' | 'command' | 'cancelled'
+export type SshFailureKind = 'connection' | 'hostkey' | 'authentication' | 'command' | 'socket' | 'cancelled'
 
 const CODES = {
   connection: 'SSH_CONNECTION_FAILED',
   hostkey: 'SSH_HOST_KEY_MISMATCH',
   authentication: 'SSH_AUTHENTICATION_FAILED',
   command: 'SSH_COMMAND_FAILED',
+  socket: 'SSH_SOCKET_FAILED',
   cancelled: 'COMMAND_CANCELLED',
 } as const satisfies Record<SshFailureKind, InstallerErrorCode>
 

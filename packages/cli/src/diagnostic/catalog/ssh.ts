@@ -24,4 +24,11 @@ export const sshDiagnostics = Object.freeze({
     'Qiln requires an explicit exit status within the command deadline and the output limit. Closing the connection does not prove that the remote command stopped, so its effects are uncertain. Qiln never replays a command automatically.',
     'Inspect the host before running anything again, because the command may have started or completed.',
   ),
+  SSH_SOCKET_FAILED: entry(
+    'Incus socket channel could not be opened over SSH',
+    'The SSH connection was authenticated against the pinned host key, but the server did not open a channel to the Incus Unix socket, so no Incus request was sent. SSH Unix-socket forwarding may be disabled by the server or the key, or the administrator account may lack permission on the socket. Incus socket access is root-equivalent authority. Qiln does not fall back to another transport or change SSH or socket configuration.',
+    'Run qiln aws deployment prepare so the approved preparation can grant the administrator account Incus socket access.',
+    'A group change applies only to new SSH connections, so run the command again afterwards.',
+    'If forwarding is disabled, inspect the effective sshd configuration; Qiln does not edit it.',
+  ),
 })

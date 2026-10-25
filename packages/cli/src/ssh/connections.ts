@@ -1,10 +1,6 @@
 import { SshError } from './failure'
-import { fingerprintOf } from './key'
-import { Link } from './link'
-import { execLimitsSchema, parseLimits, parseOptions, type ExecLimits, type SshOptions } from './options'
-import { SshClient } from './ssh2'
-import type { Client } from 'ssh2'
-import type { DiagnosticFact } from '../diagnostic/error'
+import { endpointFacts, withSession, type SshSession } from './session'
+import { execLimitsSchema, parseLimits, type ExecLimits, type SshOptions } from './options'
 
 export interface CommandResult {
   exitCode: number
@@ -25,67 +21,7 @@ export interface Remote {
   exec(command: string, limits?: Partial<ExecLimits>): Promise<CommandResult>
 }
 
-interface Handshake {
-  observed: string | undefined
-}
-
-function levelOf(error: unknown): unknown {
-  return error instanceof Error && 'level' in error ? error.level : undefined
-}
-
-function endpointFacts(options: SshOptions): DiagnosticFact[] {
-  return [
-    ['Endpoint', `${options.host}:${options.port}`],
-    ['User', options.username],
-  ]
-}
-
-function connect(client: Client, options: SshOptions, privateKey: Buffer, handshake: Handshake): Promise<void> {
-  return new Promise<void>((resolve, reject) => {
-    client.once('ready', () => resolve())
-    client.on('error', reject)
-    client.once('close', () => reject(new Error('The connection closed before it was ready.')))
-    client.connect({
-      host: options.host,
-      port: options.port,
-      username: options.username,
-      privateKey,
-      algorithms: {
-        serverHostKey: ['ssh-ed25519'],
-      },
-      hostVerifier: (key: Buffer | string) => {
-        if (typeof key === 'string') {
-          return false
-        }
-        handshake.observed = fingerprintOf(key)
-        return handshake.observed === options.fingerprint
-      },
-      authHandler: ['publickey'],
-      readyTimeout: options.connectTimeoutMs,
-    })
-  })
-}
-
-function connectionFailure(error: unknown, options: SshOptions, handshake: Handshake, signal: AbortSignal): SshError {
-  if (signal.aborted) {
-    return new SshError({ kind: 'cancelled' })
-  }
-  if (handshake.observed !== undefined && handshake.observed !== options.fingerprint) {
-    return new SshError({
-      kind: 'hostkey',
-      facts: [
-        ['Pinned fingerprint', `SHA256:${options.fingerprint}`],
-        ['Observed fingerprint', `SHA256:${handshake.observed}`],
-      ],
-    })
-  }
-  return new SshError({
-    kind: levelOf(error) === 'client-authentication' ? 'authentication' : 'connection',
-    facts: endpointFacts(options),
-  })
-}
-
-function createRemote(client: Client, options: SshOptions, signal: AbortSignal, link: Link): Remote {
+function createRemote({ client, options, signal, link }: SshSession): Remote {
   return {
     exec: async (command, overrides = {}) => {
       const limits = parseLimits(execLimitsSchema, {
@@ -184,42 +120,13 @@ function createRemote(client: Client, options: SshOptions, signal: AbortSignal, 
 }
 
 /**
- * One pinned connection for the duration of `use`. The server must present an
- * Ed25519 host key whose fingerprint equals the pin, and only public-key
- * authentication is attempted. There are no retries or reconnects, and the
- * connection is always destroyed afterwards.
+ * One pinned connection for the duration of `use`, offering command execution.
  */
-export async function withSsh<T>(
+export function withSsh<T>(
   input: SshOptions,
   privateKey: Buffer,
   signal: AbortSignal,
   use: (remote: Remote) => Promise<T>,
 ): Promise<T> {
-  const options = parseOptions(input)
-  if (signal.aborted) {
-    throw new SshError({ kind: 'cancelled' })
-  }
-  const client = new SshClient()
-  const handshake: Handshake = { observed: undefined }
-  const link = new Link()
-  client.on('error', () => link.lose())
-  client.once('close', () => link.lose())
-  const abort = () => {
-    link.lose()
-    client.destroy()
-  }
-  signal.addEventListener('abort', abort, {
-    once: true,
-  })
-  try {
-    try {
-      await connect(client, options, privateKey, handshake)
-    } catch (error: unknown) {
-      throw connectionFailure(error, options, handshake, signal)
-    }
-    return await use(createRemote(client, options, signal, link))
-  } finally {
-    signal.removeEventListener('abort', abort)
-    client.destroy()
-  }
+  return withSession(input, privateKey, signal, session => use(createRemote(session)))
 }
