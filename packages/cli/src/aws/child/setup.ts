@@ -6,6 +6,7 @@ import { SupervisedProcessError, supervise } from './supervise'
 export interface SetupOptions extends ProcessOptions {
   environment: NodeJS.ProcessEnv
   signal?: AbortSignal
+  cwd?: string
   umask?: {
     shell: string
     mask: number

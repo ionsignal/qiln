@@ -1,17 +1,8 @@
-
 import { SshError } from './failure'
 import { fingerprintOf } from './key'
 import { Link } from './link'
-import {
-  execLimitsSchema,
-  parseLimits,
-  parseOptions,
-  uploadLimitsSchema,
-  type ExecLimits,
-  type SshOptions,
-} from './options'
+import { execLimitsSchema, parseLimits, parseOptions, type ExecLimits, type SshOptions } from './options'
 import { SshClient } from './ssh2'
-import { uploadFile, type UploadOptions, type UploadResult } from './upload'
 import type { Client } from 'ssh2'
 import type { DiagnosticFact } from '../diagnostic/error'
 
@@ -27,13 +18,11 @@ export interface CommandResult {
  * limit, cancellation, or a lost connection is a failure. Limits default to the
  * connection options and may be overridden per command.
  *
- * An upload creates one new remote file exclusively and is judged complete only
- * after its remote close. Any failure invalidates the connection, so later
- * calls fail as a lost connection.
+ * Any failure invalidates the connection, so later calls fail as a lost
+ * connection.
  */
 export interface Remote {
   exec(command: string, limits?: Partial<ExecLimits>): Promise<CommandResult>
-  upload(localPath: string, remotePath: string, request: UploadOptions): Promise<UploadResult>
 }
 
 interface Handshake {
@@ -189,22 +178,6 @@ function createRemote(client: Client, options: SshOptions, signal: AbortSignal, 
         } catch {
           fail('request not accepted')
         }
-      })
-    },
-    upload: async (localPath, remotePath, request) => {
-      const limits = parseLimits(uploadLimitsSchema, {
-        timeoutMs: request.timeoutMs,
-        bytes: request.bytes,
-      })
-      if (signal.aborted) {
-        throw new SshError({ kind: 'cancelled' })
-      }
-      if (link.lost) {
-        throw new SshError({ kind: 'connection', facts: endpointFacts(options) })
-      }
-      return await uploadFile(client, link, signal, localPath, remotePath, {
-        ...limits,
-        onProgress: request.onProgress,
       })
     },
   }

@@ -15,7 +15,6 @@ export interface ProcessResult {
 }
 
 export interface ProcessOptions {
-  cwd?: string
   timeoutMs?: number
   maxOutputBytes?: number
 }
@@ -93,7 +92,6 @@ export async function runProcess(
   const command = basename(executable) || 'local command'
   return await new Promise<ProcessResult>((resolve, reject) => {
     const child = spawn(executable, [...argumentsList], {
-      cwd: options.cwd,
       env: sanitizedEnvironment(),
       shell: false,
       stdio: ['ignore', 'pipe', 'pipe'],

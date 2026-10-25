@@ -24,10 +24,4 @@ export const sshDiagnostics = Object.freeze({
     'Qiln requires an explicit exit status within the command deadline and the output limit. Closing the connection does not prove that the remote command stopped, so its effects are uncertain. Qiln never replays a command automatically.',
     'Inspect the host before running anything again, because the command may have started or completed.',
   ),
-  SSH_TRANSFER_FAILED: entry(
-    'SFTP file transfer did not complete reliably',
-    'Qiln requires the approved number of bytes to be sent, and the remote file to be created exclusively and closed successfully, within one deadline. Closing the connection does not prove that the remote file was not created or fully written, so a partial remote file may remain. Qiln never retries, resumes, replaces, or deletes remote files automatically.',
-    'Inspect the remote location before running anything again. Any file found there is evidence, not a verified upload.',
-    'Files are created exclusively, so a new attempt must use a new remote path.',
-  ),
 })

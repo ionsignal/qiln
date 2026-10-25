@@ -150,10 +150,6 @@ export const INSTALLER_SPEC = Object.freeze({
       packageName: 'openssh-client',
     },
     {
-      name: 'tar',
-      packageName: 'tar',
-    },
-    {
       name: 'zfs',
       packageName: 'zfsutils-linux',
     },

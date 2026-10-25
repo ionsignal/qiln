@@ -144,15 +144,8 @@ export async function run(argumentsList: readonly string[]): Promise<number> {
             command = 'aws'
             reporter = new Reporter({ color })
             assertUnprivilegedInvocation()
-            reporter.header('aws deployment prepare', 'approved ZFS prerequisites')
+            reporter.header('aws deployment prepare', 'approved ZFS and Incus preparation')
             await aws.deployment.prepare(options, reporter)
-          },
-          async push(options, color) {
-            command = 'aws'
-            reporter = new Reporter({ color })
-            assertUnprivilegedInvocation()
-            reporter.header('aws deployment push', 'local source delivery')
-            await aws.deployment.push(options, reporter)
           },
           ssh(_options, color) {
             command = 'aws'

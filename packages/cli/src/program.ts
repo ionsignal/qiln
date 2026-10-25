@@ -4,7 +4,6 @@ import { InstallerError } from './diagnostic/error'
 import {
   convertAwsDeploymentCreateOptions,
   convertAwsDeploymentOptions,
-  convertAwsDeploymentPushOptions,
   convertAwsOptions,
   convertUpOptions,
 } from './input'
@@ -19,8 +18,6 @@ import type {
   AwsDeploymentCreateOptions,
   AwsDeploymentInput,
   AwsDeploymentOptions,
-  AwsDeploymentPushInput,
-  AwsDeploymentPushOptions,
   AwsInput,
   UpInput,
 } from './input'
@@ -45,7 +42,6 @@ export interface ProgramHandlers {
       inspect(options: AwsDeploymentOptions, color: ColorMode): void | Promise<void>
       verify(options: AwsDeploymentOptions, color: ColorMode): void | Promise<void>
       prepare(options: AwsDeploymentOptions, color: ColorMode): void | Promise<void>
-      push(options: AwsDeploymentPushOptions, color: ColorMode): void | Promise<void>
       ssh(options: AwsDeploymentOptions, color: ColorMode): void | Promise<void>
       remove(options: AwsDeploymentOptions, color: ColorMode): void | Promise<void>
     }
@@ -260,29 +256,13 @@ export function createProgram(handlers: ProgramHandlers, output: ProgramOutput):
     )
     const prepare = deployment
       .command('prepare')
-      .description('Retain the server host-key pin if needed, then read the host over the pinned SSH connection, display each ZFS preparation plan for the recorded data volume, and, after separate approval of each, apply it: first the prerequisites, then one single-disk pool, created or imported by its recorded GUID, with its monthly scrub timer.')
-      .summary('Prepare ZFS storage after approval.')
+      .description('Retain the server host-key pin if needed, then read the host over the pinned SSH connection, display each preparation plan, and, after separate approval of each, apply it: first ZFS (the prerequisites, then one single-disk pool, created or imported by its recorded GUID, with its monthly scrub timer), then Incus (the repository, the exact packages, and one initialization on that pool).')
+      .summary('Prepare ZFS and Incus after approval.')
     addSelectorOptions(prepare)
     describeHelp(prepare, deploymentHelp.prepare)
     prepare.action(() =>
       awsHandlers.deployment.prepare(
         convertAwsDeploymentOptions(prepare.opts<AwsDeploymentInput>()),
-        program.opts<GlobalOptions>().color,
-      ),
-    )
-    const push = deployment
-      .command('push')
-      .description('Deliver the current local development source of the invoking Git checkout to a fresh directory on the recorded host after approval, without installing or activating it.')
-      .summary('Deliver the local development source.')
-    addSelectorOptions(push)
-    addSingleOption(
-      push,
-      new Option('--source <source>', 'Select what to deliver: local (default) or release (unavailable).'),
-    )
-    describeHelp(push, deploymentHelp.push)
-    push.action(() =>
-      awsHandlers.deployment.push(
-        convertAwsDeploymentPushOptions(push.opts<AwsDeploymentPushInput>()),
         program.opts<GlobalOptions>().color,
       ),
     )
@@ -300,7 +280,7 @@ export function createProgram(handlers: ProgramHandlers, output: ProgramOutput):
     )
     const remove = deployment
       .command('remove')
-      .description('Approve and remove the removable recorded resources, then observe and retain their absence. A ZFS pool recorded as imported is exported first under its own approval. Retained storage is not removed.')
+      .description('Approve and remove the removable recorded resources, then observe and retain their absence. Incus initialized by Qiln is stopped first, and a ZFS pool recorded as imported is exported, each under its own approval. Retained storage is not removed.')
       .summary('Remove one approved deployment.')
     addSelectorOptions(remove)
     describeHelp(remove, deploymentHelp.remove)

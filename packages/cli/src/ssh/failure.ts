@@ -5,14 +5,13 @@ import {
   type InstallerErrorOptions,
 } from '../diagnostic/error'
 
-export type SshFailureKind = 'connection' | 'hostkey' | 'authentication' | 'command' | 'transfer' | 'cancelled'
+export type SshFailureKind = 'connection' | 'hostkey' | 'authentication' | 'command' | 'cancelled'
 
 const CODES = {
   connection: 'SSH_CONNECTION_FAILED',
   hostkey: 'SSH_HOST_KEY_MISMATCH',
   authentication: 'SSH_AUTHENTICATION_FAILED',
   command: 'SSH_COMMAND_FAILED',
-  transfer: 'SSH_TRANSFER_FAILED',
   cancelled: 'COMMAND_CANCELLED',
 } as const satisfies Record<SshFailureKind, InstallerErrorCode>
 
@@ -27,7 +26,7 @@ function describe({ kind, remoteStarted = false, facts = [] }: SshErrorOptions):
   if (remoteStarted) {
     details.push([
       'Remote outcome',
-      'uncertain; the command or transfer may have started, and its effects were not confirmed or undone',
+      'uncertain; the command may have started, and its effects were not confirmed or undone',
     ])
   }
   return {
