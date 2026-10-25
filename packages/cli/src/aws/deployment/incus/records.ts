@@ -28,7 +28,7 @@ export function blank(deployment: Deployment): IncusRecord | null {
   const binding = bindingOf(deployment)
   return binding === null
     ? null
-    : { version: AWS_RECORD_VERSION.incus, binding, authorizations: [], steps: [] }
+    : { version: AWS_RECORD_VERSION.incus, binding, authorizations: [], steps: [], quiescence: null }
 }
 
 /**
@@ -65,6 +65,19 @@ function releasesFollowInitialization({ steps }: IncusRecord): boolean {
 }
 
 /**
+ * An observed inactivity is evidence about an initialization, so it cannot
+ * predate the fence of one that was not refused.
+ */
+function observesAfterInitialization({ quiescence, steps }: IncusRecord): boolean {
+  return (
+    quiescence === null ||
+    steps.some(
+      step => step.action === 'initialize' && step.refusedAt === null && step.fencedAt <= quiescence.observedAt,
+    )
+  )
+}
+
+/**
  * Cross-field consistency of a record whose shape is already valid: it belongs
  * to this deployment, every step follows an existing authorization that allows
  * its action, only the last step may be unsettled, and the retained plans agree
@@ -78,6 +91,7 @@ function isConsistent(record: IncusRecord, deployment: Deployment): boolean {
     hasValidPreseeds(record) &&
     hasOnePool(record) &&
     releasesFollowInitialization(record) &&
+    observesAfterInitialization(record) &&
     isHistoryConsistent(record, actionsOf)
   )
 }
@@ -114,13 +128,33 @@ export async function read(directory: Dir, deployment: Deployment): Promise<Incu
 }
 
 /**
+ * The inactivity observation only advances, and the write that changes it
+ * changes nothing else, so it can never alter or settle a step.
+ */
+function requireQuiescence(before: IncusRecord, after: IncusRecord): void {
+  const { quiescence } = after
+  if (sameJson(before.quiescence, quiescence)) {
+    return
+  }
+  if (
+    quiescence === null ||
+    (before.quiescence !== null && quiescence.observedAt < before.quiescence.observedAt) ||
+    !sameJson({ ...before, quiescence }, after)
+  ) {
+    return invalid()
+  }
+}
+
+/**
  * The journal's write rule: the binding is fixed and the history only grows by
- * the shared append-only rule. Both records are already validated.
+ * the shared append-only rule, while the inactivity observation follows its
+ * own. Both records are already validated.
  */
 function requireTransition(before: IncusRecord, after: IncusRecord): void {
   if (!sameJson(before.binding, after.binding) || !isAppendOnly(before, after)) {
     return invalid()
   }
+  requireQuiescence(before, after)
 }
 
 /**

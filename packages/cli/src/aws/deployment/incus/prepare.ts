@@ -4,13 +4,21 @@ import { InstallerError, type DiagnosticFact } from '../../../diagnostic/error'
 import { apply } from '../../../remote/incus/apply'
 import { inspectHost } from '../../../remote/incus/inspect'
 import { planOf, releasePlanOf } from '../../../remote/incus/plan'
-import { preseedOf } from '../../../remote/incus/preseed'
+import { preseedOf, type Preseed } from '../../../remote/incus/preseed'
 import { verify } from '../../../remote/incus/verify'
-import { actionsOf, type ApprovedPlan, type IncusTarget, type Observation, type Plan } from '../../../remote/incus/types'
 import { checkCancellation } from '../../../terminal/prompts'
 import { userId } from '../../host'
+import { sameJson } from '../../json'
 import { notify, withWaiting, type ProgressSink, type ProgressTask } from '../progress'
 import { incusFacts, requireNotStuck, retainedPreseed, returned } from './facts'
+import {
+  actionsOf,
+  type ApprovedPlan,
+  type IncusTarget,
+  type InitializePlan,
+  type Observation,
+  type Plan,
+} from '../../../remote/incus/types'
 import * as deployments from '../records'
 import * as records from './records'
 import type { StepOutcome } from '../../../remote/step'
@@ -75,9 +83,12 @@ function failure(
  * Coordinates Incus preparation under the AWS-operation lock held by the
  * command. Per step: authorization is persisted, then the fence, then the
  * script runs, then its completion or refusal is persisted, then a fresh
- * inspection must agree before `verifiedAt` is persisted. Nothing is replayed,
- * resumed, or rolled back, and an interrupted step stays open as evidence.
- * It runs parallel to the ZFS preparer and shares only the journal rules.
+ * inspection must agree before `verifiedAt` is persisted. An initialization is
+ * also planned again from a fresh inspection after approval, before anything is
+ * persisted. Nothing is replayed, resumed, or rolled back, and an interrupted
+ * step stays open as evidence. A release that finds every unit already inactive
+ * runs nothing: it retains only the observation. It runs parallel to the ZFS
+ * preparer and shares only the journal rules.
  */
 export class IncusPreparer {
   private constructor(
@@ -106,13 +117,14 @@ export class IncusPreparer {
   /**
    * Verifies a step left returned by an earlier run, then plans from fresh
    * evidence. Each approval covers only the plan displayed with it, so the
-   * repository, the packages, and the initialization each ask again. Returns
-   * how many steps were applied, and stops once the approved baseline holds.
+   * repository, the packages, the initialization, and the socket access grant
+   * each ask again. Returns how many steps were applied, and stops once the
+   * approved configuration holds.
    */
   public async run(target: IncusTarget, signal: AbortSignal): Promise<number> {
     const { hooks } = this.context
     const preseed = preseedOf(target.pool)
-    let observation = (await this.settleReturned(target.pool)) ?? (await this.inspect(target.pool))
+    let observation = (await this.settleReturned(target)) ?? (await this.inspect(target))
     let applied = 0
     while (true) {
       const plan = planOf(observation, target, preseed, retainedPreseed(this.evidence))
@@ -124,10 +136,12 @@ export class IncusPreparer {
           return applied
         case 'repository':
         case 'packages':
+        case 'access':
         case 'initialize': {
-          const authorization = await this.authorize(plan)
+          const recheck = plan.kind === 'initialize' ? () => this.confirmCurrent(plan, target, preseed) : undefined
+          const authorization = await this.authorize(plan, recheck)
           for (const action of actionsOf(plan)) {
-            observation = await this.step(authorization, plan, action, target.pool, signal)
+            observation = await this.step(authorization, plan, action, target, signal)
             applied += 1
           }
         }
@@ -137,22 +151,25 @@ export class IncusPreparer {
 
   /**
    * Stops Incus before the separate ZFS export. A fresh observation decides:
-   * units that are all positively inactive need nothing, and otherwise the
-   * release runs under its own approval. Incus is not queried afterwards.
+   * units that are all positively inactive need no stop, and only that
+   * observation is retained, as point-in-time evidence and not as an executed
+   * step. Otherwise the release runs under its own approval. Incus is not
+   * queried afterwards.
    */
   public async release(target: IncusTarget, signal: AbortSignal): Promise<void> {
     const { hooks } = this.context
-    const observation = (await this.settleReturned(target.pool)) ?? (await this.inspect(target.pool))
+    const observation = (await this.settleReturned(target)) ?? (await this.inspect(target))
     const plan = releasePlanOf(observation, target)
     hooks.show(observation, plan)
     switch (plan.kind) {
       case 'refused':
         throw refusal(plan.reasons, this.retry)
       case 'stopped':
+        await this.persist({ quiescence: { observedAt: observation.observedAt } })
         return
       case 'release': {
         const authorization = await this.authorize(plan)
-        await this.step(authorization, plan, 'release', target.pool, signal)
+        await this.step(authorization, plan, 'release', target, signal)
       }
     }
   }
@@ -161,9 +178,28 @@ export class IncusPreparer {
    * The inspection asks about the approved packages too, so the whole frozen
    * transaction is checked and not only the direct packages.
    */
-  private async inspect(pool: string, plan?: ApprovedPlan): Promise<Observation> {
+  private async inspect(target: IncusTarget, plan?: ApprovedPlan): Promise<Observation> {
     const approved = plan?.kind === 'packages' ? plan.install.map(change => change.name) : []
-    return await inspectHost(this.context.remote, pool, approved)
+    return await inspectHost(this.context.remote, target, approved)
+  }
+
+  /**
+   * The operator may take a while to approve, so an initialization is planned
+   * again from a fresh inspection, and the approved plan must still be exactly
+   * what is planned now. This refuses before anything is persisted, so a new
+   * invocation can try again.
+   */
+  private async confirmCurrent(approved: InitializePlan, target: IncusTarget, preseed: Preseed): Promise<void> {
+    const current = planOf(await this.inspect(target), target, preseed, retainedPreseed(this.evidence))
+    if (current.kind === 'refused') {
+      throw refusal(current.reasons, this.retry)
+    }
+    if (!sameJson(current, approved)) {
+      throw refusal(
+        ['The host changed after the plan was displayed, so the approved initialization was not applied.'],
+        this.retry,
+      )
+    }
   }
 
   private async persist(changes: Partial<IncusRecord>): Promise<void> {
@@ -179,8 +215,9 @@ export class IncusPreparer {
     })
   }
 
-  private async authorize(plan: ApprovedPlan): Promise<string> {
+  private async authorize(plan: ApprovedPlan, recheck?: () => Promise<void>): Promise<string> {
     await this.context.hooks.approve(plan)
+    await recheck?.()
     const authorization: IncusAuthorization = {
       id: randomUUID(),
       approvedAt: new Date().toISOString(),
@@ -196,7 +233,7 @@ export class IncusPreparer {
     authorization: string,
     plan: ApprovedPlan,
     action: IncusAction,
-    pool: string,
+    target: IncusTarget,
     signal: AbortSignal,
   ): Promise<Observation> {
     const { remote, hooks } = this.context
@@ -219,7 +256,7 @@ export class IncusPreparer {
     })
     const observation = await withWaiting(hooks.progress, task, async () => {
       await this.conclude(action, await apply(remote, plan, action))
-      return await this.verified(plan, action, pool)
+      return await this.verified(plan, action, target)
     })
     notify(hooks.progress, { phase: 'verified', task })
     return observation
@@ -247,8 +284,8 @@ export class IncusPreparer {
     }
   }
 
-  private async verified(plan: ApprovedPlan, action: IncusAction, pool: string): Promise<Observation> {
-    const observation = await this.inspect(pool, plan)
+  private async verified(plan: ApprovedPlan, action: IncusAction, target: IncusTarget): Promise<Observation> {
+    const observation = await this.inspect(target, plan)
     if (!verify(action, plan, observation)) {
       throw new InstallerError({
         code: 'AWS_INCUS_PREPARATION_UNRESOLVED',
@@ -264,7 +301,7 @@ export class IncusPreparer {
    * A step that exited zero but was never verified is accounting work, not
    * replay: only a fresh inspection is needed.
    */
-  private async settleReturned(pool: string): Promise<Observation | null> {
+  private async settleReturned(target: IncusTarget): Promise<Observation | null> {
     const pending = returned(this.evidence).at(-1)
     if (pending === undefined) {
       return null
@@ -276,6 +313,6 @@ export class IncusPreparer {
         retry: this.retry,
       })
     }
-    return await this.verified(plan, pending.action, pool)
+    return await this.verified(plan, pending.action, target)
   }
 }

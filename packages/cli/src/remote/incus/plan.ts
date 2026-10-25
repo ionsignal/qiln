@@ -11,7 +11,17 @@ import {
 } from './verify'
 import { transactionViolations } from '../apt'
 import type { Preseed, PreseedDocument } from './preseed'
-import type { Api, IncusTarget, Observation, PreparationPlan, RefusedPlan, ReleasePlan, StoppedPlan } from './types'
+import type {
+  AccessPlan,
+  Api,
+  IncusTarget,
+  Observation,
+  PreparationPlan,
+  ReadyPlan,
+  RefusedPlan,
+  ReleasePlan,
+  StoppedPlan,
+} from './types'
 
 type File = Observation['repository']['key']
 
@@ -65,13 +75,31 @@ function freshReasons(observation: Observation, api: Api, target: IncusTarget): 
 }
 
 /**
+ * The last preparation stage, reached only from a verified baseline. A missing
+ * administration group is refused, because the packages create it and Qiln
+ * never creates groups. An account that already belongs needs nothing.
+ */
+function accessPlan(observation: Observation, target: IncusTarget): AccessPlan | ReadyPlan | RefusedPlan {
+  const { access } = observation
+  const { group } = INCUS_SPEC.access
+  if (!access.groupExists) {
+    return { kind: 'refused', reasons: [`The group ${group} does not exist on the host, and Qiln does not create groups.`] }
+  }
+  if (access.member) {
+    return { kind: 'ready', pool: target.pool, guid: target.guid }
+  }
+  return { kind: 'access', account: target.account, group }
+}
+
+/**
  * Pure decision over one observation, in stages: the repository, then the
- * packages, then initialization. Each stage returns its own plan, so each needs
- * its own approval and a fresh inspection before the next. Refusals are
- * collected rather than short-circuited within a stage. `retained` is the
- * preseed document of an earlier verified initialization, in which case a
- * matching baseline is `ready` and any drift from it is refused, never adopted
- * or repaired. Without it, only a pristine daemon is initialized.
+ * packages, then initialization, then socket access. Each stage returns its own
+ * plan, so each needs its own approval and a fresh inspection before the next.
+ * Refusals are collected rather than short-circuited within a stage. `retained`
+ * is the preseed document of an earlier verified initialization, in which case
+ * a matching baseline proceeds to the access stage and any drift from it is
+ * refused, never adopted or repaired. Without it, only a pristine daemon is
+ * initialized.
  */
 export function planOf(
   observation: Observation,
@@ -158,7 +186,7 @@ export function planOf(
   }
   if (retained !== null) {
     const drift = baselineDrift(observation, target, retained)
-    return drift.length === 0 ? { kind: 'ready', pool: target.pool, guid: target.guid } : refused(drift)
+    return drift.length === 0 ? accessPlan(observation, target) : refused(drift)
   }
   const conflicts = [...daemonReasons(observation, api), ...freshReasons(observation, api, target)]
   if (conflicts.length > 0) {

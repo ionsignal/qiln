@@ -1,5 +1,5 @@
 interface RunSpec {
-  script: 'repository' | 'refresh' | 'packages' | 'init' | 'release'
+  script: 'repository' | 'refresh' | 'packages' | 'init' | 'access' | 'release'
   timeoutMs: number
   refusals: Readonly<Record<number, string>>
 }
@@ -10,11 +10,11 @@ interface StepSpec {
 }
 
 /**
- * The one enumeration of Incus preparation steps. `storage` marks the steps that
- * can leave Incus data on the pool or its outcome unknown, and only those block
- * removal and volume handoff. A step names one embedded script, its deadline,
- * and the wording of every exit code that script uses to refuse before any
- * effect. Arguments are built from the approved plan by `apply.ts`.
+ * The one enumeration of Incus preparation steps. `storage` marks the steps
+ * that can leave Incus data on the pool or its outcome unknown, and only those
+ * block removal and volume handoff. A step names one embedded script, its
+ * deadline, and the wording of every exit code that script uses to refuse
+ * before any effect. Arguments are built from the approved plan by `apply.ts`.
  */
 const STEPS = {
   'add-repository': {
@@ -64,15 +64,36 @@ const STEPS = {
       script: 'init',
       timeoutMs: 300_000,
       refusals: {
-        20: 'The preseed, its digest, or the recorded pool name or GUID was not given or is malformed.',
+        20: 'The preseed, its digest, the recorded pool name or GUID, or the bridge name or subnet was not given or is malformed.',
         21: 'The Incus client was not found.',
         22: 'The preseed does not match its approved SHA-256 digest.',
         23: 'The Incus daemon socket is not active, and Qiln does not start it.',
         24: 'A storage pool already exists, so this is not a fresh initialization.',
         25: 'An instance already exists, so this is not a fresh initialization.',
         26: 'The preseed could not be staged.',
-        27: 'The Incus API could not be read before initialization.',
+        27: 'The Incus API or a host listing could not be read before initialization.',
         28: 'The recorded ZFS pool is not imported with the approved GUID.',
+        29: 'The Incus server already has configuration, so this is not a fresh initialization.',
+        30: 'The Incus server does not advertise the storage_zfs_export API extension.',
+        31: 'Incus has projects or profiles beyond the pristine default, or the default profile has devices.',
+        32: 'A managed Incus network, or a network interface with the approved bridge name, already exists.',
+        33: 'Incus already holds images, so this is not a fresh initialization.',
+        34: 'The Incus daemon is listening on a TCP address.',
+        35: 'The recorded ZFS pool already holds datasets, which indicates retained Incus data.',
+        36: 'A host route overlaps the approved bridge subnet.',
+      },
+    },
+  },
+  'grant-access': {
+    storage: false,
+    run: {
+      script: 'access',
+      timeoutMs: 30_000,
+      refusals: {
+        20: 'The account or group name was not given or is malformed.',
+        21: 'The Incus administration group does not exist on the host, and Qiln does not create groups.',
+        22: 'The administrator account does not exist on the host.',
+        23: 'The account is root, which never receives a group grant.',
       },
     },
   },
@@ -102,12 +123,15 @@ const STEPS = {
  *   fails closed and needs a new reviewed constant. `fingerprint` is review
  *   metadata only, because the host verifies the file digest and not the
  *   OpenPGP fingerprint.
- * - `units` are the Incus units whose positive inactivity establishes
- *   quiescence. They must match the units reported by the inspection script.
+ * - `units` are the Incus units whose positive inactivity establishes quiescence.
+ *   They must match the units reported by the inspection script.
  * - `requiredExtensions` gate the `zfs.export` pool key, which keeps the Incus
  *   driver from exporting the whole pool when it unmounts.
- * - `maximumInstalls` is provisional. Set it from the closure observed on a
- *   real host.
+ * - `access.group` is the Incus administration group. Membership is
+ *   root-equivalent authority over the Incus Unix socket, and Qiln only ever
+ *   adds the administrator account to it.
+ * - `maximumInstalls` is provisional. Set it from the closure observed on a real
+ *   host.
  */
 export const INCUS_SPEC = Object.freeze({
   recipeRevision: 1,
@@ -132,6 +156,9 @@ export const INCUS_SPEC = Object.freeze({
     address: '10.10.10.1/24',
     subnet: '10.10.10.0/24',
     dhcpRange: '10.10.10.100-10.10.10.200',
+  },
+  access: {
+    group: 'incus-admin',
   },
   inspect: {
     timeoutMs: 120_000,

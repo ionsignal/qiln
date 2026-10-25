@@ -54,8 +54,8 @@ export function poolImported(observation: Observation, pool: string, guid: strin
 }
 
 /**
- * Every Incus unit is positively reported inactive, so nothing can answer on the
- * Incus sockets. An empty or incomplete service list is not evidence.
+ * Every Incus unit is positively reported inactive, so nothing can answer on
+ * the Incus sockets. An empty or incomplete service list is not evidence.
  */
 export function quiescent(observation: Observation): boolean {
   return INCUS_SPEC.units.every(unit =>
@@ -82,9 +82,13 @@ export function daemonReasons(observation: Observation, api: Api): string[] {
 }
 
 /**
- * Every way an observation departs from the approved initialized baseline.
- * Empty means the baseline holds. This one function backs both `ready` and the
- * verification of `initialize`, so they cannot disagree.
+ * Every way an observation departs from the approved prepared configuration.
+ * Empty means the configuration holds. This one function backs both `ready` and
+ * the verification of `initialize`, so they cannot disagree. Instances and
+ * images are deliberately not part of it: workloads are expected after
+ * initialization, and only the first initialization requires an empty
+ * inventory. Socket access is deliberately not part of it either: it is a later
+ * stage with its own plan and verification.
  */
 export function baselineDrift(observation: Observation, target: IncusTarget, document: PreseedDocument): string[] {
   const { api } = observation
@@ -138,8 +142,6 @@ export function baselineDrift(observation: Observation, target: IncusTarget, doc
     api.projects.length === 1 && api.projects.every(name => name === 'default'),
     'Incus has projects other than default.',
   )
-  check(api.instances.length === 0, 'Incus already holds instances.')
-  check(api.images === 0, 'Incus already holds images.')
   check(observation.system.ipForward, 'IPv4 forwarding is not enabled on the host.')
   return reasons
 }
@@ -148,6 +150,8 @@ export function baselineDrift(observation: Observation, target: IncusTarget, doc
  * Pure check of one step's approved result against a fresh observation. A step
  * is verified only when the host agrees, never because its script exited zero.
  * An initialization is judged against the preseed bytes retained in its plan.
+ * An access grant is judged by the account database, which does not show that
+ * SSH forwarding works.
  */
 export function verify(action: IncusAction, plan: ApprovedPlan, observation: Observation): boolean {
   switch (action) {
@@ -179,9 +183,16 @@ export function verify(action: IncusAction, plan: ApprovedPlan, observation: Obs
       }
       const document = readPreseed(plan.preseed.yaml)
       return (
-        document !== null && baselineDrift(observation, { pool: plan.pool, guid: plan.guid }, document).length === 0
+        document !== null && baselineDrift(observation, { pool: plan.pool, guid: plan.guid, account: '' }, document).length === 0
       )
     }
+    case 'grant-access':
+      return (
+        plan.kind === 'access' &&
+        observation.access.account === plan.account &&
+        observation.access.groupExists &&
+        observation.access.member
+      )
     case 'release':
       return (
         plan.kind === 'release' &&

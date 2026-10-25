@@ -24,9 +24,10 @@ import type { Reporter } from '../../../../terminal/reporter'
  * each displayed plan. ZFS first: the prerequisites, then one single-disk pool,
  * created on a blank volume or imported by its recorded GUID, together with its
  * packaged monthly scrub timer. Then Incus, each from a fresh inspection: the
- * repository, the exact packages, and one initialization from a retained
- * preseed. The local writes are the host-key pin, retained before connecting
- * exactly as for verify, and the retained ZFS and Incus preparation
+ * repository, the exact packages, one initialization from a retained preseed,
+ * and finally the administrator account's membership in the Incus
+ * administration group. The local writes are the host-key pin, retained before
+ * connecting exactly as for verify, and the retained ZFS and Incus preparation
  * evidence.
  */
 export async function prepare(options: AwsDeploymentOptions, reporter: Reporter): Promise<void> {
@@ -86,19 +87,24 @@ export async function prepare(options: AwsDeploymentOptions, reporter: Reporter)
         if (pool === null || !pool.ready) {
           throw new InstallerError({
             code: 'AWS_INCUS_PLAN_REFUSED',
-            facts: [['Reason', 'The recorded ZFS pool is not verified imported with its scrub timer, so Incus is not planned.']],
+            facts: [
+              [
+                'Reason',
+                'The recorded ZFS pool is not verified imported with its scrub timer, so Incus is not planned.',
+              ],
+            ],
             retry,
           })
         }
         reporter.section('Incus inspection')
         reporter.row('working', 'Inspecting', 'fixed host, package, and Incus inspection')
-        const incusApplied = await incusPreparer.run({ pool: pool.name, guid: pool.guid }, signal)
+        const incusApplied = await incusPreparer.run({ pool: pool.name, guid: pool.guid, account: username }, signal)
         const applied = zfsApplied + incusApplied
         const changed =
           applied === 0
             ? 'Nothing was changed.'
             : `${applied} approved ${applied === 1 ? 'step was' : 'steps were'} applied and verified by fresh inspection.`
-        return `Incus baseline prepared: the approved packages, daemon Unix-socket access, the recorded ZFS pool, the bridge, and the default profile were verified as observed. No images or instances exist. ${changed} The pool is a single disk with no redundancy or backup. Qiln is not installed; restoration and runtime readiness are not established.`
+        return `Incus baseline prepared: the approved packages, daemon Unix-socket access, the recorded ZFS pool, the bridge, the default profile, and ${username}'s membership in the Incus administration group were verified as observed. Instances and images were not part of this check. ${changed} Group membership applies to new SSH connections only, and SSH forwarding to the Incus socket was not tested. The pool is a single disk with no redundancy or backup. Qiln is not installed; restoration and runtime readiness are not established.`
       })
     })
   })

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import { INCUS_SPEC } from './spec'
+import accessScript from './scripts/access.sh?raw'
 import initScript from './scripts/init.sh?raw'
 import inspectScript from './scripts/inspect.sh?raw'
 import refreshScript from './scripts/refresh.sh?raw'
@@ -18,6 +19,7 @@ export function sha256Of(text: string): string {
  * shared with ZFS preparation: it is generic over approved `name=version` words.
  */
 export const SCRIPTS = Object.freeze({
+  access: accessScript,
   init: initScript,
   inspect: inspectScript,
   packages: packagesScript,

@@ -5,7 +5,7 @@ import { transactionOf } from '../apt'
 import { outputOf, tagged, type Section } from '../output'
 import { shellCommand } from '../shell'
 import { InstallerError } from '../../diagnostic/error'
-import { observationSchema, type Observation } from './types'
+import { observationSchema, type IncusTarget, type Observation } from './types'
 import type { Remote } from '../../ssh/connections'
 
 /**
@@ -123,13 +123,18 @@ function installedOf(section: Section) {
     })
 }
 
+/**
+ * Each line is `service <unit> <load> <unit-file> <activation>`, taken from
+ * machine-readable unit properties. A missing field fails validation, so
+ * incomplete evidence never reads as inactive.
+ */
 function servicesOf(section: Section) {
   return tagged(section.lines).map(([tag, value]) => {
     if (tag !== 'service') {
       throw inspectionFailure('The service inspection reported an unrecognized line.')
     }
-    const [unit, enablement, activation] = value.split(' ')
-    return { unit, enablement, activation }
+    const [unit, load, enablement, activation] = value.split(' ')
+    return { unit, load, enablement, activation }
   })
 }
 
@@ -155,6 +160,19 @@ function networkOf(section: Section) {
     }
   }
   return { routes, links }
+}
+
+/**
+ * The account is the one the inspection was asked about, so it comes from the
+ * caller and not from the host's output.
+ */
+function accessOf(section: Section, account: string) {
+  const values = fields(section.lines)
+  return {
+    account,
+    groupExists: yesNo(values.get('group'), 'access group'),
+    member: yesNo(values.get('member'), 'group membership'),
+  }
 }
 
 function zfsOf(section: Section) {
@@ -214,8 +232,9 @@ function apiOf(found: ReadonlyMap<string, Section>) {
 /**
  * Runs the fixed inspection and validates its output into one observation.
  * Transport failures propagate unchanged: a failed channel ends the connection,
- * so nothing further runs on it. `pool` selects the one ZFS pool whose
- * datasets are reported. `approved` names the packages of an approved
+ * so nothing further runs on it. `target.pool` selects the one ZFS pool whose
+ * datasets are reported, and `target.account` the account whose Incus group
+ * membership is reported. `approved` names the packages of an approved
  * transaction, so a verification checks all of them and not only the direct
  * ones; they are reported but never simulated. Reading the API of an active
  * socket can start the daemon through socket activation; with inactive sockets
@@ -223,15 +242,25 @@ function apiOf(found: ReadonlyMap<string, Section>) {
  */
 export async function inspectHost(
   remote: Remote,
-  pool: string,
+  target: Pick<IncusTarget, 'pool' | 'account'>,
   approved: readonly string[] = [],
 ): Promise<Observation> {
-  const { repository, network, packages, companions, excluded, inspect } = INCUS_SPEC
+  const { repository, network, access, packages, companions, excluded, inspect } = INCUS_SPEC
   const known = new Set<string>([...packages, ...companions, ...excluded])
   const reported = [...companions, ...excluded, ...approved.filter(name => !known.has(name))]
   const command = shellCommand(
     SCRIPTS.inspect,
-    [pool, repository.keyFile, repository.sourceFile, network.subnet, ...packages, '--', ...reported],
+    [
+      target.pool,
+      repository.keyFile,
+      repository.sourceFile,
+      network.subnet,
+      target.account,
+      access.group,
+      ...packages,
+      '--',
+      ...reported,
+    ],
     { privileged: true },
   )
   const result = await remote.exec(command, inspect)
@@ -249,6 +278,7 @@ export async function inspectHost(
     services: servicesOf(succeeded(found, 'services')),
     listeners: listenersOf(succeeded(found, 'listeners')),
     network: networkOf(succeeded(found, 'network')),
+    access: accessOf(succeeded(found, 'access'), target.account),
     zfs: zfsOf(succeeded(found, 'zfs')),
     api: apiOf(found),
   }

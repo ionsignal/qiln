@@ -3,6 +3,7 @@ import { RECIPE } from '../../../../remote/incus/recipe'
 import { INCUS_SPEC } from '../../../../remote/incus/spec'
 import type { DiagnosticFact } from '../../../../diagnostic/error'
 import type {
+  AccessPlan,
   ApprovedPlan,
   InitializePlan,
   Observation,
@@ -31,6 +32,8 @@ export function approvalLabel(plan: ApprovedPlan): string {
       return 'Install the displayed Incus packages on the deployment host'
     case 'initialize':
       return 'Initialize Incus from the displayed preseed on the deployment host'
+    case 'access':
+      return `Add ${plan.account} to the ${plan.group} group on the deployment host (root-equivalent Incus access)`
     case 'release':
       return 'Stop Incus on the deployment host'
   }
@@ -47,18 +50,35 @@ function fileState(file: Observation['repository']['key']): string {
   }
 }
 
+function accessState({ account, groupExists, member }: Observation['access']): string {
+  const { group } = INCUS_SPEC.access
+  if (!groupExists) {
+    return `group ${group} does not exist`
+  }
+  return `${account} ${member ? 'is' : 'is not'} a member of ${group} (account database; not a test of SSH forwarding)`
+}
+
 function hostFacts({ observation }: PlanPreview): DiagnosticFact[] {
-  const { system, repository, packages, services, listeners, zfs, api } = observation
+  const { system, repository, packages, services, listeners, access, zfs, api } = observation
   return [
     ['Package architecture', system.packageArchitecture],
     ['IPv4 forwarding', system.ipForward ? 'enabled' : 'disabled'],
     ['Zabbly key file', fileState(repository.key)],
     ['Zabbly source file', fileState(repository.source)],
     ['Incus packages', packages.map(item => `${item.name} ${item.version}`).join(', ') || 'none installed'],
-    ['Incus units', services.map(item => `${item.unit} ${item.enablement}/${item.activation}`).join(', ') || 'none reported'],
+    [
+      'Incus units',
+      services.map(item => `${item.unit} ${item.load}/${item.enablement}/${item.activation}`).join(', ') ||
+        'none reported',
+    ],
     ['TCP listeners', listeners.join(', ') || 'none'],
+    ['Incus access', accessState(access)],
     ['ZFS pool', zfs.pool === null ? 'not imported' : `${zfs.pool.name} · GUID ${zfs.pool.guid}`],
-    ['Pool datasets', zfs.datasets.map(dataset => `${dataset.name} (${dataset.mounted ? 'mounted' : 'not mounted'})`).join(', ') || 'none'],
+    [
+      'Pool datasets',
+      zfs.datasets.map(dataset => `${dataset.name} (${dataset.mounted ? 'mounted' : 'not mounted'})`).join(', ') ||
+        'none',
+    ],
     [
       'Incus API',
       api === null
@@ -80,12 +100,18 @@ function reportRepository(reporter: Reporter, plan: RepositoryPlan): void {
       'Signing key',
       `${plan.key.url} · SHA-256 ${plan.key.sha256} · OpenPGP fingerprint ${repository.fingerprint} (review metadata; the host verifies the file digest)`,
     ],
-    ['Key file', `${repository.keyFile} · written only when absent; an existing file must hold exactly the approved bytes`],
+    [
+      'Key file',
+      `${repository.keyFile} · written only when absent; an existing file must hold exactly the approved bytes`,
+    ],
     [
       'Source file',
       `${repository.sourceFile} · SHA-256 ${plan.source.sha256} · written only when absent; an existing file must hold exactly the approved bytes`,
     ],
-    ['Files', plan.add ? 'an absent file would be written, the key first' : 'both files already hold the approved bytes'],
+    [
+      'Files',
+      plan.add ? 'an absent file would be written, the key first' : 'both files already hold the approved bytes',
+    ],
     ['Package lists', 'refreshed with apt-get update, which updates every configured APT source and not only this one'],
   ])
 }
@@ -114,10 +140,7 @@ function reportInitialize(reporter: Reporter, plan: InitializePlan): void {
     ['Preseed', `${plan.preseed.yaml.length} bytes · SHA-256 ${plan.preseed.sha256} · retained exactly as approved`],
     ['Pool', `${plan.pool} · GUID ${plan.guid} · registered as an existing ZFS pool`],
     ['Pool settings', pool === undefined ? 'unreadable' : entries(pool.config)],
-    [
-      'Bridge',
-      network === undefined ? 'unreadable' : `${network.name} · ${entries(network.config)}`,
-    ],
+    ['Bridge', network === undefined ? 'unreadable' : `${network.name} · ${entries(network.config)}`],
     [
       'Default profile',
       profile === undefined
@@ -131,13 +154,27 @@ function reportInitialize(reporter: Reporter, plan: InitializePlan): void {
   ])
 }
 
+function reportAccess(reporter: Reporter, plan: AccessPlan): void {
+  reporter.section('Proposed socket access (applied only after approval)')
+  reporter.facts([
+    ['Account', plan.account],
+    ['Group', `${plan.group} · added with usermod -aG, which keeps every other membership`],
+    ['Authority', 'members can administer Incus through its Unix socket, which is root-equivalent authority on the host'],
+    ['Effect', 'applies to new SSH connections only; the current connection and its sessions keep their groups'],
+    ['Unchanged', 'socket permissions, SSH configuration, other groups, and other accounts'],
+  ])
+}
+
 function reportRelease(reporter: Reporter, observation: Observation, plan: ReleasePlan): void {
   const running = observation.api?.instances.filter(instance => instance.status === 'Running').length
   reporter.section('Proposed release (applied only after approval)')
   reporter.facts([
     ['Pool', `${plan.pool} · GUID ${plan.guid} · stays imported for the separate ZFS export`],
     ['Running instances', running === undefined ? 'unknown; the Incus API was not read' : String(running)],
-    ['Stop order', 'instances in order through the startup unit and the daemon, then the user and main sockets, then the services'],
+    [
+      'Stop order',
+      'instances in order through the startup unit and the daemon, then the user and main sockets, then the services',
+    ],
   ])
 }
 
@@ -154,8 +191,13 @@ const NOTICES: Record<ApprovedPlan['kind'], string> = {
     'A failed or cancelled step is not replayed, resumed, or rolled back, and interrupted work may already have completed.',
   initialize:
     'Initialization is not an atomic transaction, and Qiln never relies on a rollback. It runs only against a pristine daemon and a pool without Incus datasets, ' +
-    'and nothing is forced, wiped, or converged. A failed or cancelled step is not replayed, resumed, or rolled back, and interrupted work may already have ' +
+    'planned again after approval and checked again just before it runs, and nothing is forced, wiped, or converged. A failed or cancelled step is not replayed, resumed, or rolled back, and interrupted work may already have ' +
     'changed the daemon and the pool. Restoration of retained Incus state is not supported, and approval does not establish runtime readiness.',
+  access:
+    'Approval authorizes only adding the displayed account to the displayed group, one fenced remote script followed by a fresh inspection that must agree. ' +
+    'Membership is read from the account database, so it shows that the grant was recorded and not that SSH forwarding works: only the first new connection that uses it proves that. ' +
+    'Qiln never changes socket permissions, SSH configuration, or other groups, and never removes the membership. ' +
+    'A failed or cancelled step is not replayed, resumed, or rolled back, and interrupted work may already have completed.',
   release:
     'Approval authorizes stopping Incus only, one fenced remote script followed by a fresh inspection that must agree. Qiln never starts units, ' +
     'so Incus stays stopped until an operator restarts it outside Qiln. A failed or cancelled step is not replayed, resumed, or rolled back, ' +
@@ -179,13 +221,18 @@ export function reportPlan(reporter: Reporter, preview: PlanPreview): void {
       reporter.facts([
         [
           'Incus',
-          `pool ${plan.pool} · GUID ${plan.guid} · the approved packages, local Unix-socket API, pool, bridge, and default profile were observed matching the retained preseed, with no images or instances`,
+          `pool ${plan.pool} · GUID ${plan.guid} · the approved packages, local Unix-socket API, pool, bridge, and default profile were observed matching the retained preseed, and the administrator account was observed in ${INCUS_SPEC.access.group}. Instances and images are not part of this check, and SSH forwarding to the socket was not tested.`,
         ],
       ])
       return
     case 'stopped':
       reporter.section('Incus release')
-      reporter.facts([['Incus', 'every Incus unit was observed inactive, so there is nothing to release. This is point-in-time, and nothing was changed or recorded.']])
+      reporter.facts([
+        [
+          'Incus',
+          'every Incus unit was observed inactive, so there is nothing to stop. This is point-in-time: no unit was changed and no step was run. Only the observation is retained as evidence.',
+        ],
+      ])
       return
     case 'repository':
       reportRepository(reporter, plan)
@@ -195,6 +242,9 @@ export function reportPlan(reporter: Reporter, preview: PlanPreview): void {
       break
     case 'initialize':
       reportInitialize(reporter, plan)
+      break
+    case 'access':
+      reportAccess(reporter, plan)
       break
     case 'release':
       reportRelease(reporter, observation, plan)

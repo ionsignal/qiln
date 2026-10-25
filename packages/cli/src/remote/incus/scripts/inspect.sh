@@ -1,9 +1,9 @@
 # Fixed inspection of repository files, packages, units, listeners, host
-# network, the ZFS pool, and the Incus API. Every section reports its own
-# status, so a missing capability is distinguishable from an empty result.
-# Nothing here installs, loads, or writes anything. The API is read only when a
-# daemon socket is already active, and that read can start the daemon through
-# socket activation.
+# network, Incus group access, the ZFS pool, and the Incus API. Every section
+# reports its own status, so a missing capability is distinguishable from an
+# empty result. Nothing here installs, loads, or writes anything. The API is
+# read only when a daemon socket is already active, and that read can start the
+# daemon through socket activation.
 LC_ALL=C
 export LC_ALL
 PATH=/usr/sbin:/usr/bin:/sbin:/bin:/opt/incus/bin
@@ -13,13 +13,16 @@ export DEBIAN_FRONTEND
 exec 2>/dev/null
 
 # Arguments: the pool to report on, the key file, the source file, the bridge
-# subnet, the direct packages, `--`, then extra packages whose installed state
-# is reported but never simulated.
+# subnet, the administrator account, the Incus administration group, the direct
+# packages, `--`, then extra packages whose installed state is reported but
+# never simulated.
 POOL=$1
 KEY_FILE=$2
 SOURCE_FILE=$3
 SUBNET=$4
-shift 4
+ACCOUNT=$5
+GROUP=$6
+shift 6
 PACKAGES=
 while test $# -gt 0 && test "$1" != --; do
   PACKAGES="$PACKAGES $1"
@@ -99,11 +102,16 @@ simulation_info() {
   apt-get --simulate --no-install-recommends install $need
 }
 
+# `show` succeeds for an absent unit and reports it as LoadState=not-found, so
+# an absent unit is distinguishable from a failed query. A failed query fails
+# the section. Each line is `service <unit> <load> <unit-file> <activation>`.
 service_info() {
   for unit in incus.socket incus.service incus-user.socket incus-user.service incus-startup.service; do
-    enabled=$(systemctl is-enabled "$unit")
-    active=$(systemctl is-active "$unit")
-    printf 'service %s %s %s\n' "$unit" "${enabled:-unknown}" "${active:-unknown}"
+    state=$(systemctl show --property=LoadState,UnitFileState,ActiveState "$unit") || return 1
+    load=$(printf '%s\n' "$state" | sed -n 's/^LoadState=//p')
+    enabled=$(printf '%s\n' "$state" | sed -n 's/^UnitFileState=//p')
+    active=$(printf '%s\n' "$state" | sed -n 's/^ActiveState=//p')
+    printf 'service %s %s %s %s\n' "$unit" "${load:-unknown}" "${enabled:-none}" "${active:-unknown}"
   done
   return 0
 }
@@ -122,6 +130,23 @@ network_info() {
   done
   out=$(ip -o link show) || return 1
   printf '%s\n' "$out" | awk '{ name = $2; sub(/:$/, "", name); sub(/@.*/, "", name); print "link " name }'
+}
+
+# Reads the account database, not a live session, so a membership granted
+# earlier shows here even though an open SSH connection does not have it yet.
+access_info() {
+  if getent group "$GROUP" >/dev/null; then
+    echo 'group yes'
+  else
+    echo 'group no'
+  fi
+  names=$(id -nG "$ACCOUNT") || return 1
+  member=no
+  for name in $names; do
+    test "$name" = "$GROUP" && member=yes
+  done
+  echo "member $member"
+  return 0
 }
 
 zfs_info() {
@@ -170,6 +195,7 @@ section simulation simulation_info
 section services service_info
 section listeners listener_info
 section network network_info
+section access access_info
 section zfs zfs_info
 section api api_info
 if api_reachable; then

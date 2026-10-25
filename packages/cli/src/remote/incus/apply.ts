@@ -4,8 +4,8 @@ import { PACKAGE_SPEC } from '../apt'
 import { runStep, type StepOutcome } from '../step'
 import { shellCommand } from '../shell'
 import { InstallerError } from '../../diagnostic/error'
+import { accessPlanSchema, type ApprovedPlan } from './types'
 import type { Remote } from '../../ssh/connections'
-import type { ApprovedPlan } from './types'
 
 /**
  * An action that does not belong to its approved plan, or bytes that no longer
@@ -51,11 +51,18 @@ function argumentsOf(action: IncusAction, plan: ApprovedPlan): string[] {
       }
       return packages
     }
-    case 'initialize':
+    case 'initialize': {
       if (plan.kind !== 'initialize' || sha256Of(plan.preseed.yaml) !== plan.preseed.sha256) {
         return defect()
       }
-      return [base64(plan.preseed.yaml), plan.preseed.sha256, plan.pool, plan.guid]
+      const { name, subnet } = INCUS_SPEC.network
+      return [base64(plan.preseed.yaml), plan.preseed.sha256, plan.pool, plan.guid, name, subnet]
+    }
+    case 'grant-access':
+      if (plan.kind !== 'access' || !accessPlanSchema.safeParse(plan).success || plan.group !== INCUS_SPEC.access.group) {
+        return defect()
+      }
+      return [plan.account, plan.group]
     case 'release':
       return plan.kind === 'release' ? [] : defect()
   }

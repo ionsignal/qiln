@@ -49,6 +49,7 @@ const INCUS_LABELS: Record<IncusAction, string> = {
   'refresh-lists': 'Refresh APT package lists',
   'install-packages': 'Install the approved Incus packages',
   initialize: 'Initialize Incus from the approved preseed',
+  'grant-access': 'Add the administrator account to the Incus administration group',
   release: 'Stop Incus and release its sockets',
 }
 

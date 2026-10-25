@@ -7,14 +7,17 @@ const count = z.int().nonnegative()
 const guid = z.string().regex(/^[0-9]+$/)
 const sha256 = z.string().regex(/^[0-9a-f]{64}$/)
 const settings = z.record(z.string(), z.string())
+const account = z.string().regex(/^[a-z_][a-z0-9_-]{0,31}$/)
 
 /**
- * The pool that earlier ZFS preparation evidence expects on the data volume.
- * Derived from the protected deployment record, never from the host.
+ * The pool that earlier ZFS preparation evidence expects on the data volume,
+ * and the administrator account that needs Incus socket access. Both are
+ * derived from the protected deployment record, never from the host.
  */
 export interface IncusTarget {
   pool: string
   guid: string
+  account: string
 }
 
 const packageChangeSchema = z.strictObject({
@@ -36,8 +39,11 @@ const fileSchema = z.strictObject({
  * and its bound exceeds the largest approved transaction. `repository.candidates`
  * are the `apt-cache madison` rows, and `transaction` is a simulation that never
  * changes the host. `network` holds host routes that overlap the bridge subnet,
- * ignoring the default route, and every link name. `zfs.datasets` are the
- * datasets of the inspected pool, when it is imported.
+ * ignoring the default route, and every link name. `access` is read from the
+ * account database, so it shows a recorded group membership and not whether an
+ * open SSH connection already has it. `zfs.datasets` are the
+ * datasets of the inspected pool, when it is imported. Each service reports its
+ * load state, so an absent unit (`not-found`) is told apart from a loaded one.
  */
 export const observationSchema = z.strictObject({
   observedAt: z.iso.datetime(),
@@ -72,6 +78,7 @@ export const observationSchema = z.strictObject({
     .array(
       z.strictObject({
         unit: text,
+        load: text,
         enablement: text,
         activation: text,
       }),
@@ -81,6 +88,11 @@ export const observationSchema = z.strictObject({
   network: z.strictObject({
     routes: z.array(text).max(64),
     links: z.array(text).max(256),
+  }),
+  access: z.strictObject({
+    account: text,
+    groupExists: z.boolean(),
+    member: z.boolean(),
   }),
   zfs: z.strictObject({
     available: z.boolean(),
@@ -127,8 +139,9 @@ export interface RefusedPlan {
 }
 
 /**
- * The initialized baseline matches the approved preseed, so nothing is left to
- * apply. This plan is never persisted.
+ * The initialized baseline matches the approved preseed and the administrator
+ * account has Incus socket access, so nothing is left to apply. This plan is
+ * never persisted.
  */
 export interface ReadyPlan {
   kind: 'ready'
@@ -137,8 +150,9 @@ export interface ReadyPlan {
 }
 
 /**
- * Every Incus unit is positively inactive, so there is nothing to release. This
- * plan is never persisted.
+ * Every Incus unit is positively inactive, so there is nothing to release. The
+ * plan itself is never persisted; the observation behind it is retained as
+ * inactivity evidence, never as an executed step.
  */
 export interface StoppedPlan {
   kind: 'stopped'
@@ -178,6 +192,17 @@ export const initializePlanSchema = z.strictObject({
 })
 
 /**
+ * Adds the administrator account to the Incus administration group, which is
+ * root-equivalent authority over the Incus Unix socket. The group is a literal
+ * of the record version, not a read of today's spec.
+ */
+export const accessPlanSchema = z.strictObject({
+  kind: z.literal('access'),
+  account,
+  group: z.literal('incus-admin'),
+})
+
+/**
  * Orderly shutdown of instances, then the daemon and its sockets. The number of
  * running instances is shown from the observation and is not persisted.
  */
@@ -190,17 +215,18 @@ export const releasePlanSchema = z.strictObject({
 export type RepositoryPlan = z.infer<typeof repositoryPlanSchema>
 export type PackagesPlan = z.infer<typeof packagesPlanSchema>
 export type InitializePlan = z.infer<typeof initializePlanSchema>
+export type AccessPlan = z.infer<typeof accessPlanSchema>
 export type ReleasePlan = z.infer<typeof releasePlanSchema>
 
 /**
  * The plans that ask for approval and are persisted with it.
  */
-export type ApprovedPlan = RepositoryPlan | PackagesPlan | InitializePlan | ReleasePlan
+export type ApprovedPlan = RepositoryPlan | PackagesPlan | InitializePlan | AccessPlan | ReleasePlan
 
 /**
  * What `planOf` can decide.
  */
-export type PreparationPlan = RefusedPlan | ReadyPlan | RepositoryPlan | PackagesPlan | InitializePlan
+export type PreparationPlan = RefusedPlan | ReadyPlan | RepositoryPlan | PackagesPlan | InitializePlan | AccessPlan
 
 /**
  * Preparation plans plus what `releasePlanOf` decides, only before ZFS export.
@@ -219,6 +245,8 @@ export function actionsOf(plan: ApprovedPlan): readonly IncusAction[] {
       return ['install-packages']
     case 'initialize':
       return ['initialize']
+    case 'access':
+      return ['grant-access']
     case 'release':
       return ['release']
   }

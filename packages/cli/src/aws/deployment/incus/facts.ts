@@ -13,7 +13,7 @@ export type StorageState = 'none' | 'initialized' | 'released' | 'unknown'
 const STORAGE_LABELS: Record<StorageState, string> = {
   none: 'not initialized by Qiln',
   initialized: 'initialized and not released (last recorded; not freshly observed)',
-  released: 'initialized and released (last recorded; not freshly observed)',
+  released: 'initialized and released or observed inactive (last recorded; not freshly observed)',
   unknown: 'state unknown; an initialize or release step is unresolved',
 }
 
@@ -52,14 +52,21 @@ export function storageTouched(record: IncusRecord | null): boolean {
 }
 
 /**
- * Storage counts as released when it was never touched, or when a release was
- * verified after the last initialization that was not refused.
+ * Storage counts as released when it was never touched, or when, after the last
+ * initialization that was not refused, a release was verified or every Incus
+ * unit was observed inactive. Both are point-in-time evidence. An observation
+ * is not an executed step and settles nothing: unresolved steps are judged
+ * separately.
  */
 export function storageReleased(record: IncusRecord | null): boolean {
   const steps = record?.steps ?? []
   const initialized = steps.findLastIndex(step => step.action === 'initialize' && step.refusedAt === null)
+  if (initialized < 0) {
+    return true
+  }
+  const observedAt = record?.quiescence?.observedAt
   return (
-    initialized < 0 ||
+    (observedAt !== undefined && observedAt >= steps[initialized].fencedAt) ||
     steps.slice(initialized + 1).some(step => step.action === 'release' && journal.stateOf(step) === 'verified')
   )
 }
@@ -98,6 +105,7 @@ export function incusFacts(record: IncusRecord | null): readonly DiagnosticFact[
   return [
     ['Incus storage', STORAGE_LABELS[storageState(record)]],
     ['Last verified Incus step', verified?.action ?? 'none'],
+    ['Last Incus inactivity observation', record?.quiescence?.observedAt ?? 'none'],
     ['Unresolved Incus steps', open.length === 0 ? 'none' : open.map(step => `${step.action} (${journal.stateOf(step)})`).join(', ')],
   ]
 }
@@ -121,9 +129,19 @@ export function requireNotStuck(record: IncusRecord | null, deploymentId: string
 }
 
 /**
- * Only storage-affecting uncertainty blocks removal and disconnect, so an
- * interrupted repository, refresh, or package step never makes a deployment
- * unmanageable.
+ * Removal starts here: only a storage-affecting step with an unknown effect
+ * blocks it. A step that exited zero is left for the release check to verify
+ * from a fresh inspection, which is settlement and not replay.
+ */
+export function requireStorageNotStuck(record: IncusRecord | null, deploymentId: string): void {
+  if (stuck(record).some(step => affectsStorage(step.action))) {
+    throw refusal(record, deploymentId)
+  }
+}
+
+/**
+ * Only storage-affecting uncertainty blocks disconnect, so an interrupted
+ * repository, refresh, or package step never makes a deployment unmanageable.
  */
 export function requireStorageSettled(record: IncusRecord | null, deploymentId: string): void {
   if (storageUnsettled(record).length > 0) {
