@@ -19,7 +19,7 @@ const CLOUD_CONFIG =
     'user:',
     '  name: qiln',
     '  lock_passwd: true',
-    '  sudo: ALL=(ALL) NOPASSWD:ALL',
+    '  sudo: ALL=(ALL:ALL) NOPASSWD:ALL',
     'ssh_pwauth: false',
     'disable_root: true',
     'allow_public_ssh_keys: true',
