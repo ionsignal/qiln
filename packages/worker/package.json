@@ -19,7 +19,7 @@
     "@qiln/core": "*",
     "drizzle-orm": "1.0.0-rc.4",
     "postgres": "3.4.9",
-    "undici": "8.12.2",
+    "undici": "8.12.3",
     "ws": "8.22.0",
     "yaml": "2.9.1",
     "zod": "4.6.7"
@@ -28,7 +28,7 @@
     "@types/node": "22.20.3",
     "@types/ws": "8.18.2",
     "typescript": "6.0.3",
-    "vite": "8.3.4",
+    "vite": "8.3.5",
     "vite-plugin-dts": "5.1.2"
   }
 }
