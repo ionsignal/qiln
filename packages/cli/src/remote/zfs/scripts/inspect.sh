@@ -155,18 +155,25 @@ property_info() {
   printf '%s\n' "$out" | awk -F'\t' 'NF == 2 { print "dataset " $1 " " $2 }'
   out=$(zpool get -H -p -o name,property,value ashift "$POOL" all-vdevs) || return 1
   printf '%s\n' "$out" | awk -F'\t' '$2 == "ashift" { print "ashift " $3 }'
+  out=$(zfs list -H -r -o name,mounted "$POOL") || return 1
+  printf '%s\n' "$out" | awk -F'\t' '$2 == "yes" { print "mounted " $1 }'
 }
 
+# Enablement and activation are reported separately, because each command exits
+# nonzero for its negative answer while still printing the state.
 timer_info() {
   test -n "$POOL" || return 0
-  state=$(systemctl is-enabled "zfs-scrub-monthly@$POOL.timer")
-  printf 'state %s\n' "${state:-unknown}"
+  enabled=$(systemctl is-enabled "zfs-scrub-monthly@$POOL.timer")
+  active=$(systemctl is-active "zfs-scrub-monthly@$POOL.timer")
+  printf 'enablement %s\n' "${enabled:-unknown}"
+  printf 'activation %s\n' "${active:-unknown}"
   return 0
 }
 
+# The status of systemctl is the status of the section, so a failed listing is
+# an inspection failure and not an empty result.
 unit_info() {
-  unit_files=$(systemctl list-unit-files --no-legend --no-pager) || return 1
-  printf '%s\n' "$unit_files" | awk '$1 ~ /^zfs/'
+  systemctl list-unit-files --no-legend --no-pager 'zfs*'
 }
 
 section system system_info

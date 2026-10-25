@@ -1,6 +1,7 @@
 import { arcFileMatches, scrubTimerOf, ZFS_SPEC } from './spec'
 import { diskOf, layers, memberOf } from './disk'
-import { isLivePool } from './live'
+import { isLivePool, poolsEnumerated, scrubTimerRunning } from './live'
+import { transactionViolations } from '../apt'
 import type {
   AbsentPlan,
   BlockDevice,
@@ -148,33 +149,15 @@ export function planOf(
   let install: PackageChange[] = []
   if (missing.length > 0) {
     const { transaction } = observation
-    if (transaction === null) {
-      refusals.push('APT could not resolve the prerequisite packages from its current package lists.')
-    } else {
-      expect(
-        transaction.upgrades.length === 0 && transaction.removals.length === 0,
-        'Installing the prerequisite packages would upgrade or remove other packages.',
-      )
-      expect(
-        transaction.installs.length <= ZFS_SPEC.maximumInstalls,
-        `APT planned more than ${ZFS_SPEC.maximumInstalls} new packages.`,
-      )
-      expect(
-        transaction.configures.every(name => transaction.installs.some(change => change.name === name)),
-        'APT planned to configure a package that is not among the new installations, which indicates a half-configured package state.',
-      )
-      expect(
-        missing.every(name => transaction.installs.some(change => change.name === name)),
-        'APT did not plan to install every prerequisite package.',
-      )
-      expect(
-        transaction.installs.every(
-          change => change.architecture === system.packageArchitecture || change.architecture === 'all',
-        ),
-        'APT planned a package for a different architecture.',
-      )
-      install = transaction.installs
-    }
+    refusals.push(
+      ...transactionViolations(transaction, {
+        missing,
+        architecture: system.packageArchitecture,
+        maximum: ZFS_SPEC.maximumInstalls,
+        label: 'prerequisite',
+      }),
+    )
+    install = transaction?.installs ?? []
   } else {
     expect(pools.tools, 'The prerequisite packages are installed, but zpool was not found.')
   }
@@ -255,7 +238,7 @@ export function planOf(
         ],
       }
     }
-    if (recorded.ready && observation.timer === 'enabled') {
+    if (recorded.ready && scrubTimerRunning(observation)) {
       return { kind: 'ready', pool: recorded.name, guid: recorded.guid }
     }
   }
@@ -278,11 +261,13 @@ export function planOf(
 
 /**
  * Decides what the recorded pool needs before the first AWS removal step. A pool
- * observed imported with its recorded name and GUID gets an export plan. A pool
- * observed absent is accepted only when retained evidence already records its
- * verified clean export (`exported`), because Qiln never records an export that
- * did nothing and a missing pool without that evidence is unexplained. A
- * pool that matches only the name or only the GUID is never adopted.
+ * observed imported with its recorded name and GUID gets an export plan, unless
+ * ZFS reports a mounted dataset, which is refused here rather than at the
+ * script. A pool observed absent is accepted only when the pool listing could
+ * run and retained evidence already records its verified clean export
+ * (`exported`), because Qiln never records an export that did nothing and a
+ * missing pool without that evidence is unexplained. A pool that matches only
+ * the name or only the GUID is never adopted.
  */
 export function releasePlanOf(
   observation: Observation,
@@ -291,20 +276,28 @@ export function releasePlanOf(
   exported: boolean,
 ): RefusedPlan | ExportPlan | AbsentPlan {
   const data = diskOf(observation.disks, target.dataVolumeId)
-  const { imported } = observation.pools
+  const { imported, detail } = observation.pools
   const holdsRecorded = imported.some(pool => pool.name === recorded.name && pool.guid === recorded.guid)
   const reasons: string[] = []
   if (data === null) {
     reasons.push('The recorded data volume was not found exactly once among the host disks.')
+  }
+  if (!poolsEnumerated(observation)) {
+    reasons.push('The imported pools could not be listed, because the ZFS tools or module are not available, so absence of the recorded pool is not established.')
   }
   if (imported.some(pool => (pool.name === recorded.name) !== (pool.guid === recorded.guid))) {
     reasons.push(
       `An imported pool shares the name or the GUID of the recorded pool ${recorded.name} (GUID ${recorded.guid}) but not both, and Qiln does not adopt it.`,
     )
   }
-  if (!holdsRecorded && !exported) {
+  if (poolsEnumerated(observation) && !holdsRecorded && !exported) {
     reasons.push(
       `The recorded pool ${recorded.name} (GUID ${recorded.guid}) is not imported on the host. Run prepare, which re-imports it, then export it.`,
+    )
+  }
+  if (holdsRecorded && detail !== null && detail.mounted.length > 0) {
+    reasons.push(
+      `Datasets of the recorded pool ${recorded.name} are mounted (${detail.mounted.join(', ')}), and Qiln does not unmount them or force an export.`,
     )
   }
   if (data === null || reasons.length > 0) {

@@ -37,3 +37,19 @@ export function isLivePool(observation: Observation, expected: ExpectedPool): bo
     layers(disk).some(layer => layer.path === vdev.path)
   )
 }
+
+/**
+ * The packaged scrub timer counts only when it is both enabled and running. An
+ * enabled timer that is inactive will not scrub until the next boot.
+ */
+export function scrubTimerRunning(observation: Observation): boolean {
+  return observation.timer.enablement === 'enabled' && observation.timer.activation === 'active'
+}
+
+/**
+ * Absence of a pool is evidence only when the pool listing could actually run,
+ * which needs the tools and the loaded module.
+ */
+export function poolsEnumerated(observation: Observation): boolean {
+  return observation.pools.tools && observation.pools.moduleLoaded
+}

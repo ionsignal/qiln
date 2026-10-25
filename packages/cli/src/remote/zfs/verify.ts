@@ -1,4 +1,4 @@
-import { isLivePool } from './live'
+import { isLivePool, poolsEnumerated, scrubTimerRunning } from './live'
 import { arcFileMatches, ZFS_SPEC, type StepAction } from './spec'
 import type { ApprovedPlan, CreatePlan, Observation } from './types'
 
@@ -29,7 +29,8 @@ function configured(plan: CreatePlan, { pool, dataset, ashifts }: Detail): boole
  * A created pool takes whatever GUID ZFS assigned, so only the create step
  * checks the pool without one. `recordedGuid` is the GUID that the journal
  * recorded for this deployment's pool, which the scrub step of a created pool
- * must still find.
+ * must still find. An export counts only when the pool listing could run,
+ * because an unavailable listing looks the same as an empty one.
  */
 export function verify(
   action: StepAction,
@@ -77,11 +78,15 @@ export function verify(
       const guid = plan.kind === 'import' ? plan.guid : recordedGuid
       return (
         guid !== null &&
-        observation.timer === 'enabled' &&
+        scrubTimerRunning(observation) &&
         isLivePool(observation, { name: plan.pool, guid, volumeId: plan.disk.volumeId })
       )
     }
     case 'export-pool':
-      return plan.kind === 'export' && !imported.some(pool => pool.name === plan.pool || pool.guid === plan.guid)
+      return (
+        plan.kind === 'export' &&
+        poolsEnumerated(observation) &&
+        !imported.some(pool => pool.name === plan.pool || pool.guid === plan.guid)
+      )
   }
 }

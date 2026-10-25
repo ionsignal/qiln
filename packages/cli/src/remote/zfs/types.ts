@@ -109,9 +109,11 @@ const signatureSchema = z.strictObject({
  * `pools.detail` describes the one pool the inspection was asked about, and is
  * null when that pool is not imported. Its `data` lists the top-level data
  * vdevs with their type and child count, so a mirror or stripe stays
- * distinguishable from a single disk, and `auxiliary` names any log, cache,
- * spare, special, or dedup class that is present. `timer` is the enablement
- * state of that pool's packaged scrub timer.
+ * distinguishable from a single disk, `auxiliary` names any log, cache,
+ * spare, special, or dedup class that is present, and `mounted` names the
+ * datasets that ZFS reports as mounted. `timer` holds the enablement and
+ * activation states of that pool's packaged scrub timer, which are reported
+ * as observed and are not judged here.
  */
 export const observationSchema = z.strictObject({
   observedAt: z.iso.datetime(),
@@ -181,12 +183,16 @@ export const observationSchema = z.strictObject({
           .max(64),
         auxiliary: z.array(text).max(16),
         ashifts: z.array(count).max(64),
+        mounted: z.array(text).max(64),
         pool: z.record(z.string(), z.string()),
         dataset: z.record(z.string(), z.string()),
       })
       .nullable(),
   }),
-  timer: text,
+  timer: z.strictObject({
+    enablement: text,
+    activation: text,
+  }),
   units: z
     .array(
       z.strictObject({
@@ -211,8 +217,8 @@ export interface RebootPlan {
 }
 
 /**
- * The pool is imported with its scrub timer enabled and the evidence says so.
- * Nothing is left to apply. This plan is never persisted.
+ * The pool is imported with its scrub timer enabled and active, and the
+ * evidence says so. Nothing is left to apply. This plan is never persisted.
  */
 export interface ReadyPlan {
   kind: 'ready'

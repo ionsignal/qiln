@@ -2,11 +2,6 @@ import { z } from 'zod'
 import { InstallerError } from '../../diagnostic/error'
 import type { BlockDevice } from './types'
 
-export interface Section {
-  status: number
-  lines: string[]
-}
-
 /**
  * Carries only authored wording. Raw output, device names, and tool messages
  * never enter the diagnostic.
@@ -16,66 +11,6 @@ export function inspectionFailure(reason: string): InstallerError {
     code: 'ZFS_INSPECTION_FAILED',
     facts: [['Reason', reason]],
   })
-}
-
-const BEGIN = /^#qiln:begin (\w+)$/
-const END = /^#qiln:end (\w+) ([0-9]+)$/
-
-/**
- * Splits the script output into its named sections. Anything outside a section
- * is ignored, and unbalanced or repeated sections are refused.
- */
-export function sections(output: string): Map<string, Section> {
-  const found = new Map<string, Section>()
-  let open: { name: string; lines: string[] } | null = null
-  for (const line of output.split('\n')) {
-    const begin = BEGIN.exec(line)
-    const end = END.exec(line)
-    if (begin !== null) {
-      if (open !== null || found.has(begin[1])) {
-        throw inspectionFailure('The inspection output is malformed.')
-      }
-      open = { name: begin[1], lines: [] }
-    } else if (end !== null) {
-      if (open === null || open.name !== end[1]) {
-        throw inspectionFailure('The inspection output is malformed.')
-      }
-      found.set(open.name, { status: Number(end[2]), lines: open.lines })
-      open = null
-    } else if (open !== null) {
-      open.lines.push(line)
-    }
-  }
-  if (open !== null) {
-    throw inspectionFailure('The inspection output ended inside a section.')
-  }
-  return found
-}
-
-/**
- * Lines of the form `tag value`, where the value is the rest of the line.
- */
-export function tagged(lines: readonly string[]): [string, string][] {
-  return lines
-    .filter(line => line !== '')
-    .map((line): [string, string] => {
-      const space = line.indexOf(' ')
-      return space < 0 ? [line, ''] : [line.slice(0, space), line.slice(space + 1)]
-    })
-}
-
-/**
- * Tagged lines whose tags must be unique.
- */
-export function fields(lines: readonly string[]): Map<string, string> {
-  const values = new Map<string, string>()
-  for (const [tag, value] of tagged(lines)) {
-    if (values.has(tag)) {
-      throw inspectionFailure('The inspection output repeats a field.')
-    }
-    values.set(tag, value)
-  }
-  return values
 }
 
 /**

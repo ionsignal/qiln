@@ -1,23 +1,20 @@
 import { z } from 'zod'
 import { ZFS_SPEC } from './spec'
 import { SCRIPTS } from './recipe'
-import { blockDevices, fields, inspectionFailure, sections, tagged, type Section } from './parse'
+import { blockDevices, inspectionFailure } from './parse'
+import { transactionOf } from '../apt'
+import { outputOf, tagged, type Section } from '../output'
 import { shellCommand } from '../shell'
 import { observationSchema, type Observation } from './types'
 import type { Remote } from '../../ssh/connections'
 
+const { fields, required, sections, succeeded, yesNo } = outputOf(inspectionFailure)
+
 /**
- * Handles upgrades, which carry the previous version in brackets, and the
- * trailing `[]` that APT appends to some lines. Unrecognized `Inst` and `Conf`
- * lines are refused rather than guessed.
- * 
  * Pool-level keys under which `zpool status -j` reports the classes that the
  * supported layout never has. Their mere presence is reported, because an
  * unsupported class must refuse rather than disappear in the schema.
  */
-const INSTALL = /^Inst (\S+) (?:\[([^\]]+)\] )?\((\S+) .*\[([A-Za-z0-9]+)\]\)(?: \[[^\]]*\])?$/
-const CONFIGURE = /^Conf (\S+) (?:\[[^\]]+\] )?\(\S+ .*\)(?: \[[^\]]*\])?$/
-const REMOVAL = /^(?:Remv|Purg) (\S+)/
 const AUXILIARY_CLASSES = ['logs', 'l2cache', 'spares', 'special', 'dedup'] as const
 
 interface RawVdev {
@@ -48,33 +45,6 @@ const statusSchema = z.object({
   }),
   pools: z.record(z.string(), z.looseObject({ vdevs: z.record(z.string(), vdevSchema) })),
 })
-
-function required(found: ReadonlyMap<string, Section>, name: string): Section {
-  const section = found.get(name)
-  if (section === undefined) {
-    throw inspectionFailure(`The ${name} section is missing from the inspection output.`)
-  }
-  return section
-}
-
-function succeeded(found: ReadonlyMap<string, Section>, name: string): Section {
-  const section = required(found, name)
-  if (section.status !== 0) {
-    throw inspectionFailure(`The ${name} inspection step failed.`)
-  }
-  return section
-}
-
-/**
- * Indicators are exactly `yes` or `no`. Anything else is malformed output and
- * never reads as `no`.
- */
-function yesNo(value: string | undefined, subject: string): boolean {
-  if (value !== 'yes' && value !== 'no') {
-    throw inspectionFailure(`The ${subject} indicator is missing or unrecognized.`)
-  }
-  return value === 'yes'
-}
 
 function runningLimit(value: string): number {
   if (!/^[0-9]+$/.test(value)) {
@@ -126,43 +96,6 @@ function packagesOf(section: Section) {
       const [name, version, architecture, state] = line.split(' ')
       return { name, version, architecture, installed: state === 'installed' }
     })
-}
-
-/**
- * A failed simulation means APT could not resolve the packages, which the
- * planner reports as a refusal.
- */
-function transactionOf(section: Section) {
-  if (section.status !== 0) {
-    return null
-  }
-  const installs: { name: string; version: string; architecture: string }[] = []
-  const configures: string[] = []
-  const upgrades: string[] = []
-  const removals: string[] = []
-  for (const line of section.lines) {
-    const removal = REMOVAL.exec(line)
-    if (line.startsWith('Inst ')) {
-      const match = INSTALL.exec(line)
-      if (match === null) {
-        throw inspectionFailure('APT reported an installation in an unrecognized format.')
-      }
-      if (match[2] === undefined) {
-        installs.push({ name: match[1], version: match[3], architecture: match[4] })
-      } else {
-        upgrades.push(match[1])
-      }
-    } else if (line.startsWith('Conf ')) {
-      const match = CONFIGURE.exec(line)
-      if (match === null) {
-        throw inspectionFailure('APT reported a configuration in an unrecognized format.')
-      }
-      configures.push(match[1])
-    } else if (removal !== null) {
-      removals.push(removal[1])
-    }
-  }
-  return { installs, configures, upgrades, removals }
 }
 
 function signaturesOf(section: Section) {
@@ -270,9 +203,14 @@ function detailOf(status: Section, properties: Section, name: string) {
   const pool: Record<string, string> = {}
   const dataset: Record<string, string> = {}
   const ashifts: number[] = []
+  const mounted: string[] = []
   for (const [tag, value] of tagged(properties.lines)) {
     if (tag === 'ashift') {
       ashifts.push(ashiftOf(value))
+      continue
+    }
+    if (tag === 'mounted') {
+      mounted.push(value)
       continue
     }
     const separator = value.indexOf(' ')
@@ -282,7 +220,15 @@ function detailOf(status: Section, properties: Section, name: string) {
     const properties = tag === 'pool' ? pool : dataset
     properties[value.slice(0, separator)] = value.slice(separator + 1)
   }
-  return { data, auxiliary, ashifts, pool, dataset }
+  return { data, auxiliary, ashifts, mounted, pool, dataset }
+}
+
+function timerOf(section: Section) {
+  const values = fields(section.lines)
+  return {
+    enablement: values.get('enablement'),
+    activation: values.get('activation'),
+  }
 }
 
 function unitsOf(section: Section) {
@@ -325,7 +271,7 @@ export async function inspectHost(
     system: systemOf(succeeded(found, 'system')),
     module: moduleOf(required(found, 'module')),
     packages: packagesOf(succeeded(found, 'packages')),
-    transaction: transactionOf(required(found, 'simulation')),
+    transaction: transactionOf(required(found, 'simulation'), inspectionFailure),
     disks: blockDevices(succeeded(found, 'disks').lines.join('\n')),
     signatures: signaturesOf(succeeded(found, 'signatures')),
     arc: arcOf(succeeded(found, 'arc')),
@@ -333,7 +279,7 @@ export async function inspectHost(
       ...pools,
       detail: imported ? detailOf(succeeded(found, 'poolstatus'), succeeded(found, 'poolprops'), poolName) : null,
     },
-    timer: fields(succeeded(found, 'timer').lines).get('state'),
+    timer: timerOf(succeeded(found, 'timer')),
     units: unitsOf(succeeded(found, 'units')),
   }
   const parsed = observationSchema.safeParse(draft)
