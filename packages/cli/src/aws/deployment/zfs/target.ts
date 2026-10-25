@@ -1,4 +1,4 @@
-import { dataVolumeId, resourceId } from '../topology'
+import { identityOf } from '../journal/binding'
 import type { ZfsTarget } from '../../../remote/zfs/types'
 import type { Deployment } from '../types'
 
@@ -10,16 +10,12 @@ const GIB = 1_073_741_824
  * means the record lacks an identity, which callers treat as a defect.
  */
 export function targetOf(record: Deployment): ZfsTarget | null {
-  const instanceId = resourceId(record, 'run-instances')
-  const dataId = dataVolumeId(record)
-  const rootVolumeId = record.implicit?.rootVolumeId
-  if (instanceId === null || dataId === null || rootVolumeId === undefined) {
+  const identity = identityOf(record)
+  if (identity === null) {
     return null
   }
   return {
-    instanceId,
-    rootVolumeId,
-    dataVolumeId: dataId,
+    ...identity,
     dataBytes: record.approval.host.plan.data.sizeGiB * GIB,
   }
 }

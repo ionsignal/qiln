@@ -1,17 +1,7 @@
 import { InstallerError, type DiagnosticFact, type InstallerErrorCode } from '../../../diagnostic/error'
 import { isPoolAction } from '../../../remote/zfs/spec'
+import * as journal from '../journal/step'
 import { establishesPool, type ZfsRecord, type ZfsStep } from './types'
-
-/**
- * Derived from the step fields and never persisted.
- *
- * - open: fenced with no outcome recorded.
- * - uncertain: completed with a nonzero exit, which does not show that nothing changed.
- * - returned: exited zero, but the postcondition was not verified.
- * - refused: definitely refused before any effect.
- * - verified: a fresh observation agreed.
- */
-export type StepState = 'open' | 'uncertain' | 'returned' | 'refused' | 'verified'
 
 /**
  * The pool's last recorded state, not a fresh observation. `unknown` means a
@@ -20,36 +10,12 @@ export type StepState = 'open' | 'uncertain' | 'returned' | 'refused' | 'verifie
  */
 export type PoolState = 'none' | 'imported' | 'exported' | 'unknown'
 
-export function stateOf(step: ZfsStep): StepState {
-  if (step.refusedAt !== null) {
-    return 'refused'
-  }
-  if (step.completion === null) {
-    return 'open'
-  }
-  if (step.completion.exitCode !== 0) {
-    return 'uncertain'
-  }
-  return step.verifiedAt === null ? 'returned' : 'verified'
-}
-
-/**
- * A settled step has a definite outcome, so a later step may follow it.
- */
-export function settled(step: ZfsStep): boolean {
-  const state = stateOf(step)
-  return state === 'refused' || state === 'verified'
-}
-
 /**
  * Steps whose effect is unknown and which only an operator can resolve: open
  * or uncertain. Nothing clears them, and they are never replayed or resumed.
  */
 export function stuck(record: ZfsRecord | null): ZfsStep[] {
-  return (record?.steps ?? []).filter(step => {
-    const state = stateOf(step)
-    return state === 'open' || state === 'uncertain'
-  })
+  return journal.stuck(record?.steps ?? [])
 }
 
 /**
@@ -57,14 +23,14 @@ export function stuck(record: ZfsRecord | null): ZfsStep[] {
  * verify them, which is accounting and not replay.
  */
 export function returned(record: ZfsRecord | null): ZfsStep[] {
-  return (record?.steps ?? []).filter(step => stateOf(step) === 'returned')
+  return journal.returned(record?.steps ?? [])
 }
 
 /**
  * Stuck plus returned steps.
  */
 export function unsettled(record: ZfsRecord | null): ZfsStep[] {
-  return (record?.steps ?? []).filter(step => !settled(step))
+  return journal.unsettled(record?.steps ?? [])
 }
 
 function poolUnsettled(record: ZfsRecord | null): ZfsStep[] {
@@ -88,7 +54,7 @@ function poolExposed(record: ZfsRecord): boolean {
   )
   return (
     installed >= 0 &&
-    !record.steps.slice(installed + 1).some(step => isPoolAction(step.action) && stateOf(step) === 'verified')
+    !record.steps.slice(installed + 1).some(step => isPoolAction(step.action) && journal.stateOf(step) === 'verified')
   )
 }
 
@@ -99,7 +65,7 @@ export function poolState(record: ZfsRecord | null): PoolState {
   if (poolUnsettled(record).length > 0 || poolExposed(record)) {
     return 'unknown'
   }
-  const last = record.steps.findLast(step => isPoolAction(step.action) && stateOf(step) === 'verified')
+  const last = record.steps.findLast(step => isPoolAction(step.action) && journal.stateOf(step) === 'verified')
   if (last === undefined) {
     return 'none'
   }
@@ -113,13 +79,13 @@ export function poolState(record: ZfsRecord | null): PoolState {
  */
 export function prepared(record: ZfsRecord | null): boolean {
   const steps = record?.steps ?? []
-  const established = steps.findLastIndex(step => establishesPool(step.action) && stateOf(step) === 'verified')
+  const established = steps.findLastIndex(step => establishesPool(step.action) && journal.stateOf(step) === 'verified')
   if (established < 0) {
     return false
   }
   const later = steps.slice(established + 1)
   return (
-    later.some(step => step.action === 'enable-scrub' && stateOf(step) === 'verified') &&
+    later.some(step => step.action === 'enable-scrub' && journal.stateOf(step) === 'verified') &&
     !later.some(step => step.action === 'export-pool' && step.refusedAt === null)
   )
 }
@@ -143,7 +109,7 @@ export function zfsFacts(record: ZfsRecord | null): readonly DiagnosticFact[] {
   const open = unsettled(record)
   return [
     ['ZFS pool', poolDisclosure(record)],
-    ['Unresolved ZFS steps', open.length === 0 ? 'none' : open.map(step => `${step.action} (${stateOf(step)})`).join(', ')],
+    ['Unresolved ZFS steps', open.length === 0 ? 'none' : open.map(step => `${step.action} (${journal.stateOf(step)})`).join(', ')],
   ]
 }
 

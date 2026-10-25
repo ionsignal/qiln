@@ -6,31 +6,15 @@ import { requireOperationLock } from '../../root'
 import { stateFailure } from '../../errors'
 import { InstallerError } from '../../../diagnostic/error'
 import { readChild, writeChild, type Dir } from '../../../state/files'
-import { settled, stateOf } from './facts'
-import { targetOf } from './target'
-import { actionsOf, establishesPool, poolNameOf, zfsSchema, type ZfsBinding, type ZfsRecord, type ZfsStep } from './types'
+import { bindingOf } from '../journal/binding'
+import { isAppendOnly, isHistoryConsistent } from '../journal/history'
+import { actionsOf, establishesPool, poolNameOf, zfsSchema, type ZfsRecord } from './types'
 import type { Deployment } from '../types'
 
 function invalid(): never {
   throw new InstallerError({
     code: 'ZFS_STATE_INVALID',
   })
-}
-
-function bindingOf(deployment: Deployment): ZfsBinding | null {
-  const target = targetOf(deployment)
-  if (target === null) {
-    return null
-  }
-  return {
-    deployment: deployment.id,
-    connection: deployment.connection,
-    operator: deployment.binding.operator,
-    region: deployment.binding.region,
-    instanceId: target.instanceId,
-    rootVolumeId: target.rootVolumeId,
-    dataVolumeId: target.dataVolumeId,
-  }
 }
 
 /**
@@ -81,25 +65,14 @@ function isPoolConsistent({ pool, steps, authorizations, binding }: ZfsRecord): 
  * steps.
  */
 function isConsistent(record: ZfsRecord, deployment: Deployment): boolean {
-  const { authorizations, steps, binding } = record
+  const { authorizations, binding } = record
   const bound = bindingOf(deployment)
   return (
     bound !== null &&
     sameJson(binding, bound) &&
-    new Set(authorizations.map(authorization => authorization.id)).size === authorizations.length &&
-    new Set(steps.map(step => step.id)).size === steps.length &&
     authorizations.every(({ plan }) => plan.kind === 'prerequisites' || plan.disk.volumeId === binding.dataVolumeId) &&
     isPoolConsistent(record) &&
-    steps.slice(0, -1).every(settled) &&
-    steps.every((step, index) => {
-      const authorization = authorizations.find(({ id }) => id === step.authorization)
-      return (
-        authorization !== undefined &&
-        actionsOf(authorization.plan).includes(step.action) &&
-        step.fencedAt >= authorization.approvedAt &&
-        (index === 0 || steps[index - 1].fencedAt <= step.fencedAt)
-      )
-    })
+    isHistoryConsistent(record, actionsOf)
   )
 }
 
@@ -132,26 +105,6 @@ export async function read(directory: Dir, deployment: Deployment): Promise<ZfsR
     }
     return invalid()
   }
-}
-
-function unchanged(before: readonly unknown[], after: readonly unknown[]): boolean {
-  return before.length <= after.length && before.every((item, index) => sameJson(item, after[index]))
-}
-
-/**
- * Evidence is set once: a step keeps its identity, and its completion,
- * refusal, and verification are never rewritten or dropped.
- */
-function progressed(before: ZfsStep, after: ZfsStep): boolean {
-  return (
-    before.id === after.id &&
-    before.authorization === after.authorization &&
-    before.action === after.action &&
-    before.fencedAt === after.fencedAt &&
-    (before.completion === null || sameJson(before.completion, after.completion)) &&
-    (before.refusedAt === null || before.refusedAt === after.refusedAt) &&
-    (before.verifiedAt === null || before.verifiedAt === after.verifiedAt)
-  )
 }
 
 /**
@@ -193,44 +146,15 @@ function requirePool(before: ZfsRecord, after: ZfsRecord): void {
 }
 
 /**
- * The journal's write rule: history is append-only, one write adds at most one
- * authorization or one fenced step but never both, a new authorization needs
- * every step settled, a new step starts open, and otherwise only the last step
- * may progress. Both records are already validated and consistent.
+ * The journal's write rule: the binding is fixed, the history only grows by
+ * the shared append-only rule, and the pool evidence follows its own rule.
+ * Both records are already validated and consistent.
  */
 function requireTransition(before: ZfsRecord, after: ZfsRecord): void {
-  const authorized = after.authorizations.length - before.authorizations.length
-  const fenced = after.steps.length - before.steps.length
-  if (
-    !sameJson(before.binding, after.binding) ||
-    authorized < 0 ||
-    authorized > 1 ||
-    fenced < 0 ||
-    fenced > 1 ||
-    (authorized === 1 && fenced === 1) ||
-    !unchanged(before.authorizations, after.authorizations)
-  ) {
+  if (!sameJson(before.binding, after.binding) || !isAppendOnly(before, after)) {
     return invalid()
   }
   requirePool(before, after)
-  if (authorized === 1 && !after.steps.every(settled)) {
-    return invalid()
-  }
-  if (fenced === 1) {
-    if (!unchanged(before.steps, after.steps) || stateOf(after.steps[after.steps.length - 1]) !== 'open') {
-      return invalid()
-    }
-    return
-  }
-  if (before.steps.length === 0) {
-    return
-  }
-  if (
-    !unchanged(before.steps.slice(0, -1), after.steps) ||
-    !progressed(before.steps[before.steps.length - 1], after.steps[after.steps.length - 1])
-  ) {
-    return invalid()
-  }
 }
 
 /**

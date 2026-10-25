@@ -1,8 +1,6 @@
 import { z } from 'zod'
-import { KIND_IDS } from '../graph'
 import { AWS_RECORD_VERSION } from '../../spec'
 import { STEP_ACTIONS, type StepAction } from '../../../remote/zfs/spec'
-import { isIdentity, isOperationId, isTimestamp, validName, validRegion, type AwsIdentity } from '../../types'
 import {
   createPlanSchema,
   exportPlanSchema,
@@ -10,77 +8,15 @@ import {
   poolNameSchema,
   prerequisitePlanSchema,
 } from '../../../remote/zfs/types'
+import { bindingSchema, volumeId } from '../journal/binding'
+import { authorizationSchemaOf } from '../journal/history'
+import { stepSchemaOf, timestamp } from '../journal/step'
 
-const operationId = z.string().refine(isOperationId, 'Expected an operation ID.')
-const timestamp = z.string().refine(isTimestamp, 'Expected a canonical timestamp.')
-const volumeId = z.string().regex(KIND_IDS.volume)
+const authorizationSchema = authorizationSchemaOf(
+  z.discriminatedUnion('kind', [prerequisitePlanSchema, createPlanSchema, importPlanSchema, exportPlanSchema]),
+)
 
-/**
- * The deployment this evidence belongs to. It is compared with the deployment
- * record on every read, so evidence can never be applied to another host.
- */
-const bindingSchema = z.strictObject({
-  deployment: operationId,
-  connection: z.string().refine(validName, 'Expected a connection name.'),
-  operator: z.custom<AwsIdentity>(isIdentity),
-  region: z.string().refine(validRegion, 'Expected a region.'),
-  instanceId: z.string().regex(KIND_IDS.instance),
-  rootVolumeId: volumeId,
-  dataVolumeId: volumeId,
-})
-
-/**
- * One approved plan. The approver is the trusted local invocation identity, not
- * the AWS operator, because a retained SSH pin involves no fresh AWS
- * authentication. The recipe identifies the exact scripts that were approved.
- */
-const authorizationSchema = z.strictObject({
-  id: operationId,
-  approvedAt: timestamp,
-  approvedBy: z.strictObject({
-    method: z.literal('local-interactive'),
-    userId: z.int().nonnegative(),
-  }),
-  recipe: z.strictObject({
-    revision: z.int().positive(),
-    digest: z.string().regex(/^[0-9a-f]{64}$/),
-  }),
-  plan: z.discriminatedUnion('kind', [prerequisitePlanSchema, createPlanSchema, importPlanSchema, exportPlanSchema]),
-})
-
-/**
- * One fenced remote effect. A refusal is a definite absence of effect, so it
- * never coexists with a completion. A completion with a nonzero exit code does
- * not establish that nothing changed, and a zero exit code is not verified
- * until `verifiedAt` is set. Timestamps never precede the event they follow.
- */
-const stepSchema = z
-  .strictObject({
-    id: operationId,
-    authorization: operationId,
-    action: z.enum(STEP_ACTIONS),
-    fencedAt: timestamp,
-    completion: z
-      .strictObject({
-        exitCode: z.int().min(0).max(255),
-        completedAt: timestamp,
-      })
-      .nullable(),
-    refusedAt: timestamp.nullable(),
-    verifiedAt: timestamp.nullable(),
-  })
-  .refine(({ completion, refusedAt }) => refusedAt === null || completion === null, 'Expected a refusal or a completion, not both.')
-  .refine(
-    ({ completion, verifiedAt }) => verifiedAt === null || completion?.exitCode === 0,
-    'Expected verification only after a zero exit.',
-  )
-  .refine(
-    ({ fencedAt, completion, refusedAt, verifiedAt }) =>
-      (completion === null || completion.completedAt >= fencedAt) &&
-      (refusedAt === null || refusedAt >= fencedAt) &&
-      (verifiedAt === null || (completion !== null && verifiedAt >= completion.completedAt)),
-    'Expected chronological step timestamps.',
-  )
+const stepSchema = stepSchemaOf(z.enum(STEP_ACTIONS))
 
 /**
  * The GUID stays a decimal string and is never converted to a number.
