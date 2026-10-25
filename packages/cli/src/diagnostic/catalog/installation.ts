@@ -22,9 +22,9 @@ export const installationDiagnostics = Object.freeze({
     'Select or import a trusted local container image.',
   ),
   IMAGE_ARCHITECTURE_INCOMPATIBLE: entry(
-    'Selected image architecture is unsupported',
-    'The installer requires native x86_64 provider metadata and does not accept foreign-architecture emulation.',
-    'Select an image whose Incus architecture is x86_64.',
+    'Selected image architecture does not match the host',
+    'The installer requires provider metadata for the host’s native architecture (x86_64 or aarch64) and does not accept foreign-architecture emulation.',
+    'Select an image built for the architecture shown in the diagnostic facts.',
   ),
   IMAGE_ALIAS_NOT_FOUND: entry(
     'Local image alias was not found',
@@ -122,10 +122,48 @@ export const installationDiagnostics = Object.freeze({
     'The source device requires a canonical absolute non-root path without unsupported characters.',
     'Select the canonical Qiln Git checkout root with --source.',
   ),
+  INSTALLATION_HOST_INSPECTION_FAILED: entry(
+    'Target host inspection did not complete reliably',
+    'Qiln runs one fixed read-only inspection script on the target and validates each section of its output before judging the host or its checkout. The displayed reason names what was missing, malformed, or out of range. The inspection changes nothing and runs without elevated privilege.',
+    'Review the displayed reason.',
+    'Confirm that the target is reachable and passes its baseline checks, then try again.',
+    'Qiln does not retry or accept partial inspection output.',
+  ),
   INSTALLATION_STATE_REQUIRED: entry(
     'Installation image pin is unavailable',
     'Credentials may be delivered only to an instance matching the persisted image identity.',
     'Re-run qiln up to reconcile the selected image and installation state.',
+  ),
+  INSTALLER_LEGACY_STATE: entry(
+    'Installer state uses a superseded layout',
+    'Earlier versions kept the installation record, credentials, and lock directly in the Qiln state directory. Installations now live in named directories, each the single authority for its own credentials. Qiln never reads, copies, migrates, or deletes the earlier entries, so two credential authorities can never exist.',
+    'Review the listed entries in the Qiln state directory.',
+    'Remove them manually once you no longer need them, then re-run the command. An orchestrator whose credentials are no longer available locally is refused until it is reviewed manually.',
+    preservePostgresStep,
+  ),
+  INSTALLATION_HOST_UNIDENTIFIED: entry(
+    'Local host identity is unavailable',
+    'Installation records are bound to this machine through an application-specific digest of /etc/machine-id. The identifier was unreadable or malformed. The binding is evidence of identity and not attestation, and the raw identifier is never retained or displayed.',
+    'Restore a readable, valid /etc/machine-id through normal host administration.',
+  ),
+  INSTALLATION_BINDING_MISMATCH: entry(
+    'Installation record does not match this invocation',
+    'A retained installation record binds one host, architecture, layout, and checkout path. Qiln refuses a different one rather than rebinding, replacing, or migrating the record.',
+    'Use the original host, source checkout, and layout, or review the retained state manually.',
+    preservePostgresStep,
+  ),
+  INSTALLATION_HOST_REGISTERED: entry(
+    'Another installation is already registered for this host',
+    'This release supports one installation per host, because the orchestrator instance name is fixed. Qiln never merges, renames, or replaces an existing installation record.',
+    'Use the installation that is already registered for this host.',
+    'Review and remove the other installation state manually only if it is obsolete.',
+    preservePostgresStep,
+  ),
+  AWS_INSTALLATION_BINDING_REFUSED: entry(
+    'Deployment is not ready for installation',
+    'Installation consumes retained deployment evidence and never authenticates to AWS or probes the host to fill a gap. It needs a retained host-key pin, a recorded ZFS pool verified imported with its scrub timer, an Incus initialization verified and not released, no unresolved preparation step, and a bridge address that its layout derivation accepts. The evidence is point-in-time, and a live inspection precedes any later change.',
+    'Run qiln aws deployment verify to retain the host-key pin, and qiln aws deployment prepare to complete ZFS and Incus preparation.',
+    'Qiln never restarts Incus after removal has stopped it. Restart it outside Qiln only after review.',
   ),
   ORCHESTRATOR_INSTANCE_REQUIRED: entry(
     'Stopped orchestrator is unavailable',
@@ -157,8 +195,8 @@ export const installationDiagnostics = Object.freeze({
   ),
   INVALID_INSTALLATION_STATE: entry(
     'Installation state is invalid or incompatible',
-    'The state must contain exactly the supported version, project, instance name, and full lowercase image fingerprint.',
-    'Review the CLI version and inspect the state file manually before recovery.',
+    'The record must match the supported schema exactly: version, name, project, instance name, host binding, architecture, layout digest, checkout path, and an image fingerprint that is absent or a full lowercase SHA-256. A permitted write changes only the image pin.',
+    'Review the CLI version and inspect the installation record manually before recovery.',
     'Do not discard retained credentials or persistent data.',
   ),
   ORCHESTRATOR_INSTANCE_VERIFICATION_FAILED: entry(

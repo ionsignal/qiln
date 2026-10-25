@@ -1,7 +1,5 @@
 import { InstallerError } from '../../../diagnostic/error'
-import { AWS_SPEC } from '../../../aws/spec'
-import { deploymentFacts } from '../../../aws/deployment/facts'
-import { sshReady } from '../../../aws/deployment/topology'
+import { optionsOf, requireReady } from '../../../aws/deployment/access'
 import { readPrivateKey } from '../../../aws/ssh/private'
 import { withSsh, type Remote } from '../../../ssh/connections'
 import { SshError } from '../../../ssh/failure'
@@ -28,20 +26,6 @@ export interface Access {
 interface Pinned {
   record: Deployment
   pin: HostKey
-}
-
-function requireReady(record: Deployment): void {
-  if (sshReady(record)) {
-    return
-  }
-  throw new InstallerError({
-    code: 'AWS_DEPLOYMENT_ACCESS_REFUSED',
-    facts: [
-      ...deploymentFacts(record),
-      ['Observed', 'Creation is not fully verified, removal has begun, or no administrative key is bound.'],
-    ],
-    retry: `qiln aws deployment status --id ${record.id}`,
-  })
 }
 
 /**
@@ -77,13 +61,7 @@ export async function resolveAccess(
   return {
     record,
     retry,
-    options: {
-      host: pin.address,
-      port: record.approval.ingress[0].port,
-      username: record.approval.host.plan.bootstrap.user,
-      fingerprint: pin.fingerprint,
-      ...AWS_SPEC.deployment.ssh,
-    },
+    options: optionsOf(record, pin),
   }
 }
 
