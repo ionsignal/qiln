@@ -1,8 +1,9 @@
 import { InstallerError } from '../diagnostic/error'
 import { isIncusApiStatus, toInstallerError } from '../incus/errors'
 import { INSTALLER_SPEC } from './spec'
-import type { LocalIncusClient } from '../incus/client'
+import type { IncusClient } from '../incus/client'
 import type { IncusNetwork, IncusNetworkCreate } from '../incus/types'
+import type { Layout } from './layout'
 
 const RERUN =
   'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]'
@@ -12,11 +13,13 @@ export interface NetworkConvergence {
   outcome: 'created' | 'reused'
 }
 
-function configDifferences(actual: Readonly<Record<string, string>>): {
+function configDifferences(
+  actual: Readonly<Record<string, string>>,
+  expected: Readonly<Record<string, string>>,
+): {
   missing: string[]
   unexpected: string[]
 } {
-  const expected = INSTALLER_SPEC.network.config
   const missing = Object.entries(expected)
     .filter(([key, value]) => actual[key] !== value)
     .map(([key]) => key)
@@ -27,10 +30,10 @@ function configDifferences(actual: Readonly<Record<string, string>>): {
   }
 }
 
-export function assertNetwork(network: IncusNetwork): void {
-  const differences = configDifferences(network.config)
+export function assertNetwork(network: IncusNetwork, layout: Layout): void {
+  const differences = configDifferences(network.config, layout.network.config)
   const compatible =
-    network.name === INSTALLER_SPEC.network.name &&
+    network.name === layout.network.name &&
     network.type === INSTALLER_SPEC.network.type &&
     network.description === INSTALLER_SPEC.network.description &&
     network.managed &&
@@ -53,33 +56,33 @@ export function assertNetwork(network: IncusNetwork): void {
   })
 }
 
-async function getNetwork(client: LocalIncusClient): Promise<IncusNetwork | null> {
+async function getNetwork(client: IncusClient, layout: Layout): Promise<IncusNetwork | null> {
   try {
-    return await client.getNetworkOrNull(INSTALLER_SPEC.network.name)
+    return await client.getNetworkOrNull(layout.network.name)
   } catch (error: unknown) {
     throw toInstallerError(error, {
       check: 'managed Incus network convergence',
-      operation: `inspect the '${INSTALLER_SPEC.network.name}' network`,
+      operation: `inspect the '${layout.network.name}' network`,
       rerun: RERUN,
     })
   }
 }
 
-function createInput(): IncusNetworkCreate {
+function createInput(layout: Layout): IncusNetworkCreate {
   return {
-    name: INSTALLER_SPEC.network.name,
+    name: layout.network.name,
     type: INSTALLER_SPEC.network.type,
     description: INSTALLER_SPEC.network.description,
     config: {
-      ...INSTALLER_SPEC.network.config,
+      ...layout.network.config,
     },
   }
 }
 
-export async function convergeNetwork(client: LocalIncusClient): Promise<NetworkConvergence> {
-  const existing = await getNetwork(client)
+export async function convergeNetwork(client: IncusClient, layout: Layout): Promise<NetworkConvergence> {
+  const existing = await getNetwork(client, layout)
   if (existing) {
-    assertNetwork(existing)
+    assertNetwork(existing, layout)
     return {
       network: existing,
       outcome: 'reused',
@@ -88,24 +91,24 @@ export async function convergeNetwork(client: LocalIncusClient): Promise<Network
   let created = false
   let conflict: unknown
   try {
-    await client.createNetwork(createInput())
+    await client.createNetwork(createInput(layout))
     created = true
   } catch (error: unknown) {
     if (!isIncusApiStatus(error, 409)) {
       throw toInstallerError(error, {
         check: 'managed Incus network convergence',
-        operation: `create the '${INSTALLER_SPEC.network.name}' managed bridge network`,
+        operation: `create the '${layout.network.name}' managed bridge network`,
         rerun: RERUN,
       })
     }
     conflict = error
   }
-  const network = await getNetwork(client)
+  const network = await getNetwork(client, layout)
   if (!network) {
     if (conflict !== undefined) {
       throw toInstallerError(conflict, {
         check: 'managed Incus network convergence',
-        operation: `reconcile the concurrently changed '${INSTALLER_SPEC.network.name}' network`,
+        operation: `reconcile the concurrently changed '${layout.network.name}' network`,
         rerun: RERUN,
       })
     }
@@ -114,13 +117,13 @@ export async function convergeNetwork(client: LocalIncusClient): Promise<Network
       facts: [
         [
           'Observed',
-          `Incus did not return '${INSTALLER_SPEC.network.name}' after accepting its synchronous creation request.`,
+          `Incus did not return '${layout.network.name}' after accepting its synchronous creation request.`,
         ],
       ],
       retry: RERUN,
     })
   }
-  assertNetwork(network)
+  assertNetwork(network, layout)
   return {
     network,
     outcome: created ? 'created' : 'reused',

@@ -1,48 +1,61 @@
-import { basename, dirname, join, resolve } from 'node:path'
+import { basename, join } from 'node:path'
 import { TextDecoder, TextEncoder } from 'node:util'
 import { InstallerError } from '../diagnostic/error'
-import { runProcess } from '../process'
 import {
   Dir,
   FileValidationError,
   createDir,
   inspectChild,
+  openChildDir,
   openDir,
   readChild,
-  withTemp,
   writeChild,
-  type FileSnapshot,
 } from '../state/files'
-import { acquireLock, type InstallerLock } from '../state/lock'
+import { acquireLock, type StateLock } from '../state/lock'
 import { statePath } from '../state/path'
+import {
+  installationSchema,
+  invalidRecord,
+  newRecord,
+  requireBound,
+  requireHost,
+  requireTransition,
+  sameHost,
+  type HostBinding,
+  type InstallationRecord,
+} from './records'
 import { INSTALLER_SPEC } from './spec'
+import type { InstallationInputs } from './types'
 
-const MAX_INSTALLATION_STATE_BYTES = 65_536
-const MAX_AUTHORIZED_KEYS_BYTES = 1_048_576
+const MAX_RECORD_BYTES = 65_536
 const FULL_FINGERPRINT_PATTERN = /^[a-f0-9]{64}$/
-const PUBLIC_KEY_BLOB_PATTERN = /^[A-Za-z0-9+/]+={0,2}$/
-const SUPPORTED_AUTHORIZED_KEY_ALGORITHMS = new Set([
-  'ssh-ed25519',
-  'ssh-rsa',
-  'ecdsa-sha2-nistp256',
-  'ecdsa-sha2-nistp384',
-  'ecdsa-sha2-nistp521',
-  'sk-ssh-ed25519@openssh.com',
-  'sk-ecdsa-sha2-nistp256@openssh.com',
-])
+const FILES = INSTALLER_SPEC.state
+const LOCK_CODES = {
+  changed: 'INSTALLER_LOCK_CHANGED',
+  locked: 'INSTALLER_LOCKED',
+  failed: 'INSTALLER_LOCK_FAILED',
+} as const
 
-export interface InstallationState {
-  version: 1
-  projectName: string
-  instanceName: string
-  imageFingerprint: string
-}
+/**
+ * What earlier versions kept directly in the state directory. These entries
+ * would be a second credential authority, so they are refused and never read,
+ * copied, migrated, or deleted.
+ */
+const LEGACY_ENTRIES: readonly string[] = [
+  FILES.installationFileName,
+  FILES.legacyLockFileName,
+  ...Object.values(INSTALLER_SPEC.credentials.files),
+]
 
-export interface InstallerStateInspection {
+/**
+ * The record once an image is pinned.
+ */
+export type InstallationState = InstallationRecord & { imageFingerprint: string }
+
+export interface InstallationInspection {
   directoryPath: string
   exists: boolean
-  installation: InstallationState | null
-  roster: FileSnapshot | null
+  record: InstallationRecord | null
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -64,11 +77,21 @@ function currentUserId(): number {
   return process.geteuid()
 }
 
+function ownership() {
+  return {
+    owner: currentUserId(),
+    mode: 0o700,
+  }
+}
+
 export function installerStatePath(environment: NodeJS.ProcessEnv = process.env): string {
   return statePath(environment)
 }
 
 function stateError(error: unknown, path: string, expectedDirectory?: boolean): InstallerError {
+  if (error instanceof InstallerError) {
+    return error
+  }
   if (error instanceof FileValidationError) {
     const expectsDirectory = expectedDirectory ?? error.entryType === 'directory'
     if (error.kind === 'type') {
@@ -120,106 +143,63 @@ function stateError(error: unknown, path: string, expectedDirectory?: boolean): 
   })
 }
 
-function parseInstallationState(value: unknown): InstallationState {
-  if (
-    !isRecord(value) ||
-    value.version !== INSTALLER_SPEC.stateVersion ||
-    value.projectName !== INSTALLER_SPEC.projectName ||
-    value.instanceName !== INSTALLER_SPEC.orchestrator.name ||
-    typeof value.imageFingerprint !== 'string' ||
-    !FULL_FINGERPRINT_PATTERN.test(value.imageFingerprint)
-  ) {
-    throw new InstallerError({
-      code: 'INVALID_INSTALLATION_STATE',
-      facts: [
-        [
-          'Observed',
-          'installation.json does not contain the expected version, project, instance, and full lowercase image fingerprint.',
-        ],
-      ],
-      retry: 'qiln doctor',
-    })
-  }
-  const expectedKeys = ['imageFingerprint', 'instanceName', 'projectName', 'version']
-  const actualKeys = Object.keys(value).sort()
-  if (actualKeys.length !== expectedKeys.length || actualKeys.some((key, index) => key !== expectedKeys[index])) {
-    throw new InstallerError({
-      code: 'INVALID_INSTALLATION_STATE',
-      facts: [['Observed', 'installation.json does not match the installer state schema.']],
-      retry: 'qiln doctor',
-    })
-  }
-  return {
-    version: 1,
-    projectName: value.projectName,
-    instanceName: value.instanceName,
-    imageFingerprint: value.imageFingerprint,
-  }
-}
-
-function readInstallationState(snapshot: FileSnapshot): InstallationState {
-  let parsed: unknown
+/**
+ * Opens the directory that holds every named installation, refusing a state
+ * directory that still holds the earlier root-level layout. Without `create`,
+ * an absent directory is null.
+ */
+async function openRegistry(environment: NodeJS.ProcessEnv, create: boolean): Promise<Dir | null> {
+  const path = installerStatePath(environment)
+  let root: Dir
   try {
-    const content = new TextDecoder('utf-8', {
-      fatal: true,
-    }).decode(snapshot.bytes)
-    parsed = JSON.parse(content) as unknown
-  } catch {
-    throw new InstallerError({
-      code: 'INVALID_INSTALLATION_STATE',
-      facts: [['Observed', 'installation.json could not be decoded.']],
-      retry: 'qiln doctor',
-    })
-  }
-  return parseInstallationState(parsed)
-}
-
-async function readStateChild(directory: Dir, name: string, maxSize: number): Promise<FileSnapshot> {
-  try {
-    return await readChild(directory, name, {
-      owner: currentUserId(),
-      mode: 0o600,
-      maxSize,
-    })
+    root = await openDir(path, ownership())
   } catch (error: unknown) {
-    throw stateError(error, join(directory.path, name), false)
+    if (!isErrorCode(error, 'ENOENT')) {
+      throw stateError(error, path, true)
+    }
+    if (!create) {
+      return null
+    }
+    try {
+      root = await createDir(path, ownership())
+    } catch (creationError: unknown) {
+      throw stateError(creationError, path, true)
+    }
+  }
+  let names: string[]
+  try {
+    names = await root.list()
+  } catch (error: unknown) {
+    throw stateError(error, path, true)
+  }
+  const legacy = LEGACY_ENTRIES.filter(name => names.includes(name))
+  if (legacy.length > 0) {
+    throw new InstallerError({
+      code: 'INSTALLER_LEGACY_STATE',
+      facts: [['Observed', `${path} holds superseded entries: ${legacy.join(', ')}.`]],
+      retry: 'qiln doctor',
+    })
+  }
+  try {
+    return await openChildDir(root, FILES.directory, ownership(), create)
+  } catch (error: unknown) {
+    if (!create && isErrorCode(error, 'ENOENT')) {
+      return null
+    }
+    throw stateError(error, root.child(FILES.directory), true)
   }
 }
 
-function rosterReadError(error: unknown, path: string): InstallerError {
-  if (isErrorCode(error, 'ENOENT')) {
-    return new InstallerError({
-      code: 'AUTHORIZED_KEYS_NOT_FOUND',
-      facts: [['Observed', `No readable roster was found at ${path}.`]],
-      retry: 'qiln up --source <checkout> --image <alias-or-fingerprint> [--authorized-keys <roster>]',
-    })
+async function openDirectory(parent: Dir, name: string, create = false): Promise<Dir> {
+  try {
+    return await openChildDir(parent, name, ownership(), create)
+  } catch (error: unknown) {
+    throw stateError(error, join(parent.path, name), true)
   }
-  if (error instanceof FileValidationError && error.kind === 'owner') {
-    return new InstallerError({
-      code: 'INVALID_AUTHORIZED_KEYS_OWNER',
-      facts: [['Observed', `${path} does not have the expected UID ${currentUserId()} ownership.`]],
-      retry: 'qiln up --source <checkout> --image <alias-or-fingerprint> [--authorized-keys <roster>]',
-    })
-  }
-  return new InstallerError({
-    code: 'INVALID_AUTHORIZED_KEYS_FILE',
-    facts: [['Observed', `${path} could not be opened as a stable bounded regular file.`]],
-    retry: 'qiln up --source <checkout> --image <alias-or-fingerprint> [--authorized-keys <roster>]',
-  })
 }
 
-async function inspectOpenState(directory: Dir): Promise<InstallerStateInspection> {
-  let installationSnapshot: FileSnapshot | null = null
-  let roster: FileSnapshot | null = null
+async function inspectEntries(directory: Dir): Promise<void> {
   for (const name of await directory.list()) {
-    if (name === INSTALLER_SPEC.state.installationFileName) {
-      installationSnapshot = await readStateChild(directory, name, MAX_INSTALLATION_STATE_BYTES)
-      continue
-    }
-    if (name === INSTALLER_SPEC.state.authorizedKeysFileName) {
-      roster = await readStateChild(directory, name, MAX_AUTHORIZED_KEYS_BYTES)
-      continue
-    }
     try {
       await inspectChild(directory, name, {
         owner: currentUserId(),
@@ -230,72 +210,93 @@ async function inspectOpenState(directory: Dir): Promise<InstallerStateInspectio
       throw stateError(error, join(directory.path, name))
     }
   }
-  return {
-    directoryPath: directory.path,
-    exists: true,
-    installation: installationSnapshot === null ? null : readInstallationState(installationSnapshot),
-    roster,
-  }
 }
 
-export async function inspectInstallerState(
-  environment: NodeJS.ProcessEnv = process.env,
-): Promise<InstallerStateInspection> {
-  const directoryPath = installerStatePath(environment)
-  let directory: Dir
+function parseRecord(value: unknown, directory: Dir): InstallationRecord {
+  const parsed = installationSchema.safeParse(value)
+  if (!parsed.success || parsed.data.name !== basename(directory.path)) {
+    throw invalidRecord('installation.json does not match the installation record schema or its directory name.')
+  }
+  return parsed.data
+}
+
+/**
+ * Reads the record of one installation directory. An absent file is null.
+ */
+export async function readInstallation(directory: Dir): Promise<InstallationRecord | null> {
+  const path = join(directory.path, FILES.installationFileName)
+  let bytes: Uint8Array
   try {
-    directory = await openDir(directoryPath, {
+    const snapshot = await readChild(directory, FILES.installationFileName, {
       owner: currentUserId(),
-      mode: 0o700,
+      mode: 0o600,
+      minSize: 1,
+      maxSize: MAX_RECORD_BYTES,
     })
+    bytes = snapshot.bytes
   } catch (error: unknown) {
     if (isErrorCode(error, 'ENOENT')) {
-      return {
-        directoryPath,
-        exists: false,
-        installation: null,
-        roster: null,
-      }
+      return null
     }
-    throw stateError(error, directoryPath, true)
-  }
-  return await inspectOpenState(directory)
-}
-
-export async function openInstallerState(environment: NodeJS.ProcessEnv = process.env): Promise<Dir> {
-  const directoryPath = installerStatePath(environment)
-  try {
-    return await openDir(directoryPath, {
-      owner: currentUserId(),
-      mode: 0o700,
-    })
-  } catch (error: unknown) {
-    if (!isErrorCode(error, 'ENOENT')) {
-      throw stateError(error, directoryPath, true)
-    }
+    throw stateError(error, path, false)
   }
   try {
-    return await createDir(directoryPath, {
-      owner: currentUserId(),
-      mode: 0o700,
-    })
+    return parseRecord(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) as unknown, directory)
   } catch (error: unknown) {
-    throw stateError(error, directoryPath, true)
+    throw error instanceof InstallerError ? error : invalidRecord('installation.json could not be decoded.')
   }
 }
 
-export async function inspectOpenInstallerState(directory: Dir): Promise<InstallerStateInspection> {
+/**
+ * Reads the record of a registered installation and requires it to match the
+ * given binding. Call it under the installation lock, so the binding is checked
+ * again after registration.
+ */
+export async function loadInstallation(
+  directory: Dir,
+  host: HostBinding,
+  inputs: InstallationInputs,
+): Promise<InstallationRecord> {
+  const record = await readInstallation(directory)
+  if (record === null) {
+    throw invalidRecord('installation.json is absent from a registered installation.')
+  }
+  requireBound(record, host, inputs)
+  return record
+}
+
+export function pinned(record: InstallationRecord | null): InstallationState | null {
+  return record === null || record.imageFingerprint === null
+    ? null
+    : { ...record, imageFingerprint: record.imageFingerprint }
+}
+
+async function saveRecord(directory: Dir, record: InstallationRecord): Promise<void> {
+  const next = parseRecord(record, directory)
+  const current = await readInstallation(directory)
+  if (current !== null) {
+    requireTransition(current, next)
+  }
   try {
-    return await inspectOpenState(directory)
+    await writeChild(
+      directory,
+      FILES.installationFileName,
+      new TextEncoder().encode(`${JSON.stringify(next, null, 2)}\n`),
+      0o600,
+    )
   } catch (error: unknown) {
-    if (error instanceof InstallerError) {
-      throw error
-    }
-    throw stateError(error, directory.path, true)
+    throw stateError(error, join(directory.path, FILES.installationFileName), false)
   }
 }
 
-export async function writeInstallationState(directory: Dir, imageFingerprint: string): Promise<InstallationState> {
+/**
+ * Persists the image pin of a bound record, under the installation lock.
+ */
+export async function pinImage(
+  directory: Dir,
+  record: InstallationRecord,
+  imageFingerprint: string,
+): Promise<InstallationState> {
   if (!FULL_FINGERPRINT_PATTERN.test(imageFingerprint)) {
     throw new InstallerError({
       code: 'INVALID_IMAGE_FINGERPRINT',
@@ -303,123 +304,101 @@ export async function writeInstallationState(directory: Dir, imageFingerprint: s
       retry: 'qiln up --source <checkout> --image <alias-or-fingerprint> [--authorized-keys <roster>]',
     })
   }
-  const state: InstallationState = {
-    version: 1,
-    projectName: INSTALLER_SPEC.projectName,
-    instanceName: INSTALLER_SPEC.orchestrator.name,
-    imageFingerprint,
-  }
-  const content = `${JSON.stringify(state, null, 2)}\n`
-  await writeChild(directory, INSTALLER_SPEC.state.installationFileName, new TextEncoder().encode(content), 0o600)
-  return state
+  const next = { ...record, imageFingerprint }
+  await saveRecord(directory, next)
+  return next
 }
 
-export function acquireInstallerLock(directory: Dir): Promise<InstallerLock> {
-  return acquireLock(directory, {
-    name: INSTALLER_SPEC.state.lockFileName,
-    label: 'installer',
+async function register(
+  registry: Dir,
+  name: string,
+  host: HostBinding,
+  inputs: InstallationInputs,
+): Promise<Dir> {
+  const entries = await registry.list()
+  for (const other of entries.filter(entry => entry !== FILES.registryLockFileName && entry !== name)) {
+    const record = await readInstallation(await openDirectory(registry, other))
+    if (record !== null && sameHost(record.host, host)) {
+      throw new InstallerError({
+        code: 'INSTALLATION_HOST_REGISTERED',
+        facts: [
+          ['Registered installation', other],
+          ['Requested installation', name],
+        ],
+        retry: 'qiln doctor',
+      })
+    }
+  }
+  if (entries.includes(name)) {
+    const directory = await openDirectory(registry, name)
+    await loadInstallation(directory, host, inputs)
+    return directory
+  }
+  const directory = await openDirectory(registry, name, true)
+  await saveRecord(directory, newRecord(name, host, inputs))
+  return directory
+}
+
+/**
+ * Returns the directory of the named installation, creating and recording it
+ * when it is new. Registration is serialized by a small registry lock, and an
+ * existing installation must already match the binding. Nothing is migrated or
+ * rebound.
+ */
+export async function registerInstallation(
+  name: string,
+  host: HostBinding,
+  inputs: InstallationInputs,
+  environment: NodeJS.ProcessEnv = process.env,
+): Promise<Dir> {
+  const registry = await openRegistry(environment, true)
+  if (registry === null) {
+    throw new InstallerError({
+      code: 'INTERNAL_ERROR',
+      retry: 'qiln doctor',
+    })
+  }
+  const lock = await acquireLock(registry, {
+    name: FILES.registryLockFileName,
+    label: 'installation registry',
     retry: 'qiln doctor',
-    codes: {
-      changed: 'INSTALLER_LOCK_CHANGED',
-      locked: 'INSTALLER_LOCKED',
-      failed: 'INSTALLER_LOCK_FAILED',
-    },
+    codes: LOCK_CODES,
+  })
+  try {
+    return await register(registry, name, host, inputs)
+  } finally {
+    await lock.release()
+  }
+}
+
+export function acquireInstallationLock(directory: Dir): Promise<StateLock> {
+  return acquireLock(directory, {
+    name: FILES.lockFileName,
+    label: 'installation',
+    retry: 'qiln doctor',
+    codes: LOCK_CODES,
   })
 }
 
 /**
- * Reads one developer-managed authorized-key roster into a stable validated
- * snapshot without reopening its path for later content validation.
+ * Read-only inspection that creates nothing. A record that exists must belong
+ * to this host.
  */
-export async function readRoster(rosterPath: string): Promise<FileSnapshot> {
-  const path = resolve(rosterPath)
-  let directory: Dir
-  try {
-    directory = await openDir(dirname(path))
-  } catch (error: unknown) {
-    throw rosterReadError(error, path)
+export async function inspectInstallation(
+  name: string,
+  host: HostBinding,
+  environment: NodeJS.ProcessEnv = process.env,
+): Promise<InstallationInspection> {
+  const registry = await openRegistry(environment, false)
+  const directoryPath = join(installerStatePath(environment), FILES.directory, name)
+  if (registry === null || !(await registry.list()).includes(name)) {
+    return { directoryPath, exists: false, record: null }
   }
-  try {
-    return await readChild(directory, basename(path), {
-      owner: currentUserId(),
-      minSize: 1,
-      maxSize: MAX_AUTHORIZED_KEYS_BYTES,
-    })
-  } catch (error: unknown) {
-    throw rosterReadError(error, path)
+  const directory = await openDirectory(registry, name)
+  await inspectEntries(directory)
+  const record = await readInstallation(directory)
+  if (record !== null) {
+    requireHost(record, host)
   }
-}
-
-/**
- * Validates the supplied in-memory roster snapshot and runs ssh-keygen only
- * against a temporary file containing those exact validated bytes.
- */
-export async function validateRoster(roster: FileSnapshot, sshKeygenExecutable: string): Promise<FileSnapshot> {
-  let content: string
-  try {
-    content = new TextDecoder('utf-8', {
-      fatal: true,
-    }).decode(roster.bytes)
-  } catch (error: unknown) {
-    throw new InstallerError({
-      code: 'INVALID_AUTHORIZED_KEYS_CONTENT',
-      facts: [['Observed', 'The validated roster snapshot could not be decoded as UTF-8.']],
-      retry: 'qiln up --source <checkout> --image <alias-or-fingerprint> --authorized-keys <roster>',
-    })
-  }
-  let publicKeyCount = 0
-  for (const [index, line] of content.split('\n').entries()) {
-    if (line.includes('\r') || /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(line)) {
-      throw new InstallerError({
-        code: 'INVALID_AUTHORIZED_KEYS_CONTENT',
-        facts: [['Observed', `Unsupported content was found at line ${index + 1}.`]],
-        retry: 'qiln up --source <checkout> --image <alias-or-fingerprint> --authorized-keys <roster>',
-      })
-    }
-    const trimmed = line.trim()
-    if (trimmed === '' || trimmed.startsWith('#')) {
-      continue
-    }
-    const fields = trimmed.split(/\s+/)
-    const algorithm = fields[0]
-    const encodedKey = fields[1]
-    if (
-      fields.length < 2 ||
-      algorithm === undefined ||
-      encodedKey === undefined ||
-      !SUPPORTED_AUTHORIZED_KEY_ALGORITHMS.has(algorithm) ||
-      !PUBLIC_KEY_BLOB_PATTERN.test(encodedKey)
-    ) {
-      throw new InstallerError({
-        code: 'INVALID_AUTHORIZED_KEYS_CONTENT',
-        facts: [['Observed', `Line ${index + 1} is not a normal supported OpenSSH public-key line.`]],
-        retry: 'qiln up --source <checkout> --image <alias-or-fingerprint> --authorized-keys <roster>',
-      })
-    }
-    const decoded = Buffer.from(encodedKey, 'base64')
-    if (decoded.length === 0 || decoded.toString('base64') !== encodedKey) {
-      throw new InstallerError({
-        code: 'INVALID_AUTHORIZED_KEYS_CONTENT',
-        facts: [['Observed', `Line ${index + 1} does not contain canonical Base64 public-key data.`]],
-        retry: 'qiln up --source <checkout> --image <alias-or-fingerprint> --authorized-keys <roster>',
-      })
-    }
-    publicKeyCount++
-  }
-  if (publicKeyCount === 0) {
-    throw new InstallerError({
-      code: 'EMPTY_AUTHORIZED_KEYS_ROSTER',
-      facts: [['Observed', 'The selected roster snapshot contains only blank lines or comments.']],
-      retry: 'qiln up --source <checkout> --image <alias-or-fingerprint> --authorized-keys <roster>',
-    })
-  }
-  const validation = await withTemp(roster, path => runProcess(sshKeygenExecutable, ['-l', '-f', path]))
-  if (validation.exitCode !== 0 || validation.stdout.trim() === '') {
-    throw new InstallerError({
-      code: 'INVALID_AUTHORIZED_KEYS_ROSTER',
-      facts: [['Observed', 'The validated roster snapshot failed ssh-keygen public-key inspection.']],
-      retry: 'qiln up --source <checkout> --image <alias-or-fingerprint> --authorized-keys <roster>',
-    })
-  }
-  return roster
+  return { directoryPath, exists: true, record }
 }

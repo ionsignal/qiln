@@ -1,9 +1,9 @@
 import { InstallerError } from '../diagnostic/error'
-import { INSTALLER_SPEC } from '../install/spec'
 import { assertNetwork } from '../install/network'
 import { runProcess } from '../process'
 import { toInstallerError } from '../incus/errors'
-import type { LocalIncusClient } from '../incus/client'
+import type { Layout } from '../install/layout'
+import type { IncusClient } from '../incus/client'
 import type { IncusNetwork } from '../incus/types'
 import type { HostPreflight } from './host'
 
@@ -103,10 +103,12 @@ function parseJsonArray(value: string, source: string): unknown[] {
 function assertNoIncusNetworkConflict(
   networks: readonly IncusNetwork[],
   existingTargetNetwork: IncusNetwork | null,
+  layout: Layout,
 ): void {
-  const target = parseIpv4Cidr(INSTALLER_SPEC.network.ipv4Subnet)!
+  const { name, ipv4Subnet } = layout.network
+  const target = parseIpv4Cidr(ipv4Subnet)!
   for (const network of networks) {
-    if (network.name === INSTALLER_SPEC.network.name && existingTargetNetwork !== null) {
+    if (network.name === name && existingTargetNetwork !== null) {
       continue
     }
     const configuredAddress = network.config['ipv4.address']
@@ -118,10 +120,7 @@ function assertNoIncusNetworkConflict(
       throw new InstallerError({
         code: 'INCUS_NETWORK_RANGE_CONFLICT',
         facts: [
-          [
-            'Observed',
-            `Network '${network.name}' uses '${configuredAddress}', which overlaps '${INSTALLER_SPEC.network.ipv4Subnet}'.`,
-          ],
+          ['Observed', `Network '${network.name}' uses '${configuredAddress}', which overlaps '${ipv4Subnet}'.`],
         ],
         retry: 'qiln doctor',
       })
@@ -132,8 +131,10 @@ function assertNoIncusNetworkConflict(
 async function assertNoHostRouteConflict(
   host: HostPreflight,
   existingTargetNetwork: IncusNetwork | null,
+  layout: Layout,
 ): Promise<void> {
-  const target = parseIpv4Cidr(INSTALLER_SPEC.network.ipv4Subnet)!
+  const { name, ipv4Subnet } = layout.network
+  const target = parseIpv4Cidr(ipv4Subnet)!
   const routeResult = await runProcess(host.commandPaths.ip, ['-j', '-4', 'route', 'show', 'table', 'all'])
   if (routeResult.exitCode !== 0) {
     throw new InstallerError({
@@ -155,7 +156,7 @@ async function assertNoHostRouteConflict(
       continue
     }
     const device = typeof route.dev === 'string' ? route.dev : ''
-    if (existingTargetNetwork !== null && device === INSTALLER_SPEC.network.name) {
+    if (existingTargetNetwork !== null && device === name) {
       continue
     }
     throw new InstallerError({
@@ -163,7 +164,7 @@ async function assertNoHostRouteConflict(
       facts: [
         [
           'Observed',
-          `Host route '${route.dst}' on interface '${device || 'unknown'}' overlaps '${INSTALLER_SPEC.network.ipv4Subnet}'.`,
+          `Host route '${route.dst}' on interface '${device || 'unknown'}' overlaps '${ipv4Subnet}'.`,
         ],
       ],
       retry: 'qiln doctor',
@@ -199,7 +200,7 @@ async function assertNoHostRouteConflict(
       if (!addressCidr || !cidrsOverlap(target, addressCidr)) {
         continue
       }
-      if (existingTargetNetwork !== null && interfaceName === INSTALLER_SPEC.network.name) {
+      if (existingTargetNetwork !== null && interfaceName === name) {
         continue
       }
       throw new InstallerError({
@@ -207,7 +208,7 @@ async function assertNoHostRouteConflict(
         facts: [
           [
             'Observed',
-            `Interface '${interfaceName || 'unknown'}' has '${local}/${prefixLength}', overlapping '${INSTALLER_SPEC.network.ipv4Subnet}'.`,
+            `Interface '${interfaceName || 'unknown'}' has '${local}/${prefixLength}', overlapping '${ipv4Subnet}'.`,
           ],
         ],
         retry: 'qiln doctor',
@@ -218,8 +219,10 @@ async function assertNoHostRouteConflict(
 
 export async function validateNetworkPreflight(
   host: HostPreflight,
-  client: LocalIncusClient,
+  client: IncusClient,
+  layout: Layout,
 ): Promise<NetworkPreflight> {
+  const { name } = layout.network
   let networks: IncusNetwork[]
   try {
     networks = await client.getNetworks()
@@ -233,20 +236,19 @@ export async function validateNetworkPreflight(
   let existingTargetNetwork: IncusNetwork | null
   try {
     existingTargetNetwork =
-      networks.find(network => network.name === INSTALLER_SPEC.network.name) ??
-      (await client.getNetworkOrNull(INSTALLER_SPEC.network.name))
+      networks.find(network => network.name === name) ?? (await client.getNetworkOrNull(name))
   } catch (error: unknown) {
     throw toInstallerError(error, {
-      check: `existing ${INSTALLER_SPEC.network.name} inspection`,
-      operation: `inspect the '${INSTALLER_SPEC.network.name}' network`,
+      check: `existing ${name} inspection`,
+      operation: `inspect the '${name}' network`,
       rerun: 'qiln doctor',
     })
   }
   if (existingTargetNetwork) {
-    assertNetwork(existingTargetNetwork)
+    assertNetwork(existingTargetNetwork, layout)
   }
-  assertNoIncusNetworkConflict(networks, existingTargetNetwork)
-  await assertNoHostRouteConflict(host, existingTargetNetwork)
+  assertNoIncusNetworkConflict(networks, existingTargetNetwork, layout)
+  await assertNoHostRouteConflict(host, existingTargetNetwork, layout)
   return {
     network: existingTargetNetwork,
     disposition: existingTargetNetwork ? 'existing-compatible' : 'ready-to-create',

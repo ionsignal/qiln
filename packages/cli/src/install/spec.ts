@@ -1,22 +1,3 @@
-const INCUS_BRIDGE_CONFIG = Object.freeze({
-  'ipv4.address': '10.10.10.1/24',
-  'ipv4.dhcp': 'true',
-  'ipv4.dhcp.ranges': '10.10.10.100-10.10.10.200',
-  'ipv4.firewall': 'false',
-  'ipv4.nat': 'true',
-  'ipv4.routing': 'true',
-  'ipv6.address': 'none',
-  'ipv6.firewall': 'false',
-  'ipv6.nat': 'false',
-} as const)
-
-const POSTGRES_VOLUME_CONFIG = Object.freeze({
-  size: '50GiB',
-  'initial.uid': '0',
-  'initial.gid': '0',
-  'initial.mode': '0755',
-} as const)
-
 const CREDENTIAL_FILES = Object.freeze({
   authorizedKeys: 'authorized_keys',
   nats: 'nats-server.conf',
@@ -64,10 +45,10 @@ const MANAGED_CREDENTIAL_SUFFIXES = Object.freeze([
   CREDENTIAL_SUFFIXES.gatewayKey,
 ] as const)
 
+/**
+ * Settings shared by every layout. Resource limits belong to the layout.
+ */
 const ORCHESTRATOR_CONFIG = Object.freeze({
-  'limits.cpu': '8',
-  'limits.memory': '16GiB',
-  'limits.processes': '8192',
   'security.idmap.isolated': 'true',
   'security.nesting': 'false',
   'security.privileged': 'false',
@@ -85,35 +66,14 @@ const ORCHESTRATOR_CONFIG = Object.freeze({
   ].join('\n'),
 } as const)
 
-const ORCHESTRATOR_DEVICES = Object.freeze({
-  root: Object.freeze({
-    type: 'disk',
-    pool: 'is-nvme-pool',
-    path: '/',
-  }),
-  eth0: Object.freeze({
-    type: 'nic',
-    name: 'eth0',
-    network: 'incusbr0',
-    'ipv4.address': '10.10.10.10',
-    'security.ipv4_filtering': 'true',
-    'security.mac_filtering': 'true',
-  }),
-  'postgres-data': Object.freeze({
-    type: 'disk',
-    pool: 'is-nvme-pool',
-    source: 'qiln-orchestrator-dev-postgres',
-    path: '/var/lib/postgresql',
-  }),
-  incus: Object.freeze({
-    type: 'proxy',
-    bind: 'instance',
-    listen: 'unix:/run/qiln-incus.sock',
-    connect: 'unix:/var/lib/incus/unix.socket',
-    uid: '1000',
-    gid: '1000',
-    mode: '0600',
-  }),
+const INCUS_PROXY_DEVICE = Object.freeze({
+  type: 'proxy',
+  bind: 'instance',
+  listen: 'unix:/run/qiln-incus.sock',
+  connect: 'unix:/var/lib/incus/unix.socket',
+  uid: '1000',
+  gid: '1000',
+  mode: '0600',
 } as const)
 
 export const INSTALLER_SPEC = Object.freeze({
@@ -122,8 +82,6 @@ export const INSTALLER_SPEC = Object.freeze({
   supportedHost: {
     distributionId: 'ubuntu',
     versionId: '26.04',
-    nodeArchitecture: 'x64',
-    incusArchitecture: 'x86_64',
     minimumKernelRelease: '6.8.0-138-generic',
     minimumIncusVersion: '7.0',
     maximumIncusVersionExclusive: '8.0',
@@ -159,28 +117,19 @@ export const INSTALLER_SPEC = Object.freeze({
     },
   ] as const,
   storage: {
-    poolName: 'is-nvme-pool',
     driver: 'zfs',
-    volumeName: 'qiln-orchestrator-dev-postgres',
     volumeType: 'custom',
     volumeContentType: 'filesystem',
-    volumeSize: POSTGRES_VOLUME_CONFIG.size,
     volumeDescription: 'Persistent PostgreSQL 18 data for qiln-orchestrator-dev',
-    volumeConfig: POSTGRES_VOLUME_CONFIG,
     guestMountPath: '/var/lib/postgresql',
   },
   network: {
-    name: 'incusbr0',
     type: 'bridge',
     description: '',
-    config: INCUS_BRIDGE_CONFIG,
-    ipv4Subnet: '10.10.10.0/24',
-    ipv4DhcpRange: INCUS_BRIDGE_CONFIG['ipv4.dhcp.ranges'],
   },
   orchestrator: {
     name: 'qiln-orchestrator-dev',
     imageAlias: 'qiln-orchestrator-dev',
-    architecture: 'x86_64',
     type: 'container' as const,
     description: '',
     start: false as const,
@@ -188,9 +137,8 @@ export const INSTALLER_SPEC = Object.freeze({
     stateful: false,
     profileNames: [] as const,
     config: ORCHESTRATOR_CONFIG,
-    devices: ORCHESTRATOR_DEVICES,
+    incusDevice: INCUS_PROXY_DEVICE,
     credentialKeys: INSTANCE_CREDENTIAL_KEY_LIST,
-    ipv4Address: ORCHESTRATOR_DEVICES.eth0['ipv4.address'],
     sourceDeviceName: 'source',
     sourceMountPath: '/opt/qiln',
   },
@@ -227,8 +175,11 @@ export const INSTALLER_SPEC = Object.freeze({
     requiredExtensions: ['operation_wait', 'instance_systemd_credentials', 'container_disk_shift'] as const,
   },
   state: {
+    directory: 'installations',
+    registryLockFileName: 'registry.lock',
     installationFileName: 'installation.json',
-    authorizedKeysFileName: CREDENTIAL_FILES.authorizedKeys,
-    lockFileName: 'installer.lock',
+    lockFileName: 'installation.lock',
+    legacyLockFileName: 'installer.lock',
+    localName: 'dev',
   },
 })

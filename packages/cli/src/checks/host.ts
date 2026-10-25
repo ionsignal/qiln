@@ -3,6 +3,8 @@ import { readFile } from 'node:fs/promises'
 import { InstallerError } from '../diagnostic/error'
 import { findExecutable, runProcess } from '../process'
 import { INSTALLER_SPEC } from '../install/spec'
+import { architectureOf, type Architecture } from '../install/architecture'
+import { requireSupportedRelease } from '../install/host'
 
 type Tool = (typeof INSTALLER_SPEC.tools)[number]
 
@@ -12,7 +14,7 @@ export interface HostPreflight {
   distributionId: string
   distributionVersion: string
   kernelRelease: string
-  nodeArchitecture: string
+  architecture: Architecture
   incusPackageName: string
   incusPackageVersion: string
   commandPaths: Record<RequiredTool, string>
@@ -21,14 +23,6 @@ export interface HostPreflight {
 interface InstalledPackage {
   name: string
   version: string
-}
-
-interface KernelRelease {
-  major: number
-  minor: number
-  patch: number
-  abi: number
-  flavour: string | null
 }
 
 const os = {
@@ -79,52 +73,6 @@ const os = {
       version,
     }
   },
-}
-
-const kernel = {
-  parse(release: string): KernelRelease | null {
-    const match = /^(\d+)\.(\d+)\.(\d+)-(\d+)(?:-([A-Za-z0-9][A-Za-z0-9._+-]*))?$/.exec(release)
-    if (!match) {
-      return null
-    }
-    const major = Number(match[1])
-    const minor = Number(match[2])
-    const patch = Number(match[3])
-    const abi = Number(match[4])
-    if (![major, minor, patch, abi].every(Number.isSafeInteger)) {
-      return null
-    }
-    return {
-      major,
-      minor,
-      patch,
-      abi,
-      flavour: match[5] ?? null,
-    }
-  },
-
-  meets(actual: KernelRelease, minimum: KernelRelease): boolean {
-    for (const [actualPart, minimumPart] of [
-      [actual.major, minimum.major],
-      [actual.minor, minimum.minor],
-      [actual.patch, minimum.patch],
-      [actual.abi, minimum.abi],
-    ]) {
-      if (actualPart > minimumPart) {
-        return true
-      }
-      if (actualPart < minimumPart) {
-        return false
-      }
-    }
-    return true
-  },
-}
-
-const supportedUbuntuRelease = `Ubuntu ${INSTALLER_SPEC.supportedHost.versionId}`
-const minimumKernel = kernel.parse(INSTALLER_SPEC.supportedHost.minimumKernelRelease)
-if (!minimumKernel) {
-  throw new Error('Installer kernel policy is invalid.')
 }
 
 const tools = {
@@ -257,49 +205,24 @@ export async function validateHostPreflight(): Promise<HostPreflight> {
   }
   const distributionId = release.id.toLowerCase()
   const distributionVersion = release.version
-  if (
-    distributionId !== INSTALLER_SPEC.supportedHost.distributionId ||
-    distributionVersion !== INSTALLER_SPEC.supportedHost.versionId
-  ) {
-    throw new InstallerError({
-      code: 'UNSUPPORTED_UBUNTU_RELEASE',
-      facts: [
-        ['Detected release', `${distributionId} ${distributionVersion}`],
-        ['Required release', supportedUbuntuRelease],
-      ],
-      retry: 'qiln doctor',
-    })
-  }
-  const nodeArchitecture = process.arch
-  if (nodeArchitecture !== INSTALLER_SPEC.supportedHost.nodeArchitecture) {
-    throw new InstallerError({
-      code: 'UNSUPPORTED_HOST_ARCHITECTURE',
-      facts: [
-        ['Detected architecture', nodeArchitecture],
-        ['Required architecture', INSTALLER_SPEC.supportedHost.nodeArchitecture],
-      ],
-      retry: 'qiln doctor',
-    })
-  }
   const kernelRelease = nodeOs.release()
-  const kernelVersion = kernel.parse(kernelRelease)
-  if (!kernelVersion || !minimumKernel || !kernel.meets(kernelVersion, minimumKernel)) {
-    throw new InstallerError({
-      code: 'UNSUPPORTED_KERNEL_VERSION',
-      facts: [
-        ['Running kernel', kernelRelease],
-        ['Minimum kernel', INSTALLER_SPEC.supportedHost.minimumKernelRelease],
-      ],
-      retry: 'qiln doctor',
-    })
-  }
+  requireSupportedRelease({ distributionId, distributionVersion, kernelRelease }, 'qiln doctor')
   const commandPaths = await tools.all()
+  const packageArchitecture = await runProcess(commandPaths.dpkg, ['--print-architecture'])
+  const architecture = architectureOf(
+    {
+      packageArchitecture: packageArchitecture.stdout.trim(),
+      machine: nodeOs.machine(),
+      node: process.arch,
+    },
+    'qiln doctor',
+  )
   const incusPackage = await deb.incus(commandPaths.dpkg, commandPaths['dpkg-query'])
   return {
     distributionId,
     distributionVersion,
     kernelRelease,
-    nodeArchitecture,
+    architecture,
     incusPackageName: incusPackage.name,
     incusPackageVersion: incusPackage.version,
     commandPaths,

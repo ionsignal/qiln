@@ -58,9 +58,9 @@ export const incusDiagnostics = Object.freeze({
     'Use an approved local administrative session with access to that project.',
   ),
   INCUS_ARCHITECTURE_INCOMPATIBLE: entry(
-    'Incus does not report the required architecture',
-    'The installer requires native x86_64 container support.',
-    'Use a supported x86_64 Incus host without relying on emulation.',
+    'Incus does not report the host architecture',
+    'The installer requires native container support for the host’s own architecture (x86_64 or aarch64) and does not rely on emulation.',
+    'Use an Incus daemon that reports the host’s native architecture.',
   ),
   INCUS_CAPABILITY_MISSING: entry(
     'Incus is missing required installer capabilities',

@@ -1,6 +1,9 @@
 import { randomBytes } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { request as createHttpRequest, type ClientRequest, type IncomingMessage } from 'node:http'
+import type { Duplex } from 'node:stream'
+import { InstallerError } from '../diagnostic/error'
+import type { IncusConnection } from './connection'
 import type {
   IncusConfigMap,
   IncusDevicesMap,
@@ -26,8 +29,8 @@ const FULL_FINGERPRINT_PATTERN = /^[a-f0-9]{64}$/
 const QUOTED_ETAG_PATTERN = /^"[a-f0-9]{64}"$/
 const OPERATION_PATH_PATTERN = /^\/1\.0\/operations\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/
 
-export interface LocalIncusClientOptions {
-  socketPath: string
+export interface IncusClientOptions {
+  connection: IncusConnection
   projectName: string
   requestTimeoutMs: number
   uploadTimeoutMs: number
@@ -48,14 +51,17 @@ interface RequestOptions {
   expectedType: 'sync' | 'async'
   timeoutMs: number
   headers?: Readonly<Record<string, string>>
-  write?: (request: ClientRequest) => Promise<void>
+  write?: (request: ClientRequest, signal: AbortSignal) => Promise<void>
   waitOperationPath?: string
 }
 
 export class IncusTransportError extends Error {
-  constructor(message: string, options?: ErrorOptions) {
-    super(message, options)
+  public readonly endpoint: string
+
+  constructor(endpoint: string, options?: ErrorOptions) {
+    super(`Could not query Incus through ${endpoint}.`, options)
     this.name = 'IncusTransportError'
+    this.endpoint = endpoint
   }
 }
 
@@ -92,11 +98,13 @@ export class IncusOperationError extends Error {
 
 export class IncusOperationWaitTimeoutError extends Error {
   public readonly operationPath: string
+  public readonly timeoutMs: number
 
-  constructor(operationPath: string) {
+  constructor(operationPath: string, timeoutMs: number) {
     super('The Incus operation wait exceeded its local wall-clock limit.')
     this.name = 'IncusOperationWaitTimeoutError'
     this.operationPath = operationPath
+    this.timeoutMs = timeoutMs
   }
 }
 
@@ -333,34 +341,43 @@ function operationRef(value: unknown): IncusOperationRef {
   }
 }
 
-async function writeChunk(request: ClientRequest, chunk: Uint8Array): Promise<void> {
+/**
+ * Stops waiting for drain when the request fails, closes, or its lifetime is
+ * aborted, so a premature closure can never leave the writer pending.
+ */
+async function writeChunk(request: ClientRequest, chunk: Uint8Array, signal: AbortSignal): Promise<void> {
+  signal.throwIfAborted()
   if (request.write(chunk)) {
     return
   }
   await new Promise<void>((resolve, reject) => {
     const cleanup = () => {
       request.off('drain', onDrain)
-      request.off('error', onError)
+      request.off('error', onStop)
+      request.off('close', onStop)
+      signal.removeEventListener('abort', onStop)
     }
     const onDrain = () => {
       cleanup()
       resolve()
     }
-    const onError = (error: Error) => {
+    const onStop = () => {
       cleanup()
-      reject(error)
+      reject(new Error('The Incus request body transfer stopped.'))
     }
     request.once('drain', onDrain)
-    request.once('error', onError)
+    request.once('error', onStop)
+    request.once('close', onStop)
+    signal.addEventListener('abort', onStop, { once: true })
   })
 }
 
-async function writeFile(request: ClientRequest, path: string): Promise<void> {
+async function writeFile(request: ClientRequest, path: string, signal: AbortSignal): Promise<void> {
   for await (const chunk of createReadStream(path)) {
     if (typeof chunk === 'string') {
-      await writeChunk(request, Buffer.from(chunk))
+      await writeChunk(request, Buffer.from(chunk), signal)
     } else {
-      await writeChunk(request, chunk)
+      await writeChunk(request, chunk, signal)
     }
   }
 }
@@ -372,18 +389,15 @@ function multipartPart(boundary: string, name: string, filename: string): Buffer
   )
 }
 
-export class LocalIncusClient {
-  private readonly socketPath: string
+export class IncusClient {
+  private readonly connection: IncusConnection
   private readonly projectName: string
   private readonly requestTimeoutMs: number
   private readonly uploadTimeoutMs: number
   private readonly operationWaitTimeoutMs: number
   private readonly maximumResponseBytes: number
 
-  constructor(options: LocalIncusClientOptions) {
-    if (options.socketPath.trim() === '') {
-      throw new RangeError('The Incus Unix socket path cannot be empty.')
-    }
+  constructor(options: IncusClientOptions) {
     if (options.projectName.trim() === '') {
       throw new RangeError('The Incus project name cannot be empty.')
     }
@@ -399,7 +413,7 @@ export class LocalIncusClient {
     if (!Number.isSafeInteger(options.maximumResponseBytes) || options.maximumResponseBytes <= 0) {
       throw new RangeError('The Incus response limit must be a positive safe integer.')
     }
-    this.socketPath = options.socketPath
+    this.connection = options.connection
     this.projectName = options.projectName
     this.requestTimeoutMs = options.requestTimeoutMs
     this.uploadTimeoutMs = options.uploadTimeoutMs
@@ -603,13 +617,13 @@ export class LocalIncusClient {
         'X-Incus-fingerprint': input.fingerprint,
         'X-Incus-aliases': `alias=${input.alias}`,
       },
-      write: async request => {
-        await writeChunk(request, metadataPrefix)
-        await writeFile(request, input.metadataPath)
-        await writeChunk(request, separator)
-        await writeChunk(request, rootfsPrefix)
-        await writeFile(request, input.rootfsPath)
-        await writeChunk(request, closing)
+      write: async (request, signal) => {
+        await writeChunk(request, metadataPrefix, signal)
+        await writeFile(request, input.metadataPath, signal)
+        await writeChunk(request, separator, signal)
+        await writeChunk(request, rootfsPrefix, signal)
+        await writeFile(request, input.rootfsPath, signal)
+        await writeChunk(request, closing, signal)
       },
     })
     return operationRef(result.operation)
@@ -771,70 +785,88 @@ export class LocalIncusClient {
         'Content-Length': String(body.byteLength),
         ...options.headers,
       },
-      write: request => writeChunk(request, body),
+      write: (request, signal) => writeChunk(request, body, signal),
     })
   }
 
+  /**
+   * One wall-clock deadline covers opening the connection and the whole
+   * exchange. The deadline aborts the request's lifetime instead of waiting for
+   * a transport event, because a dead connection may never emit one.
+   */
   private async request(options: RequestOptions): Promise<EnvelopeResult> {
     const path = this.projectPath(options.path)
-    return await new Promise<EnvelopeResult>((resolve, reject) => {
-      let settled = false
-      let timedOut = false
-      const rejectOnce = (error: Error) => {
-        if (settled) {
-          return
-        }
-        settled = true
-        clearTimeout(timeout)
-        reject(error)
-      }
+    const lifetime = new AbortController()
+    const writers: Promise<void>[] = []
+    const timer = setTimeout(() => lifetime.abort(), options.timeoutMs)
+    try {
+      const socket = await this.connection.open(lifetime.signal)
+      return await this.exchange(socket, path, options, lifetime.signal, writers)
+    } catch (error: unknown) {
+      throw this.failure(error, options, lifetime.signal.aborted)
+    } finally {
+      clearTimeout(timer)
+      lifetime.abort()
+      await Promise.all(writers)
+    }
+  }
+
+  private failure(error: unknown, options: RequestOptions, timedOut: boolean): Error {
+    if (timedOut) {
+      return options.waitOperationPath === undefined
+        ? new IncusTransportError(this.connection.endpoint, { cause: error })
+        : new IncusOperationWaitTimeoutError(options.waitOperationPath, options.timeoutMs)
+    }
+    if (
+      error instanceof InstallerError ||
+      error instanceof IncusApiError ||
+      error instanceof IncusProtocolError ||
+      error instanceof IncusTransportError
+    ) {
+      return error
+    }
+    return new IncusTransportError(this.connection.endpoint, { cause: error })
+  }
+
+  private exchange(
+    socket: Duplex,
+    path: string,
+    options: RequestOptions,
+    signal: AbortSignal,
+    writers: Promise<void>[],
+  ): Promise<EnvelopeResult> {
+    return new Promise<EnvelopeResult>((resolve, reject) => {
       const request = createHttpRequest(
         {
           method: options.method,
-          socketPath: this.socketPath,
           path,
-          agent: false,
+          createConnection: () => socket,
           headers: {
             Accept: JSON_CONTENT_TYPE,
             ...options.headers,
           },
         },
-        response => {
-          this.readResponse(response, options, resolve, rejectOnce, () => {
-            settled = true
-            clearTimeout(timeout)
-          })
-        },
+        response => this.readResponse(response, options, resolve, reject),
       )
-      const timeout = setTimeout(() => {
-        timedOut = true
-        request.destroy(new Error('Incus request wall-clock timeout'))
-      }, options.timeoutMs)
-      request.once('error', error => {
-        if (timedOut && options.waitOperationPath !== undefined) {
-          rejectOnce(new IncusOperationWaitTimeoutError(options.waitOperationPath))
-          return
-        }
-        rejectOnce(
-          new IncusTransportError(`Could not query Incus through the local Unix socket ${this.socketPath}.`, {
-            cause: error,
-          }),
-        )
-      })
+      const fail = (error: unknown) => {
+        reject(error)
+        request.destroy()
+        socket.destroy()
+      }
+      request.on('error', reject)
+      socket.on('error', reject)
+      signal.addEventListener('abort', () => fail(signal.reason), { once: true })
       if (options.write === undefined) {
         request.end()
         return
       }
-      void options
-        .write(request)
-        .then(() => {
+      writers.push(
+        options.write(request, signal).then(() => {
           if (!request.destroyed) {
             request.end()
           }
-        })
-        .catch((error: unknown) => {
-          request.destroy(error instanceof Error ? error : new Error('Incus request body transfer failed.'))
-        })
+        }, fail),
+      )
     })
   }
 
@@ -843,7 +875,6 @@ export class LocalIncusClient {
     options: RequestOptions,
     resolve: (result: EnvelopeResult) => void,
     reject: (error: Error) => void,
-    settle: () => void,
   ): void {
     const chunks: Buffer[] = []
     let responseBytes = 0
@@ -860,8 +891,17 @@ export class LocalIncusClient {
       }
       chunks.push(Buffer.from(chunk))
     })
-    response.once('error', error => {
-      reject(new IncusTransportError('The Incus response stream failed.', { cause: error }))
+    response.on('error', error => {
+      reject(new IncusTransportError(this.connection.endpoint, { cause: error }))
+    })
+    response.once('close', () => {
+      if (!response.complete) {
+        reject(
+          new IncusTransportError(this.connection.endpoint, {
+            cause: new Error('The Incus response ended before it was complete.'),
+          }),
+        )
+      }
     })
     response.once('end', () => {
       const statusCode = response.statusCode ?? 0
@@ -918,7 +958,6 @@ export class LocalIncusClient {
       }
       const rawEtag = response.headers.etag
       const etag = Array.isArray(rawEtag) ? rawEtag[0] : rawEtag
-      settle()
       resolve({
         metadata: envelope.metadata,
         operation: envelope.operation,

@@ -44,8 +44,8 @@ export const hostDiagnostics = Object.freeze({
   ),
   UNSUPPORTED_HOST_ARCHITECTURE: entry(
     'Host architecture is unsupported',
-    'The installer requires native AMD64 containers and does not rely on foreign-architecture emulation.',
-    'Run Qiln on a supported x86_64/AMD64 host.',
+    'The installer supports native AMD64 and ARM64 hosts, and requires the package, machine, and Node architectures to agree. It does not rely on foreign-architecture emulation.',
+    'Run Qiln on a supported amd64/x86_64 or arm64/aarch64 host with a matching Node runtime.',
   ),
   UNSUPPORTED_KERNEL_VERSION: entry(
     'Running kernel does not meet the installation policy',

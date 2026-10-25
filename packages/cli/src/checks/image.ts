@@ -1,13 +1,15 @@
 import { InstallerError } from '../diagnostic/error'
 import { INSTALLER_SPEC } from '../install/spec'
 import { isIncusApiStatus, toInstallerError } from '../incus/errors'
+import type { Architecture } from '../install/architecture'
 import type { InstallationState } from '../install/state'
-import type { LocalIncusClient } from '../incus/client'
+import type { IncusClient } from '../incus/client'
 import type { IncusImage, IncusImageAlias } from '../incus/types'
 
 const FULL_FINGERPRINT_PATTERN = /^[a-f0-9]{64}$/
 const CASE_INSENSITIVE_FINGERPRINT_PATTERN = /^[a-f0-9]{64}$/i
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/
+const RERUN = 'qiln up --source <checkout> --image <alias-or-fingerprint> [--authorized-keys <roster>]'
 
 export interface ImagePreflight {
   image: IncusImage
@@ -26,7 +28,7 @@ function validateImageSelector(value: string): string {
           'The selector is empty, too long, contains surrounding whitespace, or contains control characters.',
         ],
       ],
-      retry: 'qiln up --source <checkout> --image <alias-or-fingerprint> [--authorized-keys <roster>]',
+      retry: RERUN,
     })
   }
   if (CASE_INSENSITIVE_FINGERPRINT_PATTERN.test(value) && !FULL_FINGERPRINT_PATTERN.test(value)) {
@@ -39,7 +41,7 @@ function validateImageSelector(value: string): string {
   return value
 }
 
-export function validateContainerImage(image: IncusImage, fingerprint: string): IncusImage {
+export function validateContainerImage(image: IncusImage, fingerprint: string, architecture: Architecture): IncusImage {
   if (!FULL_FINGERPRINT_PATTERN.test(image.fingerprint) || image.fingerprint !== fingerprint) {
     throw new InstallerError({
       code: 'IMAGE_FINGERPRINT_MISMATCH',
@@ -47,7 +49,7 @@ export function validateContainerImage(image: IncusImage, fingerprint: string): 
         ['Requested image', fingerprint],
         ['Returned image', image.fingerprint],
       ],
-      retry: 'qiln up --source <checkout> --image <alias-or-fingerprint> [--authorized-keys <roster>]',
+      retry: RERUN,
     })
   }
   if (image.type !== 'container') {
@@ -57,26 +59,27 @@ export function validateContainerImage(image: IncusImage, fingerprint: string): 
         ['Image type', image.type],
         ['Required type', 'container'],
       ],
-      retry: 'qiln up --source <checkout> --image <alias-or-fingerprint> [--authorized-keys <roster>]',
+      retry: RERUN,
     })
   }
-  if (image.architecture !== INSTALLER_SPEC.supportedHost.incusArchitecture) {
+  if (image.architecture !== architecture.incus) {
     throw new InstallerError({
       code: 'IMAGE_ARCHITECTURE_INCOMPATIBLE',
       facts: [
         ['Image architecture', image.architecture],
-        ['Required architecture', INSTALLER_SPEC.supportedHost.incusArchitecture],
+        ['Required architecture', architecture.incus],
       ],
-      retry: 'qiln up --source <checkout> --image <alias-or-fingerprint> [--authorized-keys <roster>]',
+      retry: RERUN,
     })
   }
   return image
 }
 
 export async function validateImagePreflight(
-  client: LocalIncusClient,
+  client: IncusClient,
   imageSelector: string,
   installationState: InstallationState | null,
+  architecture: Architecture,
 ): Promise<ImagePreflight> {
   const selector = validateImageSelector(imageSelector)
   let fingerprint: string
@@ -94,7 +97,7 @@ export async function validateImagePreflight(
       throw toInstallerError(error, {
         check: 'operator-selected local Incus image alias',
         operation: 'resolve the selected local image alias',
-        rerun: 'qiln up --source <checkout> --image <alias-or-fingerprint> [--authorized-keys <roster>]',
+        rerun: RERUN,
       })
     }
     if (!resolvedAlias) {
@@ -104,7 +107,7 @@ export async function validateImagePreflight(
           ['Alias', selector],
           ['Project', INSTALLER_SPEC.projectName],
         ],
-        retry: 'qiln up --source <checkout> --image <alias-or-fingerprint> [--authorized-keys <roster>]',
+        retry: RERUN,
       })
     }
     if (!FULL_FINGERPRINT_PATTERN.test(resolvedAlias.target)) {
@@ -114,7 +117,7 @@ export async function validateImagePreflight(
           ['Alias', selector],
           ['Alias target', resolvedAlias.target],
         ],
-        retry: 'qiln up --source <checkout> --image <alias-or-fingerprint> [--authorized-keys <roster>]',
+        retry: RERUN,
       })
     }
     fingerprint = resolvedAlias.target
@@ -140,16 +143,16 @@ export async function validateImagePreflight(
       throw new InstallerError({
         code: 'IMAGE_NOT_FOUND',
         facts: [['Image', fingerprint]],
-        retry: 'qiln up --source <checkout> --image <alias-or-fingerprint> [--authorized-keys <roster>]',
+        retry: RERUN,
       })
     }
     throw toInstallerError(error, {
       check: 'resolved local Incus image',
       operation: 'retrieve the resolved local image',
-      rerun: 'qiln up --source <checkout> --image <alias-or-fingerprint> [--authorized-keys <roster>]',
+      rerun: RERUN,
     })
   }
-  validateContainerImage(image, fingerprint)
+  validateContainerImage(image, fingerprint, architecture)
   return {
     image,
     fingerprint,

@@ -1,5 +1,4 @@
 import { InstallerError } from '../diagnostic/error'
-import { INSTALLER_SPEC } from '../install/spec'
 import {
   IncusApiError,
   IncusOperationError,
@@ -27,7 +26,7 @@ export function isIncusApiStatus(error: unknown, statusCode: number): error is I
 }
 
 /**
- * Converts unhandled local Incus client failures into non-secret installer
+ * Converts unhandled Incus client failures into non-secret installer
  * diagnostics. Expected resource absence and guarded update conflicts remain
  * caller-owned decisions.
  */
@@ -39,10 +38,7 @@ export function toInstallerError(error: unknown, context: IncusErrorContext): In
     return new InstallerError({
       code: 'INCUS_OPERATION_INDETERMINATE',
       facts: [
-        [
-          'Observed',
-          `The local wait for operation '${error.operationPath}' exceeded ${INSTALLER_SPEC.incus.operationWaitTimeoutMs}ms.`,
-        ],
+        ['Observed', `The local wait for operation '${error.operationPath}' exceeded ${error.timeoutMs}ms.`],
       ],
       retry: context.rerun,
     })
@@ -58,10 +54,7 @@ export function toInstallerError(error: unknown, context: IncusErrorContext): In
     return new InstallerError({
       code: 'INCUS_API_UNAVAILABLE',
       facts: [
-        [
-          'Observed',
-          `The local Unix-socket request to ${context.operation} did not complete through ${INSTALLER_SPEC.incus.socketPath}.`,
-        ],
+        ['Observed', `The Incus request to ${context.operation} did not complete through ${error.endpoint}.`],
       ],
       retry: context.rerun,
     })

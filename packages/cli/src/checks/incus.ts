@@ -1,11 +1,13 @@
 import { lstat } from 'node:fs/promises'
 import { InstallerError } from '../diagnostic/error'
 import { INSTALLER_SPEC } from '../install/spec'
-import { IncusApiError, IncusProtocolError, IncusTransportError, LocalIncusClient } from '../incus/client'
+import { requireIncusArchitecture, type Architecture } from '../install/architecture'
+import { IncusApiError, IncusProtocolError, IncusTransportError, IncusClient } from '../incus/client'
+import { localConnection } from '../incus/connection'
 import type { IncusServer } from '../incus/types'
 
 export interface IncusPreflight {
-  client: LocalIncusClient
+  client: IncusClient
   server: IncusServer
 }
 
@@ -18,7 +20,7 @@ function parseIncusMajorVersion(value: string): number | null {
   return Number.isSafeInteger(major) ? major : null
 }
 
-export async function validateLocalIncus(): Promise<IncusPreflight> {
+export async function validateLocalIncus(architecture: Architecture): Promise<IncusPreflight> {
   const socketPath = INSTALLER_SPEC.incus.socketPath
   try {
     const metadata = await lstat(socketPath)
@@ -39,8 +41,8 @@ export async function validateLocalIncus(): Promise<IncusPreflight> {
       retry: 'qiln doctor',
     })
   }
-  const client = new LocalIncusClient({
-    socketPath,
+  const client = new IncusClient({
+    connection: localConnection(socketPath),
     projectName: INSTALLER_SPEC.projectName,
     requestTimeoutMs: INSTALLER_SPEC.incus.requestTimeoutMs,
     uploadTimeoutMs: INSTALLER_SPEC.incus.uploadTimeoutMs,
@@ -110,13 +112,7 @@ export async function validateLocalIncus(): Promise<IncusPreflight> {
       retry: 'qiln doctor',
     })
   }
-  if (!server.environment.architectures.includes(INSTALLER_SPEC.supportedHost.incusArchitecture)) {
-    throw new InstallerError({
-      code: 'INCUS_ARCHITECTURE_INCOMPATIBLE',
-      facts: [['Observed', `Incus architectures: ${server.environment.architectures.join(', ') || 'none'}.`]],
-      retry: 'qiln doctor',
-    })
-  }
+  requireIncusArchitecture(architecture, server.environment.architectures, 'qiln doctor')
   return {
     client,
     server,

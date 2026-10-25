@@ -3,7 +3,8 @@ import { INSTALLER_SPEC } from '../install/spec'
 import { assertVolume } from '../install/storage'
 import { runProcess } from '../process'
 import { toInstallerError } from '../incus/errors'
-import type { LocalIncusClient } from '../incus/client'
+import type { Layout } from '../install/layout'
+import type { IncusClient } from '../incus/client'
 import type { HostPreflight } from './host'
 import type { IncusStoragePool, IncusStorageVolume } from '../incus/types'
 
@@ -15,24 +16,20 @@ export interface StoragePreflight {
 
 export async function validateStoragePreflight(
   host: HostPreflight,
-  client: LocalIncusClient,
+  client: IncusClient,
+  layout: Layout,
 ): Promise<StoragePreflight> {
-  const hostPool = await runProcess(host.commandPaths.zpool, [
-    'list',
-    '-H',
-    '-o',
-    'name,health',
-    INSTALLER_SPEC.storage.poolName,
-  ])
+  const poolName = layout.pool.name
+  const hostPool = await runProcess(host.commandPaths.zpool, ['list', '-H', '-o', 'name,health', poolName])
   if (hostPool.exitCode !== 0) {
     throw new InstallerError({
       code: 'HOST_ZFS_POOL_MISSING',
-      facts: [['Observed', `zpool list could not find or inspect '${INSTALLER_SPEC.storage.poolName}'.`]],
+      facts: [['Observed', `zpool list could not find or inspect '${poolName}'.`]],
       retry: 'qiln doctor',
     })
   }
   const [hostPoolName, hostPoolHealth] = hostPool.stdout.trim().split(/\s+/)
-  if (hostPoolName !== INSTALLER_SPEC.storage.poolName || hostPoolHealth !== 'ONLINE') {
+  if (hostPoolName !== poolName || hostPoolHealth !== 'ONLINE') {
     throw new InstallerError({
       code: 'HOST_ZFS_POOL_UNHEALTHY',
       facts: [
@@ -41,42 +38,36 @@ export async function validateStoragePreflight(
       retry: 'qiln doctor',
     })
   }
-  const hostDataset = await runProcess(host.commandPaths.zfs, [
-    'list',
-    '-H',
-    '-o',
-    'name',
-    INSTALLER_SPEC.storage.poolName,
-  ])
-  if (hostDataset.exitCode !== 0 || hostDataset.stdout.trim() !== INSTALLER_SPEC.storage.poolName) {
+  const hostDataset = await runProcess(host.commandPaths.zfs, ['list', '-H', '-o', 'name', poolName])
+  if (hostDataset.exitCode !== 0 || hostDataset.stdout.trim() !== poolName) {
     throw new InstallerError({
       code: 'HOST_ZFS_DATASET_UNAVAILABLE',
-      facts: [['Observed', `zfs list did not return the expected '${INSTALLER_SPEC.storage.poolName}' dataset.`]],
+      facts: [['Observed', `zfs list did not return the expected '${poolName}' dataset.`]],
       retry: 'qiln doctor',
     })
   }
   let incusPool: IncusStoragePool | null
   try {
-    incusPool = await client.getStoragePoolOrNull(INSTALLER_SPEC.storage.poolName)
+    incusPool = await client.getStoragePoolOrNull(poolName)
   } catch (error: unknown) {
     throw toInstallerError(error, {
       check: 'existing Incus storage pool',
-      operation: `inspect the '${INSTALLER_SPEC.storage.poolName}' storage pool`,
+      operation: `inspect the '${poolName}' storage pool`,
       rerun: 'qiln doctor',
     })
   }
   if (!incusPool) {
     throw new InstallerError({
       code: 'INCUS_STORAGE_POOL_MISSING',
-      facts: [['Observed', `GET /1.0/storage-pools/${INSTALLER_SPEC.storage.poolName} returned not found.`]],
+      facts: [['Observed', `GET /1.0/storage-pools/${poolName} returned not found.`]],
       retry: 'qiln doctor',
     })
   }
   const incusPoolCompatible =
-    incusPool.name === INSTALLER_SPEC.storage.poolName &&
+    incusPool.name === poolName &&
     incusPool.driver === INSTALLER_SPEC.storage.driver &&
     incusPool.status === 'Created' &&
-    incusPool.config.source === INSTALLER_SPEC.storage.poolName
+    incusPool.config.source === poolName
   if (!incusPoolCompatible) {
     throw new InstallerError({
       code: 'INCOMPATIBLE_INCUS_STORAGE_POOL',
@@ -92,9 +83,9 @@ export async function validateStoragePreflight(
   let existingPostgresVolume: IncusStorageVolume | null
   try {
     existingPostgresVolume = await client.getStoragePoolVolumeOrNull(
-      INSTALLER_SPEC.storage.poolName,
+      poolName,
       INSTALLER_SPEC.storage.volumeType,
-      INSTALLER_SPEC.storage.volumeName,
+      layout.postgres.volumeName,
     )
   } catch (error: unknown) {
     throw toInstallerError(error, {
@@ -104,7 +95,7 @@ export async function validateStoragePreflight(
     })
   }
   if (existingPostgresVolume) {
-    assertVolume(existingPostgresVolume)
+    assertVolume(existingPostgresVolume, layout)
   }
   return {
     hostPoolHealth,

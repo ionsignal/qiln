@@ -1,12 +1,13 @@
 import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
+import { INSTALLER_SPEC } from './spec'
 import { InstallerError } from '../diagnostic/error'
 import { validateContainerImage, validateImagePreflight } from '../checks/image'
 import { toInstallerError } from '../incus/errors'
 import { withStage, type StagedFile } from '../state/files'
-import { INSTALLER_SPEC } from './spec'
+import type { Architecture } from './architecture'
 import type { InstallationState } from './state'
-import type { LocalIncusClient } from '../incus/client'
+import type { IncusClient } from '../incus/client'
 import type { IncusImage, IncusImageAlias } from '../incus/types'
 
 const FULL_FINGERPRINT_PATTERN = /^[a-f0-9]{64}$/
@@ -45,7 +46,7 @@ async function splitFingerprint(metadata: StagedFile, rootfs: StagedFile): Promi
   return hash.digest('hex')
 }
 
-async function getAlias(client: LocalIncusClient): Promise<IncusImageAlias | null> {
+async function getAlias(client: IncusClient): Promise<IncusImageAlias | null> {
   try {
     return await client.getImageAliasOrNull(INSTALLER_SPEC.orchestrator.imageAlias)
   } catch (error: unknown) {
@@ -57,7 +58,7 @@ async function getAlias(client: LocalIncusClient): Promise<IncusImageAlias | nul
   }
 }
 
-async function getImage(client: LocalIncusClient, fingerprint: string): Promise<IncusImage | null> {
+async function getImage(client: IncusClient, fingerprint: string): Promise<IncusImage | null> {
   try {
     return await client.getImageOrNull(fingerprint)
   } catch (error: unknown) {
@@ -70,7 +71,7 @@ async function getImage(client: LocalIncusClient, fingerprint: string): Promise<
 }
 
 async function validateAliasTarget(
-  client: LocalIncusClient,
+  client: IncusClient,
   alias: IncusImageAlias,
 ): Promise<{ fingerprint: string; image: IncusImage }> {
   if (!FULL_FINGERPRINT_PATTERN.test(alias.target)) {
@@ -96,7 +97,7 @@ async function validateAliasTarget(
   }
 }
 
-async function deleteAliasedImage(client: LocalIncusClient, alias: IncusImageAlias): Promise<void> {
+async function deleteAliasedImage(client: IncusClient, alias: IncusImageAlias): Promise<void> {
   const target = await validateAliasTarget(client, alias)
   try {
     const operation = await client.deleteImage(target.fingerprint)
@@ -110,7 +111,7 @@ async function deleteAliasedImage(client: LocalIncusClient, alias: IncusImageAli
   }
 }
 
-async function ensureAlias(client: LocalIncusClient, fingerprint: string): Promise<IncusImageAlias> {
+async function ensureAlias(client: IncusClient, fingerprint: string): Promise<IncusImageAlias> {
   const existing = await getAlias(client)
   if (existing) {
     if (existing.target !== fingerprint) {
@@ -143,7 +144,7 @@ async function ensureAlias(client: LocalIncusClient, fingerprint: string): Promi
 }
 
 async function importImage(
-  client: LocalIncusClient,
+  client: IncusClient,
   fingerprint: string,
   metadata: StagedFile,
   rootfs: StagedFile,
@@ -168,8 +169,9 @@ async function importImage(
 }
 
 async function verifySplitResult(
-  client: LocalIncusClient,
+  client: IncusClient,
   fingerprint: string,
+  architecture: Architecture,
 ): Promise<{ image: IncusImage; alias: IncusImageAlias }> {
   const image = await getImage(client, fingerprint)
   if (!image) {
@@ -179,7 +181,7 @@ async function verifySplitResult(
       retry: RERUN,
     })
   }
-  validateContainerImage(image, fingerprint)
+  validateContainerImage(image, fingerprint, architecture)
   const alias = await getAlias(client)
   if (!alias || alias.name !== INSTALLER_SPEC.orchestrator.imageAlias || alias.target !== fingerprint) {
     throw new InstallerError({
@@ -195,9 +197,10 @@ async function verifySplitResult(
 }
 
 async function convergeSplit(
-  client: LocalIncusClient,
+  client: IncusClient,
   metadataPath: string,
   rootfsPath: string,
+  architecture: Architecture,
 ): Promise<ImageConvergence> {
   return await withStage(
     [
@@ -229,7 +232,7 @@ async function convergeSplit(
       let image = await getImage(client, fingerprint)
       let outcome: ImageConvergence['outcome']
       if (image) {
-        validateContainerImage(image, fingerprint)
+        validateContainerImage(image, fingerprint, architecture)
         await ensureAlias(client, fingerprint)
         outcome = 'reused'
       } else {
@@ -246,7 +249,7 @@ async function convergeSplit(
         await importImage(client, fingerprint, metadata, rootfs)
         outcome = 'imported'
       }
-      const verified = await verifySplitResult(client, fingerprint)
+      const verified = await verifySplitResult(client, fingerprint, architecture)
       image = verified.image
       return {
         fingerprint,
@@ -260,12 +263,13 @@ async function convergeSplit(
 }
 
 export async function convergeImage(
-  client: LocalIncusClient,
+  client: IncusClient,
   selection: InstallerImageSelection,
   installationState: InstallationState | null,
+  architecture: Architecture,
 ): Promise<ImageConvergence> {
   if (selection.kind === 'reference') {
-    const selected = await validateImagePreflight(client, selection.value, installationState)
+    const selected = await validateImagePreflight(client, selection.value, installationState, architecture)
     return {
       fingerprint: selected.fingerprint,
       image: selected.image,
@@ -274,5 +278,5 @@ export async function convergeImage(
       replacement: false,
     }
   }
-  return await convergeSplit(client, selection.metadataPath, selection.rootfsPath)
+  return await convergeSplit(client, selection.metadataPath, selection.rootfsPath, architecture)
 }

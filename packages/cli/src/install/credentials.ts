@@ -10,15 +10,19 @@ import { validateContainerImage } from '../checks/image'
 import { Dir, FileValidationError, read, readChild, withDir, withTemp, writeChild } from '../state/files'
 import { assertInstance } from './instance'
 import { assertNetwork } from './network'
+import { validateRoster } from './roster'
 import { INSTALLER_SPEC } from './spec'
-import { inspectOpenInstallerState, validateRoster } from './state'
+import { pinned, readInstallation } from './state'
 import { assertVolume } from './storage'
+import type { InstallationInputs } from './types'
 import type { FileSnapshot } from '../state/files'
-import type { LocalIncusClient } from '../incus/client'
+import type { IncusClient } from '../incus/client'
 import type { IncusConfigMap, IncusDevicesMap, IncusInstance, IncusInstancePut, IncusRead } from '../incus/types'
 
 const FULL_FINGERPRINT_PATTERN = /^[a-f0-9]{64}$/
 const UNSUPPORTED_CONTROL_PATTERN = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/
+const RERUN =
+  'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]'
 
 type LocalOutcome = 'generated' | 'reused' | 'roster-updated'
 type DeliveryOutcome = 'transferred' | 'reused'
@@ -80,8 +84,7 @@ function text(snapshotValue: FileSnapshot, _: string): string {
     throw new InstallerError({
       code: 'INVALID_LOCAL_CREDENTIAL',
       facts: [['Observed', 'The credential is not valid supported UTF-8 text.']],
-      retry:
-        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      retry: RERUN,
     })
   }
 }
@@ -101,8 +104,7 @@ function parseNats(value: string): string {
     throw new InstallerError({
       code: 'INVALID_NATS_CREDENTIAL',
       facts: [['Observed', 'nats-server.conf does not match the installer-owned configuration schema.']],
-      retry:
-        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      retry: RERUN,
     })
   }
   return match[1]
@@ -116,8 +118,7 @@ function parseHost(value: string): { natsToken: string; cookieSecret: string } {
     throw new InstallerError({
       code: 'INVALID_HOST_CREDENTIAL',
       facts: [['Observed', 'qiln-host.env contains missing, duplicate, malformed, or unsupported fields.']],
-      retry:
-        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      retry: RERUN,
     })
   }
   return {
@@ -136,8 +137,7 @@ async function validateGatewayKey(privateKey: FileSnapshot, sshKeygen: string): 
     throw new InstallerError({
       code: 'INVALID_GATEWAY_HOST_KEY',
       facts: [['Observed', 'ssh-keygen could not derive a public key using an empty passphrase.']],
-      retry:
-        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      retry: RERUN,
     })
   }
   const publicKey = derivedPublicKey.stdout.trim()
@@ -155,8 +155,7 @@ async function validateGatewayKey(privateKey: FileSnapshot, sshKeygen: string): 
       facts: [
         ['Observed', 'The public key derived from the retained private key does not use the required algorithm.'],
       ],
-      retry:
-        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      retry: RERUN,
     })
   }
 }
@@ -173,15 +172,13 @@ function credentialReadError(error: unknown, _: string): InstallerError {
     return new InstallerError({
       code: 'INVALID_LOCAL_CREDENTIAL_FILE',
       facts: [['Observed', reason]],
-      retry:
-        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      retry: RERUN,
     })
   }
   return new InstallerError({
     code: 'LOCAL_CREDENTIAL_READ_FAILED',
     facts: [['Observed', 'The credential could not be opened as one stable bounded regular file.']],
-    retry:
-      'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+    retry: RERUN,
   })
 }
 
@@ -213,8 +210,7 @@ async function files(directory: Dir): Promise<'absent' | LocalFiles> {
       facts: [
         ['Observed', `Present files: ${present.join(', ') || 'none'}; missing files: ${missing.join(', ') || 'none'}.`],
       ],
-      retry:
-        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      retry: RERUN,
     })
   }
   const limits = INSTALLER_SPEC.credentials.limits
@@ -236,8 +232,7 @@ async function validate(local: LocalFiles, sshKeygen: string): Promise<Credentia
     throw new InstallerError({
       code: 'LOCAL_CREDENTIAL_TOKEN_MISMATCH',
       facts: [['Observed', 'The NATS token in nats-server.conf differs from the token in qiln-host.env.']],
-      retry:
-        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      retry: RERUN,
     })
   }
   await validateGatewayKey(local.gatewayKey, sshKeygen)
@@ -270,8 +265,7 @@ function collision(config: Readonly<IncusConfigMap>): void {
       throw new InstallerError({
         code: 'INSTANCE_CREDENTIAL_NAMESPACE_COLLISION',
         facts: [['Observed', `Both credential namespaces are populated for managed suffix '${suffix}'.`]],
-        retry:
-          'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+        retry: RERUN,
       })
     }
   }
@@ -285,14 +279,13 @@ function hasManagedCredentials(config: Readonly<IncusConfigMap>): boolean {
   )
 }
 
-async function current(directory: Dir, client: LocalIncusClient, sourceRoot: string): Promise<CurrentInstance> {
-  const state = await inspectOpenInstallerState(directory)
-  if (!state.installation) {
+async function current(directory: Dir, client: IncusClient, inputs: InstallationInputs): Promise<CurrentInstance> {
+  const installation = pinned(await readInstallation(directory))
+  if (!installation) {
     throw new InstallerError({
       code: 'INSTALLATION_STATE_REQUIRED',
-      facts: [['Observed', 'installation.json is absent after image convergence.']],
-      retry:
-        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      facts: [['Observed', 'installation.json is absent or holds no image pin after image convergence.']],
+      retry: RERUN,
     })
   }
   let instance: IncusRead<IncusInstance> | null
@@ -302,33 +295,30 @@ async function current(directory: Dir, client: LocalIncusClient, sourceRoot: str
     throw toInstallerError(error, {
       check: 'credential delivery instance inspection',
       operation: 'read the stopped orchestrator instance and its ETag',
-      rerun:
-        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      rerun: RERUN,
     })
   }
   if (!instance) {
     throw new InstallerError({
       code: 'ORCHESTRATOR_INSTANCE_REQUIRED',
       facts: [['Observed', `Incus did not return '${INSTALLER_SPEC.orchestrator.name}'.`]],
-      retry:
-        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      retry: RERUN,
     })
   }
   collision(instance.value.config)
-  assertInstance(instance.value, state.installation.imageFingerprint, sourceRoot)
+  assertInstance(instance.value, installation.imageFingerprint, inputs)
   const signature = instance.value.config['volatile.base_image']
   if (
     typeof signature !== 'string' ||
     !FULL_FINGERPRINT_PATTERN.test(signature) ||
-    signature !== state.installation.imageFingerprint
+    signature !== installation.imageFingerprint
   ) {
     throw new InstallerError({
       code: 'ORCHESTRATOR_IMAGE_SIGNATURE_MISMATCH',
       facts: [
         ['Observed', 'The instance base-image signature is missing, malformed, or different from installation.json.'],
       ],
-      retry:
-        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      retry: RERUN,
     })
   }
   return {
@@ -363,8 +353,7 @@ async function gatewayKey(sshKeygen: string): Promise<FileSnapshot> {
       throw new InstallerError({
         code: 'GATEWAY_HOST_KEY_GENERATION_FAILED',
         facts: [['Observed', 'ssh-keygen did not complete successfully in the private temporary directory.']],
-        retry:
-          'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+        retry: RERUN,
       })
     }
     await rm(`${keyPath}.pub`, {
@@ -386,10 +375,10 @@ async function generate(
   directory: Dir,
   roster: FileSnapshot,
   sshKeygen: string,
-  client: LocalIncusClient,
-  sourceRoot: string,
+  client: IncusClient,
+  inputs: InstallationInputs,
 ): Promise<Credentials> {
-  const target = await current(directory, client, sourceRoot)
+  const target = await current(directory, client, inputs)
   if (hasManagedCredentials(target.read.value.config)) {
     throw new InstallerError({
       code: 'LOCAL_CREDENTIAL_RECOVERY_REQUIRED',
@@ -399,8 +388,7 @@ async function generate(
           'The stopped orchestrator contains one or more managed credential keys while the local set is absent.',
         ],
       ],
-      retry:
-        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      retry: RERUN,
     })
   }
   const natsToken = randomBytes(INSTALLER_SPEC.credentials.secretBytes).toString(
@@ -426,8 +414,7 @@ async function generate(
     throw new InstallerError({
       code: 'LOCAL_CREDENTIAL_PERSISTENCE_FAILED',
       facts: [['Observed', 'The protected state directory did not contain a complete valid credential set.']],
-      retry:
-        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      retry: RERUN,
     })
   }
   return persisted
@@ -504,19 +491,18 @@ function matches(config: Readonly<IncusConfigMap>, values: Readonly<IncusConfigM
 
 async function deliver(
   directory: Dir,
-  client: LocalIncusClient,
+  client: IncusClient,
   sshKeygen: string,
-  sourceRoot: string,
+  inputs: InstallationInputs,
 ): Promise<Delivery> {
   for (let attempt = 0; attempt < 2; attempt++) {
-    const target = await current(directory, client, sourceRoot)
+    const target = await current(directory, client, inputs)
     const local = await load(directory, sshKeygen)
     if (local === 'absent') {
       throw new InstallerError({
         code: 'LOCAL_CREDENTIAL_SET_REQUIRED',
         facts: [['Observed', 'The protected installer state directory contains no credential set.']],
-        retry:
-          'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+        retry: RERUN,
       })
     }
     const expected = put(target.read.value, local.values)
@@ -534,8 +520,7 @@ async function deliver(
         throw toInstallerError(error, {
           check: 'guarded orchestrator credential delivery',
           operation: 'wait for the guarded complete instance update',
-          rerun:
-            'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+          rerun: RERUN,
         })
       }
       return {
@@ -550,16 +535,14 @@ async function deliver(
         throw new InstallerError({
           code: 'INCUS_ETAG_CONFLICT',
           facts: [['Observed', 'Incus returned HTTP 412 after the instance was re-read and revalidated once.']],
-          retry:
-            'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+          retry: RERUN,
         })
       }
       if (error instanceof IncusApiError) {
         throw toInstallerError(error, {
           check: 'guarded orchestrator credential delivery',
           operation: 'apply the complete stopped instance credential configuration',
-          rerun:
-            'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+          rerun: RERUN,
         })
       }
       throw error
@@ -570,63 +553,59 @@ async function deliver(
 
 async function verify(
   directory: Dir,
-  client: LocalIncusClient,
+  client: IncusClient,
   sshKeygen: string,
   expected: IncusInstancePut,
   verifyAlias: boolean,
-  sourceRoot: string,
+  inputs: InstallationInputs,
 ): Promise<string> {
-  const state = await inspectOpenInstallerState(directory)
-  if (!state.installation) {
+  const installation = pinned(await readInstallation(directory))
+  if (!installation) {
     throw new InstallerError({
       code: 'FINAL_INSTALLATION_STATE_MISSING',
       facts: [['Observed', 'installation.json could not be re-read after credential convergence.']],
-      retry:
-        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      retry: RERUN,
     })
   }
-  const installation = state.installation
+  const { layout } = inputs
   let image
   let network
   let volume
   let instance
   try {
     image = await client.getImage(installation.imageFingerprint)
-    network = await client.getNetwork(INSTALLER_SPEC.network.name)
+    network = await client.getNetwork(layout.network.name)
     volume = await client.getStoragePoolVolume(
-      INSTALLER_SPEC.storage.poolName,
+      layout.pool.name,
       INSTALLER_SPEC.storage.volumeType,
-      INSTALLER_SPEC.storage.volumeName,
+      layout.postgres.volumeName,
     )
     instance = await client.getInstance(INSTALLER_SPEC.orchestrator.name)
   } catch (error: unknown) {
     throw toInstallerError(error, {
       check: 'final stopped-installation verification',
       operation: 're-read the selected image, network, volume, and stopped orchestrator',
-      rerun:
-        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      rerun: RERUN,
     })
   }
-  validateContainerImage(image, installation.imageFingerprint)
-  assertNetwork(network)
-  assertVolume(volume)
+  validateContainerImage(image, installation.imageFingerprint, inputs.architecture)
+  assertNetwork(network, layout)
+  assertVolume(volume, layout)
   collision(instance.config)
-  assertInstance(instance, installation.imageFingerprint, sourceRoot)
+  assertInstance(instance, installation.imageFingerprint, inputs)
   const local = await load(directory, sshKeygen)
   if (local === 'absent') {
     throw new InstallerError({
       code: 'FINAL_LOCAL_CREDENTIAL_SET_MISSING',
       facts: [['Observed', 'The protected installer state directory no longer contains all four credentials.']],
-      retry:
-        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      retry: RERUN,
     })
   }
   if (!matches(instance.config, local.values)) {
     throw new InstallerError({
       code: 'FINAL_INSTANCE_CREDENTIAL_MISMATCH',
       facts: [['Observed', 'At least one managed credential is missing or differs from the local source of truth.']],
-      retry:
-        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      retry: RERUN,
     })
   }
   if (!samePut(instance, expected)) {
@@ -638,8 +617,7 @@ async function verify(
           'Profiles, devices, local configuration, or another writable instance field differs from the guarded state.',
         ],
       ],
-      retry:
-        'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+      retry: RERUN,
     })
   }
   if (verifyAlias) {
@@ -650,16 +628,14 @@ async function verify(
       throw toInstallerError(error, {
         check: 'final managed image-alias verification',
         operation: 're-read the managed split-image alias',
-        rerun:
-          'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+        rerun: RERUN,
       })
     }
     if (alias.target !== installation.imageFingerprint) {
       throw new InstallerError({
         code: 'FINAL_IMAGE_ALIAS_MISMATCH',
         facts: [['Observed', 'The alias target differs from the persisted full image fingerprint.']],
-        retry:
-          'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+        retry: RERUN,
       })
     }
   }
@@ -668,11 +644,11 @@ async function verify(
 
 export async function convergeCredentials(options: {
   directory: Dir
-  client: LocalIncusClient
+  client: IncusClient
   sshKeygen: string
   roster: FileSnapshot | null
   verifyAlias: boolean
-  sourceRoot: string
+  inputs: InstallationInputs
 }): Promise<CredentialConvergence> {
   let local = await load(options.directory, options.sshKeygen)
   let localOutcome: LocalOutcome
@@ -681,11 +657,10 @@ export async function convergeCredentials(options: {
       throw new InstallerError({
         code: 'AUTHORIZED_KEYS_REQUIRED',
         facts: [['Observed', 'No local credential files or validated authorized-key roster are available.']],
-        retry:
-          'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]',
+        retry: RERUN,
       })
     }
-    local = await generate(options.directory, options.roster, options.sshKeygen, options.client, options.sourceRoot)
+    local = await generate(options.directory, options.roster, options.sshKeygen, options.client, options.inputs)
     localOutcome = 'generated'
   } else if (options.roster) {
     await writeChild(options.directory, INSTALLER_SPEC.credentials.files.authorizedKeys, options.roster.bytes, 0o600)
@@ -698,14 +673,14 @@ export async function convergeCredentials(options: {
   } else {
     localOutcome = 'reused'
   }
-  const delivery = await deliver(options.directory, options.client, options.sshKeygen, options.sourceRoot)
+  const delivery = await deliver(options.directory, options.client, options.sshKeygen, options.inputs)
   const imageFingerprint = await verify(
     options.directory,
     options.client,
     options.sshKeygen,
     delivery.expected,
     options.verifyAlias,
-    options.sourceRoot,
+    options.inputs,
   )
   return {
     localOutcome,
