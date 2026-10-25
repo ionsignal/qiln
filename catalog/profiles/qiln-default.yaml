@@ -9,5 +9,5 @@ devices:
     type: nic
   root:
     path: /
-    pool: is-nvme-pool
+    pool: qiln-pool
     type: disk

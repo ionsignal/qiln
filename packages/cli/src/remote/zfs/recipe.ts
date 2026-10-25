@@ -6,7 +6,7 @@ import exportScript from './scripts/export.sh?raw'
 import importScript from './scripts/import.sh?raw'
 import inspectScript from './scripts/inspect.sh?raw'
 import moduleScript from './scripts/module.sh?raw'
-import packagesScript from './scripts/packages.sh?raw'
+import packagesScript from '../scripts/packages.sh?raw'
 import scrubScript from './scripts/scrub.sh?raw'
 
 /**
