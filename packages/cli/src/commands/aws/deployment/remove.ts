@@ -1,22 +1,25 @@
+import { resolveAccess, withRemote } from './access'
+import { requireBaseline } from './baseline'
+import { progressSink } from './progress'
+import { lifecycleOf, observationSummary, reportDeployment } from './report'
+import { authenticateDeployer, openTarget, type Target } from './shared'
+import { withConfirmedOperation } from '../shared'
 import { InstallerError, type DiagnosticFact } from '../../../diagnostic/error'
 import { deploymentName } from '../../../aws/deployment/alias'
 import { expectation, matches } from '../../../aws/deployment/expect'
 import { cleanup, deploymentFacts, removable } from '../../../aws/deployment/facts'
 import { removalPlan, retained, sshReady, unreleased } from '../../../aws/deployment/topology'
+import { evidence as incusEvidence } from '../../../aws/deployment/incus/evidence'
+import { requireStorageReleased, requireStorageSettled, storageHeld } from '../../../aws/deployment/incus/facts'
+import { IncusPreparer } from '../../../aws/deployment/incus/prepare'
 import { poolState, requirePoolReleased, requirePoolSettled } from '../../../aws/deployment/zfs/facts'
-import { Preparer } from '../../../aws/deployment/zfs/prepare'
+import { ZfsPreparer } from '../../../aws/deployment/zfs/prepare'
 import { targetOf } from '../../../aws/deployment/zfs/target'
 import { requireAwsHost } from '../../../aws/host'
 import { Prompts, withCancellation } from '../../../terminal/prompts'
-import { withConfirmedOperation } from '../shared'
-import { openAccess, withRemote } from './access'
-import { requireBaseline } from './baseline'
-import { approvalLabel, reportPlan } from './prepare/preview'
-import { progressSink } from './progress'
-import { lifecycleOf, observationSummary, reportDeployment } from './report'
-import { authenticateDeployer, openTarget, type Target } from './shared'
+import { approvalLabel as incusApproval, reportPlan as reportIncusPlan } from './prepare/incus'
+import { approvalLabel as zfsApproval, reportPlan as reportZfsPlan } from './prepare/zfs'
 import * as lineage from '../../../aws/deployment/zfs/lineage'
-import type { DeploymentSelector } from '../../../aws/deployment/alias'
 import type { Action } from '../../../aws/deployment/graph'
 import type { Dir } from '../../../state/files'
 import type { Reporter } from '../../../terminal/reporter'
@@ -36,6 +39,15 @@ const EFFECTS: Partial<Record<Action, string>> = {
   'detach-gateway': 'Detach the internet gateway from the VPC.',
   'delete-gateway': 'Delete the internet gateway.',
   'delete-vpc': 'Delete the VPC.',
+}
+
+/**
+ * What the host still holds that must be released before AWS removal: Incus
+ * initialized and not stopped, and a ZFS pool recorded as imported or exported.
+ */
+interface Holds {
+  incus: boolean
+  pool: boolean
 }
 
 function refusal(record: Deployment, observation?: Observation): InstallerError {
@@ -88,19 +100,19 @@ function reportTarget(reporter: Reporter, record: Deployment, observation: Obser
 }
 
 /**
- * Freshly checks the recorded pool over the pinned SSH connection, so a
- * successor host can import it without force. A pool still imported is exported
- * under its own default-no approval, and one observed absent only corroborates
- * the retained export evidence. Declining leaves the host untouched, and an
- * unreachable host refuses removal. Opening access may retain a host-key pin
- * through its own deployer, so the target is read again afterwards and the
- * caller never holds a stale record.
+ * Releases the host over the pinned SSH connection, so a successor host can
+ * import the recorded pool without force. Incus is stopped first, under its own
+ * default-no approval, because a running daemon holds the pool. Then a pool
+ * still imported is exported under its own approval, and one observed absent
+ * only corroborates the retained export evidence. Declining leaves the host
+ * untouched, and an unreachable host refuses removal. Resolving access may
+ * retain a host-key pin, so the returned target carries the access record,
+ * which includes it, and the caller never holds a stale record.
  */
-async function checkPool(
+async function releaseHost(
   root: Dir,
-  store: Dir,
-  selector: DeploymentSelector,
   target: Target,
+  holds: Holds,
   prompts: Prompts,
   reporter: Reporter,
   signal: AbortSignal,
@@ -114,31 +126,52 @@ async function checkPool(
       retry,
     })
   }
-  const access = await openAccess(root, target, retry, reporter, signal)
+  const access = await resolveAccess(root, target, retry, reporter, signal)
   const recorded = await lineage.pool(root, record)
+  if (recorded === null) {
+    throw new InstallerError({
+      code: 'INTERNAL_ERROR',
+      retry,
+    })
+  }
   const { host, port, username, fingerprint } = access.options
-  reporter.section('ZFS host check')
+  reporter.section('Host release check')
   reporter.row('working', 'Connecting', `${username}@${host}:${port} · pinned host key SHA256:${fingerprint}`)
   await withRemote(root, access, signal, async remote => {
     await requireBaseline(reporter, remote, username, record.id, [
       'Removal',
-      'no ZFS check or export was completed and no AWS resource was changed',
+      'no Incus or ZFS release, check, or export was completed and no AWS resource was changed',
     ])
-    const preparer = await Preparer.open({
-      root,
-      deployment: record,
-      target: zfsTarget,
-      recorded,
-      remote,
-      hooks: {
-        show: (observation, plan) => reportPlan(reporter, { observation, plan, target: zfsTarget }),
-        approve: plan => prompts.approve(approvalLabel(plan)),
-        progress: progressSink(reporter),
-      },
-    })
-    await preparer.release(signal)
+    if (holds.incus) {
+      const incusPreparer = await IncusPreparer.open({
+        root,
+        deployment: record,
+        remote,
+        hooks: {
+          show: (observation, plan) => reportIncusPlan(reporter, { observation, plan }),
+          approve: plan => prompts.approve(incusApproval(plan)),
+          progress: progressSink(reporter),
+        },
+      })
+      await incusPreparer.release({ pool: recorded.name, guid: recorded.guid }, signal)
+    }
+    if (holds.pool) {
+      const zfsPreparer = await ZfsPreparer.open({
+        root,
+        deployment: record,
+        target: zfsTarget,
+        recorded,
+        remote,
+        hooks: {
+          show: (observation, plan) => reportZfsPlan(reporter, { observation, plan, target: zfsTarget }),
+          approve: plan => prompts.approve(zfsApproval(plan)),
+          progress: progressSink(reporter),
+        },
+      })
+      await zfsPreparer.release(signal)
+    }
   })
-  return await openTarget(root, store, selector)
+  return { ...target, record: access.record }
 }
 
 export async function remove(options: AwsDeploymentOptions, reporter: Reporter): Promise<void> {
@@ -149,6 +182,7 @@ export async function remove(options: AwsDeploymentOptions, reporter: Reporter):
     return await withConfirmedOperation(false, async ({ root, connections: store }) => {
       let target = await openTarget(root, store, selector)
       requirePoolSettled(await lineage.evidence(root, target.record), target.record.id)
+      requireStorageSettled(await incusEvidence(root, target.record), target.record.id)
       if (!removable(target.record)) {
         if (cleanup(target.record).status === 'not-needed' && retained(target.record).length > 0) {
           reportDeployment(reporter, target.record)
@@ -157,10 +191,15 @@ export async function remove(options: AwsDeploymentOptions, reporter: Reporter):
         throw refusal(target.record)
       }
       const poolOnRecord = poolState(await lineage.evidence(root, target.record))
-      if ((poolOnRecord === 'imported' || poolOnRecord === 'exported') && sshReady(target.record)) {
-        target = await checkPool(root, store, selector, target, prompts, reporter, signal)
+      const holds: Holds = {
+        incus: storageHeld(await incusEvidence(root, target.record)),
+        pool: poolOnRecord === 'imported' || poolOnRecord === 'exported',
+      }
+      if ((holds.incus || holds.pool) && sshReady(target.record)) {
+        target = await releaseHost(root, target, holds, prompts, reporter, signal)
       }
       requirePoolReleased(await lineage.evidence(root, target.record), target.record.id)
+      requireStorageReleased(await incusEvidence(root, target.record), target.record.id)
       const deployer = await authenticateDeployer(root, target, signal, progressSink(reporter))
       const observation = await deployer.observe(signal)
       const record = deployer.record

@@ -36,7 +36,7 @@ export function approvalLabel(plan: ApprovedPlan): string {
 }
 
 function hostFacts({ observation, target }: PlanPreview): DiagnosticFact[] {
-  const { system, module: zfsModule, packages, arc, disks, pools } = observation
+  const { system, module: zfsModule, packages, arc, disks, pools, timer } = observation
   const root = diskOf(disks, target.rootVolumeId)
   const data = diskOf(disks, target.dataVolumeId)
   const others = disks.filter(disk => disk.type === 'disk' && disk !== root && disk !== data)
@@ -60,6 +60,11 @@ function hostFacts({ observation, target }: PlanPreview): DiagnosticFact[] {
     ['ZFS userspace', userspace],
     ['ARC limit', arc.runningMax === null ? 'module not loaded' : `${arc.runningMax} bytes (0 means the module default)`],
     ['Imported pools', pools.imported.map(pool => `${pool.name} (GUID ${pool.guid})`).join(', ') || 'none'],
+    [
+      'Mounted datasets',
+      pools.detail === null ? 'inspected pool not imported' : pools.detail.mounted.join(', ') || 'none',
+    ],
+    ['Scrub timer', `${timer.enablement} · ${timer.activation}`],
     [
       'Root volume',
       root === null
@@ -183,7 +188,7 @@ export function reportPlan(reporter: Reporter, preview: PlanPreview): void {
       reporter.facts([
         [
           'Pool',
-          `${plan.pool} · GUID ${plan.guid} · observed imported and online as a single plain disk on the recorded data volume, with its monthly scrub timer enabled`,
+          `${plan.pool} · GUID ${plan.guid} · observed imported and online as a single plain disk on the recorded data volume, with its monthly scrub timer enabled and active`,
         ],
       ])
       return

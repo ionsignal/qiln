@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import { RECIPE } from '../../../remote/zfs/recipe'
 import { InstallerError, type DiagnosticFact } from '../../../diagnostic/error'
-import { apply, type ApplyOutcome } from '../../../remote/zfs/apply'
 import { inspectHost } from '../../../remote/zfs/inspect'
 import { planOf, releasePlanOf } from '../../../remote/zfs/plan'
+import { apply } from '../../../remote/zfs/apply'
 import {
   DEFAULT_POLICY,
   type ApprovedPlan,
@@ -20,6 +20,7 @@ import { poolState, prepared, requireNotStuck, returned, zfsFacts } from './fact
 import { actionsOf, establishesPool, type ZfsAuthorization, type ZfsRecord, type ZfsStep } from './types'
 import * as deployments from '../records'
 import * as records from './records'
+import type { StepOutcome } from '../../../remote/step'
 import type { StepAction } from '../../../remote/zfs/spec'
 import type { Remote } from '../../../ssh/connections'
 import type { Dir } from '../../../state/files'
@@ -47,7 +48,7 @@ export interface Context {
 
 function failure(
   action: StepAction,
-  outcome: Exclude<ApplyOutcome, { kind: 'returned' }>,
+  outcome: Exclude<StepOutcome, { kind: 'returned' }>,
   retry: string,
 ): InstallerError {
   if (outcome.cause?.kind === 'cancelled') {
@@ -79,14 +80,14 @@ function failure(
  * SSH uncertainty never affects the AWS child termination, because the
  * durable ZFS guards keep blocking instead.
  */
-export class Preparer {
+export class ZfsPreparer {
   private constructor(
     private readonly context: Context,
     private readonly directory: Dir,
     private evidence: ZfsRecord,
   ) {}
 
-  public static async open(context: Context): Promise<Preparer> {
+  public static async open(context: Context): Promise<ZfsPreparer> {
     const { root, deployment } = context
     const directory = await deployments.directoryOf(root, deployment.id)
     const evidence = (await records.read(directory, deployment)) ?? records.blank(deployment)
@@ -96,7 +97,7 @@ export class Preparer {
       })
     }
     requireNotStuck(evidence, deployment.id)
-    return new Preparer(context, directory, evidence)
+    return new ZfsPreparer(context, directory, evidence)
   }
 
   private get retry(): string {
@@ -279,7 +280,7 @@ export class Preparer {
    * recorded and then thrown, so cancellation is classified before it
    * propagates. A step with no exit status stays open, which is uncertain.
    */
-  private async conclude(action: StepAction, outcome: ApplyOutcome): Promise<void> {
+  private async conclude(action: StepAction, outcome: StepOutcome): Promise<void> {
     const at = new Date().toISOString()
     switch (outcome.kind) {
       case 'returned':

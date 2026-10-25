@@ -3,6 +3,7 @@ export const AWS_RECORD_VERSION = Object.freeze({
   pending: 1,
   deployment: 1,
   zfs: 1,
+  incus: 1,
 })
 
 export const AWS_SPEC = Object.freeze({
@@ -192,6 +193,7 @@ export const AWS_SPEC = Object.freeze({
     connection: 'connection.json',
     deployment: 'deployment.json',
     zfs: 'zfs.json',
+    incus: 'incus.json',
     pending: 'pending.json',
     root: 'root',
     auth: 'auth',
@@ -205,6 +207,7 @@ export const AWS_SPEC = Object.freeze({
   limits: {
     record: 65_536,
     zfs: 131_072,
+    incus: 131_072,
     config: 65_536,
     cache: 262_144,
     privateKey: 4_096,

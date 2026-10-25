@@ -1,31 +1,11 @@
 import { ZFS_SPEC, arcLine, type StepAction } from './spec'
 import { SCRIPTS } from './recipe'
-import { SshError } from '../../ssh/failure'
+import { PACKAGE_SPEC } from '../apt'
+import { runStep, type StepOutcome } from '../step'
 import { shellCommand } from '../shell'
 import { InstallerError } from '../../diagnostic/error'
 import type { Remote } from '../../ssh/connections'
 import type { ApprovedPlan } from './types'
-
-/**
- * - returned: exited zero. This is not verified until a fresh inspection agrees.
- * - refused: an authored refusal, or a connection that ended before dispatch.
- *   The whole step had no effect.
- * - uncertain: anything else. A nonzero exit does not show that nothing
- *   changed, and a step cut off after dispatch may have run partly or fully.
- *   `exitCode` is null when no exit status was reported.
- *
- * `cause` carries the SSH failure, if any, so cancellation can be rethrown.
- */
-export type ApplyOutcome =
-  | { kind: 'returned' }
-  | { kind: 'refused'; reason: string; cause: SshError | null }
-  | { kind: 'uncertain'; reason: string; exitCode: number | null; cause: SshError | null }
-
-/**
- * Package specs are approved evidence, but they become arguments to APT, so
- * only plain `name=version` words are accepted.
- */
-const PACKAGE_SPEC = /^[a-z0-9][a-z0-9+.-]*=[A-Za-z0-9][A-Za-z0-9.+:~-]*$/
 
 /**
  * An action that does not belong to its approved plan is a defect of the
@@ -91,38 +71,13 @@ function argumentsOf(action: StepAction, plan: ApprovedPlan): string[] {
  * caller supplies a command. A failed SSH channel ends the connection, so
  * nothing is retried here.
  */
-export async function apply(remote: Remote, plan: ApprovedPlan, action: StepAction): Promise<ApplyOutcome> {
+export async function apply(remote: Remote, plan: ApprovedPlan, action: StepAction): Promise<StepOutcome> {
   const { run } = ZFS_SPEC.steps[action]
-  const refusals: Readonly<Record<number, string>> = run.refusals
-  const { first, last } = ZFS_SPEC.apply.refusalCodes
   const command = shellCommand(SCRIPTS[run.script], argumentsOf(action, plan), { privileged: true })
-  try {
-    const { exitCode } = await remote.exec(command, {
-      timeoutMs: run.timeoutMs,
-      maxOutputBytes: ZFS_SPEC.apply.maxOutputBytes,
-    })
-    if (exitCode === 0) {
-      return { kind: 'returned' }
-    }
-    if (exitCode >= first && exitCode <= last) {
-      return {
-        kind: 'refused',
-        reason: refusals[exitCode] ?? 'The script refused before changing anything.',
-        cause: null,
-      }
-    }
-    return { kind: 'uncertain', reason: `The script exited with code ${exitCode}.`, exitCode, cause: null }
-  } catch (error: unknown) {
-    if (!(error instanceof SshError)) {
-      throw error
-    }
-    return error.remoteStarted
-      ? {
-          kind: 'uncertain',
-          reason: 'The connection or remote operation did not complete reliably.',
-          exitCode: null,
-          cause: error,
-        }
-      : { kind: 'refused', reason: 'The connection ended before the step was dispatched.', cause: error }
-  }
+  return await runStep(remote, command, {
+    timeoutMs: run.timeoutMs,
+    maxOutputBytes: ZFS_SPEC.apply.maxOutputBytes,
+    refusals: run.refusals,
+    refusalCodes: ZFS_SPEC.apply.refusalCodes,
+  })
 }

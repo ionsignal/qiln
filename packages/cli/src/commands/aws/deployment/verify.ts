@@ -3,7 +3,7 @@ import { requireAwsHost } from '../../../aws/host'
 import { runBaseline, unmetChecks, type Check, type CheckStatus } from '../../../remote/baseline'
 import { withCancellation } from '../../../terminal/prompts'
 import { withConfirmedOperation } from '../shared'
-import { openAccess, withRemote } from './access'
+import { resolveAccess, withRemote } from './access'
 import { openTarget } from './shared'
 import type { AwsDeploymentOptions } from '../../../input'
 import type { Reporter, TableCell, Tone } from '../../../terminal/reporter'
@@ -36,7 +36,7 @@ export async function verify(options: AwsDeploymentOptions, reporter: Reporter):
       const target = await openTarget(root, store, options.selector)
       const { record } = target
       const retry = `qiln aws deployment verify --id ${record.id}`
-      const access = await openAccess(root, target, retry, reporter, signal)
+      const access = await resolveAccess(root, target, retry, reporter, signal)
       const { host, port, username, fingerprint } = access.options
       reporter.section('Guest verification')
       reporter.row('working', 'Connecting', `${username}@${host}:${port} · pinned host key SHA256:${fingerprint}`)

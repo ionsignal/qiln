@@ -10,6 +10,11 @@ import type { Deployment } from '../../../aws/deployment/types'
 import type { Dir } from '../../../state/files'
 import { authenticate, requireAvailable } from '../shared'
 
+/**
+ * `record` is a snapshot from the moment the target was opened. An operation
+ * that retains evidence, such as resolving a host-key pin, outdates it, so such
+ * an operation must hand back its own current record.
+ */
 export interface Target {
   record: Deployment
   directory: Dir

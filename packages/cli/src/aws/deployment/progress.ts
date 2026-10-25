@@ -1,4 +1,5 @@
 import type { Action } from './graph'
+import type { IncusAction } from '../../remote/incus/spec'
 import type { StepAction } from '../../remote/zfs/spec'
 
 const WAITING_INTERVAL_MS = 10_000
@@ -31,12 +32,17 @@ export interface ZfsTask {
   action: StepAction
 }
 
+export interface IncusTask {
+  kind: 'incus'
+  action: IncusAction
+}
+
 /**
- * Key generation, the AWS health check, the host-key read, and a ZFS
+ * Key generation, the AWS health check, the host-key read, and a ZFS or Incus
  * preparation step are stages of their own, not actions of the deployment
  * graph, so each is a task of its own.
  */
-export type ProgressTask = KeyTask | StepTask | HealthTask | HostKeyTask | ZfsTask
+export type ProgressTask = KeyTask | StepTask | HealthTask | HostKeyTask | ZfsTask | IncusTask
 
 /**
  * `working` precedes the activity, `waiting` repeats while it lasts, and

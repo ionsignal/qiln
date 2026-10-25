@@ -1,5 +1,6 @@
 import type { Action } from '../../../aws/deployment/graph'
 import type { ProgressSink, ProgressTask } from '../../../aws/deployment/progress'
+import type { IncusAction } from '../../../remote/incus/spec'
 import type { StepAction } from '../../../remote/zfs/spec'
 import type { Reporter } from '../../../terminal/reporter'
 
@@ -43,6 +44,14 @@ const ZFS_LABELS: Record<StepAction, string> = {
   'enable-scrub': 'Enable the monthly ZFS scrub timer',
 }
 
+const INCUS_LABELS: Record<IncusAction, string> = {
+  'add-repository': 'Add the Zabbly signing key and APT source',
+  'refresh-lists': 'Refresh APT package lists',
+  'install-packages': 'Install the approved Incus packages',
+  initialize: 'Initialize Incus from the approved preseed',
+  release: 'Stop Incus and release its sockets',
+}
+
 function title(task: ProgressTask): string {
   switch (task.kind) {
     case 'key':
@@ -53,6 +62,8 @@ function title(task: ProgressTask): string {
       return 'SSH host key'
     case 'zfs':
       return 'ZFS'
+    case 'incus':
+      return 'Incus'
     case 'step':
       return `Step ${task.position}/${task.total}`
   }
@@ -68,6 +79,8 @@ function subject(task: ProgressTask): string {
       return 'Read the server host key from AWS console output'
     case 'zfs':
       return ZFS_LABELS[task.action]
+    case 'incus':
+      return INCUS_LABELS[task.action]
     case 'step': {
       const label = LABELS[task.action]
       return task.slot > 0 ? `${label} #${task.slot + 1}` : label
@@ -84,6 +97,7 @@ function verifiedDetail(task: ProgressTask): string {
     case 'hostkey':
       return 'Ed25519 fingerprint retained as AWS-reported console evidence; not guest attestation'
     case 'zfs':
+    case 'incus':
       return 'a fresh inspection agrees with the approved result'
     case 'step':
       return 'observation agrees with the record'

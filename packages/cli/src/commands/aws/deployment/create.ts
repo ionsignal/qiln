@@ -1,4 +1,3 @@
-
 import { AWS_SPEC } from '../../../aws/spec'
 import { POLICY_KEYS, enrolledKeys } from '../../../aws/permission/keys'
 import { findPin } from '../../../aws/ami'
@@ -12,6 +11,7 @@ import { expectation, matches } from '../../../aws/deployment/expect'
 import { evaluate, isBlocked } from '../../../aws/deployment/proposal/evaluate'
 import { prepare } from '../../../aws/deployment/proposal/prepare'
 import { reusable, type Reuse } from '../../../aws/deployment/reuse'
+import { requireStorageReleased } from '../../../aws/deployment/incus/facts'
 import { requirePoolReleased } from '../../../aws/deployment/zfs/facts'
 import { reviewRequired } from '../../../aws/permission/spec'
 import { requireAwsHost } from '../../../aws/host'
@@ -23,6 +23,7 @@ import { authenticate, reportAuthentication, requireAvailable, withConfirmedOper
 import { reportCreationEffects, reportProposal } from './preview'
 import { progressSink } from './progress'
 import { observationSummary, reportDeployment } from './report'
+import { evidence as incusEvidence } from '../../../aws/deployment/incus/evidence'
 import * as deployments from '../../../aws/deployment/records'
 import * as connections from '../../../aws/connection/records'
 import * as lineage from '../../../aws/deployment/zfs/lineage'
@@ -134,6 +135,9 @@ export async function create(options: AwsDeploymentCreateOptions, reporter: Repo
       const offer = previous === null ? null : reusable(previous)
       let reuse: Reuse | null = null
       if (offer !== null) {
+        reporter.notice(
+          'Incus preparation cannot initialize a reused pool that holds retained Incus datasets, because restoration is not supported. Choose a new data volume if Incus is required.',
+        )
         const choice = await prompts.select('Data storage', [
           'Create a new data volume',
           `Reuse ${offer.volumeId} from the previously removed deployment`,
@@ -142,6 +146,7 @@ export async function create(options: AwsDeploymentCreateOptions, reporter: Repo
       }
       if (previous !== null && reuse !== null) {
         requirePoolReleased(await lineage.evidence(root, previous), previous.id)
+        requireStorageReleased(await incusEvidence(root, previous), previous.id)
       }
       const session = await Session.open(directory, connection.region)
       const authentication = await authenticate(session, connection.identity, signal)

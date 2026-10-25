@@ -5,11 +5,13 @@ import { diagnostic } from '../../aws/errors'
 import { pendingFacts } from '../../aws/iam/facts'
 import { InstallerError, type DiagnosticFact } from '../../diagnostic/error'
 import { deploymentFacts, effects } from '../../aws/deployment/facts'
+import { requireStorageSettled } from '../../aws/deployment/incus/facts'
 import { requirePoolSettled } from '../../aws/deployment/zfs/facts'
 import { authRecovery, deploymentRecovery, iamRecovery, terminationConfirmed } from '../../aws/recovery'
 import { requireAuthentication } from '../../aws/auth/identity'
 import { removeAuth, Session } from '../../aws/auth/session'
 import { withAwsOperation, type AwsState } from '../../aws/root'
+import { evidence as incusEvidence } from '../../aws/deployment/incus/evidence'
 import * as connections from '../../aws/connection/records'
 import * as deployments from '../../aws/deployment/records'
 import * as lineage from '../../aws/deployment/zfs/lineage'
@@ -86,8 +88,8 @@ export async function withConfirmedOperation<T>(create: boolean, run: (state: Aw
 /**
  * Local removal discards the managed binding, so it is refused while retained
  * deployment evidence indicates that resources or unresolved effects may remain,
- * including an unsettled pool-affecting ZFS step. Returns the settled
- * deployments, which stay on disk after removal.
+ * including an unsettled pool-affecting ZFS step or storage-affecting Incus
+ * step. Returns the settled deployments, which stay on disk after removal.
  */
 export async function requireSettledDeployments(root: Dir, identity: AwsIdentity): Promise<Deployment[]> {
   const bound = await deployments.bound(root, identity)
@@ -110,6 +112,7 @@ export async function requireSettledDeployments(root: Dir, identity: AwsIdentity
   }
   for (const record of bound) {
     requirePoolSettled(await lineage.evidence(root, record), record.id)
+    requireStorageSettled(await incusEvidence(root, record), record.id)
   }
   return bound
 }

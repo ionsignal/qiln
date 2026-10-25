@@ -8,10 +8,17 @@ import {
   volumeDisclosure,
   type Phase,
 } from '../../../aws/deployment/facts'
+import {
+  incusFacts,
+  retainedPreseed,
+  storageReleased,
+  unsettled as incusUnsettled,
+} from '../../../aws/deployment/incus/facts'
 import { removalOutcome } from '../../../aws/deployment/outcome'
 import { refusals } from '../../../aws/deployment/step'
 import { prepared, unsettled, zfsFacts } from '../../../aws/deployment/zfs/facts'
 import { released, resourceId, resources, retained, unreleased, type Resource } from '../../../aws/deployment/topology'
+import type { IncusRecord } from '../../../aws/deployment/incus/types'
 import type { ZfsRecord } from '../../../aws/deployment/zfs/types'
 import type { Disposition } from '../../../aws/deployment/graph'
 import type { DiagnosticFact } from '../../../diagnostic/error'
@@ -250,5 +257,40 @@ export function reportZfsUnreadable(reporter: Reporter): void {
   reporter.section('ZFS preparation')
   reporter.notice(
     'The ZFS preparation evidence is unreadable or incompatible, so conflicting work is refused. It was not repaired, migrated, or discarded.',
+  )
+}
+
+/**
+ * Retained Incus preparation evidence only. Absence is not a statement about
+ * the host or the Incus daemon.
+ */
+export function reportIncus(reporter: Reporter, preparation: IncusRecord | null): void {
+  reporter.section('Incus preparation')
+  if (preparation === null) {
+    reporter.info('No Incus preparation evidence is retained. This does not establish the state of the host or its Incus daemon.')
+    return
+  }
+  reporter.facts([
+    ...incusFacts(preparation),
+    [
+      'Baseline preparation',
+      retainedPreseed(preparation) !== null && !storageReleased(preparation)
+        ? 'initialization verified when last recorded; not freshly observed'
+        : 'not recorded as complete',
+    ],
+    ['Recorded steps', String(preparation.steps.length)],
+  ])
+  if (incusUnsettled(preparation).length > 0) {
+    reporter.space()
+    reporter.notice(
+      'An Incus preparation step has no verified outcome. Interrupted remote work may already have completed, and nothing was replayed, resumed, or rolled back.',
+    )
+  }
+}
+
+export function reportIncusUnreadable(reporter: Reporter): void {
+  reporter.section('Incus preparation')
+  reporter.notice(
+    'The Incus preparation evidence is unreadable or incompatible, so conflicting work is refused. It was not repaired, migrated, or discarded.',
   )
 }

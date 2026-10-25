@@ -10,11 +10,13 @@ import { userId } from '../host'
 import { encodeRecord } from '../json'
 import { requireOperationLock } from '../root'
 import { sameIdentity } from '../auth/identity'
+import { requireStorageReleased } from './incus/facts'
 import { requirePoolReleased } from './zfs/facts'
 import { InstallerError } from '../../diagnostic/error'
 import { isOperationId, type AwsIdentity } from '../types'
 import { openChildDir, readChild, writeChild, type Dir } from '../../state/files'
 import { isDeployment, type Deployment } from './types'
+import * as incus from './incus/records'
 import * as zfs from './zfs/records'
 import type { DeploymentSelector } from './alias'
 
@@ -162,7 +164,9 @@ export async function create(root: Dir, record: Deployment): Promise<void> {
     return invalid()
   }
   if (volume.kind === 'reuse' && previous !== null) {
-    requirePoolReleased(await zfs.read(await directoryOf(root, previous.id), previous), previous.id)
+    const previousDirectory = await directoryOf(root, previous.id)
+    requirePoolReleased(await zfs.read(previousDirectory, previous), previous.id)
+    requireStorageReleased(await incus.read(previousDirectory, previous), previous.id)
   }
   const directory = await openDirectory(root, initial.id, true)
   if (!directory || (await directory.list()).length !== 0) {
