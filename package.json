@@ -70,6 +70,7 @@
     "cpu-features": false
   },
   "overrides": {
+    "fast-uri": "^4.2.3",
     "ip-address": "^10.7.4",
     "braces": "npm:@franciscosolis/braces@3.1.1"
   },
