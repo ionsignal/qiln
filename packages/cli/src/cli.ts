@@ -1,7 +1,7 @@
 import { diagnostic as awsDiagnostic, isCancellation } from './aws/errors'
 import { CommanderError } from 'commander'
 import { InstallerError } from './diagnostic/error'
-import { ProcessExecutionError } from './process'
+import { ProcessExecutionError } from './transport/process'
 import { createProgram, parserFailure, type GlobalOptions } from './program'
 import { Reporter, type ColorMode, type OutputStream } from './terminal/reporter'
 import * as aws from './commands/aws'

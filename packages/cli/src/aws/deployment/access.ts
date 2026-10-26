@@ -2,7 +2,7 @@ import { InstallerError } from '../../diagnostic/error'
 import { AWS_SPEC } from '../spec'
 import { deploymentFacts } from './facts'
 import { sshReady } from './topology'
-import type { SshOptions } from '../../ssh/options'
+import type { SshOptions } from '../../transport/ssh/options'
 import type { HostKey } from './hostkey'
 import type { Deployment } from './types'
 

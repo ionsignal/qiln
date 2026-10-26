@@ -1,5 +1,5 @@
 import { InstallerError, type DiagnosticFact, type InstallerErrorCode } from '../../../diagnostic/error'
-import { isPoolAction } from '../../../remote/zfs/spec'
+import { isPoolAction } from '../../../host/zfs/spec'
 import * as journal from '../../../journal/step'
 import { establishesPool, type ZfsRecord, type ZfsStep } from './types'
 

@@ -4,7 +4,7 @@ import { hasKeys, isOperationId, isRecord, isTimestamp } from '../../guards'
 import { sameJson } from '../../json'
 import { operatorArn } from '../operator'
 import { policyArn } from '../permission/policy'
-import { isFingerprint } from '../../ssh/key'
+import { isFingerprint } from '../../transport/ssh/key'
 import {
   isAccountId,
   isIdentity,

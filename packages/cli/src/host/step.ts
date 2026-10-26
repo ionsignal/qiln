@@ -1,5 +1,5 @@
-import { SshError } from '../ssh/failure'
-import type { Remote } from '../ssh/connections'
+import { SshError } from '../transport/ssh/failure'
+import type { Remote } from '../transport/ssh/connections'
 
 /**
  * - returned: exited zero. This is not verified until a fresh inspection agrees.

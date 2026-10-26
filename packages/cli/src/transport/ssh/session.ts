@@ -4,7 +4,7 @@ import { Link } from './link'
 import { parseOptions, type SshOptions } from './options'
 import { SshClient } from './ssh2'
 import type { Client } from 'ssh2'
-import type { DiagnosticFact } from '../diagnostic/error'
+import type { DiagnosticFact } from '../../diagnostic/error'
 
 /**
  * Idle channels, such as an Incus operation wait, are otherwise silent, and NAT

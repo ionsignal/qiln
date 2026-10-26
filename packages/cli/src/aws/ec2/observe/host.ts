@@ -11,7 +11,7 @@ import {
 } from '@aws-sdk/client-ec2'
 import { dataTags, resourceId } from '../../deployment/topology'
 import { collect } from '../../observe'
-import { sameFingerprint } from '../../../ssh/key'
+import { sameFingerprint } from '../../../transport/ssh/key'
 import { byId, judge, listed, PAGES, tagFilters, tagged, unverified } from './shared'
 import type { Ec2 } from '../client'
 import type { Candidate, Of } from './shared'

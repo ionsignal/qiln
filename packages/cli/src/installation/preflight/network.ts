@@ -1,7 +1,7 @@
 import { InstallerError } from '../../diagnostic/error'
 import { isRecord } from '../../guards'
 import { assertNetwork } from '../network'
-import { runProcess } from '../../process'
+import { runProcess } from '../../transport/process'
 import { toInstallerError } from '../../transport/incus/errors'
 import type { Layout } from '../layout'
 import type { IncusClient } from '../../transport/incus/client'

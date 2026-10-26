@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto'
-import { RECIPE } from '../../../remote/zfs/recipe'
+import { RECIPE } from '../../../host/zfs/recipe'
 import { InstallerError, type DiagnosticFact } from '../../../diagnostic/error'
-import { inspectHost } from '../../../remote/zfs/inspect'
-import { planOf, releasePlanOf } from '../../../remote/zfs/plan'
-import { apply } from '../../../remote/zfs/apply'
+import { inspectHost } from '../../../host/zfs/inspect'
+import { planOf, releasePlanOf } from '../../../host/zfs/plan'
+import { apply } from '../../../host/zfs/apply'
 import {
   DEFAULT_POLICY,
   type ApprovedPlan,
@@ -11,8 +11,8 @@ import {
   type Plan,
   type RecordedPool,
   type ZfsTarget,
-} from '../../../remote/zfs/types'
-import { verify } from '../../../remote/zfs/verify'
+} from '../../../host/zfs/types'
+import { verify } from '../../../host/zfs/verify'
 import { checkCancellation } from '../../../terminal/prompts'
 import { userId } from '../../host'
 import { notify, withWaiting, type ProgressSink, type ProgressTask } from '../progress'
@@ -20,9 +20,9 @@ import { poolState, prepared, requireNotStuck, returned, zfsFacts } from './fact
 import { actionsOf, establishesPool, type ZfsAuthorization, type ZfsRecord, type ZfsStep } from './types'
 import * as deployments from '../records'
 import * as records from './records'
-import type { StepOutcome } from '../../../remote/step'
-import type { StepAction } from '../../../remote/zfs/spec'
-import type { Remote } from '../../../ssh/connections'
+import type { StepOutcome } from '../../../host/step'
+import type { StepAction } from '../../../host/zfs/spec'
+import type { Remote } from '../../../transport/ssh/connections'
 import type { Dir } from '../../../state/files'
 import type { Deployment } from '../types'
 

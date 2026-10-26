@@ -1,4 +1,4 @@
-import { runProcess } from '../../process'
+import { runProcess } from '../../transport/process'
 import { runSetup } from '../child/setup'
 import { runInteractive } from './interactive'
 import { AWS_SPEC } from '../spec'

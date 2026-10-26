@@ -2,7 +2,7 @@ import { basename, dirname, resolve } from 'node:path'
 import { TextDecoder } from 'node:util'
 import { InstallerError } from '../diagnostic/error'
 import { isErrorCode } from '../guards'
-import { runProcess } from '../process'
+import { runProcess } from '../transport/process'
 import { FileValidationError, openDir, readChild, withTemp, type Dir, type FileSnapshot } from '../state/files'
 import { currentUserId } from '../state/user'
 

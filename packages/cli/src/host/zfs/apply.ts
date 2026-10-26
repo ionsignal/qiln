@@ -4,7 +4,7 @@ import { PACKAGE_SPEC } from '../apt'
 import { runStep, type StepOutcome } from '../step'
 import { shellCommand } from '../shell'
 import { InstallerError } from '../../diagnostic/error'
-import type { Remote } from '../../ssh/connections'
+import type { Remote } from '../../transport/ssh/connections'
 import type { ApprovedPlan } from './types'
 
 /**

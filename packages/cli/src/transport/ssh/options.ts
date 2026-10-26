@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { InstallerError } from '../diagnostic/error'
+import { InstallerError } from '../../diagnostic/error'
 import { isFingerprint } from './key'
 
 const MAXIMUM_DEADLINE_MS = 10 * 60 * 1_000

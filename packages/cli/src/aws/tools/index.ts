@@ -1,6 +1,6 @@
 import { realpath } from 'node:fs/promises'
 import { InstallerError } from '../../diagnostic/error'
-import { findExecutable } from '../../process'
+import { findExecutable } from '../../transport/process'
 import { checkCancellation } from '../../terminal/prompts'
 import { SupervisedProcessError } from '../child/supervise'
 import { toolDiagnostic } from '../errors'

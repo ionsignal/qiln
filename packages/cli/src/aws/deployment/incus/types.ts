@@ -1,13 +1,13 @@
 import { z } from 'zod'
 import { AWS_RECORD_VERSION } from '../../spec'
-import { INCUS_ACTIONS } from '../../../remote/incus/spec'
+import { INCUS_ACTIONS } from '../../../host/incus/spec'
 import {
   accessPlanSchema,
   initializePlanSchema,
   packagesPlanSchema,
   releasePlanSchema,
   repositoryPlanSchema,
-} from '../../../remote/incus/types'
+} from '../../../host/incus/types'
 import { bindingSchema } from '../journal/binding'
 import { authorizationSchemaOf } from '../../../journal/history'
 import { stepSchemaOf, timestamp } from '../../../journal/step'

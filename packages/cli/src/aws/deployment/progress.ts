@@ -1,6 +1,6 @@
 import type { Action } from './graph'
-import type { IncusAction } from '../../remote/incus/spec'
-import type { StepAction } from '../../remote/zfs/spec'
+import type { IncusAction } from '../../host/incus/spec'
+import type { StepAction } from '../../host/zfs/spec'
 
 const WAITING_INTERVAL_MS = 10_000
 

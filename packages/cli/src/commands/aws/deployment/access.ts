@@ -1,14 +1,14 @@
 import { InstallerError } from '../../../diagnostic/error'
 import { optionsOf, requireReady } from '../../../aws/deployment/access'
 import { readPrivateKey } from '../../../aws/ssh/private'
-import { withSsh, type Remote } from '../../../ssh/connections'
-import { SshError } from '../../../ssh/failure'
+import { withSsh, type Remote } from '../../../transport/ssh/connections'
+import { SshError } from '../../../transport/ssh/failure'
 import { progressSink } from './progress'
 import { authenticateDeployer, type Target } from './shared'
 import type { Dir } from '../../../state/files'
 import type { HostKey } from '../../../aws/deployment/hostkey'
 import type { Deployment } from '../../../aws/deployment/types'
-import type { SshOptions } from '../../../ssh/options'
+import type { SshOptions } from '../../../transport/ssh/options'
 import type { Reporter } from '../../../terminal/reporter'
 
 /**

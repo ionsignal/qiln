@@ -2,7 +2,7 @@ import { SshError } from './failure'
 import { endpointFacts, withSession, type SshSession } from './session'
 import type { Duplex } from 'node:stream'
 import type { ClientChannel } from 'ssh2'
-import type { IncusConnection } from '../transport/incus/connection'
+import type { IncusConnection } from '../incus/connection'
 import type { SshOptions } from './options'
 
 function interrupted({ signal, options }: SshSession): SshError {

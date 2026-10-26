@@ -1,8 +1,8 @@
-import { RECIPE } from '../../../../remote/zfs/recipe'
-import { ZFS_SPEC } from '../../../../remote/zfs/spec'
-import { diskOf } from '../../../../remote/zfs/disk'
+import { RECIPE } from '../../../../host/zfs/recipe'
+import { ZFS_SPEC } from '../../../../host/zfs/spec'
+import { diskOf } from '../../../../host/zfs/disk'
 import type { DiagnosticFact } from '../../../../diagnostic/error'
-import type { ApprovedPlan, Observation, Plan, ZfsTarget } from '../../../../remote/zfs/types'
+import type { ApprovedPlan, Observation, Plan, ZfsTarget } from '../../../../host/zfs/types'
 import type { Reporter } from '../../../../terminal/reporter'
 
 const GIB = 1_073_741_824

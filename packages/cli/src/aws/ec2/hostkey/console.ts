@@ -1,5 +1,5 @@
 import { InstallerError } from '../../../diagnostic/error'
-import { isFingerprint } from '../../../ssh/key'
+import { isFingerprint } from '../../../transport/ssh/key'
 
 const MAXIMUM_ENCODED_CHARACTERS = 262_144
 const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/

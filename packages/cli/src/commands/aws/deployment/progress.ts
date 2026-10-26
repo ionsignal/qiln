@@ -1,7 +1,7 @@
 import type { Action } from '../../../aws/deployment/graph'
 import type { ProgressSink, ProgressTask } from '../../../aws/deployment/progress'
-import type { IncusAction } from '../../../remote/incus/spec'
-import type { StepAction } from '../../../remote/zfs/spec'
+import type { IncusAction } from '../../../host/incus/spec'
+import type { StepAction } from '../../../host/zfs/spec'
 import type { Reporter } from '../../../terminal/reporter'
 
 const LABELS: Record<Action, string> = {

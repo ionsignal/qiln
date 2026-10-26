@@ -1,7 +1,7 @@
-import { SshError } from '../ssh/failure'
+import { SshError } from '../transport/ssh/failure'
 import { cloudInitClean, parseArchitecture, parseCloudInit, parseOsRelease, shortText } from './parse'
-import type { CommandResult, Remote } from '../ssh/connections'
-import type { ExecLimits } from '../ssh/options'
+import type { CommandResult, Remote } from '../transport/ssh/connections'
+import type { ExecLimits } from '../transport/ssh/options'
 
 export type CheckStatus = 'passed' | 'failed' | 'unverified' | 'observed' | 'not-run'
 export type CheckId = 'cloud-init' | 'os-release' | 'architecture' | 'login' | 'sudo'

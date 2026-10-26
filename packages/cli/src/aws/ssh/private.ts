@@ -1,6 +1,6 @@
 import { AWS_SPEC } from '../spec'
 import { userId } from '../host'
-import { privateKeyFingerprint } from '../../ssh/identity'
+import { privateKeyFingerprint } from '../../transport/ssh/identity'
 import { InstallerError } from '../../diagnostic/error'
 import { readChild, type Dir } from '../../state/files'
 import { openSshDir } from './store'

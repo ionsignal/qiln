@@ -1,13 +1,13 @@
 import { z } from 'zod'
 import { AWS_RECORD_VERSION } from '../../spec'
-import { STEP_ACTIONS, type StepAction } from '../../../remote/zfs/spec'
+import { STEP_ACTIONS, type StepAction } from '../../../host/zfs/spec'
 import {
   createPlanSchema,
   exportPlanSchema,
   importPlanSchema,
   poolNameSchema,
   prerequisitePlanSchema,
-} from '../../../remote/zfs/types'
+} from '../../../host/zfs/types'
 import { bindingSchema, volumeId } from '../journal/binding'
 import { authorizationSchemaOf } from '../../../journal/history'
 import { stepSchemaOf, timestamp } from '../../../journal/step'

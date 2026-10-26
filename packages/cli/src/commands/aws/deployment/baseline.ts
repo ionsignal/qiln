@@ -1,6 +1,6 @@
 import { InstallerError, type DiagnosticFact } from '../../../diagnostic/error'
-import { runBaseline, unmetChecks } from '../../../remote/baseline'
-import type { Remote } from '../../../ssh/connections'
+import { runBaseline, unmetChecks } from '../../../host/baseline'
+import type { Remote } from '../../../transport/ssh/connections'
 import type { Reporter } from '../../../terminal/reporter'
 
 /**

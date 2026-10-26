@@ -6,7 +6,7 @@ import { transactionOf } from '../apt'
 import { outputOf, tagged, type Section } from '../output'
 import { shellCommand } from '../shell'
 import { observationSchema, type Observation } from './types'
-import type { Remote } from '../../ssh/connections'
+import type { Remote } from '../../transport/ssh/connections'
 
 const { fields, required, sections, succeeded, yesNo } = outputOf(inspectionFailure)
 

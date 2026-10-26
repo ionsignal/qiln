@@ -3,7 +3,7 @@ import {
   type DiagnosticFact,
   type InstallerErrorCode,
   type InstallerErrorOptions,
-} from '../diagnostic/error'
+} from '../../diagnostic/error'
 
 export type SshFailureKind = 'connection' | 'hostkey' | 'authentication' | 'command' | 'socket' | 'cancelled'
 

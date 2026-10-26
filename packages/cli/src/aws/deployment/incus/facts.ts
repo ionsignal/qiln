@@ -1,6 +1,6 @@
 import { InstallerError, type DiagnosticFact } from '../../../diagnostic/error'
-import { readPreseed, type PreseedDocument } from '../../../remote/incus/preseed'
-import { affectsStorage } from '../../../remote/incus/spec'
+import { readPreseed, type PreseedDocument } from '../../../host/incus/preseed'
+import { affectsStorage } from '../../../host/incus/spec'
 import * as journal from '../../../journal/step'
 import type { IncusRecord, IncusStep } from './types'
 

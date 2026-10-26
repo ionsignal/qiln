@@ -1,6 +1,6 @@
 import { AWS_SPEC } from '../spec'
 import { userId } from '../host'
-import { parsePublicKey } from '../../ssh/key'
+import { parsePublicKey } from '../../transport/ssh/key'
 import { InstallerError } from '../../diagnostic/error'
 import { openChildDir, readChild, type Dir } from '../../state/files'
 import type { Deployment } from '../deployment/types'

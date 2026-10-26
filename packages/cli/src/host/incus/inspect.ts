@@ -6,7 +6,7 @@ import { outputOf, tagged, type Section } from '../output'
 import { shellCommand } from '../shell'
 import { InstallerError } from '../../diagnostic/error'
 import { observationSchema, type IncusTarget, type Observation } from './types'
-import type { Remote } from '../../ssh/connections'
+import type { Remote } from '../../transport/ssh/connections'
 
 /**
  * Carries only authored wording. Raw output, host names, and tool messages

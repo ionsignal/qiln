@@ -5,7 +5,7 @@ import { runStep, type StepOutcome } from '../step'
 import { shellCommand } from '../shell'
 import { InstallerError } from '../../diagnostic/error'
 import { accessPlanSchema, type ApprovedPlan } from './types'
-import type { Remote } from '../../ssh/connections'
+import type { Remote } from '../../transport/ssh/connections'
 
 /**
  * An action that does not belong to its approved plan, or bytes that no longer

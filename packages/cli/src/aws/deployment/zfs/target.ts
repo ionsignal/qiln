@@ -1,5 +1,5 @@
 import { identityOf } from '../journal/binding'
-import type { ZfsTarget } from '../../../remote/zfs/types'
+import type { ZfsTarget } from '../../../host/zfs/types'
 import type { Deployment } from '../types'
 
 const GIB = 1_073_741_824

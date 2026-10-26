@@ -1,7 +1,7 @@
 import { InstallerError } from '../../diagnostic/error'
 import { INSTALLER_SPEC } from '../spec'
 import { assertVolume } from '../storage'
-import { runProcess } from '../../process'
+import { runProcess } from '../../transport/process'
 import { toInstallerError } from '../../transport/incus/errors'
 import type { Layout } from '../layout'
 import type { IncusClient } from '../../transport/incus/client'

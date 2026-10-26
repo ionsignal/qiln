@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
 import { basename, isAbsolute } from 'node:path'
-import type { ProcessOptions, ProcessResult } from '../../process'
+import type { ProcessOptions, ProcessResult } from '../../transport/process'
 import { SupervisedProcessError, supervise } from './supervise'
 
 export interface SetupOptions extends ProcessOptions {

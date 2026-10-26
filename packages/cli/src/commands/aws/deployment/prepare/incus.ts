@@ -1,6 +1,6 @@
-import { readPreseed } from '../../../../remote/incus/preseed'
-import { RECIPE } from '../../../../remote/incus/recipe'
-import { INCUS_SPEC } from '../../../../remote/incus/spec'
+import { readPreseed } from '../../../../host/incus/preseed'
+import { RECIPE } from '../../../../host/incus/recipe'
+import { INCUS_SPEC } from '../../../../host/incus/spec'
 import type { DiagnosticFact } from '../../../../diagnostic/error'
 import type {
   AccessPlan,
@@ -11,7 +11,7 @@ import type {
   Plan,
   ReleasePlan,
   RepositoryPlan,
-} from '../../../../remote/incus/types'
+} from '../../../../host/incus/types'
 import type { Reporter } from '../../../../terminal/reporter'
 
 export interface PlanPreview {

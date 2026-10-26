@@ -1,6 +1,6 @@
 import { InstallerError } from '../../../diagnostic/error'
 import { requireAwsHost } from '../../../aws/host'
-import { runBaseline, unmetChecks, type Check, type CheckStatus } from '../../../remote/baseline'
+import { runBaseline, unmetChecks, type Check, type CheckStatus } from '../../../host/baseline'
 import { withCancellation } from '../../../terminal/prompts'
 import { withConfirmedOperation } from '../../../aws/operation'
 import { resolveAccess, withRemote } from './access'
