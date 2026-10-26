@@ -1,6 +1,6 @@
 import type { ImagePin } from '../../ami'
 import { AWS_SPEC } from '../../spec'
-import { sameJson } from '../../json'
+import { sameJson } from '../../../json'
 import { planOf } from '../host/plan'
 import type { Reuse } from '../reuse'
 import { allocate } from '../topology'

@@ -1,5 +1,5 @@
-import { hasKeys, isRecord } from '../guards'
-import { canonical, sameJson } from '../json'
+import { hasKeys, isRecord } from '../../guards'
+import { canonical, sameJson } from '../../json'
 import type { AwsConnection } from '../types'
 import { computePolicy } from './compute'
 import { foundationPolicy } from './foundation'

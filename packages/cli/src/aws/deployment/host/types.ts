@@ -1,5 +1,5 @@
 import { isImageId, isSnapshotId, type ImagePin } from '../../ami'
-import { hasKeys, isRecord } from '../../guards'
+import { hasKeys, isRecord } from '../../../guards'
 import { isAccountId, validRegion } from '../../types'
 import { validCidr } from '../cidr'
 import type { Ingress, Zone } from '../types'

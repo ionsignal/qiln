@@ -1,6 +1,6 @@
 import { catalog } from '../diagnostic/catalog'
 import { InstallerError, isInstallerErrorCode, type DiagnosticFact, type InstallerErrorCode, type InstallerErrorOptions } from '../diagnostic/error'
-import { isRecord } from './guards'
+import { isRecord } from '../guards'
 
 export type Outcome = boolean | 'not-required'
 

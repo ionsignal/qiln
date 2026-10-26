@@ -1,5 +1,5 @@
 import { InstallerError } from '../../diagnostic/error'
-import { sameJson } from '../json'
+import { sameJson } from '../../json'
 import { AWS_SPEC } from '../spec'
 import { expectation, matches } from './expect'
 import { refusals, settled, stateOf } from './step'

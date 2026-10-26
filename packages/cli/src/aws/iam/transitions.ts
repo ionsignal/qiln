@@ -1,5 +1,5 @@
 import { InstallerError } from '../../diagnostic/error'
-import { sameJson } from '../json'
+import { sameJson } from '../../json'
 import { POLICY_KEYS, policyMap, type PolicyKey, type PolicyMap } from '../permission/keys'
 import { emptySnapshot, type PolicyIdentity, type PolicySnapshot } from '../permission/policy'
 import { isSpec, reconciliation } from '../permission/spec'

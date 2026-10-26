@@ -1,5 +1,5 @@
 import { AWS_RECORD_VERSION } from './spec'
-import { hasKeys, isRecord } from './guards'
+import { hasKeys, isRecord } from '../guards'
 import {
   POLICY_KEYS,
   POLICY_PATH,

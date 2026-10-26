@@ -1,5 +1,5 @@
 import { InstallerError, type DiagnosticFact } from '../../../diagnostic/error'
-import { hasKeys, isRecord } from '../../guards'
+import { hasKeys, isRecord } from '../../../guards'
 
 /**
  * Bounded, authored context for discovery evidence that failed validation.

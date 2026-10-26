@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { isIdentity, validName, validRegion, type AwsIdentity } from '../../types'
 import { KIND_IDS } from '../graph'
 import { dataVolumeId, resourceId } from '../topology'
-import { operationId } from './step'
+import { operationId } from '../../../journal/step'
 import type { Deployment } from '../types'
 
 export const volumeId = z.string().regex(KIND_IDS.volume)

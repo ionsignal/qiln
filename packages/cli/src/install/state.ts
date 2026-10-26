@@ -11,7 +11,7 @@ import {
   readChild,
   writeChild,
 } from '../state/files'
-import { acquireLock, type StateLock } from '../state/lock'
+import { acquireLock, requireLock, type LockOptions, type StateLock } from '../state/lock'
 import { statePath } from '../state/path'
 import {
   installationSchema,
@@ -35,6 +35,13 @@ const LOCK_CODES = {
   locked: 'INSTALLER_LOCKED',
   failed: 'INSTALLER_LOCK_FAILED',
 } as const
+
+const INSTALLATION_LOCK: LockOptions = {
+  name: FILES.lockFileName,
+  label: 'installation',
+  retry: 'qiln doctor',
+  codes: LOCK_CODES,
+}
 
 /**
  * What earlier versions kept directly in the state directory. These entries
@@ -66,7 +73,7 @@ function isErrorCode(value: unknown, code: string): boolean {
   return isRecord(value) && value.code === code
 }
 
-function currentUserId(): number {
+export function currentUserId(): number {
   if (typeof process.geteuid !== 'function') {
     throw new InstallerError({
       code: 'UNSUPPORTED_PLATFORM',
@@ -372,12 +379,15 @@ export async function registerInstallation(
 }
 
 export function acquireInstallationLock(directory: Dir): Promise<StateLock> {
-  return acquireLock(directory, {
-    name: FILES.lockFileName,
-    label: 'installation',
-    retry: 'qiln doctor',
-    codes: LOCK_CODES,
-  })
+  return acquireLock(directory, INSTALLATION_LOCK)
+}
+
+/**
+ * Confirms that the installation lock still names this process before any
+ * installation evidence is written.
+ */
+export function requireInstallationLock(directory: Dir): Promise<void> {
+  return requireLock(directory, INSTALLATION_LOCK)
 }
 
 /**

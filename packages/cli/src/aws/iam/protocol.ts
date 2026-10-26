@@ -1,4 +1,4 @@
-import { hasKeys, isRecord } from '../guards'
+import { hasKeys, isRecord } from '../../guards'
 import { COMMON_CODES, replyGuard, type ChildReply } from '../child/protocol'
 import { isPolicyKey, type PolicyMap } from '../permission/keys'
 import { isIdentities, type PolicyIdentity } from '../permission/policy'

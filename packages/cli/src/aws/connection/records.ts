@@ -6,9 +6,9 @@ import { sameIdentity } from '../auth/identity'
 import { Session } from '../auth/session'
 import { userId } from '../host'
 import { stateFailure } from '../errors'
-import { isErrorCode } from '../guards'
+import { isErrorCode } from '../../guards'
 import { isPending, type Pending } from '../iam/types'
-import { encodeRecord, sameJson } from '../json'
+import { encodeRecord, sameJson } from '../../json'
 import { inspectChild, openChildDir, readChild, writeChild, type Dir } from '../../state/files'
 import { isConnection, validName, type AwsConnection, type PolicyBinding } from '../types'
 import { POLICY_KEYS, bindingEntries, type PolicyBindings, type PolicyKey } from '../permission/keys'
@@ -246,7 +246,7 @@ export async function save(directory: Dir, connection: AwsConnection): Promise<v
     })
   }
   try {
-    await writeChild(directory, AWS_SPEC.state.connection, encodeRecord(connection, 'AWS_STATE_INVALID'), 0o600)
+    await writeChild(directory, AWS_SPEC.state.connection, encodeRecord(connection, 'AWS_STATE_INVALID', AWS_SPEC.limits.record), 0o600) 
   } catch (error: unknown) {
     throw stateFailure(error)
   }

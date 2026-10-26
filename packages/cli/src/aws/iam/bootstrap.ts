@@ -11,7 +11,7 @@ import { iamRecovery, originalCode, terminationConfirmed, type RecoveryOutcomes 
 import { POLICY_KEYS, policyMap, type PolicyKey } from '../permission/keys'
 import { POLICY_LIMITS, isPolicy, policyArn, type PolicyIdentity } from '../permission/policy'
 import { isSpec, reconciliation, specification } from '../permission/spec'
-import { canonical, sameJson } from '../json'
+import { canonical, sameJson } from '../../json'
 import { operatorArn } from '../operator'
 import { AWS_SPEC } from '../spec'
 import { userId } from '../host'

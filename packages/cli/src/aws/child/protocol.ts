@@ -1,5 +1,5 @@
 import type { InstallerErrorCode } from '../../diagnostic/error'
-import { hasKeys, isRecord } from '../guards'
+import { hasKeys, isRecord } from '../../guards'
 
 /**
  * `rejected` means the provider definitely refused the request, so it had no

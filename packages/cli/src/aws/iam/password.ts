@@ -1,6 +1,6 @@
 import { InstallerError } from '../../diagnostic/error'
 import { sendEvidence } from '../child/evidence'
-import { hasKeys, isRecord } from '../guards'
+import { hasKeys, isRecord } from '../../guards'
 import { isOperationId } from '../types'
 import { isPasswordReceipt, type PasswordReceipt } from './types'
 

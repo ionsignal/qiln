@@ -1,6 +1,6 @@
 import { AWS_SPEC } from '../../spec'
 import { isImageId, isSnapshotId } from '../../ami'
-import { hasKeys, isRecord } from '../../guards'
+import { hasKeys, isRecord } from '../../../guards'
 import { isAccountId, isTimestamp } from '../../types'
 import { isPlacement } from '../types'
 import { DiscoveryError, kindOf, type Issue } from './failure'

@@ -1,5 +1,5 @@
 import { AWS_SPEC } from '../spec'
-import { hasKeys, isRecord } from '../guards'
+import { hasKeys, isRecord } from '../../guards'
 import { COMMON_CODES, replyGuard, type Certainty, type ChildReply } from '../child/protocol'
 import { isHealth, isObservation, type Health, type Observation } from '../deployment/types'
 import { isHostKey, type HostKey } from '../deployment/hostkey'

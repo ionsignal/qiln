@@ -5,7 +5,7 @@ import { InstallerError, isInstallerErrorCode, type InstallerErrorCode } from '.
 import { inspectChild, openChildDir, readChild, writeChild, type Dir } from '../../state/files'
 import { acquireLock, type StateLock } from '../../state/lock'
 import { statePath } from '../../state/path'
-import { hasKeys, isErrorCode, isRecord } from '../guards'
+import { hasKeys, isErrorCode, isRecord } from '../../guards'
 import { AWS_SPEC } from '../spec'
 import { openAwsRoot } from '../root'
 import { userId } from '../host'

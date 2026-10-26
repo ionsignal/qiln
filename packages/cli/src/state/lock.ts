@@ -1,7 +1,7 @@
 import { constants } from 'node:fs'
 import { lstat, open, unlink, type FileHandle } from 'node:fs/promises'
 import { InstallerError, type InstallerErrorCode } from '../diagnostic/error'
-import { Dir } from './files'
+import { Dir, readChild } from './files'
 
 export interface StateLock {
   release(): Promise<void>
@@ -113,5 +113,26 @@ export async function acquireLock(directory: Dir, options: LockOptions): Promise
         await handle.close()
       }
     },
+  }
+}
+
+/**
+ * Confirms that the lock file still names the expected process. A parent passes
+ * its own PID; a credential child passes its parent's. PID, age, or a received
+ * reply never establishes that a lock is stale.
+ */
+export async function requireLock(directory: Dir, options: LockOptions, pid = process.pid): Promise<void> {
+  const snapshot = await readChild(directory, options.name, {
+    owner: currentUserId(),
+    mode: 0o600,
+    minSize: 1,
+    maxSize: 64,
+  })
+  if (Buffer.from(snapshot.bytes).toString('utf8') !== `${pid}\n`) {
+    throw new InstallerError({
+      code: options.codes.changed,
+      facts: [['Observed', `The ${options.label} lock no longer names this process.`]],
+      retry: options.retry,
+    })
   }
 }

@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { sameJson } from '../../json'
+import { sameJson } from '../json'
 import { operationId, progressed, settled, stateOf, timestamp, type JournalStep } from './step'
 
 /**

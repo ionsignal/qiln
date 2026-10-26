@@ -8,7 +8,7 @@ import { preseedOf, type Preseed } from '../../../remote/incus/preseed'
 import { verify } from '../../../remote/incus/verify'
 import { checkCancellation } from '../../../terminal/prompts'
 import { userId } from '../../host'
-import { sameJson } from '../../json'
+import { sameJson } from '../../../json'
 import { notify, withWaiting, type ProgressSink, type ProgressTask } from '../progress'
 import { incusFacts, requireNotStuck, retainedPreseed, returned } from './facts'
 import {

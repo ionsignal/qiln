@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { InstallerError } from '../../diagnostic/error'
-import { hasKeys, isRecord } from '../guards'
-import { document } from '../json'
+import { hasKeys, isRecord } from '../../guards'
+import { document } from './document'
 import { operatorName } from '../operator'
 import { POLICY_KEYS, POLICY_PATH, type PolicyKey, type PolicyMap } from './keys'
 

@@ -2,7 +2,7 @@
 import { DescribeInstanceStatusCommand } from '@aws-sdk/client-ec2'
 import { AWS_SPEC } from '../spec'
 import { resourceId } from '../deployment/topology'
-import { isRecord } from '../guards'
+import { isRecord } from '../../guards'
 import { poll } from '../observe'
 import { unverified } from './observe/shared'
 import type { Ec2 } from './client'

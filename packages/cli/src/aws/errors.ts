@@ -2,7 +2,7 @@ import { InstallerError } from '../diagnostic/error'
 import { ProcessExecutionError } from '../process'
 import { FileValidationError } from '../state/files'
 import { SupervisedProcessError } from './child/supervise'
-import { isRecord } from './guards'
+import { isRecord } from '../guards'
 import { originalCode } from './recovery'
 
 export type AuthMode = 'login' | 'context'

@@ -1,6 +1,6 @@
 import { z } from 'zod'
-import { sameJson } from '../../json'
-import { isOperationId, isTimestamp } from '../../types'
+import { isOperationId, isTimestamp } from '../guards'
+import { sameJson } from '../json'
 
 export const operationId = z.string().refine(isOperationId, 'Expected an operation ID.')
 export const timestamp = z.string().refine(isTimestamp, 'Expected a canonical timestamp.')

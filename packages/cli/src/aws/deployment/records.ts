@@ -5,9 +5,9 @@ import { vacated } from './facts'
 import { reusable } from './reuse'
 import { requireTransition } from './transitions'
 import { stateFailure } from '../errors'
-import { isErrorCode } from '../guards'
+import { isErrorCode } from '../../guards'
 import { userId } from '../host'
-import { encodeRecord } from '../json'
+import { encodeRecord } from '../../json'
 import { requireOperationLock } from '../root'
 import { sameIdentity } from '../auth/identity'
 import { requireStorageReleased } from './incus/facts'
@@ -93,7 +93,7 @@ async function load(directory: Dir): Promise<Deployment> {
 }
 
 async function write(directory: Dir, record: Deployment): Promise<void> {
-  const bytes = encodeRecord(parse(record), 'AWS_DEPLOYMENT_STATE_INVALID')
+  const bytes = encodeRecord(parse(record), 'AWS_DEPLOYMENT_STATE_INVALID', AWS_SPEC.limits.record)
   try {
     await writeChild(directory, AWS_SPEC.state.deployment, bytes, 0o600)
   } catch (error: unknown) {

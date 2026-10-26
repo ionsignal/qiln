@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto'
 import { InstallerError } from '../../diagnostic/error'
-import { isRecord } from '../guards'
-import { canonical, document } from '../json'
+import { isRecord } from '../../guards'
+import { canonical } from '../../json'
+import { document } from '../permission/document'
 import { operatorArn, operatorName } from '../operator'
 import type { PolicyReview } from './types'
 

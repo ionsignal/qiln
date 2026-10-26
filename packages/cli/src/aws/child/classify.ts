@@ -1,5 +1,5 @@
 import { InstallerError, type InstallerErrorCode } from '../../diagnostic/error'
-import { isRecord } from '../guards'
+import { isRecord } from '../../guards'
 import { COMMON_CODES, type CommonCode, type Failure } from './protocol'
 
 type Names<Code extends InstallerErrorCode> = Readonly<Record<string, Failure<Code>>>

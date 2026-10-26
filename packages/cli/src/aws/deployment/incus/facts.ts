@@ -1,7 +1,7 @@
 import { InstallerError, type DiagnosticFact } from '../../../diagnostic/error'
 import { readPreseed, type PreseedDocument } from '../../../remote/incus/preseed'
 import { affectsStorage } from '../../../remote/incus/spec'
-import * as journal from '../journal/step'
+import * as journal from '../../../journal/step'
 import type { IncusRecord, IncusStep } from './types'
 
 /**
@@ -135,6 +135,16 @@ export function requireNotStuck(record: IncusRecord | null, deploymentId: string
  */
 export function requireStorageNotStuck(record: IncusRecord | null, deploymentId: string): void {
   if (stuck(record).some(step => affectsStorage(step.action))) {
+    throw refusal(record, deploymentId)
+  }
+}
+
+/**
+ * Any unsettled Incus step blocks a handoff to installation, because a returned
+ * step has not yet been verified by a fresh inspection.
+ */
+export function requireSettled(record: IncusRecord | null, deploymentId: string): void {
+  if (unsettled(record).length > 0) {
     throw refusal(record, deploymentId)
   }
 }

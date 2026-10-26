@@ -1,4 +1,5 @@
 import { InstallerError } from '../diagnostic/error'
+import { currentUserId } from '../state/user'
 
 /**
  * AWS commands run on Linux or macOS as an unprivileged operator. This module
@@ -25,11 +26,6 @@ export function requireAwsHost(): void {
 
 export function userId(): number {
   requireAwsHost()
-  const geteuid = process.geteuid
-  if (typeof geteuid !== 'function') {
-    throw new InstallerError({
-      code: 'AWS_PLATFORM_UNSUPPORTED',
-    })
-  }
-  return geteuid()
+  return currentUserId()
 }
+

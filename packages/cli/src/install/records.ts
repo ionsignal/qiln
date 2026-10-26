@@ -4,7 +4,7 @@ import { z } from 'zod'
 import { INSTALLER_SPEC } from './spec'
 import { InstallerError } from '../diagnostic/error'
 import { bindingSchema } from '../aws/deployment/journal/binding'
-import { canonical, sameJson } from '../aws/json'
+import { canonical, sameJson } from '../json'
 import type { Layout } from './layout'
 import type { InstallationInputs } from './types'
 
@@ -15,7 +15,7 @@ const sha256 = z.string().regex(/^[0-9a-f]{64}$/)
  * application-specific digest of the machine ID, which is binding evidence and
  * not attestation. An AWS host is the deployment's own retained identity.
  */
-const hostSchema = z.discriminatedUnion('kind', [
+export const hostSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('local'), machine: sha256 }),
   z.strictObject({ kind: z.literal('aws'), ...bindingSchema.shape }),
 ])

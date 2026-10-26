@@ -1,4 +1,4 @@
-import { isRecord } from '../guards'
+import { isRecord } from '../../guards'
 
 export interface PolicySummary {
   changes: string[]

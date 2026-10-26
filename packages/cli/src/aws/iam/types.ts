@@ -1,6 +1,6 @@
 import { isInstallerErrorCode, type InstallerErrorCode } from '../../diagnostic/error'
-import { hasKeys, isRecord } from '../guards'
-import { sameJson } from '../json'
+import { hasKeys, isRecord } from '../../guards'
+import { sameJson } from '../../json'
 import { operatorArn } from '../operator'
 import { isPolicyKey, POLICY_KEYS, type PolicyKey, type PolicyMap } from '../permission/keys'
 import { isPolicy, isSnapshots, policyArn, type PolicyIdentity, type PolicySnapshot } from '../permission/policy'

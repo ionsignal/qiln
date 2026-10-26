@@ -9,8 +9,8 @@ import {
   prerequisitePlanSchema,
 } from '../../../remote/zfs/types'
 import { bindingSchema, volumeId } from '../journal/binding'
-import { authorizationSchemaOf } from '../journal/history'
-import { stepSchemaOf, timestamp } from '../journal/step'
+import { authorizationSchemaOf } from '../../../journal/history'
+import { stepSchemaOf, timestamp } from '../../../journal/step'
 
 const authorizationSchema = authorizationSchemaOf(
   z.discriminatedUnion('kind', [prerequisitePlanSchema, createPlanSchema, importPlanSchema, exportPlanSchema]),

@@ -1,4 +1,4 @@
-import { hasKeys, isRecord } from '../guards'
+import { hasKeys, isRecord } from '../../guards'
 import { COMMON_CODES, replyGuard, type ChildReply } from '../child/protocol'
 import { isAuthentication, validRegion, type AwsAuthentication } from '../types'
 

@@ -1,4 +1,4 @@
-import { canonical } from '../json'
+import { canonical } from '../../json'
 import { normalize } from './policy'
 
 export type Conditions = Record<string, Record<string, string | string[]>>

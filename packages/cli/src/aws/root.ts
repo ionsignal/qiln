@@ -1,9 +1,9 @@
 import { InstallerError } from '../diagnostic/error'
-import { createDir, openChildDir, openDir, readChild, type Dir } from '../state/files'
-import { acquireLock, type StateLock } from '../state/lock'
+import { createDir, openChildDir, openDir, type Dir } from '../state/files'
+import { acquireLock, requireLock, type LockOptions, type StateLock } from '../state/lock'
 import { statePath } from '../state/path'
 import { stateFailure } from './errors'
-import { isErrorCode } from './guards'
+import { isErrorCode } from '../guards'
 import { requireAwsHost, userId } from './host'
 import { lockRecovery, terminationConfirmed } from './recovery'
 import { AWS_SPEC } from './spec'
@@ -11,6 +11,17 @@ import { AWS_SPEC } from './spec'
 export interface AwsState {
   root: Dir
   connections: Dir
+}
+
+const OPERATION_LOCK: LockOptions = {
+  name: AWS_SPEC.state.lock,
+  label: 'AWS operation',
+  retry: 'qiln aws status',
+  codes: {
+    changed: 'AWS_LOCK_CHANGED',
+    locked: 'AWS_LOCKED',
+    failed: 'AWS_LOCK_FAILED',
+  },
 }
 
 /**
@@ -81,22 +92,10 @@ export async function openExistingConnections(): Promise<Dir | null> {
 }
 
 /**
- * Confirms that the lock file still names the expected process. A parent
- * passes its own PID; a credential child passes its parent's. PID, age, or a
- * received reply never establishes that a lock is stale.
+ * Confirms that the AWS operation lock still names the expected process.
  */
 export async function requireOperationLock(root: Dir, pid = process.pid): Promise<void> {
-  const snapshot = await readChild(root, AWS_SPEC.state.lock, {
-    owner: userId(),
-    mode: 0o600,
-    minSize: 1,
-    maxSize: 64,
-  })
-  if (Buffer.from(snapshot.bytes).toString('utf8') !== `${pid}\n`) {
-    throw new InstallerError({
-      code: 'AWS_LOCK_CHANGED',
-    })
-  }
+  await requireLock(root, OPERATION_LOCK, pid)
 }
 
 /**
@@ -121,16 +120,7 @@ export async function withAwsOperation<T>(create: boolean, run: (state: AwsState
   let failure: InstallerError | undefined
   let release = true
   try {
-    lock = await acquireLock(root, {
-      name: AWS_SPEC.state.lock,
-      label: 'AWS operation',
-      retry: 'qiln aws status',
-      codes: {
-        changed: 'AWS_LOCK_CHANGED',
-        locked: 'AWS_LOCKED',
-        failed: 'AWS_LOCK_FAILED',
-      },
-    })
+    lock = await acquireLock(root, OPERATION_LOCK)
     const connections = await openChildDir(root, AWS_SPEC.state.connections, ownership, create)
     return await run({
       root,

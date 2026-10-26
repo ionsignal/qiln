@@ -9,8 +9,8 @@ import {
   repositoryPlanSchema,
 } from '../../../remote/incus/types'
 import { bindingSchema } from '../journal/binding'
-import { authorizationSchemaOf } from '../journal/history'
-import { stepSchemaOf, timestamp } from '../journal/step'
+import { authorizationSchemaOf } from '../../../journal/history'
+import { stepSchemaOf, timestamp } from '../../../journal/step'
 
 const stepSchema = stepSchemaOf(z.enum(INCUS_ACTIONS))
 const authorizationSchema = authorizationSchemaOf(
