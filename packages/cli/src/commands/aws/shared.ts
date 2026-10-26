@@ -7,10 +7,9 @@ import { InstallerError, type DiagnosticFact } from '../../diagnostic/error'
 import { deploymentFacts, effects } from '../../aws/deployment/facts'
 import { requireStorageSettled } from '../../aws/deployment/incus/facts'
 import { requirePoolSettled } from '../../aws/deployment/zfs/facts'
-import { authRecovery, deploymentRecovery, iamRecovery, terminationConfirmed } from '../../aws/recovery'
+import { authRecovery, iamRecovery, terminationConfirmed } from '../../aws/recovery'
 import { requireAuthentication } from '../../aws/auth/identity'
 import { removeAuth, Session } from '../../aws/auth/session'
-import { withAwsOperation, type AwsState } from '../../aws/root'
 import { evidence as incusEvidence } from '../../aws/deployment/incus/evidence'
 import * as connections from '../../aws/connection/records'
 import * as deployments from '../../aws/deployment/records'
@@ -48,41 +47,6 @@ export async function requireAvailable(directory: Dir): Promise<void> {
   if (pending) {
     return pendingFailure(pending)
   }
-}
-
-/**
- * Unconfirmed child termination is sticky. Refusing before any authentication
- * keeps further child work from starting, and the error's unconfirmed
- * termination makes the outer operation retain its lock. Nothing here clears
- * the recorded termination.
- */
-async function requireConfirmedTermination(root: Dir): Promise<void> {
-  const active = (await deployments.list(root)).find(record => record.termination === 'unconfirmed')
-  if (active === undefined) {
-    return
-  }
-  throw deploymentRecovery(
-    new InstallerError({
-      code: 'AWS_DEPLOYMENT_RECOVERY_REQUIRED',
-    }),
-    {
-      termination: false,
-      persistence: true,
-    },
-    deploymentFacts(active),
-    `qiln aws deployment status --id ${active.id}`,
-  )
-}
-
-/**
- * The AWS-operation lock plus the sticky-termination check. Commands that
- * authenticate or start children use this instead of `withAwsOperation`.
- */
-export async function withConfirmedOperation<T>(create: boolean, run: (state: AwsState) => Promise<T>): Promise<T> {
-  return await withAwsOperation(create, async state => {
-    await requireConfirmedTermination(state.root)
-    return await run(state)
-  })
 }
 
 /**

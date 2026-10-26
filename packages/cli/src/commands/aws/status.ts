@@ -10,8 +10,8 @@ import {
   pendingFailure,
   reportAuthentication,
   reportPermissionMetadata,
-  withConfirmedOperation,
 } from './shared'
+import { withConfirmedOperation } from '../../aws/operation'
 import * as connections from '../../aws/connection/records'
 import type { Reporter } from '../../terminal/reporter'
 import type { AwsAuthentication } from '../../aws/types'

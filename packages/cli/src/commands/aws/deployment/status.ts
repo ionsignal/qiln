@@ -1,6 +1,6 @@
 import { requireAwsHost } from '../../../aws/host'
 import { openAwsRoot } from '../../../aws/root'
-import { notFound } from './shared'
+import { notFound } from '../../../aws/deployment/alias'
 import {
   recordedState,
   reportDeployment,
@@ -37,10 +37,10 @@ async function reportPreparation(reporter: Reporter, root: Dir, record: Deployme
 export async function status(options: AwsDeploymentOptions, reporter: Reporter): Promise<void> {
   requireAwsHost()
   const root = await openAwsRoot()
-  const record = root === null ? null : await deployments.find(root, options.selector)
-  if (root === null || !record) {
+  if (root === null) {
     throw notFound(options.selector)
   }
+  const record = await deployments.select(root, options.selector)
   reportDeployment(reporter, record)
   await reportPreparation(reporter, root, record)
   reporter.info('This status reads local evidence only. It did not authenticate, call AWS, or freshly observe any AWS resource.')

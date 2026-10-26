@@ -4,8 +4,9 @@ import { isConsistent } from './audit'
 import { vacated } from './facts'
 import { reusable } from './reuse'
 import { requireTransition } from './transitions'
+import { isDeployment, type Deployment } from './types'
+import { notFound, type DeploymentSelector } from './alias'
 import { stateFailure } from '../errors'
-import { isErrorCode } from '../../guards'
 import { userId } from '../host'
 import { encodeRecord } from '../../json'
 import { requireOperationLock } from '../root'
@@ -13,12 +14,11 @@ import { sameIdentity } from '../auth/identity'
 import { requireStorageReleased } from './incus/facts'
 import { requirePoolReleased } from './zfs/facts'
 import { InstallerError } from '../../diagnostic/error'
-import { isOperationId, type AwsIdentity } from '../types'
 import { openChildDir, readChild, writeChild, type Dir } from '../../state/files'
-import { isDeployment, type Deployment } from './types'
+import { isErrorCode, isOperationId } from '../../guards'
 import * as incus from './incus/records'
 import * as zfs from './zfs/records'
-import type { DeploymentSelector } from './alias'
+import type { AwsIdentity } from '../types'
 
 function invalid(): never {
   throw new InstallerError({
@@ -196,6 +196,18 @@ export async function find(root: Dir, selector: DeploymentSelector): Promise<Dep
     return await read(root, selector.value)
   }
   return await tipOf(root, selector.value)
+}
+
+/**
+ * Like `find`, but a missing deployment is the operator-facing not-found
+ * diagnostic, so every caller reports it the same way.
+ */
+export async function select(root: Dir, selector: DeploymentSelector): Promise<Deployment> {
+  const record = await find(root, selector)
+  if (record === null) {
+    throw notFound(selector)
+  }
+  return record
 }
 
 /**

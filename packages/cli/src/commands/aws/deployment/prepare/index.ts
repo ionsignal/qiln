@@ -11,7 +11,7 @@ import { evidence as incusEvidence } from '../../../../aws/deployment/incus/evid
 import { IncusPreparer } from '../../../../aws/deployment/incus/prepare'
 import { ZfsPreparer } from '../../../../aws/deployment/zfs/prepare'
 import { Prompts, withCancellation } from '../../../../terminal/prompts'
-import { withConfirmedOperation } from '../../shared'
+import { withConfirmedOperation } from '../../../../aws/operation'
 import { approvalLabel as incusApproval, reportPlan as reportIncusPlan } from './incus'
 import { approvalLabel as zfsApproval, reportPlan as reportZfsPlan } from './zfs'
 import * as lineage from '../../../../aws/deployment/zfs/lineage'

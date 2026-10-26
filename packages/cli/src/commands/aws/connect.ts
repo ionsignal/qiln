@@ -14,13 +14,8 @@ import { requireAwsHost } from '../../aws/host'
 import { resolveAwsName, validateAwsRegion, type AwsCommandOptions } from '../../input'
 import { checkCancellation, Prompts, withCancellation } from '../../terminal/prompts'
 import { modesOf, policyLabel, reportPermissionChange } from './review'
-import {
-  authenticate,
-  failAuthentication,
-  reportAuthentication,
-  requireAvailable,
-  withConfirmedOperation,
-} from './shared'
+import { withConfirmedOperation } from '../../aws/operation'
+import { authenticate, failAuthentication, reportAuthentication, requireAvailable } from './shared'
 import * as awsLogin from '../../aws/auth/login'
 import * as tools from '../../aws/tools'
 import * as connections from '../../aws/connection/records'
