@@ -4,7 +4,7 @@ import type { HelpContent } from '../../terminal/help'
 export const group: HelpContent = {
   examples: ['qiln aws connect', 'qiln aws disconnect', 'qiln aws status', 'qiln aws deployment --help'],
   safety: [
-    'AWS commands support unprivileged Linux and macOS operators, including Windows through WSL. They are independent of development doctor, Incus, Ubuntu-release, and ZFS checks.',
+    'AWS commands support unprivileged Linux and macOS operators, including Windows through WSL. They are independent of the Ubuntu, Incus, and ZFS requirements of a local installation target.',
     'Connect an existing non-root IAM operator or explicitly approve root bootstrap to create one dedicated operator with console access, Sign-In permission, scoped password/MFA self-service, and separate foundation (networking) and compute policies.',
     'A saved Qiln-created operator can receive a root-authenticated policy update. It needs two yes/no approvals: consent to sign in as root and review, then approval of the displayed changes. Its immutable identity, password, MFA enrollment, creation identity, and saved ordinary operator login are preserved. Unsupported local layouts are not adopted or migrated.',
     'Root authentication is accepted only in separate approved bootstrap contexts. SSO and assumed-role onboarding are not available. Connecting never provisions or removes infrastructure; provisioning requires separate approval.',

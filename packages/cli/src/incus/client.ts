@@ -3,6 +3,7 @@ import { createReadStream } from 'node:fs'
 import { request as createHttpRequest, type ClientRequest, type IncomingMessage } from 'node:http'
 import type { Duplex } from 'node:stream'
 import { InstallerError } from '../diagnostic/error'
+import { isRecord } from '../guards'
 import type { IncusConnection } from './connection'
 import type {
   IncusConfigMap,
@@ -106,10 +107,6 @@ export class IncusOperationWaitTimeoutError extends Error {
     this.operationPath = operationPath
     this.timeoutMs = timeoutMs
   }
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function boundedMessage(value: unknown, fallback: string): string {

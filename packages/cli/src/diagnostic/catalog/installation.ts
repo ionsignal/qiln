@@ -80,7 +80,7 @@ export const installationDiagnostics = Object.freeze({
   FINAL_IMAGE_ALIAS_MISMATCH: entry(
     'Managed image alias changed during convergence',
     'Split-image convergence requires the alias and persisted image identity to remain consistent.',
-    'Inspect concurrent image and alias changes, then re-run qiln up.',
+    'Inspect concurrent image and alias changes, then re-run qiln installation configure for the same target.',
   ),
   INVALID_SOURCE_CHECKOUT: entry(
     'Source checkout is unavailable or invalid',
@@ -129,10 +129,16 @@ export const installationDiagnostics = Object.freeze({
     'Confirm that the target is reachable and passes its baseline checks, then try again.',
     'Qiln does not retry or accept partial inspection output.',
   ),
+  INSTALLATION_TARGET_CAPACITY: entry(
+    'Target host has less memory than the installation limit',
+    'The layout limits the orchestrator to more memory than the target reports in total. Qiln does not lower the limit, change the layout of an installation, or resize the host. The check compares the configured limit with total memory only: it does not establish free capacity or runtime readiness. Nothing was changed.',
+    'Review the memory limit and the memory the target reports.',
+    'Use a target with more memory. Resolve the host size outside Qiln.',
+  ),
   INSTALLATION_STATE_REQUIRED: entry(
     'Installation image pin is unavailable',
     'Credentials may be delivered only to an instance matching the persisted image identity.',
-    'Re-run qiln up to reconcile the selected image and installation state.',
+    'Re-run qiln installation configure for the same target to reconcile the selected image and installation state.',
   ),
   INSTALLER_LEGACY_STATE: entry(
     'Installer state uses a superseded layout',
@@ -168,7 +174,7 @@ export const installationDiagnostics = Object.freeze({
   ORCHESTRATOR_INSTANCE_REQUIRED: entry(
     'Stopped orchestrator is unavailable',
     'Credential delivery requires an exact compatible stopped target instance.',
-    'Re-run qiln up to reconcile the development orchestrator.',
+    'Re-run qiln installation configure for the same target to reconcile the development orchestrator.',
   ),
   ORCHESTRATOR_IMAGE_SIGNATURE_MISMATCH: entry(
     'Orchestrator does not match the persisted image',
@@ -184,7 +190,7 @@ export const installationDiagnostics = Object.freeze({
   FINAL_INSTANCE_STATE_MISMATCH: entry(
     'Instance changed during credential convergence',
     'Credential delivery must preserve unrelated writable instance configuration.',
-    'Inspect concurrent configuration changes, then re-run qiln up.',
+    'Inspect concurrent configuration changes, then re-run qiln installation configure for the same target.',
   ),
   INCOMPATIBLE_ORCHESTRATOR_INSTANCE: entry(
     'Existing orchestrator conflicts with the installation',

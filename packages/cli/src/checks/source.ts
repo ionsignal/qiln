@@ -2,23 +2,16 @@ import { constants } from 'node:fs'
 import { access, lstat, readFile, realpath } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { InstallerError } from '../diagnostic/error'
+import { isRecord } from '../guards'
 import { runProcess } from '../process'
 
 const MAX_PACKAGE_JSON_BYTES = 1_048_576
-const RETRY =
-  'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]'
-const ROOT_RETRY =
-  'qiln up --source <checkout-root> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]'
 
 export interface SourcePreflight {
   sourceRoot: string
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-async function assertSourceDirectory(path: string): Promise<void> {
+async function assertSourceDirectory(path: string, retry: string): Promise<void> {
   let metadata
   try {
     metadata = await lstat(path)
@@ -26,14 +19,14 @@ async function assertSourceDirectory(path: string): Promise<void> {
     throw new InstallerError({
       code: 'INVALID_SOURCE_CHECKOUT',
       facts: [['Observed', `${path} could not be inspected.`]],
-      retry: RETRY,
+      retry,
     })
   }
   if (metadata.isSymbolicLink() || !metadata.isDirectory()) {
     throw new InstallerError({
       code: 'INVALID_SOURCE_CHECKOUT',
       facts: [['Observed', `${path} is not a real directory.`]],
-      retry: RETRY,
+      retry,
     })
   }
 }
@@ -43,7 +36,11 @@ async function assertSourceDirectory(path: string): Promise<void> {
  * contains a bounded Qiln package descriptor. It intentionally does not
  * validate workspace membership, package completeness, or project layout.
  */
-export async function validateSourcePreflight(sourcePath: string, gitExecutable: string): Promise<SourcePreflight> {
+export async function validateSourcePreflight(
+  sourcePath: string,
+  gitExecutable: string,
+  retry: string,
+): Promise<SourcePreflight> {
   const requestedPath = resolve(sourcePath)
   let sourceRoot: string
   try {
@@ -53,11 +50,11 @@ export async function validateSourcePreflight(sourcePath: string, gitExecutable:
     throw new InstallerError({
       code: 'SOURCE_NOT_ACCESSIBLE',
       facts: [['Observed', `${requestedPath} could not be resolved and read by the invoking developer.`]],
-      retry: RETRY,
+      retry,
     })
   }
 
-  await assertSourceDirectory(sourceRoot)
+  await assertSourceDirectory(sourceRoot, retry)
 
   const workTreeResult = await runProcess(gitExecutable, ['-C', sourceRoot, 'rev-parse', '--is-inside-work-tree'])
   const topLevelResult = await runProcess(gitExecutable, ['-C', sourceRoot, 'rev-parse', '--show-toplevel'])
@@ -70,7 +67,7 @@ export async function validateSourcePreflight(sourcePath: string, gitExecutable:
     throw new InstallerError({
       code: 'SOURCE_NOT_GIT_CHECKOUT',
       facts: [['Observed', `${sourceRoot} did not pass local git rev-parse checks.`]],
-      retry: RETRY,
+      retry,
     })
   }
   const gitTopLevel = await realpath(topLevelResult.stdout.trim())
@@ -81,7 +78,7 @@ export async function validateSourcePreflight(sourcePath: string, gitExecutable:
         ['Selected source', sourceRoot],
         ['Checkout root', gitTopLevel],
       ],
-      retry: ROOT_RETRY,
+      retry,
     })
   }
   const gitEntryPath = join(sourceRoot, '.git')
@@ -90,7 +87,7 @@ export async function validateSourcePreflight(sourcePath: string, gitExecutable:
     throw new InstallerError({
       code: 'INVALID_GIT_METADATA',
       facts: [['Observed', `${gitEntryPath} is missing, symbolic, or not a normal worktree metadata entry.`]],
-      retry: RETRY,
+      retry,
     })
   }
   const packageJsonPath = join(sourceRoot, 'package.json')
@@ -101,7 +98,7 @@ export async function validateSourcePreflight(sourcePath: string, gitExecutable:
     throw new InstallerError({
       code: 'INVALID_SOURCE_CHECKOUT',
       facts: [['Observed', `${packageJsonPath} could not be inspected.`]],
-      retry: RETRY,
+      retry,
     })
   }
   if (
@@ -118,7 +115,7 @@ export async function validateSourcePreflight(sourcePath: string, gitExecutable:
           `${packageJsonPath} must be a non-empty regular file no larger than ${MAX_PACKAGE_JSON_BYTES} bytes.`,
         ],
       ],
-      retry: RETRY,
+      retry,
     })
   }
   let packageJson: unknown
@@ -128,14 +125,14 @@ export async function validateSourcePreflight(sourcePath: string, gitExecutable:
     throw new InstallerError({
       code: 'INVALID_SOURCE_PACKAGE',
       facts: [['Observed', `${packageJsonPath} could not be decoded as JSON.`]],
-      retry: RETRY,
+      retry,
     })
   }
   if (!isRecord(packageJson) || packageJson.name !== 'qiln') {
     throw new InstallerError({
       code: 'SOURCE_NOT_QILN_PACKAGE',
       facts: [['Observed', "package.json must have name='qiln'."]],
-      retry: RETRY,
+      retry,
     })
   }
   return {

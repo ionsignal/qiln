@@ -12,12 +12,10 @@ import type {
   IncusRead,
   IncusStorageVolume,
 } from '../incus/types'
+import type { Retry } from '../retry'
 import type { Dir } from '../state/files'
 import type { InstallationState } from './state'
 import type { InstallationInputs } from './types'
-
-const RERUN =
-  'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]'
 
 export interface ObservationRequest {
   client: IncusClient
@@ -27,6 +25,7 @@ export interface ObservationRequest {
   source: ImageSource
   installation: InstallationState | null
   inputs: InstallationInputs
+  retry: Retry
 }
 
 /**
@@ -51,11 +50,11 @@ export interface Observation {
 
 type Images = Pick<Observation, 'fingerprint' | 'image' | 'alias' | 'aliased'>
 
-async function read<T>(operation: string, run: () => Promise<T>): Promise<T> {
+async function read<T>(retry: string, operation: string, run: () => Promise<T>): Promise<T> {
   try {
     return await run()
   } catch (error: unknown) {
-    throw toInstallerError(error, { check: 'installation observation', operation, rerun: RERUN })
+    throw toInstallerError(error, { check: 'installation observation', operation, rerun: retry })
   }
 }
 
@@ -63,36 +62,36 @@ async function read<T>(operation: string, run: () => Promise<T>): Promise<T> {
  * A reference has nothing to import, so it is resolved and validated here and
  * is always present afterwards. Split content may be absent from the store.
  */
-async function imagesOf({ client, source, installation, inputs }: ObservationRequest): Promise<Images> {
+async function imagesOf({ client, source, installation, inputs, retry }: ObservationRequest): Promise<Images> {
   if (source.kind === 'reference') {
-    const selected = await validateImagePreflight(client, source.selector, installation, inputs.architecture)
+    const selected = await validateImagePreflight(client, source.selector, installation, inputs.architecture, retry)
     return { fingerprint: selected.fingerprint, image: selected.image, alias: null, aliased: null }
   }
-  const alias = await readAlias(client)
+  const alias = await readAlias(client, retry.configure)
   return {
     fingerprint: source.fingerprint,
-    image: await readImage(client, source.fingerprint),
+    image: await readImage(client, source.fingerprint, retry.configure),
     alias,
-    aliased: alias === null ? null : await readImage(client, alias.target),
+    aliased: alias === null ? null : await readImage(client, alias.target, retry.configure),
   }
 }
 
 export async function observe(request: ObservationRequest): Promise<Observation> {
-  const { client, directory, sshKeygen, source, installation, inputs } = request
+  const { client, directory, sshKeygen, source, installation, inputs, retry } = request
   const { layout } = inputs
   return {
     kind: source.kind,
     ...(await imagesOf(request)),
     pin: installation?.imageFingerprint ?? null,
-    network: await read(`inspect the '${layout.network.name}' network`, () =>
+    network: await read(retry.configure, `inspect the '${layout.network.name}' network`, () =>
       client.getNetworkOrNull(layout.network.name),
     ),
-    volume: await read('inspect the Qiln PostgreSQL custom volume', () =>
+    volume: await read(retry.configure, 'inspect the Qiln PostgreSQL custom volume', () =>
       client.getStoragePoolVolumeOrNull(layout.pool.name, INSTALLER_SPEC.storage.volumeType, layout.postgres.volumeName),
     ),
-    instance: await read(`inspect the '${INSTALLER_SPEC.orchestrator.name}' instance`, () =>
+    instance: await read(retry.configure, `inspect the '${INSTALLER_SPEC.orchestrator.name}' instance`, () =>
       client.getInstanceWithEtagOrNull(INSTALLER_SPEC.orchestrator.name),
     ),
-    credentials: await loadCredentials(directory, sshKeygen),
+    credentials: await loadCredentials(directory, sshKeygen, retry.configure),
   }
 }

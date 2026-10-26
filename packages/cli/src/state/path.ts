@@ -1,7 +1,7 @@
 import { resolve } from 'node:path'
 import { InstallerError } from '../diagnostic/error'
 
-export function statePath(environment: NodeJS.ProcessEnv = process.env, retry = 'qiln doctor'): string {
+export function statePath(environment: NodeJS.ProcessEnv, retry: string): string {
   const configuredStateHome = environment.XDG_STATE_HOME?.trim()
   if (configuredStateHome) {
     if (!configuredStateHome.startsWith('/')) {

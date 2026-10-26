@@ -1,6 +1,6 @@
 import { AWS_RECORD_VERSION, AWS_SPEC } from '../spec'
 import { isInstallerErrorCode, type InstallerErrorCode } from '../../diagnostic/error'
-import { hasKeys, isRecord } from '../../guards'
+import { hasKeys, isOperationId, isRecord, isTimestamp } from '../../guards'
 import { sameJson } from '../../json'
 import { operatorArn } from '../operator'
 import { policyArn } from '../permission/policy'
@@ -8,10 +8,8 @@ import { isFingerprint } from '../../ssh/key'
 import {
   isAccountId,
   isIdentity,
-  isOperationId,
   isPermissionMetadata,
   isPolicyBinding,
-  isTimestamp,
   validName,
   validRegion,
   type AwsIdentity,

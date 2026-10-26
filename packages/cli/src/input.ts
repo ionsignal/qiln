@@ -1,8 +1,12 @@
+import { installationRetry } from './retry'
 import { AWS_SPEC } from './aws/spec'
 import { InstallerError } from './diagnostic/error'
-import { isOperationId, validName, validRegion } from './aws/types'
+import { isOperationId } from './guards'
+import { validName, validRegion } from './aws/types'
+import type { Retry } from './retry' 
 import type { DeploymentSelector } from './aws/deployment/alias'
-import type { UpCommandOptions } from './commands/up'
+import type { ConfigureOptions } from './commands/installation/configure'
+import type { InstallationSelector } from './commands/installation/target'
 
 export interface AwsInput {
   name?: string
@@ -106,7 +110,7 @@ export function validateAwsRegion(region: string): string {
   return region
 }
 
-export interface UpInput {
+export interface ConfigureInput {
   source?: string
   image?: string
   imageMeta?: string
@@ -127,9 +131,10 @@ function validateValue(value: string | undefined, option: string): void {
 
 /**
  * Converts parsed options without accessing installer state or performing any
- * local or provider work.
+ * local or provider work. `retry` names the commands that diagnostics show for
+ * the selected target's workflow.
  */
-export function convertUpOptions(input: UpInput): UpCommandOptions {
+export function convertConfigureOptions(input: ConfigureInput, retry: Retry): ConfigureOptions {
   validateValue(input.source, '--source')
   validateValue(input.image, '--image')
   validateValue(input.imageMeta, '--image-meta')
@@ -140,7 +145,7 @@ export function convertUpOptions(input: UpInput): UpCommandOptions {
     throw new InstallerError({
       code: 'SOURCE_REQUIRED',
       facts: [['Observed', 'No host Qiln checkout was selected.']],
-      retry: 'qiln up --source <checkout> --image <alias-or-fingerprint>',
+      retry: retry.configure,
     })
   }
   const hasMetadata = input.imageMeta !== undefined
@@ -149,8 +154,7 @@ export function convertUpOptions(input: UpInput): UpCommandOptions {
     throw new InstallerError({
       code: 'SPLIT_IMAGE_PAIR_REQUIRED',
       facts: [['Observed', hasMetadata ? '--image-rootfs is missing.' : '--image-meta is missing.']],
-      retry:
-        'qiln up --source <checkout> --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs> [--authorized-keys <roster>]',
+      retry: retry.configure,
     })
   }
   const authorizedKeys =
@@ -193,4 +197,47 @@ export function convertUpOptions(input: UpInput): UpCommandOptions {
     ],
     retry: 'qiln --help',
   })
+}
+
+export interface InstallationInput {
+  local?: boolean
+  id?: string
+  alias?: string
+}
+
+export interface InstallationConfigureInput extends InstallationInput, ConfigureInput {}
+
+export interface InstallationConfigureOptions {
+  selector: InstallationSelector
+  options: ConfigureOptions
+}
+
+/** Exactly one target is required, and there is no default. */
+export function convertInstallationSelector(input: InstallationInput): InstallationSelector {
+  const supplied = [input.local === true, input.id !== undefined, input.alias !== undefined].filter(Boolean)
+  if (supplied.length !== 1) {
+    throw new InstallerError({
+      code: 'INVALID_ARGUMENT',
+      facts: [
+        ['Option', '--local, --id, --alias'],
+        ['Observed', 'Supply exactly one of --local, --id, or --alias.'],
+      ],
+      retry: 'qiln installation --help',
+    })
+  }
+  if (input.id !== undefined) {
+    return convertAwsDeploymentOptions({ id: input.id }).selector
+  }
+  if (input.alias !== undefined) {
+    return { kind: 'alias', value: validateAwsAlias(input.alias) }
+  }
+  return { kind: 'local' }
+}
+
+export function convertInstallationConfigureOptions(input: InstallationConfigureInput): InstallationConfigureOptions {
+  const selector = convertInstallationSelector(input)
+  return {
+    selector,
+    options: convertConfigureOptions(input, installationRetry(selector)),
+  }
 }

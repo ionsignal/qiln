@@ -5,13 +5,15 @@ import {
   convertAwsDeploymentCreateOptions,
   convertAwsDeploymentOptions,
   convertAwsOptions,
-  convertUpOptions,
+  convertInstallationConfigureOptions,
+  convertInstallationSelector,
 } from './input'
 import { configureHelp } from './terminal/help'
 import { Reporter, type ColorMode, type OutputStream } from './terminal/reporter'
 import * as help from './commands/help'
 import * as awsHelp from './commands/aws/help'
 import * as deploymentHelp from './commands/aws/deployment/help'
+import * as installationHelp from './commands/installation/help'
 import type {
   AwsCommandOptions,
   AwsDeploymentCreateInput,
@@ -19,18 +21,24 @@ import type {
   AwsDeploymentInput,
   AwsDeploymentOptions,
   AwsInput,
-  UpInput,
+  InstallationConfigureInput,
+  InstallationInput,
 } from './input'
 import type { CommanderError } from 'commander'
-import type { UpCommandOptions } from './commands/up'
+import type { ConfigureOptions } from './commands/installation/configure'
+import type { InstallationSelector } from './commands/installation/target'
 
 export interface GlobalOptions {
   color: ColorMode
 }
 
 export interface ProgramHandlers {
-  doctor(color: ColorMode): void | Promise<void>
-  up(options: UpCommandOptions, color: ColorMode): void | Promise<void>
+  installation: {
+    list(color: ColorMode): void | Promise<void>
+    status(selector: InstallationSelector, color: ColorMode): void | Promise<void>
+    inspect(selector: InstallationSelector, color: ColorMode): void | Promise<void>
+    configure(selector: InstallationSelector, options: ConfigureOptions, color: ColorMode): void | Promise<void>
+  }
   aws?: {
     connect(options: AwsCommandOptions, color: ColorMode): void | Promise<void>
     status(options: AwsCommandOptions, color: ColorMode): void | Promise<void>
@@ -77,6 +85,33 @@ function addSelectorOptions(command: Command): void {
   )
 }
 
+/** Installation targets have no default: the converter requires exactly one of these. */
+function addTargetOptions(command: Command): void {
+  addSingleOption(command, new Option('--local', 'Select the installation on this machine.'))
+  addSingleOption(command, new Option('--id <deployment-id>', 'Select the AWS deployment by its immutable ID.'))
+  addSingleOption(command, new Option('--alias <alias>', 'Select the AWS deployment by its local alias.'))
+}
+
+function addInstallOptions(command: Command): void {
+  addSingleOption(command, new Option('--source <checkout>', 'Select the canonical Qiln Git checkout root on the target.'))
+  addSingleOption(
+    command,
+    new Option('--image <alias-or-fingerprint>', 'Select an existing local image alias or full lowercase fingerprint.'),
+  )
+  addSingleOption(
+    command,
+    new Option('--image-meta <metadata>', 'Select the metadata artifact for explicit split-image replacement.'),
+  )
+  addSingleOption(
+    command,
+    new Option('--image-rootfs <rootfs>', 'Select the rootfs artifact for explicit split-image replacement.'),
+  )
+  addSingleOption(
+    command,
+    new Option('--authorized-keys <roster>', 'Select the developer-owned orchestrator SSH public-key roster.'),
+  )
+}
+
 /**
  * Each invocation receives a fresh program so parsed values and duplicate
  * detection cannot leak into another execution.
@@ -88,7 +123,7 @@ export function createProgram(handlers: ProgramHandlers, output: ProgramOutput):
     .description(
       'Manage the Qiln development installation, AWS operator connections, and AWS deployments.',
     )
-    .version('0.1.2', '-v, --version', 'Display the Qiln version.')
+    .version('0.2.0', '-v, --version', 'Display the Qiln version.')
     .helpOption('-h, --help', 'Display help.')
     .helpCommand(false)
     .allowExcessArguments(false)
@@ -112,37 +147,54 @@ export function createProgram(handlers: ProgramHandlers, output: ProgramOutput):
       }),
   )
   describeHelp(program, help.root(handlers.aws !== undefined))
-  const doctor = program
-    .command('doctor')
-    .description(
-      'Inspect the supported host, local Incus access, ZFS storage, networking, and existing installer state.',
+  const installation = program
+    .command('installation')
+    .description('Inspect and configure the Qiln development installation on this machine or on a prepared AWS deployment.')
+    .summary('Inspect and configure installations.')
+  describeHelp(installation, installationHelp.group)
+  const installationList = installation
+    .command('list')
+    .description('List every registered installation from retained local records, without contacting any target.')
+    .summary('List local installation records.')
+  describeHelp(installationList, installationHelp.list)
+  installationList.action(() => handlers.installation.list(program.opts<GlobalOptions>().color))
+  const installationStatus = installation
+    .command('status')
+    .description('Report the retained evidence of one installation without contacting its target or taking a lock.')
+    .summary('Report local installation evidence.')
+  addTargetOptions(installationStatus)
+  describeHelp(installationStatus, installationHelp.status)
+  installationStatus.action(() =>
+    handlers.installation.status(
+      convertInstallationSelector(installationStatus.opts<InstallationInput>()),
+      program.opts<GlobalOptions>().color,
+    ),
+  )
+  const installationInspect = installation
+    .command('inspect')
+    .description('Inspect the selected target, its Incus daemon, its storage and network, and any registered installation, without changes.')
+    .summary('Inspect a target without changes.')
+  addTargetOptions(installationInspect)
+  describeHelp(installationInspect, installationHelp.inspect)
+  installationInspect.action(() =>
+    handlers.installation.inspect(
+      convertInstallationSelector(installationInspect.opts<InstallationInput>()),
+      program.opts<GlobalOptions>().color,
+    ),
+  )
+  const installationConfigure = installation
+    .command('configure')
+    .description('Register if needed, then configure and verify the Qiln installation on the selected target, leaving the orchestrator stopped.')
+    .summary('Configure the stopped installation.')
+  addTargetOptions(installationConfigure)
+  addInstallOptions(installationConfigure)
+  describeHelp(installationConfigure, installationHelp.configure)
+  installationConfigure.action(() => {
+    const { selector, options } = convertInstallationConfigureOptions(
+      installationConfigure.opts<InstallationConfigureInput>(),
     )
-    .summary('Inspect the development host without changes.')
-    .action(() => handlers.doctor(program.opts<GlobalOptions>().color))
-  describeHelp(doctor, help.doctor)
-  const up = program
-    .command('up')
-    .description('Configure and verify the Qiln development installation, leaving the orchestrator stopped.')
-    .summary('Configure the stopped development installation.')
-  addSingleOption(up, new Option('--source <checkout>', 'Select the canonical local Qiln Git checkout root.'))
-  addSingleOption(
-    up,
-    new Option('--image <alias-or-fingerprint>', 'Select an existing local image alias or full lowercase fingerprint.'),
-  )
-  addSingleOption(
-    up,
-    new Option('--image-meta <metadata>', 'Select the metadata artifact for explicit split-image replacement.'),
-  )
-  addSingleOption(
-    up,
-    new Option('--image-rootfs <rootfs>', 'Select the rootfs artifact for explicit split-image replacement.'),
-  )
-  addSingleOption(
-    up,
-    new Option('--authorized-keys <roster>', 'Select the developer-owned orchestrator SSH public-key roster.'),
-  )
-  describeHelp(up, help.up)
-  up.action(() => handlers.up(convertUpOptions(up.opts<UpInput>()), program.opts<GlobalOptions>().color))
+    return handlers.installation.configure(selector, options, program.opts<GlobalOptions>().color)
+  })
   const awsHandlers = handlers.aws
   if (awsHandlers) {
     const aws = program

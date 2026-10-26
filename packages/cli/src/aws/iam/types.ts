@@ -1,5 +1,5 @@
 import { isInstallerErrorCode, type InstallerErrorCode } from '../../diagnostic/error'
-import { hasKeys, isRecord } from '../../guards'
+import { hasKeys, isOperationId, isRecord, isTimestamp } from '../../guards'
 import { sameJson } from '../../json'
 import { operatorArn } from '../operator'
 import { isPolicyKey, POLICY_KEYS, type PolicyKey, type PolicyMap } from '../permission/keys'
@@ -9,9 +9,7 @@ import { AWS_RECORD_VERSION } from '../spec'
 import {
   isAccountId,
   isIdentity,
-  isOperationId,
   isPermissionMetadata,
-  isTimestamp,
   validName,
   validRegion,
   type AwsIdentity,

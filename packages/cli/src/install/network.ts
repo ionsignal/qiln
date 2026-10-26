@@ -20,7 +20,7 @@ function configDifferences(
   }
 }
 
-export function assertNetwork(network: IncusNetwork, layout: Layout): void {
+export function assertNetwork(network: IncusNetwork, layout: Layout, retry: string): void {
   const differences = configDifferences(network.config, layout.network.config)
   const compatible =
     network.name === layout.network.name &&
@@ -42,7 +42,7 @@ export function assertNetwork(network: IncusNetwork, layout: Layout): void {
         `Incus reports type='${network.type}', managed=${network.managed}, status='${network.status || 'unknown'}', description='${network.description}', and project='${network.project || INSTALLER_SPEC.projectName}'; missing or mismatched expected keys: ${differences.missing.join(', ') || 'none'}; unexpected non-volatile keys: ${differences.unexpected.join(', ') || 'none'}.`,
       ],
     ],
-    retry: 'qiln doctor',
+    retry,
   })
 }
 

@@ -6,9 +6,6 @@ import { withStage, type StagedFile } from '../state/files'
 import type { IncusClient } from '../incus/client'
 import type { IncusImage, IncusImageAlias } from '../incus/types'
 
-const RERUN =
-  'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]'
-
 export type InstallerImageSelection =
   | {
       kind: 'reference'
@@ -50,26 +47,26 @@ async function splitFingerprint(metadata: StagedFile, rootfs: StagedFile): Promi
   return hash.digest('hex')
 }
 
-export async function readAlias(client: IncusClient): Promise<IncusImageAlias | null> {
+export async function readAlias(client: IncusClient, retry: string): Promise<IncusImageAlias | null> {
   try {
     return await client.getImageAliasOrNull(INSTALLER_SPEC.orchestrator.imageAlias)
   } catch (error: unknown) {
     throw toInstallerError(error, {
       check: 'managed orchestrator image alias',
       operation: 'inspect the managed orchestrator image alias',
-      rerun: RERUN,
+      rerun: retry,
     })
   }
 }
 
-export async function readImage(client: IncusClient, fingerprint: string): Promise<IncusImage | null> {
+export async function readImage(client: IncusClient, fingerprint: string, retry: string): Promise<IncusImage | null> {
   try {
     return await client.getImageOrNull(fingerprint)
   } catch (error: unknown) {
     throw toInstallerError(error, {
       check: 'local orchestrator image',
       operation: 'inspect the local content-addressed orchestrator image',
-      rerun: RERUN,
+      rerun: retry,
     })
   }
 }

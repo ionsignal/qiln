@@ -1,8 +1,10 @@
 import { basename, dirname, resolve } from 'node:path'
 import { TextDecoder } from 'node:util'
 import { InstallerError } from '../diagnostic/error'
+import { isErrorCode } from '../guards'
 import { runProcess } from '../process'
 import { FileValidationError, openDir, readChild, withTemp, type Dir, type FileSnapshot } from '../state/files'
+import { currentUserId } from '../state/user'
 
 const MAX_AUTHORIZED_KEYS_BYTES = 1_048_576
 const PUBLIC_KEY_BLOB_PATTERN = /^[A-Za-z0-9+/]+={0,2}$/
@@ -16,44 +18,25 @@ const SUPPORTED_AUTHORIZED_KEY_ALGORITHMS = new Set([
   'sk-ecdsa-sha2-nistp256@openssh.com',
 ])
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-function isErrorCode(value: unknown, code: string): boolean {
-  return isRecord(value) && value.code === code
-}
-
-function currentUserId(): number {
-  if (typeof process.geteuid !== 'function') {
-    throw new InstallerError({
-      code: 'UNSUPPORTED_PLATFORM',
-      facts: [['Observed', `Node platform '${process.platform}' does not expose process.geteuid().`]],
-      retry: 'qiln doctor',
-    })
-  }
-  return process.geteuid()
-}
-
-function rosterReadError(error: unknown, path: string): InstallerError {
+function rosterReadError(error: unknown, path: string, retry: string): InstallerError {
   if (isErrorCode(error, 'ENOENT')) {
     return new InstallerError({
       code: 'AUTHORIZED_KEYS_NOT_FOUND',
       facts: [['Observed', `No readable roster was found at ${path}.`]],
-      retry: 'qiln up --source <checkout> --image <alias-or-fingerprint> [--authorized-keys <roster>]',
+      retry,
     })
   }
   if (error instanceof FileValidationError && error.kind === 'owner') {
     return new InstallerError({
       code: 'INVALID_AUTHORIZED_KEYS_OWNER',
       facts: [['Observed', `${path} does not have the expected UID ${currentUserId()} ownership.`]],
-      retry: 'qiln up --source <checkout> --image <alias-or-fingerprint> [--authorized-keys <roster>]',
+      retry,
     })
   }
   return new InstallerError({
     code: 'INVALID_AUTHORIZED_KEYS_FILE',
     facts: [['Observed', `${path} could not be opened as a stable bounded regular file.`]],
-    retry: 'qiln up --source <checkout> --image <alias-or-fingerprint> [--authorized-keys <roster>]',
+    retry,
   })
 }
 
@@ -61,13 +44,13 @@ function rosterReadError(error: unknown, path: string): InstallerError {
  * Reads one developer-managed authorized-key roster into a stable validated
  * snapshot without reopening its path for later content validation.
  */
-export async function readRoster(rosterPath: string): Promise<FileSnapshot> {
+export async function readRoster(rosterPath: string, retry: string): Promise<FileSnapshot> {
   const path = resolve(rosterPath)
   let directory: Dir
   try {
     directory = await openDir(dirname(path))
   } catch (error: unknown) {
-    throw rosterReadError(error, path)
+    throw rosterReadError(error, path, retry)
   }
   try {
     return await readChild(directory, basename(path), {
@@ -76,7 +59,7 @@ export async function readRoster(rosterPath: string): Promise<FileSnapshot> {
       maxSize: MAX_AUTHORIZED_KEYS_BYTES,
     })
   } catch (error: unknown) {
-    throw rosterReadError(error, path)
+    throw rosterReadError(error, path, retry)
   }
 }
 
@@ -84,7 +67,11 @@ export async function readRoster(rosterPath: string): Promise<FileSnapshot> {
  * Validates the supplied in-memory roster snapshot and runs ssh-keygen only
  * against a temporary file containing those exact validated bytes.
  */
-export async function validateRoster(roster: FileSnapshot, sshKeygenExecutable: string): Promise<FileSnapshot> {
+export async function validateRoster(
+  roster: FileSnapshot,
+  sshKeygenExecutable: string,
+  retry: string,
+): Promise<FileSnapshot> {
   let content: string
   try {
     content = new TextDecoder('utf-8', {
@@ -94,7 +81,7 @@ export async function validateRoster(roster: FileSnapshot, sshKeygenExecutable: 
     throw new InstallerError({
       code: 'INVALID_AUTHORIZED_KEYS_CONTENT',
       facts: [['Observed', 'The validated roster snapshot could not be decoded as UTF-8.']],
-      retry: 'qiln up --source <checkout> --image <alias-or-fingerprint> --authorized-keys <roster>',
+      retry,
     })
   }
   let publicKeyCount = 0
@@ -103,7 +90,7 @@ export async function validateRoster(roster: FileSnapshot, sshKeygenExecutable: 
       throw new InstallerError({
         code: 'INVALID_AUTHORIZED_KEYS_CONTENT',
         facts: [['Observed', `Unsupported content was found at line ${index + 1}.`]],
-        retry: 'qiln up --source <checkout> --image <alias-or-fingerprint> --authorized-keys <roster>',
+        retry,
       })
     }
     const trimmed = line.trim()
@@ -123,7 +110,7 @@ export async function validateRoster(roster: FileSnapshot, sshKeygenExecutable: 
       throw new InstallerError({
         code: 'INVALID_AUTHORIZED_KEYS_CONTENT',
         facts: [['Observed', `Line ${index + 1} is not a normal supported OpenSSH public-key line.`]],
-        retry: 'qiln up --source <checkout> --image <alias-or-fingerprint> --authorized-keys <roster>',
+        retry,
       })
     }
     const decoded = Buffer.from(encodedKey, 'base64')
@@ -131,7 +118,7 @@ export async function validateRoster(roster: FileSnapshot, sshKeygenExecutable: 
       throw new InstallerError({
         code: 'INVALID_AUTHORIZED_KEYS_CONTENT',
         facts: [['Observed', `Line ${index + 1} does not contain canonical Base64 public-key data.`]],
-        retry: 'qiln up --source <checkout> --image <alias-or-fingerprint> --authorized-keys <roster>',
+        retry,
       })
     }
     publicKeyCount++
@@ -140,7 +127,7 @@ export async function validateRoster(roster: FileSnapshot, sshKeygenExecutable: 
     throw new InstallerError({
       code: 'EMPTY_AUTHORIZED_KEYS_ROSTER',
       facts: [['Observed', 'The selected roster snapshot contains only blank lines or comments.']],
-      retry: 'qiln up --source <checkout> --image <alias-or-fingerprint> --authorized-keys <roster>',
+      retry,
     })
   }
   const validation = await withTemp(roster, path => runProcess(sshKeygenExecutable, ['-l', '-f', path]))
@@ -148,7 +135,7 @@ export async function validateRoster(roster: FileSnapshot, sshKeygenExecutable: 
     throw new InstallerError({
       code: 'INVALID_AUTHORIZED_KEYS_ROSTER',
       facts: [['Observed', 'The validated roster snapshot failed ssh-keygen public-key inspection.']],
-      retry: 'qiln up --source <checkout> --image <alias-or-fingerprint> --authorized-keys <roster>',
+      retry,
     })
   }
   return roster

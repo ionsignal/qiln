@@ -1,11 +1,10 @@
 import { AWS_SPEC } from '../spec'
-import { hasKeys, isRecord } from '../../guards'
+import { hasKeys, isOperationId, isRecord, isTimestamp } from '../../guards'
 import { COMMON_CODES, replyGuard, type Certainty, type ChildReply } from '../child/protocol'
 import { isHealth, isObservation, type Health, type Observation } from '../deployment/types'
 import { isHostKey, type HostKey } from '../deployment/hostkey'
 import { isDiscovery } from '../deployment/proposal/schema'
 import { isIssue, type Issue } from '../deployment/proposal/failure'
-import { isOperationId, isTimestamp } from '../types'
 import type { Discovery } from '../deployment/proposal/types'
 
 export type Request =

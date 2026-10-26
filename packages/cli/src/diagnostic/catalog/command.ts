@@ -19,7 +19,7 @@ export const commandDiagnostics = Object.freeze({
   INVALID_ARGUMENT: entry(
     'Command-line arguments are invalid',
     'Qiln requires declared options, explicit usable values, and no unexpected positional arguments.',
-    'Review qiln --help or qiln up --help and correct the invocation.',
+    'Review qiln --help or qiln installation --help and correct the invocation.',
   ),
   SOURCE_REQUIRED: entry(
     'Source checkout is required',
@@ -54,7 +54,7 @@ export const commandDiagnostics = Object.freeze({
   INTERNAL_ERROR: entry(
     'Unexpected installer failure',
     'Continuing after an unclassified failure could produce an unsafe or misleading installation result. No successful installation should be inferred.',
-    'Review the installed CLI version and run qiln doctor.',
+    'Review the installed CLI version and run qiln installation inspect --local.',
     'Inspect actual installation state before retrying a mutation.',
   ),
   COMMAND_CANCELLED: entry('Command canceled', 'No successful completion should be inferred.'),

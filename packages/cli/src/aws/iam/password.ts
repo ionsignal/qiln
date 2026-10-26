@@ -1,7 +1,6 @@
 import { InstallerError } from '../../diagnostic/error'
 import { sendEvidence } from '../child/evidence'
-import { hasKeys, isRecord } from '../../guards'
-import { isOperationId } from '../types'
+import { hasKeys, isOperationId, isRecord } from '../../guards'
 import { isPasswordReceipt, type PasswordReceipt } from './types'
 
 export interface PasswordEvidence {

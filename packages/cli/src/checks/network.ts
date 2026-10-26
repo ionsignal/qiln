@@ -1,4 +1,5 @@
 import { InstallerError } from '../diagnostic/error'
+import { isRecord } from '../guards'
 import { assertNetwork } from '../install/network'
 import { runProcess } from '../process'
 import { toInstallerError } from '../incus/errors'
@@ -26,10 +27,6 @@ interface IpAddressRecord {
 export interface NetworkPreflight {
   network: IncusNetwork | null
   disposition: 'existing-compatible' | 'ready-to-create'
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
 function ipv4AddressToBigInt(value: string): bigint | null {
@@ -79,7 +76,7 @@ function cidrsOverlap(left: IPv4Cidr, right: IPv4Cidr): boolean {
   return left.network <= rightEnd && right.network <= leftEnd
 }
 
-function parseJsonArray(value: string, source: string): unknown[] {
+function parseJsonArray(value: string, source: string, retry: string): unknown[] {
   let parsed: unknown
   try {
     parsed = JSON.parse(value) as unknown
@@ -87,14 +84,14 @@ function parseJsonArray(value: string, source: string): unknown[] {
     throw new InstallerError({
       code: 'HOST_NETWORK_INSPECTION_FAILED',
       facts: [['Observed', `${source} returned invalid JSON.`]],
-      retry: 'qiln doctor',
+      retry,
     })
   }
   if (!Array.isArray(parsed)) {
     throw new InstallerError({
       code: 'HOST_NETWORK_INSPECTION_FAILED',
       facts: [['Observed', `${source} did not return a JSON array.`]],
-      retry: 'qiln doctor',
+      retry,
     })
   }
   return parsed
@@ -104,6 +101,7 @@ function assertNoIncusNetworkConflict(
   networks: readonly IncusNetwork[],
   existingTargetNetwork: IncusNetwork | null,
   layout: Layout,
+  retry: string,
 ): void {
   const { name, ipv4Subnet } = layout.network
   const target = parseIpv4Cidr(ipv4Subnet)!
@@ -122,7 +120,7 @@ function assertNoIncusNetworkConflict(
         facts: [
           ['Observed', `Network '${network.name}' uses '${configuredAddress}', which overlaps '${ipv4Subnet}'.`],
         ],
-        retry: 'qiln doctor',
+        retry,
       })
     }
   }
@@ -132,6 +130,7 @@ async function assertNoHostRouteConflict(
   host: HostPreflight,
   existingTargetNetwork: IncusNetwork | null,
   layout: Layout,
+  retry: string,
 ): Promise<void> {
   const { name, ipv4Subnet } = layout.network
   const target = parseIpv4Cidr(ipv4Subnet)!
@@ -140,10 +139,10 @@ async function assertNoHostRouteConflict(
     throw new InstallerError({
       code: 'HOST_ROUTE_INSPECTION_FAILED',
       facts: [['Observed', `ip returned exit code ${routeResult.exitCode ?? 'unknown'}.`]],
-      retry: 'qiln doctor',
+      retry,
     })
   }
-  for (const rawRoute of parseJsonArray(routeResult.stdout, 'ip route')) {
+  for (const rawRoute of parseJsonArray(routeResult.stdout, 'ip route', retry)) {
     if (!isRecord(rawRoute)) {
       continue
     }
@@ -167,7 +166,7 @@ async function assertNoHostRouteConflict(
           `Host route '${route.dst}' on interface '${device || 'unknown'}' overlaps '${ipv4Subnet}'.`,
         ],
       ],
-      retry: 'qiln doctor',
+      retry,
     })
   }
   const addressResult = await runProcess(host.commandPaths.ip, ['-j', '-4', 'address', 'show'])
@@ -175,10 +174,10 @@ async function assertNoHostRouteConflict(
     throw new InstallerError({
       code: 'HOST_ADDRESS_INSPECTION_FAILED',
       facts: [['Observed', `ip returned exit code ${addressResult.exitCode ?? 'unknown'}.`]],
-      retry: 'qiln doctor',
+      retry,
     })
   }
-  for (const rawInterface of parseJsonArray(addressResult.stdout, 'ip address')) {
+  for (const rawInterface of parseJsonArray(addressResult.stdout, 'ip address', retry)) {
     if (!isRecord(rawInterface)) {
       continue
     }
@@ -211,16 +210,21 @@ async function assertNoHostRouteConflict(
             `Interface '${interfaceName || 'unknown'}' has '${local}/${prefixLength}', overlapping '${ipv4Subnet}'.`,
           ],
         ],
-        retry: 'qiln doctor',
+        retry,
       })
     }
   }
 }
 
-export async function validateNetworkPreflight(
-  host: HostPreflight,
+/**
+ * The Incus-API half of the network check, shared by every target: the managed
+ * network must be compatible if it exists, and no other Incus network may
+ * overlap the layout's subnet.
+ */
+export async function validateIncusNetwork(
   client: IncusClient,
   layout: Layout,
+  retry: string,
 ): Promise<NetworkPreflight> {
   const { name } = layout.network
   let networks: IncusNetwork[]
@@ -230,7 +234,7 @@ export async function validateNetworkPreflight(
     throw toInstallerError(error, {
       check: 'local Incus network inventory',
       operation: 'list local Incus networks',
-      rerun: 'qiln doctor',
+      rerun: retry,
     })
   }
   let existingTargetNetwork: IncusNetwork | null
@@ -241,16 +245,30 @@ export async function validateNetworkPreflight(
     throw toInstallerError(error, {
       check: `existing ${name} inspection`,
       operation: `inspect the '${name}' network`,
-      rerun: 'qiln doctor',
+      rerun: retry,
     })
   }
   if (existingTargetNetwork) {
-    assertNetwork(existingTargetNetwork, layout)
+    assertNetwork(existingTargetNetwork, layout, retry)
   }
-  assertNoIncusNetworkConflict(networks, existingTargetNetwork, layout)
-  await assertNoHostRouteConflict(host, existingTargetNetwork, layout)
+  assertNoIncusNetworkConflict(networks, existingTargetNetwork, layout, retry)
   return {
     network: existingTargetNetwork,
     disposition: existingTargetNetwork ? 'existing-compatible' : 'ready-to-create',
   }
+}
+
+/**
+ * The local check: the shared Incus half, then this machine's routes and
+ * addresses.
+ */
+export async function validateNetworkPreflight(
+  host: HostPreflight,
+  client: IncusClient,
+  layout: Layout,
+  retry: string,
+): Promise<NetworkPreflight> {
+  const preflight = await validateIncusNetwork(client, layout, retry)
+  await assertNoHostRouteConflict(host, preflight.network, layout, retry)
+  return preflight
 }

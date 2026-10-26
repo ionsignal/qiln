@@ -1,6 +1,22 @@
-import { matchesCredentials } from './credentials'
+import { hasCollision, matchesCredentials } from './credentials'
+import { instanceFits } from './instance'
+import type { IncusInstance } from '../incus/types'
 import type { InstallAction, ConfigurePlan } from './journal/types'
 import type { Observation } from './observe'
+import type { InstallationInputs } from './types'
+
+/**
+ * An instance step is verified only when the instance is compatible, not
+ * merely present.
+ */
+function compatible(
+  instance: IncusInstance,
+  fingerprint: string,
+  inputs: InstallationInputs,
+  retry: string,
+): boolean {
+  return !hasCollision(instance.config) && instanceFits(instance, fingerprint, inputs, retry)
+}
 
 /**
  * Pure check of one step's approved result against a fresh observation. A step
@@ -8,7 +24,13 @@ import type { Observation } from './observe'
  * accepted. Compatibility of the whole installation is judged by planning
  * again after the last step.
  */
-export function verify(action: InstallAction, plan: ConfigurePlan, observation: Observation): boolean {
+export function verify(
+  action: InstallAction,
+  plan: ConfigurePlan,
+  observation: Observation,
+  inputs: InstallationInputs,
+  retry: string,
+): boolean {
   const { image, alias, network, volume, instance, credentials } = observation
   switch (action) {
     case 'delete-image':
@@ -22,8 +44,13 @@ export function verify(action: InstallAction, plan: ConfigurePlan, observation: 
     case 'create-volume':
       return volume !== null
     case 'create-instance':
-      return instance !== null
+      return instance !== null && compatible(instance.value, plan.fingerprint, inputs, retry)
     case 'update-instance':
-      return instance !== null && credentials !== 'absent' && matchesCredentials(instance.value.config, credentials.values)
+      return (
+        instance !== null &&
+        compatible(instance.value, plan.fingerprint, inputs, retry) &&
+        credentials !== 'absent' &&
+        matchesCredentials(instance.value.config, credentials.values)
+      )
   }
 }

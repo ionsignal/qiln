@@ -5,30 +5,30 @@ import { assertInstance } from './instance'
 import { assertNetwork } from './network'
 import { assertVolume } from './storage'
 import type { IncusImage, IncusImageAlias } from '../incus/types'
+import type { Retry } from '../retry'
 import type { FileSnapshot } from '../state/files'
 import type { ConfigurePlan } from './journal/types'
 import type { Observation } from './observe'
 import type { InstallationInputs } from './types'
 
 const FULL_FINGERPRINT_PATTERN = /^[a-f0-9]{64}$/
-const RERUN =
-  'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]'
 
 export interface PlanRequest {
   inputs: InstallationInputs
   roster: FileSnapshot | null
+  retry: Retry
 }
 
 /**
  * The image the managed alias targets must be a full fingerprint that Incus
  * still holds, because a replacement names it and its aliases for approval.
  */
-function managedTarget(alias: IncusImageAlias, aliased: IncusImage | null): IncusImage {
+function managedTarget(alias: IncusImageAlias, aliased: IncusImage | null, retry: string): IncusImage {
   if (!FULL_FINGERPRINT_PATTERN.test(alias.target)) {
     throw new InstallerError({
       code: 'MANAGED_IMAGE_ALIAS_TARGET_INVALID',
       facts: [['Observed', `Alias '${alias.name}' targets '${alias.target}'.`]],
-      retry: RERUN,
+      retry,
     })
   }
   if (aliased === null || aliased.fingerprint !== alias.target) {
@@ -37,7 +37,7 @@ function managedTarget(alias: IncusImageAlias, aliased: IncusImage | null): Incu
       facts: [
         ['Observed', `Alias '${alias.name}' targets '${alias.target}', but that full image could not be validated.`],
       ],
-      retry: RERUN,
+      retry,
     })
   }
   return aliased
@@ -48,18 +48,18 @@ function managedTarget(alias: IncusImageAlias, aliased: IncusImage | null): Incu
  * content deletes an image, and then the selected content is imported, or
  * aliased when the store already holds it.
  */
-function imagePlan(observation: Observation, inputs: InstallationInputs): ConfigurePlan['image'] {
+function imagePlan(observation: Observation, inputs: InstallationInputs, retry: string): ConfigurePlan['image'] {
   const { kind, fingerprint, image, alias, aliased } = observation
   if (kind === 'reference') {
     return { replace: null, import: false, alias: false }
   }
   if (image !== null) {
-    validateContainerImage(image, fingerprint, inputs.architecture)
+    validateContainerImage(image, fingerprint, inputs.architecture, retry)
   }
   if (alias === null) {
     return { replace: null, import: image === null, alias: image !== null }
   }
-  const target = managedTarget(alias, aliased)
+  const target = managedTarget(alias, aliased, retry)
   if (alias.target === fingerprint) {
     return { replace: null, import: false, alias: false }
   }
@@ -70,7 +70,11 @@ function imagePlan(observation: Observation, inputs: InstallationInputs): Config
   }
 }
 
-function credentialsPlan(observation: Observation, roster: FileSnapshot | null): ConfigurePlan['credentials'] {
+function credentialsPlan(
+  observation: Observation,
+  roster: FileSnapshot | null,
+  retry: string,
+): ConfigurePlan['credentials'] {
   const { credentials, instance } = observation
   if (credentials !== 'absent') {
     return roster !== null && !Buffer.from(roster.bytes).equals(credentials.authorizedKeys.bytes) ? 'roster' : 'reuse'
@@ -79,7 +83,7 @@ function credentialsPlan(observation: Observation, roster: FileSnapshot | null):
     throw new InstallerError({
       code: 'AUTHORIZED_KEYS_REQUIRED',
       facts: [['Observed', 'No local credential files or validated authorized-key roster are available.']],
-      retry: RERUN,
+      retry,
     })
   }
   if (instance !== null && hasManagedCredentials(instance.value.config)) {
@@ -91,7 +95,7 @@ function credentialsPlan(observation: Observation, roster: FileSnapshot | null):
           'The stopped orchestrator contains one or more managed credential keys while the local set is absent.',
         ],
       ],
-      retry: RERUN,
+      retry,
     })
   }
   return 'generate'
@@ -103,24 +107,24 @@ function credentialsPlan(observation: Observation, roster: FileSnapshot | null):
  * could not complete. An empty plan means the installation already matches.
  */
 export function planOf(observation: Observation, request: PlanRequest): ConfigurePlan {
-  const { inputs, roster } = request
+  const { inputs, roster, retry } = request
   const { layout } = inputs
   const { fingerprint, pin, network, volume, instance, credentials } = observation
   if (network !== null) {
-    assertNetwork(network, layout)
+    assertNetwork(network, layout, retry.inspect)
   }
   if (volume !== null) {
-    assertVolume(volume, layout)
+    assertVolume(volume, layout, retry.inspect)
   }
   if (instance !== null) {
-    requireNoCollision(instance.value.config)
-    assertInstance(instance.value, fingerprint, inputs)
+    requireNoCollision(instance.value.config, retry.configure)
+    assertInstance(instance.value, fingerprint, inputs, retry.configure)
   }
-  const mode = credentialsPlan(observation, roster)
+  const mode = credentialsPlan(observation, roster, retry.configure)
   return {
     kind: 'configure',
     fingerprint,
-    image: imagePlan(observation, inputs),
+    image: imagePlan(observation, inputs, retry.configure),
     pin: pin !== fingerprint,
     network: network === null,
     volume: volume === null,

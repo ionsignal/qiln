@@ -3,6 +3,7 @@ import { constants, type Stats } from 'node:fs'
 import { chmod, mkdir, mkdtemp, open, readdir, rename, rm, type FileHandle } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
+import { isErrorCode } from '../guards'
 
 const FILE_FLAGS = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
 const DIRECTORY_FLAGS = constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW | constants.O_NONBLOCK
@@ -88,10 +89,6 @@ export class Dir {
       await handle.close()
     }
   }
-}
-
-function isErrorCode(value: unknown, code: string): boolean {
-  return typeof value === 'object' && value !== null && 'code' in value && value.code === code
 }
 
 function assertChildName(value: string): void {

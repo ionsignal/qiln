@@ -42,19 +42,19 @@ export const installationSchema = z.strictObject({
 export type HostBinding = z.infer<typeof hostSchema>
 export type InstallationRecord = z.infer<typeof installationSchema>
 
-export function invalidRecord(observed: string): InstallerError {
+export function invalidRecord(observed: string, retry: string): InstallerError {
   return new InstallerError({
     code: 'INVALID_INSTALLATION_STATE',
     facts: [['Observed', observed]],
-    retry: 'qiln doctor',
+    retry,
   })
 }
 
-function mismatch(subject: string): InstallerError {
+function mismatch(subject: string, retry: string): InstallerError {
   return new InstallerError({
     code: 'INSTALLATION_BINDING_MISMATCH',
     facts: [['Observed', `${subject} differs from the retained installation record.`]],
-    retry: 'qiln doctor',
+    retry,
   })
 }
 
@@ -62,7 +62,7 @@ function mismatch(subject: string): InstallerError {
  * Binds the installation to this machine through a keyed digest, so the raw
  * machine ID is never retained or displayed.
  */
-export async function localBinding(): Promise<HostBinding> {
+export async function localBinding(retry: string): Promise<HostBinding> {
   let id = ''
   try {
     id = (await readFile('/etc/machine-id', 'utf8')).trim()
@@ -72,7 +72,7 @@ export async function localBinding(): Promise<HostBinding> {
   if (!/^[0-9a-f]{32}$/.test(id)) {
     throw new InstallerError({
       code: 'INSTALLATION_HOST_UNIDENTIFIED',
-      retry: 'qiln doctor',
+      retry,
     })
   }
   return { kind: 'local', machine: createHmac('sha256', 'qiln:installation:host').update(id).digest('hex') }
@@ -100,9 +100,9 @@ export function newRecord(name: string, host: HostBinding, inputs: InstallationI
   }
 }
 
-export function requireHost(record: InstallationRecord, host: HostBinding): void {
+export function requireHost(record: InstallationRecord, host: HostBinding, retry: string): void {
   if (!sameHost(record.host, host)) {
-    throw mismatch('The host identity')
+    throw mismatch('The host identity', retry)
   }
 }
 
@@ -110,16 +110,21 @@ export function requireHost(record: InstallationRecord, host: HostBinding): void
  * Evidence is never rebound: a different host, architecture, layout, or
  * checkout path is refused.
  */
-export function requireBound(record: InstallationRecord, host: HostBinding, inputs: InstallationInputs): void {
-  requireHost(record, host)
+export function requireBound(
+  record: InstallationRecord,
+  host: HostBinding,
+  inputs: InstallationInputs,
+  retry: string,
+): void {
+  requireHost(record, host, retry)
   if (record.architecture !== inputs.architecture.package) {
-    throw mismatch('The architecture')
+    throw mismatch('The architecture', retry)
   }
   if (record.layout !== layoutDigest(inputs.layout)) {
-    throw mismatch('The layout')
+    throw mismatch('The layout', retry)
   }
   if (record.checkoutPath !== inputs.sourceRoot) {
-    throw mismatch('The checkout path')
+    throw mismatch('The checkout path', retry)
   }
 }
 
@@ -128,8 +133,8 @@ export function requireBound(record: InstallationRecord, host: HostBinding, inpu
  * replacement is the one workflow that changes it. Both records are already
  * validated.
  */
-export function requireTransition(before: InstallationRecord, after: InstallationRecord): void {
+export function requireTransition(before: InstallationRecord, after: InstallationRecord, retry: string): void {
   if (!sameJson({ ...before, imageFingerprint: null }, { ...after, imageFingerprint: null })) {
-    throw invalidRecord('A write may change only the image pin of an installation record.')
+    throw invalidRecord('A write may change only the image pin of an installation record.', retry)
   }
 }

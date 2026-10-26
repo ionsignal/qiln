@@ -76,7 +76,7 @@ const os = {
 }
 
 const tools = {
-  async require(tool: Tool): Promise<string> {
+  async require(tool: Tool, retry: string): Promise<string> {
     const executable = await findExecutable(tool.name)
     if (executable) {
       return executable
@@ -87,21 +87,33 @@ const tools = {
         ['Tool', tool.name],
         ['Package', tool.packageName],
       ],
-      retry: 'qiln doctor',
+      retry,
     })
   },
 
-  async all(): Promise<Record<RequiredTool, string>> {
+  async all(retry: string): Promise<Record<RequiredTool, string>> {
     const paths = {} as Record<RequiredTool, string>
     for (const tool of INSTALLER_SPEC.tools) {
-      paths[tool.name] = await tools.require(tool)
+      paths[tool.name] = await tools.require(tool, retry)
     }
     return paths
   },
 }
 
+/**
+ * Locates one declared tool on the operator's machine, so a target that needs
+ * only some of the tools does not require the rest.
+ */
+export async function requireTool(name: RequiredTool, retry: string): Promise<string> {
+  const tool = INSTALLER_SPEC.tools.find(item => item.name === name)
+  if (tool === undefined) {
+    throw new RangeError(`'${name}' is not a declared required tool.`)
+  }
+  return await tools.require(tool, retry)
+}
+
 const deb = {
-  async package(dpkgQuery: string, name: string): Promise<InstalledPackage | null> {
+  async package(dpkgQuery: string, name: string, retry: string): Promise<InstalledPackage | null> {
     const result = await runProcess(dpkgQuery, ['-W', '-f=${binary:Package}\t${db:Status-Abbrev}\t${Version}\n', name])
     if (result.exitCode === 1) {
       return null
@@ -112,7 +124,7 @@ const deb = {
         facts: [
           ['Observed', `dpkg-query returned exit code ${result.exitCode ?? 'unknown'} while inspecting '${name}'.`],
         ],
-        retry: 'qiln doctor',
+        retry,
       })
     }
     const [packageName, status, version] = result.stdout.trim().split('\t')
@@ -125,7 +137,13 @@ const deb = {
     }
   },
 
-  async compare(dpkg: string, version: string, operator: 'ge' | 'lt', expectedVersion: string): Promise<boolean> {
+  async compare(
+    dpkg: string,
+    version: string,
+    operator: 'ge' | 'lt',
+    expectedVersion: string,
+    retry: string,
+  ): Promise<boolean> {
     const result = await runProcess(dpkg, ['--compare-versions', version, operator, expectedVersion])
     if (result.exitCode === 0) {
       return true
@@ -138,7 +156,7 @@ const deb = {
       facts: [
         ['Observed', `dpkg returned exit code ${result.exitCode ?? 'unknown'} while comparing the installed package.`],
       ],
-      retry: 'qiln doctor',
+      retry,
     })
   },
 
@@ -151,21 +169,21 @@ const deb = {
     }
   },
 
-  async incus(dpkg: string, dpkgQuery: string): Promise<InstalledPackage> {
+  async incus(dpkg: string, dpkgQuery: string, retry: string): Promise<InstalledPackage> {
     const candidates = (
-      await Promise.all([deb.package(dpkgQuery, 'incus'), deb.package(dpkgQuery, 'incus-base')])
+      await Promise.all([deb.package(dpkgQuery, 'incus', retry), deb.package(dpkgQuery, 'incus-base', retry)])
     ).filter((candidate): candidate is InstalledPackage => candidate !== null)
     if (candidates.length === 0) {
       throw new InstallerError({
         code: 'INCUS_PACKAGE_MISSING',
         facts: [['Observed', "Neither the 'incus' nor 'incus-base' package is installed according to dpkg."]],
-        retry: 'qiln doctor',
+        retry,
       })
     }
     for (const candidate of candidates) {
       const bounds = deb.bound(candidate.version)
-      const meetsMinimum = await deb.compare(dpkg, candidate.version, 'ge', bounds.minimum)
-      const belowMaximum = await deb.compare(dpkg, candidate.version, 'lt', bounds.maximumExclusive)
+      const meetsMinimum = await deb.compare(dpkg, candidate.version, 'ge', bounds.minimum, retry)
+      const belowMaximum = await deb.compare(dpkg, candidate.version, 'lt', bounds.maximumExclusive, retry)
       if (meetsMinimum && belowMaximum) {
         return candidate
       }
@@ -178,17 +196,17 @@ const deb = {
           `Installed package versions: ${candidates.map(candidate => `${candidate.name}=${candidate.version}`).join(', ')}.`,
         ],
       ],
-      retry: 'qiln doctor',
+      retry,
     })
   },
 }
 
-export async function validateHostPreflight(): Promise<HostPreflight> {
+export async function validateHostPreflight(retry: string): Promise<HostPreflight> {
   if (process.platform !== 'linux') {
     throw new InstallerError({
       code: 'UNSUPPORTED_HOST_PLATFORM',
       facts: [['Observed', `Node reports platform '${process.platform}'.`]],
-      retry: 'qiln doctor',
+      retry,
     })
   }
   let release: { id: string; version: string }
@@ -200,14 +218,14 @@ export async function validateHostPreflight(): Promise<HostPreflight> {
       facts: [
         ['Observed', '/etc/os-release could not be read or contains malformed required ID or VERSION_ID fields.'],
       ],
-      retry: 'qiln doctor',
+      retry,
     })
   }
   const distributionId = release.id.toLowerCase()
   const distributionVersion = release.version
   const kernelRelease = nodeOs.release()
-  requireSupportedRelease({ distributionId, distributionVersion, kernelRelease }, 'qiln doctor')
-  const commandPaths = await tools.all()
+  requireSupportedRelease({ distributionId, distributionVersion, kernelRelease }, retry)
+  const commandPaths = await tools.all(retry)
   const packageArchitecture = await runProcess(commandPaths.dpkg, ['--print-architecture'])
   const architecture = architectureOf(
     {
@@ -215,9 +233,9 @@ export async function validateHostPreflight(): Promise<HostPreflight> {
       machine: nodeOs.machine(),
       node: process.arch,
     },
-    'qiln doctor',
+    retry,
   )
-  const incusPackage = await deb.incus(commandPaths.dpkg, commandPaths['dpkg-query'])
+  const incusPackage = await deb.incus(commandPaths.dpkg, commandPaths['dpkg-query'], retry)
   return {
     distributionId,
     distributionVersion,

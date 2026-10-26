@@ -71,7 +71,7 @@ export const incusDiagnostics = Object.freeze({
     'Incus operation result is indeterminate',
     'The local wait deadline does not establish success or failure. The operation may still be running or may already have completed; Qiln will not cancel it automatically.',
     'Inspect the operation and actual resource state.',
-    'Re-run qiln up to reconcile without assuming that rollback occurred.',
+    'Re-run qiln installation configure for the same target to reconcile without assuming that rollback occurred.',
   ),
   INCUS_OPERATION_FAILED: entry(
     'Incus operation completed unsuccessfully',
@@ -99,7 +99,7 @@ export const incusDiagnostics = Object.freeze({
   INCUS_ETAG_CONFLICT: entry(
     'Incus resource changed during a guarded update',
     'Qiln will not replay a complete update body derived from stale provider state. Any permitted re-read and guarded retry has already been handled by the caller.',
-    'Stop concurrent configuration changes, then re-run qiln up.',
+    'Stop concurrent configuration changes, then re-run qiln installation configure for the same target.',
   ),
   INCUS_API_REQUEST_REJECTED: entry(
     'Incus rejected the requested operation',

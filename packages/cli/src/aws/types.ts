@@ -1,5 +1,5 @@
 import { AWS_RECORD_VERSION } from './spec'
-import { hasKeys, isRecord } from '../guards'
+import { hasKeys, isOperationId, isRecord, isTimestamp } from '../guards'
 import {
   POLICY_KEYS,
   POLICY_PATH,
@@ -73,20 +73,8 @@ export function validRegion(value: string): boolean {
   return /^(af|ap|ca|eu|il|me|mx|sa|us)-[a-z]+-[1-9][0-9]*$/.test(value)
 }
 
-export function isOperationId(value: unknown): value is string {
-  return typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value)
-}
-
 export function isAccountId(value: unknown): value is string {
   return typeof value === 'string' && /^[0-9]{12}$/.test(value)
-}
-
-export function isTimestamp(value: unknown): value is string {
-  if (typeof value !== 'string') {
-    return false
-  }
-  const timestamp = new Date(value)
-  return Number.isFinite(timestamp.getTime()) && timestamp.toISOString() === value
 }
 
 export function isIdentity(value: unknown): value is AwsIdentity {

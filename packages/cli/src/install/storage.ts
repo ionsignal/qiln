@@ -20,7 +20,7 @@ function configDifferences(
   }
 }
 
-export function assertVolume(volume: IncusStorageVolume, layout: Layout): void {
+export function assertVolume(volume: IncusStorageVolume, layout: Layout, retry: string): void {
   const differences = configDifferences(volume.config, layout.postgres.config)
   const compatible =
     volume.name === layout.postgres.volumeName &&
@@ -41,7 +41,7 @@ export function assertVolume(volume: IncusStorageVolume, layout: Layout): void {
         `Volume '${volume.name}' reports type='${volume.type}', content_type='${volume.contentType}', description='${volume.description}', and project='${volume.project || INSTALLER_SPEC.projectName}'; missing or mismatched expected keys: ${differences.missing.join(', ') || 'none'}; unexpected non-volatile keys: ${differences.unexpected.join(', ') || 'none'}.`,
       ],
     ],
-    retry: 'qiln doctor',
+    retry,
   })
 }
 

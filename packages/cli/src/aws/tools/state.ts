@@ -1,16 +1,16 @@
 import { constants } from 'node:fs'
 import { access, lstat, readlink, realpath, readdir, stat } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve } from 'node:path'
+import { AWS_SPEC } from '../spec'
+import { RELEASE, TOOL_SPEC } from './spec'
 import { InstallerError, isInstallerErrorCode, type InstallerErrorCode } from '../../diagnostic/error'
 import { inspectChild, openChildDir, readChild, writeChild, type Dir } from '../../state/files'
 import { acquireLock, type StateLock } from '../../state/lock'
 import { statePath } from '../../state/path'
-import { hasKeys, isErrorCode, isRecord } from '../../guards'
-import { AWS_SPEC } from '../spec'
+import { hasKeys, isErrorCode, isRecord, isTimestamp } from '../../guards'
 import { openAwsRoot } from '../root'
 import { userId } from '../host'
-import { isTimestamp } from '../types'
-import { RELEASE, TOOL_SPEC, type Artifact, type Release, type ReviewedLink, type TargetId } from './spec'
+import type { Artifact, Release, ReviewedLink, TargetId } from './spec'
 
 export interface InstallationRecord {
   version: 1

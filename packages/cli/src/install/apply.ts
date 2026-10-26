@@ -1,23 +1,22 @@
-import { InstallerError } from '../diagnostic/error'
-import { instancePut } from './credentials'
-import { instanceInput } from './instance'
+import { INSTALLER_SPEC } from './spec'
+import { instancePut, requireNoCollision } from './credentials'
+import { assertInstance, instanceInput } from './instance'
 import { networkInput } from './network'
 import { volumeInput } from './storage'
-import { INSTALLER_SPEC } from './spec'
+import { InstallerError } from '../diagnostic/error'
 import type { IncusClient } from '../incus/client'
 import type { IncusOperationRef } from '../incus/types'
+import type { Retry } from '../retry'
 import type { ImageSource } from './image'
 import type { ConfigurePlan, InstallAction } from './journal/types'
 import type { Observation } from './observe'
 import type { InstallationInputs } from './types'
 
-const RERUN =
-  'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]'
-
 export interface ApplyContext {
   client: IncusClient
   inputs: InstallationInputs
   source: ImageSource
+  retry: Retry
   /**
    * Called once an asynchronous request was accepted and before its wait begins,
    * so the caller can retain the operation reference first.
@@ -53,7 +52,7 @@ export async function apply(
   observation: Observation,
   context: ApplyContext,
 ): Promise<void> {
-  const { client, inputs, source } = context
+  const { client, inputs, source, retry } = context
   const { layout } = inputs
   switch (action) {
     case 'delete-image':
@@ -88,7 +87,7 @@ export async function apply(
       await client.createStoragePoolVolume(layout.pool.name, volumeInput(layout))
       return
     case 'create-instance':
-      await wait(context, await client.createInstance(instanceInput(plan.fingerprint, inputs)))
+      await wait(context, await client.createInstance(instanceInput(plan.fingerprint, inputs, retry.configure)))
       return
     case 'update-instance': {
       const { instance, credentials } = observation
@@ -99,9 +98,11 @@ export async function apply(
         throw new InstallerError({
           code: 'LOCAL_CREDENTIAL_SET_REQUIRED',
           facts: [['Observed', 'The protected installer state directory contains no credential set.']],
-          retry: RERUN,
+          retry: retry.configure,
         })
       }
+      requireNoCollision(instance.value.config, retry.configure)
+      assertInstance(instance.value, plan.fingerprint, inputs, retry.configure)
       await wait(
         context,
         await client.updateInstance(

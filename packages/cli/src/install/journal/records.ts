@@ -1,18 +1,19 @@
+import { INSTALLER_SPEC } from '../spec'
 import { isAppendOnly, isHistoryConsistent } from '../../journal/history'
 import { stateOf } from '../../journal/step'
 import { isErrorCode } from '../../guards'
 import { encodeRecord, sameJson } from '../../json'
 import { InstallerError } from '../../diagnostic/error'
 import { readChild, writeChild, type Dir } from '../../state/files'
-import type { InstallationRecord } from '../records'
-import { currentUserId, requireInstallationLock } from '../state'
-import { INSTALLER_SPEC } from '../spec'
+import { currentUserId } from '../../state/user'
+import { requireInstallationLock } from '../state'
 import { actionsOf, evidenceSchema, type ConfigureEvidence } from './types'
+import type { InstallationRecord } from '../records'
 
-function invalid(): never {
+function invalid(retry: string): never {
   throw new InstallerError({
     code: 'INSTALLATION_EVIDENCE_INVALID',
-    retry: 'qiln doctor',
+    retry,
   })
 }
 
@@ -44,10 +45,10 @@ function isConsistent(evidence: ConfigureEvidence, record: InstallationRecord): 
   )
 }
 
-function parse(value: unknown, record: InstallationRecord): ConfigureEvidence {
+function parse(value: unknown, record: InstallationRecord, retry: string): ConfigureEvidence {
   const parsed = evidenceSchema.safeParse(value)
   if (!parsed.success || !isConsistent(parsed.data, record)) {
-    return invalid()
+    return invalid(retry)
   }
   return parsed.data
 }
@@ -56,7 +57,11 @@ function parse(value: unknown, record: InstallationRecord): ConfigureEvidence {
  * Lock-free so status can show evidence while an operation is running. An absent
  * file means no configuration history, and any other failure fails closed.
  */
-export async function read(directory: Dir, record: InstallationRecord): Promise<ConfigureEvidence | null> {
+export async function read(
+  directory: Dir,
+  record: InstallationRecord,
+  retry: string,
+): Promise<ConfigureEvidence | null> {
   let value: unknown
   try {
     const snapshot = await readChild(directory, INSTALLER_SPEC.state.configureFileName, {
@@ -70,9 +75,9 @@ export async function read(directory: Dir, record: InstallationRecord): Promise<
     if (isErrorCode(error, 'ENOENT')) {
       return null
     }
-    return invalid()
+    return invalid(retry)
   }
-  return parse(value, record)
+  return parse(value, record, retry)
 }
 
 /**
@@ -100,9 +105,9 @@ function operationRecorded(before: ConfigureEvidence, after: ConfigureEvidence):
  * append-only rule, and operation references are added only as described above.
  * Both records are already validated.
  */
-function requireTransition(before: ConfigureEvidence, after: ConfigureEvidence): void {
+function requireTransition(before: ConfigureEvidence, after: ConfigureEvidence, retry: string): void {
   if (!sameJson(before.binding, after.binding) || !isAppendOnly(before, after) || !operationRecorded(before, after)) {
-    invalid()
+    invalid(retry)
   }
 }
 
@@ -111,10 +116,15 @@ function requireTransition(before: ConfigureEvidence, after: ConfigureEvidence):
  * installation lock held by this process. `directory` is the installation's own
  * directory.
  */
-export async function save(directory: Dir, record: InstallationRecord, evidence: ConfigureEvidence): Promise<void> {
-  await requireInstallationLock(directory)
-  const next = parse(evidence, record)
-  requireTransition((await read(directory, record)) ?? blank(record), next)
+export async function save(
+  directory: Dir,
+  record: InstallationRecord,
+  evidence: ConfigureEvidence,
+  retry: string,
+): Promise<void> {
+  await requireInstallationLock(directory, retry)
+  const next = parse(evidence, record, retry)
+  requireTransition((await read(directory, record, retry)) ?? blank(record), next, retry)
   await writeChild(
     directory,
     INSTALLER_SPEC.state.configureFileName,

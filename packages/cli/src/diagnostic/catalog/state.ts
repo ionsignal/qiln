@@ -42,7 +42,7 @@ export const stateDiagnostics = Object.freeze({
   INSTALLER_LOCKED: entry(
     'Installer lock already exists',
     'Qiln never waits for, removes, or assumes that an existing lock is stale.',
-    'Confirm that no qiln up process is active before deciding whether an old lock can be removed manually.',
+    'Confirm that no qiln installation process is active before deciding whether an old lock can be removed manually.',
   ),
   INSTALLER_LOCK_FAILED: entry(
     'Installer lock could not be established',
@@ -128,7 +128,7 @@ export const stateDiagnostics = Object.freeze({
   FINAL_INSTANCE_CREDENTIAL_MISMATCH: entry(
     'Instance credentials do not match local credentials',
     'Qiln reports success only after exact equality with the retained text and binary credentials is verified.',
-    'Inspect concurrent instance changes, then re-run qiln up.',
+    'Inspect concurrent instance changes, then re-run qiln installation configure for the same target.',
   ),
   AUTHORIZED_KEYS_REQUIRED: entry(
     'First credential set requires an authorized-key roster',

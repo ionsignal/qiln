@@ -1,16 +1,17 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { INSTALLER_SPEC } from './spec'
+import { apply } from './apply'
+import { verify } from './verify'
+import { planOf, type PlanRequest } from './plan'
+import { observe, type Observation } from './observe'
+import { createCredentials, replaceRoster } from './credentials'
+import { pinImage, pinned } from './state'
 import { canonical, sameJson } from '../json'
 import { InstallerError } from '../diagnostic/error'
 import { IncusApiError, IncusOperationError, type IncusClient } from '../incus/client'
 import { toInstallerError } from '../incus/errors'
 import { checkCancellation } from '../terminal/prompts'
-import { apply } from './apply'
-import { createCredentials, replaceRoster } from './credentials'
-import { observe, type Observation } from './observe'
-import { planOf } from './plan'
-import { INSTALLER_SPEC } from './spec'
-import { currentUserId, pinImage, pinned } from './state'
-import { verify } from './verify'
+import { currentUserId } from '../state/user'
 import { requireNotStuck, returned } from './journal/facts'
 import {
   actionsOf,
@@ -22,13 +23,11 @@ import {
   type InstallAction,
 } from './journal/types'
 import * as records from './journal/records'
+import type { Retry } from '../retry'
 import type { Dir, FileSnapshot } from '../state/files'
 import type { ImageSource } from './image'
 import type { InstallationRecord } from './records'
 import type { InstallationInputs } from './types'
-
-const RERUN =
-  'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]'
 
 /**
  * No scripts are approved here, so the recipe identifies the installer
@@ -74,6 +73,7 @@ export interface ConfigureContext {
   sshKeygen: string
   roster: FileSnapshot | null
   hooks: ConfigureHooks
+  retry: Retry
 }
 
 /**
@@ -85,11 +85,16 @@ export interface ConfigureResult {
   observation: Observation
 }
 
-function failure(action: InstallAction, outcome: 'refused' | 'uncertain', error: unknown): InstallerError {
+function failure(
+  action: InstallAction,
+  outcome: 'refused' | 'uncertain',
+  error: unknown,
+  retry: string,
+): InstallerError {
   const cause = toInstallerError(error, {
     check: 'installation step',
     operation: OPERATIONS[action],
-    rerun: RERUN,
+    rerun: retry,
   })
   return new InstallerError({
     code: 'INSTALLATION_STEP_FAILED',
@@ -104,18 +109,18 @@ function failure(action: InstallAction, outcome: 'refused' | 'uncertain', error:
       ['Reason', cause.message],
       ...cause.facts,
     ],
-    retry: RERUN,
+    retry,
   })
 }
 
-function unverified(installation: string, subject: string): InstallerError {
+function unverified(installation: string, subject: string, retry: string): InstallerError {
   return new InstallerError({
     code: 'INSTALLATION_NOT_VERIFIED',
     facts: [
       ['Installation', installation],
       ['Unverified', subject],
     ],
-    retry: RERUN,
+    retry,
   })
 }
 
@@ -137,9 +142,9 @@ export class Configurer {
   ) {}
 
   public static async open(context: ConfigureContext): Promise<Configurer> {
-    const { directory, installation } = context
-    const evidence = (await records.read(directory, installation)) ?? records.blank(installation)
-    requireNotStuck(evidence, installation.name)
+    const { directory, installation, retry } = context
+    const evidence = (await records.read(directory, installation, retry.inspect)) ?? records.blank(installation)
+    requireNotStuck(evidence, installation.name, retry.inspect)
     return new Configurer(context, installation, evidence)
   }
 
@@ -148,19 +153,20 @@ export class Configurer {
    * evidence. An installation that already matches needs no approval.
    */
   public async run(signal: AbortSignal): Promise<ConfigureResult> {
-    const { hooks, inputs, roster } = this.context
+    const { hooks, inputs, roster, retry } = this.context
+    const request: PlanRequest = { inputs, roster, retry }
     const observation = (await this.settleReturned()) ?? (await this.fresh())
-    const plan = planOf(observation, { inputs, roster })
+    const plan = planOf(observation, request)
     hooks.show(plan)
     if (isEmpty(plan)) {
       return { plan, observation }
     }
     await hooks.approve(plan)
     const current = await this.fresh()
-    if (!sameJson(planOf(current, { inputs, roster }), plan)) {
+    if (!sameJson(planOf(current, request), plan)) {
       throw new InstallerError({
         code: 'INSTALLATION_PLAN_CHANGED',
-        retry: RERUN,
+        retry: retry.configure,
       })
     }
     const authorization = await this.authorize(plan)
@@ -178,15 +184,23 @@ export class Configurer {
     }
     await this.pin(plan)
     const final = await this.fresh()
-    if (!isEmpty(planOf(final, { inputs, roster }))) {
-      throw unverified(this.installation.name, 'the complete installation')
+    if (!isEmpty(planOf(final, request))) {
+      throw unverified(this.installation.name, 'the complete installation', retry.configure)
     }
     return { plan, observation: final }
   }
 
   private async fresh(): Promise<Observation> {
-    const { client, directory, sshKeygen, source, inputs } = this.context
-    return await observe({ client, directory, sshKeygen, source, installation: pinned(this.installation), inputs })
+    const { client, directory, sshKeygen, source, inputs, retry } = this.context
+    return await observe({
+      client,
+      directory,
+      sshKeygen,
+      source,
+      installation: pinned(this.installation),
+      inputs,
+      retry,
+    })
   }
 
   private get lastStep(): ConfigureStep {
@@ -201,7 +215,7 @@ export class Configurer {
 
   private async persist(changes: Partial<ConfigureEvidence>): Promise<void> {
     const next = { ...this.evidence, ...changes }
-    await records.save(this.context.directory, this.installation, next)
+    await records.save(this.context.directory, this.installation, next, this.context.retry.inspect)
     this.evidence = next
   }
 
@@ -225,7 +239,12 @@ export class Configurer {
 
   private async pin(plan: ConfigurePlan): Promise<void> {
     if (plan.pin && this.installation.imageFingerprint !== plan.fingerprint) {
-      this.installation = await pinImage(this.context.directory, this.installation, plan.fingerprint)
+      this.installation = await pinImage(
+        this.context.directory,
+        this.installation,
+        plan.fingerprint,
+        this.context.retry,
+      )
     }
   }
 
@@ -234,7 +253,7 @@ export class Configurer {
    * follows. A roster is present whenever the plan generates or replaces.
    */
   private async writeCredentials(plan: ConfigurePlan): Promise<void> {
-    const { directory, sshKeygen, roster } = this.context
+    const { directory, sshKeygen, roster, retry } = this.context
     if (plan.credentials === 'reuse') {
       return
     }
@@ -244,9 +263,9 @@ export class Configurer {
       })
     }
     if (plan.credentials === 'generate') {
-      await createCredentials(directory, roster, sshKeygen)
+      await createCredentials(directory, roster, sshKeygen, retry.configure)
     } else {
-      await replaceRoster(directory, roster, sshKeygen)
+      await replaceRoster(directory, roster, sshKeygen, retry.configure)
     }
   }
 
@@ -256,7 +275,7 @@ export class Configurer {
     action: InstallAction,
     observation: Observation,
   ): Promise<Observation> {
-    const { client, inputs, source } = this.context
+    const { client, inputs, source, retry } = this.context
     await this.persist({
       steps: [
         ...this.evidence.steps,
@@ -277,6 +296,7 @@ export class Configurer {
         client,
         inputs,
         source,
+        retry,
         accepted: async operation => {
           request.accepted = true
           await this.persist({
@@ -302,10 +322,11 @@ export class Configurer {
    * show that nothing changed.
    */
   private async conclude(action: InstallAction, error: unknown, accepted: boolean): Promise<never> {
+    const { retry } = this.context
     const at = new Date().toISOString()
     if (error instanceof IncusOperationError) {
       await this.amend({ completion: { exitCode: 1, completedAt: at } })
-      throw failure(action, 'uncertain', error)
+      throw failure(action, 'uncertain', error, retry.configure)
     }
     const refused =
       !accepted &&
@@ -313,15 +334,16 @@ export class Configurer {
         (error instanceof IncusApiError && error.statusCode >= 400 && error.statusCode < 500))
     if (refused) {
       await this.amend({ refusedAt: at })
-      throw failure(action, 'refused', error)
+      throw failure(action, 'refused', error, retry.configure)
     }
-    throw failure(action, 'uncertain', error)
+    throw failure(action, 'uncertain', error, retry.configure)
   }
 
   private async verified(plan: ConfigurePlan, action: InstallAction): Promise<Observation> {
+    const { inputs, retry } = this.context
     const observation = await this.fresh()
-    if (!verify(action, plan, observation)) {
-      throw unverified(this.installation.name, `step ${action}`)
+    if (!verify(action, plan, observation, inputs, retry.configure)) {
+      throw unverified(this.installation.name, `step ${action}`, retry.configure)
     }
     await this.amend({ verifiedAt: new Date().toISOString() })
     return observation
@@ -340,7 +362,7 @@ export class Configurer {
     if (plan === undefined) {
       throw new InstallerError({
         code: 'INTERNAL_ERROR',
-        retry: RERUN,
+        retry: this.context.retry.configure,
       })
     }
     return await this.verified(plan, pending.action)

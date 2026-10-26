@@ -1,7 +1,9 @@
 import { constants } from 'node:fs'
 import { lstat, open, unlink, type FileHandle } from 'node:fs/promises'
-import { InstallerError, type InstallerErrorCode } from '../diagnostic/error'
+import { currentUserId } from './user'
 import { Dir, readChild } from './files'
+import { isErrorCode } from '../guards'
+import { InstallerError, type InstallerErrorCode } from '../diagnostic/error'
 
 export interface StateLock {
   release(): Promise<void>
@@ -18,21 +20,6 @@ export interface LockOptions {
     locked: InstallerErrorCode
     failed: InstallerErrorCode
   }
-}
-
-function isErrorCode(value: unknown, code: string): boolean {
-  return typeof value === 'object' && value !== null && 'code' in value && value.code === code
-}
-
-function currentUserId(): number {
-  if (typeof process.geteuid !== 'function') {
-    throw new InstallerError({
-      code: 'UNSUPPORTED_PLATFORM',
-      facts: [['Observed', `Node platform '${process.platform}' does not expose process.geteuid().`]],
-      retry: 'qiln doctor',
-    })
-  }
-  return process.geteuid()
 }
 
 async function removeOwnedLock(path: string, handle: FileHandle, options: LockOptions): Promise<void> {

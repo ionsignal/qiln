@@ -1,5 +1,8 @@
 import { InstallerError, type InstallerErrorCode } from '../diagnostic/error'
 import { INSTALLER_SPEC } from './spec'
+import type { Layout } from './layout'
+
+const GIB = 1_073_741_824
 
 export interface HostRelease {
   distributionId: string
@@ -97,6 +100,26 @@ export function requireSupportedRelease(host: HostRelease, retry: string): void 
       retry,
     })
   }
+}
+
+/**
+ * The orchestrator memory limit must fit the total memory the target reports.
+ * Only a limit written in whole GiB is judged, and an omitted limit is not
+ * applied. This compares configuration with total memory, not free capacity.
+ */
+export function requireCapacity(layout: Layout, memoryBytes: number, retry: string): void {
+  const match = /^([1-9][0-9]*)GiB$/.exec(layout.orchestrator.limits['limits.memory'] ?? '')
+  if (match === null || Number(match[1]) * GIB <= memoryBytes) {
+    return
+  }
+  throw new InstallerError({
+    code: 'INSTALLATION_TARGET_CAPACITY',
+    facts: [
+      ['Memory limit', `${match[1]} GiB`],
+      ['Observed memory', `${(memoryBytes / GIB).toFixed(1)} GiB total`],
+    ],
+    retry,
+  })
 }
 
 /**

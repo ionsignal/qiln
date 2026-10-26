@@ -8,44 +8,26 @@ import type { IncusClient } from '../incus/client'
 import type { HostPreflight } from './host'
 import type { IncusStoragePool, IncusStorageVolume } from '../incus/types'
 
-export interface StoragePreflight {
-  hostPoolHealth: string
+export interface IncusStoragePreflight {
   incusPool: IncusStoragePool
   existingPostgresVolume: IncusStorageVolume | null
 }
 
-export async function validateStoragePreflight(
-  host: HostPreflight,
+export interface StoragePreflight extends IncusStoragePreflight {
+  hostPoolHealth: string
+}
+
+/**
+ * The Incus-API half of the storage check, shared by every target: the layout's
+ * pool must exist and be compatible, and an existing PostgreSQL volume must be
+ * compatible.
+ */
+export async function validateIncusStorage(
   client: IncusClient,
   layout: Layout,
-): Promise<StoragePreflight> {
+  retry: string,
+): Promise<IncusStoragePreflight> {
   const poolName = layout.pool.name
-  const hostPool = await runProcess(host.commandPaths.zpool, ['list', '-H', '-o', 'name,health', poolName])
-  if (hostPool.exitCode !== 0) {
-    throw new InstallerError({
-      code: 'HOST_ZFS_POOL_MISSING',
-      facts: [['Observed', `zpool list could not find or inspect '${poolName}'.`]],
-      retry: 'qiln doctor',
-    })
-  }
-  const [hostPoolName, hostPoolHealth] = hostPool.stdout.trim().split(/\s+/)
-  if (hostPoolName !== poolName || hostPoolHealth !== 'ONLINE') {
-    throw new InstallerError({
-      code: 'HOST_ZFS_POOL_UNHEALTHY',
-      facts: [
-        ['Observed', `zpool reports name='${hostPoolName || 'unknown'}' and health='${hostPoolHealth || 'unknown'}'.`],
-      ],
-      retry: 'qiln doctor',
-    })
-  }
-  const hostDataset = await runProcess(host.commandPaths.zfs, ['list', '-H', '-o', 'name', poolName])
-  if (hostDataset.exitCode !== 0 || hostDataset.stdout.trim() !== poolName) {
-    throw new InstallerError({
-      code: 'HOST_ZFS_DATASET_UNAVAILABLE',
-      facts: [['Observed', `zfs list did not return the expected '${poolName}' dataset.`]],
-      retry: 'qiln doctor',
-    })
-  }
   let incusPool: IncusStoragePool | null
   try {
     incusPool = await client.getStoragePoolOrNull(poolName)
@@ -53,14 +35,14 @@ export async function validateStoragePreflight(
     throw toInstallerError(error, {
       check: 'existing Incus storage pool',
       operation: `inspect the '${poolName}' storage pool`,
-      rerun: 'qiln doctor',
+      rerun: retry,
     })
   }
   if (!incusPool) {
     throw new InstallerError({
       code: 'INCUS_STORAGE_POOL_MISSING',
       facts: [['Observed', `GET /1.0/storage-pools/${poolName} returned not found.`]],
-      retry: 'qiln doctor',
+      retry,
     })
   }
   const incusPoolCompatible =
@@ -77,7 +59,7 @@ export async function validateStoragePreflight(
           `Incus reports driver='${incusPool.driver}', status='${incusPool.status || 'unknown'}', and source='${incusPool.config.source ?? 'unset'}'.`,
         ],
       ],
-      retry: 'qiln doctor',
+      retry,
     })
   }
   let existingPostgresVolume: IncusStorageVolume | null
@@ -91,15 +73,57 @@ export async function validateStoragePreflight(
     throw toInstallerError(error, {
       check: 'existing Qiln PostgreSQL storage volume',
       operation: 'inspect the existing Qiln PostgreSQL storage volume',
-      rerun: 'qiln doctor',
+      rerun: retry,
     })
   }
   if (existingPostgresVolume) {
-    assertVolume(existingPostgresVolume, layout)
+    assertVolume(existingPostgresVolume, layout, retry)
   }
   return {
-    hostPoolHealth,
     incusPool,
     existingPostgresVolume,
+  }
+}
+
+/**
+ * The local check: this machine's ZFS pool first, then the shared Incus half.
+ */
+export async function validateStoragePreflight(
+  host: HostPreflight,
+  client: IncusClient,
+  layout: Layout,
+  retry: string,
+): Promise<StoragePreflight> {
+  const poolName = layout.pool.name
+  const hostPool = await runProcess(host.commandPaths.zpool, ['list', '-H', '-o', 'name,health', poolName])
+  if (hostPool.exitCode !== 0) {
+    throw new InstallerError({
+      code: 'HOST_ZFS_POOL_MISSING',
+      facts: [['Observed', `zpool list could not find or inspect '${poolName}'.`]],
+      retry,
+    })
+  }
+  const [hostPoolName, hostPoolHealth] = hostPool.stdout.trim().split(/\s+/)
+  if (hostPoolName !== poolName || hostPoolHealth !== 'ONLINE') {
+    throw new InstallerError({
+      code: 'HOST_ZFS_POOL_UNHEALTHY',
+      facts: [
+        ['Observed', `zpool reports name='${hostPoolName || 'unknown'}' and health='${hostPoolHealth || 'unknown'}'.`],
+      ],
+      retry,
+    })
+  }
+  const hostDataset = await runProcess(host.commandPaths.zfs, ['list', '-H', '-o', 'name', poolName])
+  if (hostDataset.exitCode !== 0 || hostDataset.stdout.trim() !== poolName) {
+    throw new InstallerError({
+      code: 'HOST_ZFS_DATASET_UNAVAILABLE',
+      facts: [['Observed', `zfs list did not return the expected '${poolName}' dataset.`]],
+      retry,
+    })
+  }
+  const incus = await validateIncusStorage(client, layout, retry)
+  return {
+    hostPoolHealth,
+    ...incus,
   }
 }

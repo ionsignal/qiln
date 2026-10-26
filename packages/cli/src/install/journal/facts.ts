@@ -29,7 +29,7 @@ export function unsettled(evidence: ConfigureEvidence | null): ConfigureStep[] {
  * An open or uncertain step blocks configuration, because its effect on the
  * Incus daemon is unknown and nothing here replays or resumes it.
  */
-export function requireNotStuck(evidence: ConfigureEvidence | null, installation: string): void {
+export function requireNotStuck(evidence: ConfigureEvidence | null, installation: string, retry: string): void {
   const blocking = stuck(evidence)
   if (blocking.length > 0) {
     throw new InstallerError({
@@ -38,7 +38,7 @@ export function requireNotStuck(evidence: ConfigureEvidence | null, installation
         ['Installation', installation],
         ['Unresolved steps', blocking.map(step => `${step.action} (${journal.stateOf(step)})`).join(', ')],
       ],
-      retry: 'qiln doctor',
+      retry,
     })
   }
 }

@@ -1,14 +1,13 @@
 import { diagnostic as awsDiagnostic, isCancellation } from './aws/errors'
 import { CommanderError } from 'commander'
-import { doctor } from './commands/doctor'
-import { up } from './commands/up'
 import { InstallerError } from './diagnostic/error'
 import { ProcessExecutionError } from './process'
 import { createProgram, parserFailure, type GlobalOptions } from './program'
-import { Reporter, type OutputStream } from './terminal/reporter'
+import { Reporter, type ColorMode, type OutputStream } from './terminal/reporter'
 import * as aws from './commands/aws'
+import * as installation from './commands/installation'
 
-type OperationalCommand = 'doctor' | 'up' | 'aws'
+type OperationalCommand = 'installation' | 'aws'
 
 interface OutputChunk {
   text: string
@@ -22,7 +21,7 @@ function assertUnprivilegedInvocation(): void {
       facts: [
         ['Observed', `Node platform '${process.platform}' does not expose process.getuid() and process.geteuid().`],
       ],
-      retry: 'qiln doctor',
+      retry: 'qiln --help',
     })
   }
   if (process.getuid() === 0 || process.geteuid() === 0) {
@@ -32,18 +31,13 @@ function assertUnprivilegedInvocation(): void {
         ['User ID', String(process.getuid())],
         ['Effective user ID', String(process.geteuid())],
       ],
-      retry: 'qiln doctor',
+      retry: 'qiln --help',
     })
   }
 }
 
 function rerun(command: OperationalCommand | undefined): string {
-  if (command === 'aws') {
-    return 'qiln aws connect'
-  }
-  return command === 'up'
-    ? 'qiln up --source <checkout> --image <alias-or-fingerprint> [--authorized-keys <roster>]'
-    : 'qiln doctor'
+  return command === 'aws' ? 'qiln aws connect' : 'qiln installation --help'
 }
 
 function processFailure(error: ProcessExecutionError, command: OperationalCommand | undefined): InstallerError {
@@ -66,100 +60,96 @@ export async function run(argumentsList: readonly string[]): Promise<number> {
   let reporter = new Reporter()
   let command: OperationalCommand | undefined
   const output: OutputChunk[] = []
+
+  /**
+   * Every operational handler starts the same way: record the command kind,
+   * bind a reporter to the color mode, refuse a privileged invocation, and
+   * print the header.
+   */
+  function begin(kind: OperationalCommand, color: ColorMode, name: string, description: string): Reporter {
+    command = kind
+    reporter = new Reporter({ color })
+    assertUnprivilegedInvocation()
+    reporter.header(name, description)
+    return reporter
+  }
+
   const program = createProgram(
     {
-      async doctor(color) {
-        command = 'doctor'
-        reporter = new Reporter({ color })
-        assertUnprivilegedInvocation()
-        reporter.header('doctor', 'read-only preflight')
-        await doctor(reporter)
-      },
-      async up(options, color) {
-        command = 'up'
-        reporter = new Reporter({ color })
-        assertUnprivilegedInvocation()
-        reporter.header('up', 'stopped installation convergence')
-        await up(options, reporter)
+      installation: {
+        async list(color) {
+          await installation.list(begin('installation', color, 'installation list', 'registered installations'))
+        },
+        async status(selector, color) {
+          await installation.status(
+            selector,
+            begin('installation', color, 'installation status', 'local installation evidence'),
+          )
+        },
+        async inspect(selector, color) {
+          await installation.inspect(
+            selector,
+            begin('installation', color, 'installation inspect', 'read-only target preflight'),
+          )
+        },
+        async configure(selector, options, color) {
+          await installation.configure(
+            selector,
+            options,
+            begin('installation', color, 'installation configure', 'stopped installation convergence'),
+          )
+        },
       },
       aws: {
         async connect(options, color) {
-          command = 'aws'
-          reporter = new Reporter({ color })
-          assertUnprivilegedInvocation()
-          reporter.header('aws connect', 'guided AWS sign-in')
-          await aws.connect(options, reporter)
+          await aws.connect(options, begin('aws', color, 'aws connect', 'guided AWS sign-in'))
         },
         async status(options, color) {
-          command = 'aws'
-          reporter = new Reporter({ color })
-          assertUnprivilegedInvocation()
-          reporter.header('aws status', 'operator identity verification')
-          await aws.status(options, reporter)
+          await aws.status(options, begin('aws', color, 'aws status', 'operator identity verification'))
         },
         async disconnect(options, color) {
-          command = 'aws'
-          reporter = new Reporter({ color })
-          assertUnprivilegedInvocation()
-          reporter.header('aws disconnect', 'local connection removal')
-          await aws.disconnect(options, reporter)
+          await aws.disconnect(options, begin('aws', color, 'aws disconnect', 'local connection removal'))
         },
         deployment: {
           async create(options, color) {
-            command = 'aws'
-            reporter = new Reporter({ color })
-            assertUnprivilegedInvocation()
-            reporter.header('aws deployment create', 'approved host creation')
-            await aws.deployment.create(options, reporter)
+            await aws.deployment.create(options, begin('aws', color, 'aws deployment create', 'approved host creation'))
           },
           async status(options, color) {
-            command = 'aws'
-            reporter = new Reporter({ color })
-            assertUnprivilegedInvocation()
-            reporter.header('aws deployment status', 'local deployment evidence')
-            await aws.deployment.status(options, reporter)
+            await aws.deployment.status(
+              options,
+              begin('aws', color, 'aws deployment status', 'local deployment evidence'),
+            )
           },
           async list(color) {
-            command = 'aws'
-            reporter = new Reporter({ color })
-            assertUnprivilegedInvocation()
-            reporter.header('aws deployment list', 'retained deployments')
-            await aws.deployment.list(reporter)
+            await aws.deployment.list(begin('aws', color, 'aws deployment list', 'retained deployments'))
           },
           async inspect(options, color) {
-            command = 'aws'
-            reporter = new Reporter({ color })
-            assertUnprivilegedInvocation()
-            reporter.header('aws deployment inspect', 'fresh deployment observation')
-            await aws.deployment.inspect(options, reporter)
+            await aws.deployment.inspect(
+              options,
+              begin('aws', color, 'aws deployment inspect', 'fresh deployment observation'),
+            )
           },
           async verify(options, color) {
-            command = 'aws'
-            reporter = new Reporter({ color })
-            assertUnprivilegedInvocation()
-            reporter.header('aws deployment verify', 'read-only guest baseline')
-            await aws.deployment.verify(options, reporter)
+            await aws.deployment.verify(
+              options,
+              begin('aws', color, 'aws deployment verify', 'read-only guest baseline'),
+            )
           },
           async prepare(options, color) {
-            command = 'aws'
-            reporter = new Reporter({ color })
-            assertUnprivilegedInvocation()
-            reporter.header('aws deployment prepare', 'approved ZFS and Incus preparation')
-            await aws.deployment.prepare(options, reporter)
+            await aws.deployment.prepare(
+              options,
+              begin('aws', color, 'aws deployment prepare', 'approved ZFS and Incus preparation'),
+            )
           },
           ssh(_options, color) {
-            command = 'aws'
-            reporter = new Reporter({ color })
-            assertUnprivilegedInvocation()
-            reporter.header('aws deployment ssh', 'interactive session (unavailable)')
+            begin('aws', color, 'aws deployment ssh', 'interactive session (unavailable)')
             aws.deployment.ssh()
           },
           async remove(options, color) {
-            command = 'aws'
-            reporter = new Reporter({ color })
-            assertUnprivilegedInvocation()
-            reporter.header('aws deployment remove', 'approved deployment removal')
-            await aws.deployment.remove(options, reporter)
+            await aws.deployment.remove(
+              options,
+              begin('aws', color, 'aws deployment remove', 'approved deployment removal'),
+            )
           },
         },
       },

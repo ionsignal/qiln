@@ -292,7 +292,7 @@ export class Reporter {
         ? error
         : new InstallerError({
             code: 'INTERNAL_ERROR',
-            retry: 'qiln doctor',
+            retry: 'qiln --help',
           })
     const definition = catalog[diagnostic.code]
     const interactive = this.interactive(this.stderr)

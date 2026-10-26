@@ -7,10 +7,8 @@ import type { IncusConfigMap, IncusDevicesMap, IncusInstance, IncusInstanceCreat
 
 const STOPPED_STATUS_CODE = 102
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/
-const RERUN =
-  'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]'
 
-function validateSourceRoot(sourceRoot: string): void {
+function validateSourceRoot(sourceRoot: string, retry: string): void {
   if (
     !isAbsolute(sourceRoot) ||
     sourceRoot.trim() !== sourceRoot ||
@@ -20,7 +18,7 @@ function validateSourceRoot(sourceRoot: string): void {
     throw new InstallerError({
       code: 'INVALID_SOURCE_ROOT',
       facts: [['Observed', 'The source root is not a canonical absolute non-root path.']],
-      retry: RERUN,
+      retry,
     })
   }
 }
@@ -32,8 +30,8 @@ function expectedConfig(layout: Layout): IncusConfigMap {
   }
 }
 
-function expectedDevices({ layout, sourceRoot }: InstallationInputs): IncusDevicesMap {
-  validateSourceRoot(sourceRoot)
+function expectedDevices({ layout, sourceRoot }: InstallationInputs, retry: string): IncusDevicesMap {
+  validateSourceRoot(sourceRoot, retry)
   const { pool, network, postgres, orchestrator } = layout
   return {
     root: {
@@ -112,12 +110,13 @@ function sameDevice(actual: Readonly<Record<string, string>>, expected: Readonly
 function deviceDifferences(
   actual: IncusDevicesMap,
   inputs: InstallationInputs,
+  retry: string,
 ): {
   missing: string[]
   mismatched: string[]
   unexpected: string[]
 } {
-  const expected = expectedDevices(inputs)
+  const expected = expectedDevices(inputs, retry)
   const expectedNames = Object.keys(expected)
   const actualNames = Object.keys(actual)
   const missing = expectedNames.filter(name => actual[name] === undefined)
@@ -134,9 +133,13 @@ function deviceDifferences(
   }
 }
 
-export function assertInstance(instance: IncusInstance, imageFingerprint: string, inputs: InstallationInputs): void {
+/**
+ * The one comparison behind both the boolean and the diagnostic form, so a
+ * verification and a refusal can never disagree about compatibility.
+ */
+function compatibility(instance: IncusInstance, imageFingerprint: string, inputs: InstallationInputs, retry: string) {
   const config = configDifferences(instance.config, expectedConfig(inputs.layout), imageFingerprint)
-  const devices = deviceDifferences(instance.devices, inputs)
+  const devices = deviceDifferences(instance.devices, inputs, retry)
   const compatible =
     instance.name === INSTALLER_SPEC.orchestrator.name &&
     instance.architecture === inputs.architecture.incus &&
@@ -154,6 +157,25 @@ export function assertInstance(instance: IncusInstance, imageFingerprint: string
     devices.missing.length === 0 &&
     devices.mismatched.length === 0 &&
     devices.unexpected.length === 0
+  return { config, devices, compatible }
+}
+
+export function instanceFits(
+  instance: IncusInstance,
+  imageFingerprint: string,
+  inputs: InstallationInputs,
+  retry: string,
+): boolean {
+  return compatibility(instance, imageFingerprint, inputs, retry).compatible
+}
+
+export function assertInstance(
+  instance: IncusInstance,
+  imageFingerprint: string,
+  inputs: InstallationInputs,
+  retry: string,
+): void {
+  const { config, devices, compatible } = compatibility(instance, imageFingerprint, inputs, retry)
   if (compatible) {
     return
   }
@@ -165,7 +187,7 @@ export function assertInstance(instance: IncusInstance, imageFingerprint: string
         `Instance '${instance.name}' reports architecture='${instance.architecture}' (expected '${inputs.architecture.incus}'), type='${instance.type}', status='${instance.status}', status_code=${instance.statusCode}, project='${instance.project || INSTALLER_SPEC.projectName}', ephemeral=${instance.ephemeral}, stateful=${instance.stateful}, and profiles='${instance.profiles.join(',') || 'none'}'; volatile.base_image expected '${imageFingerprint}' but was '${config.baseImage || 'unset'}'; missing or mismatched config keys: ${config.missing.join(', ') || 'none'}; unexpected non-volatile, non-image config keys: ${config.unexpected.join(', ') || 'none'}; missing devices: ${devices.missing.join(', ') || 'none'}; mismatched devices: ${devices.mismatched.join(', ') || 'none'}; unexpected devices: ${devices.unexpected.join(', ') || 'none'}.`,
       ],
     ],
-    retry: RERUN,
+    retry,
   })
 }
 
@@ -173,7 +195,7 @@ export function assertInstance(instance: IncusInstance, imageFingerprint: string
  * Takes the image fingerprint itself, so an approved plan can create the
  * instance without depending on when the installation pin is written.
  */
-export function instanceInput(fingerprint: string, inputs: InstallationInputs): IncusInstanceCreate {
+export function instanceInput(fingerprint: string, inputs: InstallationInputs, retry: string): IncusInstanceCreate {
   return {
     name: INSTALLER_SPEC.orchestrator.name,
     architecture: inputs.architecture.incus,
@@ -184,7 +206,7 @@ export function instanceInput(fingerprint: string, inputs: InstallationInputs): 
     stateful: INSTALLER_SPEC.orchestrator.stateful,
     profiles: [...INSTALLER_SPEC.orchestrator.profileNames],
     config: expectedConfig(inputs.layout),
-    devices: expectedDevices(inputs),
+    devices: expectedDevices(inputs, retry),
     source: {
       type: 'image',
       fingerprint,
