@@ -1,15 +1,15 @@
+import { localTarget } from './local'
+import { withAwsTarget } from './aws'
 import { installationRetry } from '../../retry'
 import { withCancellation } from '../../terminal/prompts'
-import { withAwsTarget } from './aws'
-import { configure as configureTarget, type ConfigureOptions } from './configure'
 import { inspect as inspectTarget } from './inspect'
-import { localTarget } from './local'
+import { configure as configureTarget, type ConfigureOptions } from './configure'
 import type { Reporter } from '../../terminal/reporter'
 import type { InstallationSelector, InstallationTarget } from './target'
 
 /**
- * A local target only needs its retry commands renamed for the named workflow.
- * An AWS target is resolved under the AWS lock, so it exists only while `use`
+ * A local target is built with the retry commands of the selected workflow. An
+ * AWS target is resolved under the AWS lock, so it exists only while `use`
  * runs.
  */
 async function withTarget<T>(
@@ -17,7 +17,7 @@ async function withTarget<T>(
   use: (target: InstallationTarget) => Promise<T>,
 ): Promise<T> {
   if (selector.kind === 'local') {
-    return await use({ ...localTarget, retry: installationRetry(selector) })
+    return await use(localTarget(installationRetry(selector)))
   }
   return await withCancellation(signal => withAwsTarget(selector, signal, use))
 }

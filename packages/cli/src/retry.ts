@@ -27,9 +27,3 @@ export function installationRetry(selector: InstallationSelector): Retry {
     configureImage: (image: string) => `${configure} --image ${image} [--authorized-keys <roster>]`,
   })
 }
-
-/**
- * The commands for this machine, which the local target starts from before a
- * selector has named the workflow.
- */
-export const RETRY: Retry = installationRetry({ kind: 'local' })

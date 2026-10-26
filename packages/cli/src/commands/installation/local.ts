@@ -1,4 +1,3 @@
-import { RETRY } from '../../retry'
 import { INSTALLER_SPEC } from '../../install/spec'
 import { validateHostPreflight } from '../../checks/host'
 import { validateLocalIncus } from '../../checks/incus'
@@ -7,15 +6,17 @@ import { validateSourcePreflight } from '../../checks/source'
 import { validateStoragePreflight } from '../../checks/storage'
 import { devLayout } from '../../install/layout'
 import { localBinding } from '../../install/records'
+import type { Retry } from '../../retry'
 import type { InstallationTarget } from './target'
 
 /**
  * This machine: the operator-side host checks, the local Incus socket, and the
- * development layout.
+ * development layout. `commands` names the workflow that diagnostics tell the
+ * operator to run again.
  */
-export const localTarget: InstallationTarget = {
+export const localTarget = (commands: Retry): InstallationTarget => ({
   name: INSTALLER_SPEC.state.localName,
-  retry: RETRY,
+  retry: commands,
   async withHost(reporter, retry, use) {
     const layout = devLayout
     const preflight = await validateHostPreflight(retry)
@@ -72,4 +73,4 @@ export const localTarget: InstallationTarget = {
       },
     })
   },
-}
+})
