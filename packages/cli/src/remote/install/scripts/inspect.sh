@@ -29,8 +29,9 @@ osrelease_info() {
   cat /etc/os-release
 }
 
-# A modified work tree is reported, not refused. `--no-optional-locks` keeps
-# the status read from refreshing the index.
+# Working-tree state is deliberately not inspected: `git status` can run
+# repository- or user-configured hooks such as core.fsmonitor, which would
+# execute code before any approval. A modified work tree is accepted anyway.
 checkout_info() {
   test -n "$CHECKOUT" || return 0
   path=$(cd "$CHECKOUT" && pwd -P) || { echo 'present no'; return 0; }
@@ -39,12 +40,6 @@ checkout_info() {
   if top=$(git -C "$path" rev-parse --show-toplevel); then
     printf 'toplevel %s\n' "$top"
     printf 'commit %s\n' "$(git -C "$path" rev-parse --verify -q HEAD)"
-    printf 'branch %s\n' "$(git -C "$path" symbolic-ref --short -q HEAD)"
-    if test -n "$(git --no-optional-locks -C "$path" status --porcelain)"; then
-      echo 'modified yes'
-    else
-      echo 'modified no'
-    fi
   fi
   if test -f "$path/package.json" && ! test -L "$path/package.json"; then
     printf 'packageName %s\n' "$(sed -n 's/^[[:space:]]*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$path/package.json" | head -n 1)"

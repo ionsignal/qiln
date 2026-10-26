@@ -49,8 +49,6 @@ function checkoutOf(section: Section): CheckoutObservation | null {
     path,
     gitRoot: values.get('toplevel') || null,
     commit,
-    branch: values.get('branch') || null,
-    modified: values.get('modified') === 'yes',
     packageName: values.get('packageName') || null,
   }
 }

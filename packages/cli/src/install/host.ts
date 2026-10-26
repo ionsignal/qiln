@@ -11,15 +11,15 @@ export interface HostRelease {
 }
 
 /**
- * The checkout as observed on the target. A modified working tree is accepted:
- * `commit` only identifies the committed baseline it started from.
+ * The checkout as observed on the target. Working-tree state is not inspected,
+ * because a Git status can run repository-configured hooks, and a modified
+ * working tree is accepted anyway. `commit` only identifies the committed
+ * baseline.
  */
 export interface CheckoutObservation {
   path: string
   gitRoot: string | null
   commit: string | null
-  branch: string | null
-  modified: boolean
   packageName: string | null
 }
 
