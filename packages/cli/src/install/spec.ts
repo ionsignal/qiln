@@ -78,6 +78,7 @@ const INCUS_PROXY_DEVICE = Object.freeze({
 
 export const INSTALLER_SPEC = Object.freeze({
   stateVersion: 1,
+  evidenceVersion: 1,
   projectName: 'default',
   supportedHost: {
     distributionId: 'ubuntu',
@@ -178,8 +179,12 @@ export const INSTALLER_SPEC = Object.freeze({
     directory: 'installations',
     registryLockFileName: 'registry.lock',
     installationFileName: 'installation.json',
+    configureFileName: 'configure.json',
     lockFileName: 'installation.lock',
     legacyLockFileName: 'installer.lock',
     localName: 'dev',
+  },
+  limits: {
+    evidence: 131_072,
   },
 })

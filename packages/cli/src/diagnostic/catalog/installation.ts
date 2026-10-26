@@ -204,4 +204,33 @@ export const installationDiagnostics = Object.freeze({
     'Qiln cannot report success without re-reading the exact stopped instance after its operation completes.',
     'Inspect the instance inventory and operation history before retrying.',
   ),
+  INSTALLATION_PLAN_CHANGED: entry(
+    'Installation changed after its plan was displayed',
+    'The host no longer matches the plan that was approved, so nothing was applied for that plan.',
+    'Re-run the command to review the current plan.',
+  ),
+  INSTALLATION_STEP_FAILED: entry(
+    'Installation step did not complete',
+    'An Incus request was refused or its outcome is uncertain. A refused request had no effect. An uncertain one may have changed the host in part or in full, and Qiln never replays it.',
+    'Inspect the images, network, volume, and instance named in the diagnostic facts before retrying.',
+    preservePostgresStep,
+  ),
+  INSTALLATION_UNRESOLVED: entry(
+    'Installation has an unresolved step',
+    'A previous configuration step has an effect that is unknown. Qiln never replays, resumes, or clears it.',
+    'Inspect the Incus daemon, images, and network named in the diagnostic facts manually.',
+    preservePostgresStep,
+  ),
+  INSTALLATION_EVIDENCE_INVALID: entry(
+    'Installation evidence is invalid or incompatible',
+    'Configuration evidence must match its installation record, the approved plan shape, and its step and operation history. It is never repaired or rebound.',
+    'Review configure.json in the installation directory before any recovery.',
+    preservePostgresStep,
+  ),
+  INSTALLATION_NOT_VERIFIED: entry(
+    'Installation was not verified after configuration',
+    'Qiln reports success only after a fresh observation agrees with the approved plan.',
+    'Inspect the image, network, volume, instance, and credentials, then re-run the command.',
+    preservePostgresStep,
+  ),
 })
