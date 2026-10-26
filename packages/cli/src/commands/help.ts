@@ -25,8 +25,9 @@ export const up: HelpContent = {
     'qiln up --source <checkout> --image-meta <metadata> --image-rootfs <rootfs> [--authorized-keys <roster>]',
   ],
   safety: [
+    'Qiln observes the host first, then displays one installation plan and applies it only after an explicit default-no approval. Each Incus change is journaled with its approval in the installation directory, and a failed or interrupted change is never replayed, resumed, or rolled back. An installation that already matches needs no approval and no terminal.',
     '--image verifies an existing local alias or full lowercase SHA-256 fingerprint. It does not pull or replace an image.',
-    '--image-meta with --image-rootfs explicitly authorizes deleting the image targeted by the managed qiln-orchestrator-dev alias before importing or reusing staged content. Other aliases on that image may be removed. No automatic rollback is attempted.',
+    '--image-meta with --image-rootfs stages and fingerprints the artifacts first. Content identical to the managed qiln-orchestrator-dev alias target is never replaced. If that alias targets different content, deleting that image, with the aliases attached to it, is displayed in the plan and happens only after approval. It is refused while an orchestrator instance exists, so remove the stopped instance manually first. No automatic rollback is attempted.',
     'The first credential set requires --authorized-keys. Later runs reuse retained credentials; a supplied roster replaces only authorized_keys.',
     'Installation state and credentials live in one protected named installation directory (dev for this workflow) under the Qiln state directory. Its record is bound to this machine, architecture, layout, and source checkout, and a different checkout or layout for the same installation is refused, not rebound. State that earlier versions kept directly in the state directory is refused and never read, migrated, or deleted.',
     'The selected image is trusted guest code. Qiln does not establish its provenance, authenticity, guest compatibility, or bootstrap readiness.',

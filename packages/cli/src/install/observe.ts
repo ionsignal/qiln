@@ -1,0 +1,98 @@
+import { validateImagePreflight } from '../checks/image'
+import { toInstallerError } from '../incus/errors'
+import { loadCredentials, type Credentials } from './credentials'
+import { readAlias, readImage, type ImageSource } from './image'
+import { INSTALLER_SPEC } from './spec'
+import type { IncusClient } from '../incus/client'
+import type {
+  IncusImage,
+  IncusImageAlias,
+  IncusInstance,
+  IncusNetwork,
+  IncusRead,
+  IncusStorageVolume,
+} from '../incus/types'
+import type { Dir } from '../state/files'
+import type { InstallationState } from './state'
+import type { InstallationInputs } from './types'
+
+const RERUN =
+  'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]'
+
+export interface ObservationRequest {
+  client: IncusClient
+  /** The installation directory that holds the local credential files. */
+  directory: Dir
+  sshKeygen: string
+  source: ImageSource
+  installation: InstallationState | null
+  inputs: InstallationInputs
+}
+
+/**
+ * One point-in-time read of everything an installation depends on. `image` is
+ * the selected content, `alias` is the managed orchestrator alias, and
+ * `aliased` is the image that alias currently targets. A reference selection
+ * never touches the managed alias. Absent resources are null, and the local
+ * credential set is `absent` only when none of its files exist.
+ */
+export interface Observation {
+  kind: ImageSource['kind']
+  fingerprint: string
+  pin: string | null
+  image: IncusImage | null
+  alias: IncusImageAlias | null
+  aliased: IncusImage | null
+  network: IncusNetwork | null
+  volume: IncusStorageVolume | null
+  instance: IncusRead<IncusInstance> | null
+  credentials: Credentials | 'absent'
+}
+
+type Images = Pick<Observation, 'fingerprint' | 'image' | 'alias' | 'aliased'>
+
+async function read<T>(operation: string, run: () => Promise<T>): Promise<T> {
+  try {
+    return await run()
+  } catch (error: unknown) {
+    throw toInstallerError(error, { check: 'installation observation', operation, rerun: RERUN })
+  }
+}
+
+/**
+ * A reference has nothing to import, so it is resolved and validated here and
+ * is always present afterwards. Split content may be absent from the store.
+ */
+async function imagesOf({ client, source, installation, inputs }: ObservationRequest): Promise<Images> {
+  if (source.kind === 'reference') {
+    const selected = await validateImagePreflight(client, source.selector, installation, inputs.architecture)
+    return { fingerprint: selected.fingerprint, image: selected.image, alias: null, aliased: null }
+  }
+  const alias = await readAlias(client)
+  return {
+    fingerprint: source.fingerprint,
+    image: await readImage(client, source.fingerprint),
+    alias,
+    aliased: alias === null ? null : await readImage(client, alias.target),
+  }
+}
+
+export async function observe(request: ObservationRequest): Promise<Observation> {
+  const { client, directory, sshKeygen, source, installation, inputs } = request
+  const { layout } = inputs
+  return {
+    kind: source.kind,
+    ...(await imagesOf(request)),
+    pin: installation?.imageFingerprint ?? null,
+    network: await read(`inspect the '${layout.network.name}' network`, () =>
+      client.getNetworkOrNull(layout.network.name),
+    ),
+    volume: await read('inspect the Qiln PostgreSQL custom volume', () =>
+      client.getStoragePoolVolumeOrNull(layout.pool.name, INSTALLER_SPEC.storage.volumeType, layout.postgres.volumeName),
+    ),
+    instance: await read(`inspect the '${INSTALLER_SPEC.orchestrator.name}' instance`, () =>
+      client.getInstanceWithEtagOrNull(INSTALLER_SPEC.orchestrator.name),
+    ),
+    credentials: await loadCredentials(directory, sshKeygen),
+  }
+}

@@ -1,23 +1,14 @@
 import { isAbsolute } from 'node:path'
 import { InstallerError } from '../diagnostic/error'
-import { isIncusApiStatus, toInstallerError } from '../incus/errors'
 import { INSTALLER_SPEC } from './spec'
-import type { InstallationState } from './state'
 import type { InstallationInputs } from './types'
 import type { Layout } from './layout'
-import type { IncusClient } from '../incus/client'
 import type { IncusConfigMap, IncusDevicesMap, IncusInstance, IncusInstanceCreate } from '../incus/types'
 
-const FULL_FINGERPRINT_PATTERN = /^[a-f0-9]{64}$/
 const STOPPED_STATUS_CODE = 102
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/
 const RERUN =
   'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]'
-
-export interface InstanceConvergence {
-  instance: IncusInstance
-  outcome: 'created' | 'reused'
-}
 
 function validateSourceRoot(sourceRoot: string): void {
   if (
@@ -178,28 +169,11 @@ export function assertInstance(instance: IncusInstance, imageFingerprint: string
   })
 }
 
-function validateState(state: InstallationState): void {
-  if (
-    state.version !== INSTALLER_SPEC.stateVersion ||
-    state.projectName !== INSTALLER_SPEC.projectName ||
-    state.instanceName !== INSTALLER_SPEC.orchestrator.name ||
-    !FULL_FINGERPRINT_PATTERN.test(state.imageFingerprint)
-  ) {
-    throw new InstallerError({
-      code: 'INVALID_INSTALLATION_STATE',
-      facts: [
-        [
-          'Observed',
-          'The state does not contain the required version, project, instance name, and full lowercase image fingerprint.',
-        ],
-      ],
-      retry: RERUN,
-    })
-  }
-}
-
-function createInput(state: InstallationState, inputs: InstallationInputs): IncusInstanceCreate {
-  validateState(state)
+/**
+ * Takes the image fingerprint itself, so an approved plan can create the
+ * instance without depending on when the installation pin is written.
+ */
+export function instanceInput(fingerprint: string, inputs: InstallationInputs): IncusInstanceCreate {
   return {
     name: INSTALLER_SPEC.orchestrator.name,
     architecture: inputs.architecture.incus,
@@ -213,77 +187,7 @@ function createInput(state: InstallationState, inputs: InstallationInputs): Incu
     devices: expectedDevices(inputs),
     source: {
       type: 'image',
-      fingerprint: state.imageFingerprint,
+      fingerprint,
     },
-  }
-}
-
-async function getInstance(client: IncusClient): Promise<IncusInstance | null> {
-  try {
-    return await client.getInstanceOrNull(INSTALLER_SPEC.orchestrator.name)
-  } catch (error: unknown) {
-    throw toInstallerError(error, {
-      check: 'development orchestrator instance convergence',
-      operation: `inspect the '${INSTALLER_SPEC.orchestrator.name}' instance`,
-      rerun: RERUN,
-    })
-  }
-}
-
-export async function convergeInstance(
-  client: IncusClient,
-  state: InstallationState,
-  inputs: InstallationInputs,
-): Promise<InstanceConvergence> {
-  validateState(state)
-  validateSourceRoot(inputs.sourceRoot)
-  const existing = await getInstance(client)
-  if (existing) {
-    assertInstance(existing, state.imageFingerprint, inputs)
-    return {
-      instance: existing,
-      outcome: 'reused',
-    }
-  }
-  let created = false
-  let conflict: unknown
-  try {
-    const operation = await client.createInstance(createInput(state, inputs))
-    await client.waitOperation(operation)
-    created = true
-  } catch (error: unknown) {
-    if (!isIncusApiStatus(error, 409)) {
-      throw toInstallerError(error, {
-        check: 'development orchestrator instance convergence',
-        operation: `create the stopped '${INSTALLER_SPEC.orchestrator.name}' instance`,
-        rerun: RERUN,
-      })
-    }
-    conflict = error
-  }
-  const instance = await getInstance(client)
-  if (!instance) {
-    if (conflict !== undefined) {
-      throw toInstallerError(conflict, {
-        check: 'development orchestrator instance convergence',
-        operation: `reconcile the concurrently changed '${INSTALLER_SPEC.orchestrator.name}' instance`,
-        rerun: RERUN,
-      })
-    }
-    throw new InstallerError({
-      code: 'ORCHESTRATOR_INSTANCE_VERIFICATION_FAILED',
-      facts: [
-        [
-          'Observed',
-          `Incus did not return '${INSTALLER_SPEC.orchestrator.name}' after its creation operation completed successfully.`,
-        ],
-      ],
-      retry: RERUN,
-    })
-  }
-  assertInstance(instance, state.imageFingerprint, inputs)
-  return {
-    instance,
-    outcome: created ? 'created' : 'reused',
   }
 }

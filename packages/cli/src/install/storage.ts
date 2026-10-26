@@ -1,17 +1,7 @@
 import { InstallerError } from '../diagnostic/error'
-import { isIncusApiStatus, toInstallerError } from '../incus/errors'
 import { INSTALLER_SPEC } from './spec'
-import type { IncusClient } from '../incus/client'
 import type { IncusStorageVolume, IncusStorageVolumeCreate } from '../incus/types'
 import type { Layout } from './layout'
-
-const RERUN =
-  'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]'
-
-export interface StorageConvergence {
-  volume: IncusStorageVolume
-  outcome: 'created' | 'reused'
-}
 
 function configDifferences(
   actual: Readonly<Record<string, string>>,
@@ -55,23 +45,7 @@ export function assertVolume(volume: IncusStorageVolume, layout: Layout): void {
   })
 }
 
-async function getVolume(client: IncusClient, layout: Layout): Promise<IncusStorageVolume | null> {
-  try {
-    return await client.getStoragePoolVolumeOrNull(
-      layout.pool.name,
-      INSTALLER_SPEC.storage.volumeType,
-      layout.postgres.volumeName,
-    )
-  } catch (error: unknown) {
-    throw toInstallerError(error, {
-      check: 'Qiln PostgreSQL volume convergence',
-      operation: 'inspect the Qiln PostgreSQL custom volume',
-      rerun: RERUN,
-    })
-  }
-}
-
-function createInput(layout: Layout): IncusStorageVolumeCreate {
+export function volumeInput(layout: Layout): IncusStorageVolumeCreate {
   return {
     name: layout.postgres.volumeName,
     type: INSTALLER_SPEC.storage.volumeType,
@@ -81,56 +55,5 @@ function createInput(layout: Layout): IncusStorageVolumeCreate {
       ...layout.postgres.config,
     },
     source: {},
-  }
-}
-
-export async function convergeStorage(client: IncusClient, layout: Layout): Promise<StorageConvergence> {
-  const existing = await getVolume(client, layout)
-  if (existing) {
-    assertVolume(existing, layout)
-    return {
-      volume: existing,
-      outcome: 'reused',
-    }
-  }
-  let created = false
-  let conflict: unknown
-  try {
-    await client.createStoragePoolVolume(layout.pool.name, createInput(layout))
-    created = true
-  } catch (error: unknown) {
-    if (!isIncusApiStatus(error, 409)) {
-      throw toInstallerError(error, {
-        check: 'Qiln PostgreSQL volume convergence',
-        operation: 'create the Qiln PostgreSQL custom volume',
-        rerun: RERUN,
-      })
-    }
-    conflict = error
-  }
-  const volume = await getVolume(client, layout)
-  if (!volume) {
-    if (conflict !== undefined) {
-      throw toInstallerError(conflict, {
-        check: 'Qiln PostgreSQL volume convergence',
-        operation: 'reconcile the concurrently changed Qiln PostgreSQL custom volume',
-        rerun: RERUN,
-      })
-    }
-    throw new InstallerError({
-      code: 'POSTGRES_VOLUME_VERIFICATION_FAILED',
-      facts: [
-        [
-          'Observed',
-          `Incus did not return '${layout.postgres.volumeName}' after accepting its synchronous creation request.`,
-        ],
-      ],
-      retry: RERUN,
-    })
-  }
-  assertVolume(volume, layout)
-  return {
-    volume,
-    outcome: created ? 'created' : 'reused',
   }
 }

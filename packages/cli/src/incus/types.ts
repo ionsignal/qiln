@@ -84,6 +84,7 @@ export interface IncusImage {
   cached: boolean
   filename: string
   size: number
+  aliases: string[]
   properties: IncusConfigMap
 }
 

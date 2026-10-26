@@ -1,16 +1,11 @@
 import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { INSTALLER_SPEC } from './spec'
-import { InstallerError } from '../diagnostic/error'
-import { validateContainerImage, validateImagePreflight } from '../checks/image'
 import { toInstallerError } from '../incus/errors'
 import { withStage, type StagedFile } from '../state/files'
-import type { Architecture } from './architecture'
-import type { InstallationState } from './state'
 import type { IncusClient } from '../incus/client'
 import type { IncusImage, IncusImageAlias } from '../incus/types'
 
-const FULL_FINGERPRINT_PATTERN = /^[a-f0-9]{64}$/
 const RERUN =
   'qiln up --source <checkout> (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]'
 
@@ -25,13 +20,22 @@ export type InstallerImageSelection =
       rootfsPath: string
     }
 
-export interface ImageConvergence {
-  fingerprint: string
-  image: IncusImage
-  alias: IncusImageAlias | null
-  outcome: 'verified' | 'reused' | 'imported'
-  replacement: boolean
-}
+/**
+ * What an installation observes and plans against. A reference is resolved
+ * during observation. Split artifacts stay staged for as long as the source is
+ * in use, and their fingerprint is computed from the staged bytes.
+ */
+export type ImageSource =
+  | {
+      kind: 'reference'
+      selector: string
+    }
+  | {
+      kind: 'split'
+      fingerprint: string
+      metadata: StagedFile
+      rootfs: StagedFile
+    }
 
 async function hashFile(hash: ReturnType<typeof createHash>, path: string): Promise<void> {
   for await (const chunk of createReadStream(path)) {
@@ -46,7 +50,7 @@ async function splitFingerprint(metadata: StagedFile, rootfs: StagedFile): Promi
   return hash.digest('hex')
 }
 
-async function getAlias(client: IncusClient): Promise<IncusImageAlias | null> {
+export async function readAlias(client: IncusClient): Promise<IncusImageAlias | null> {
   try {
     return await client.getImageAliasOrNull(INSTALLER_SPEC.orchestrator.imageAlias)
   } catch (error: unknown) {
@@ -58,7 +62,7 @@ async function getAlias(client: IncusClient): Promise<IncusImageAlias | null> {
   }
 }
 
-async function getImage(client: IncusClient, fingerprint: string): Promise<IncusImage | null> {
+export async function readImage(client: IncusClient, fingerprint: string): Promise<IncusImage | null> {
   try {
     return await client.getImageOrNull(fingerprint)
   } catch (error: unknown) {
@@ -70,138 +74,15 @@ async function getImage(client: IncusClient, fingerprint: string): Promise<Incus
   }
 }
 
-async function validateAliasTarget(
-  client: IncusClient,
-  alias: IncusImageAlias,
-): Promise<{ fingerprint: string; image: IncusImage }> {
-  if (!FULL_FINGERPRINT_PATTERN.test(alias.target)) {
-    throw new InstallerError({
-      code: 'MANAGED_IMAGE_ALIAS_TARGET_INVALID',
-      facts: [['Observed', `Alias '${alias.name}' targets '${alias.target}'.`]],
-      retry: RERUN,
-    })
-  }
-  const image = await getImage(client, alias.target)
-  if (!image || image.fingerprint !== alias.target) {
-    throw new InstallerError({
-      code: 'MANAGED_IMAGE_ALIAS_TARGET_MISSING',
-      facts: [
-        ['Observed', `Alias '${alias.name}' targets '${alias.target}', but that full image could not be validated.`],
-      ],
-      retry: RERUN,
-    })
-  }
-  return {
-    fingerprint: alias.target,
-    image,
-  }
-}
-
-async function deleteAliasedImage(client: IncusClient, alias: IncusImageAlias): Promise<void> {
-  const target = await validateAliasTarget(client, alias)
-  try {
-    const operation = await client.deleteImage(target.fingerprint)
-    await client.waitOperation(operation)
-  } catch (error: unknown) {
-    throw toInstallerError(error, {
-      check: 'explicit development image replacement',
-      operation: 'delete the previous image targeted by the managed orchestrator alias',
-      rerun: RERUN,
-    })
-  }
-}
-
-async function ensureAlias(client: IncusClient, fingerprint: string): Promise<IncusImageAlias> {
-  const existing = await getAlias(client)
-  if (existing) {
-    if (existing.target !== fingerprint) {
-      throw new InstallerError({
-        code: 'MANAGED_IMAGE_ALIAS_CONFLICT',
-        facts: [['Observed', `Alias target='${existing.target}', required target='${fingerprint}'.`]],
-        retry: RERUN,
-      })
-    }
-    return existing
-  }
-  try {
-    await client.createImageAlias(INSTALLER_SPEC.orchestrator.imageAlias, fingerprint)
-  } catch (error: unknown) {
-    throw toInstallerError(error, {
-      check: 'managed orchestrator image alias',
-      operation: 'create the managed orchestrator image alias',
-      rerun: RERUN,
-    })
-  }
-  const created = await getAlias(client)
-  if (!created || created.name !== INSTALLER_SPEC.orchestrator.imageAlias || created.target !== fingerprint) {
-    throw new InstallerError({
-      code: 'MANAGED_IMAGE_ALIAS_VERIFICATION_FAILED',
-      facts: [['Observed', `The required alias did not resolve to '${fingerprint}'.`]],
-      retry: RERUN,
-    })
-  }
-  return created
-}
-
-async function importImage(
-  client: IncusClient,
-  fingerprint: string,
-  metadata: StagedFile,
-  rootfs: StagedFile,
-): Promise<void> {
-  try {
-    const operation = await client.importSplitImage({
-      fingerprint,
-      alias: INSTALLER_SPEC.orchestrator.imageAlias,
-      metadataPath: metadata.path,
-      metadataSize: metadata.size,
-      rootfsPath: rootfs.path,
-      rootfsSize: rootfs.size,
-    })
-    await client.waitOperation(operation)
-  } catch (error: unknown) {
-    throw toInstallerError(error, {
-      check: 'split orchestrator image import',
-      operation: 'upload and import the staged split Incus image',
-      rerun: RERUN,
-    })
-  }
-}
-
-async function verifySplitResult(
-  client: IncusClient,
-  fingerprint: string,
-  architecture: Architecture,
-): Promise<{ image: IncusImage; alias: IncusImageAlias }> {
-  const image = await getImage(client, fingerprint)
-  if (!image) {
-    throw new InstallerError({
-      code: 'IMPORTED_IMAGE_NOT_FOUND',
-      facts: [['Observed', `Incus did not return image '${fingerprint}'.`]],
-      retry: RERUN,
-    })
-  }
-  validateContainerImage(image, fingerprint, architecture)
-  const alias = await getAlias(client)
-  if (!alias || alias.name !== INSTALLER_SPEC.orchestrator.imageAlias || alias.target !== fingerprint) {
-    throw new InstallerError({
-      code: 'MANAGED_IMAGE_ALIAS_VERIFICATION_FAILED',
-      facts: [['Observed', `Required alias target='${fingerprint}', actual target='${alias?.target ?? 'absent'}'.`]],
-      retry: RERUN,
-    })
-  }
-  return {
-    image,
-    alias,
-  }
-}
-
-async function convergeSplit(
-  client: IncusClient,
+/**
+ * Copies the split artifacts into a private stage that exists only while `run`
+ * is pending.
+ */
+async function withSplitFiles<T>(
   metadataPath: string,
   rootfsPath: string,
-  architecture: Architecture,
-): Promise<ImageConvergence> {
+  run: (metadata: StagedFile, rootfs: StagedFile) => Promise<T>,
+): Promise<T> {
   return await withStage(
     [
       {
@@ -223,60 +104,26 @@ async function convergeSplit(
       if (!metadata || !rootfs) {
         throw new Error('Split-image staging did not return both required artifacts.')
       }
-      const fingerprint = await splitFingerprint(metadata, rootfs)
-      const previousAlias = await getAlias(client)
-      const replacement = previousAlias !== null
-      if (previousAlias) {
-        await deleteAliasedImage(client, previousAlias)
-      }
-      let image = await getImage(client, fingerprint)
-      let outcome: ImageConvergence['outcome']
-      if (image) {
-        validateContainerImage(image, fingerprint, architecture)
-        await ensureAlias(client, fingerprint)
-        outcome = 'reused'
-      } else {
-        const unexpectedAlias = await getAlias(client)
-        if (unexpectedAlias) {
-          throw new InstallerError({
-            code: 'MANAGED_IMAGE_ALIAS_CONFLICT',
-            facts: [
-              ['Observed', `Alias target='${unexpectedAlias.target}', pending import fingerprint='${fingerprint}'.`],
-            ],
-            retry: RERUN,
-          })
-        }
-        await importImage(client, fingerprint, metadata, rootfs)
-        outcome = 'imported'
-      }
-      const verified = await verifySplitResult(client, fingerprint, architecture)
-      image = verified.image
-      return {
-        fingerprint,
-        image,
-        alias: verified.alias,
-        outcome,
-        replacement,
-      }
+      return await run(metadata, rootfs)
     },
   )
 }
 
-export async function convergeImage(
-  client: IncusClient,
+/**
+ * Keeps split artifacts staged, and their fingerprint known, for as long as an
+ * installation plans, applies, and verifies against them.
+ */
+export async function withImageSource<T>(
   selection: InstallerImageSelection,
-  installationState: InstallationState | null,
-  architecture: Architecture,
-): Promise<ImageConvergence> {
+  run: (source: ImageSource) => Promise<T>,
+): Promise<T> {
   if (selection.kind === 'reference') {
-    const selected = await validateImagePreflight(client, selection.value, installationState, architecture)
-    return {
-      fingerprint: selected.fingerprint,
-      image: selected.image,
-      alias: null,
-      outcome: 'verified',
-      replacement: false,
-    }
+    return await run({ kind: 'reference', selector: selection.value })
   }
-  return await convergeSplit(client, selection.metadataPath, selection.rootfsPath, architecture)
+  return await withSplitFiles(
+    selection.metadataPath,
+    selection.rootfsPath,
+    async (metadata, rootfs) =>
+      await run({ kind: 'split', fingerprint: await splitFingerprint(metadata, rootfs), metadata, rootfs }),
+  )
 }

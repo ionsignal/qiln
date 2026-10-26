@@ -278,6 +278,17 @@ function parseImageAlias(value: unknown): IncusImageAlias {
   }
 }
 
+function aliasNames(value: unknown): string[] {
+  if (value === undefined || value === null) {
+    return []
+  }
+  if (!Array.isArray(value)) {
+    throw new IncusProtocolError('Incus returned an invalid image.aliases field.')
+  }
+  const entries: unknown[] = value
+  return entries.map(entry => requiredString(resourceRecord(entry, 'image alias'), 'name', 'image alias'))
+}
+
 function parseImage(value: unknown): IncusImage {
   const image = resourceRecord(value, 'image')
   return {
@@ -288,6 +299,7 @@ function parseImage(value: unknown): IncusImage {
     cached: optionalBoolean(image, 'cached'),
     filename: optionalString(image, 'filename'),
     size: optionalNumber(image, 'size'),
+    aliases: aliasNames(image.aliases),
     properties: configMap(image.properties, 'image properties'),
   }
 }
