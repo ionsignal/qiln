@@ -1,8 +1,8 @@
+import { INSTALLER_SPEC } from './spec'
 import { validateImagePreflight } from '../checks/image'
 import { toInstallerError } from '../incus/errors'
 import { loadCredentials, type Credentials } from './credentials'
-import { readAlias, readImage, type ImageSource } from './image'
-import { INSTALLER_SPEC } from './spec'
+import type { ImageSource } from './image'
 import type { IncusClient } from '../incus/client'
 import type {
   IncusImage,
@@ -67,12 +67,18 @@ async function imagesOf({ client, source, installation, inputs, retry }: Observa
     const selected = await validateImagePreflight(client, source.selector, installation, inputs.architecture, retry)
     return { fingerprint: selected.fingerprint, image: selected.image, alias: null, aliased: null }
   }
-  const alias = await readAlias(client, retry.configure)
+  const imageOf = (fingerprint: string) =>
+    read(retry.configure, 'inspect the local content-addressed orchestrator image', () =>
+      client.getImageOrNull(fingerprint),
+    )
+  const alias = await read(retry.configure, 'inspect the managed orchestrator image alias', () =>
+    client.getImageAliasOrNull(INSTALLER_SPEC.orchestrator.imageAlias),
+  )
   return {
     fingerprint: source.fingerprint,
-    image: await readImage(client, source.fingerprint, retry.configure),
+    image: await imageOf(source.fingerprint),
     alias,
-    aliased: alias === null ? null : await readImage(client, alias.target, retry.configure),
+    aliased: alias === null ? null : await imageOf(alias.target),
   }
 }
 

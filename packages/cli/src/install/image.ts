@@ -1,10 +1,7 @@
 import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { INSTALLER_SPEC } from './spec'
-import { toInstallerError } from '../incus/errors'
 import { withStage, type StagedFile } from '../state/files'
-import type { IncusClient } from '../incus/client'
-import type { IncusImage, IncusImageAlias } from '../incus/types'
 
 export type InstallerImageSelection =
   | {
@@ -45,30 +42,6 @@ async function splitFingerprint(metadata: StagedFile, rootfs: StagedFile): Promi
   await hashFile(hash, metadata.path)
   await hashFile(hash, rootfs.path)
   return hash.digest('hex')
-}
-
-export async function readAlias(client: IncusClient, retry: string): Promise<IncusImageAlias | null> {
-  try {
-    return await client.getImageAliasOrNull(INSTALLER_SPEC.orchestrator.imageAlias)
-  } catch (error: unknown) {
-    throw toInstallerError(error, {
-      check: 'managed orchestrator image alias',
-      operation: 'inspect the managed orchestrator image alias',
-      rerun: retry,
-    })
-  }
-}
-
-export async function readImage(client: IncusClient, fingerprint: string, retry: string): Promise<IncusImage | null> {
-  try {
-    return await client.getImageOrNull(fingerprint)
-  } catch (error: unknown) {
-    throw toInstallerError(error, {
-      check: 'local orchestrator image',
-      operation: 'inspect the local content-addressed orchestrator image',
-      rerun: retry,
-    })
-  }
 }
 
 /**
