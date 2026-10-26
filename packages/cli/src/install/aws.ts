@@ -1,11 +1,11 @@
 import { InstallerError } from '../diagnostic/error'
 import { optionsOf, requireReady } from '../aws/deployment/access'
 import { evidence as incusEvidence } from '../aws/deployment/incus/evidence'
-import { requireNotStuck as requireIncusNotStuck, retainedPreseed, storageHeld } from '../aws/deployment/incus/facts'
 import { bindingOf } from '../aws/deployment/journal/binding'
-import { requireNotStuck as requireZfsNotStuck } from '../aws/deployment/zfs/facts'
 import { withAwsOperation } from '../aws/root'
 import { devLayout, type Layout } from './layout'
+import { requireSettled as requireZfsSettled } from '../aws/deployment/zfs/facts'
+import { requireSettled as requireIncusSettled, retainedPreseed, storageHeld } from '../aws/deployment/incus/facts'
 import * as deployments from '../aws/deployment/records'
 import * as lineage from '../aws/deployment/zfs/lineage'
 import type { DeploymentSelector } from '../aws/deployment/alias'
@@ -55,7 +55,8 @@ function refusal(record: Deployment, reason: string): InstallerError {
  * executes. The caller acquires the installation lock inside `run`, so the lock
  * order is AWS state first, then installation state. Nothing here authenticates
  * to AWS, connects to the host, or writes evidence, and a missing host-key pin
- * is refused rather than retained.
+ * is refused rather than retained. Every unsettled preparation step on either
+ * side blocks the handoff, including a returned step not yet verified.
  */
 export async function withAwsHost<T>(
   selector: DeploymentSelector,
@@ -71,9 +72,9 @@ export async function withAwsHost<T>(
       })
     }
     requireReady(record)
-    requireZfsNotStuck(await lineage.evidence(root, record), record.id)
+    requireZfsSettled(await lineage.evidence(root, record), record.id)
     const incus = await incusEvidence(root, record)
-    requireIncusNotStuck(incus, record.id)
+    requireIncusSettled(incus, record.id)
     const pin = record.hostKey
     const identity = bindingOf(record)
     const pool = await lineage.pool(root, record)
