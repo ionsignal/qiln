@@ -1,10 +1,10 @@
 import nodeOs from 'node:os'
 import { readFile } from 'node:fs/promises'
-import { InstallerError } from '../diagnostic/error'
-import { findExecutable, runProcess } from '../process'
-import { INSTALLER_SPEC } from '../install/spec'
-import { architectureOf, type Architecture } from '../install/architecture'
-import { requireSupportedRelease } from '../install/host'
+import { InstallerError } from '../../diagnostic/error'
+import { findExecutable, runProcess } from '../../process'
+import { INSTALLER_SPEC } from '../spec'
+import { architectureOf, type Architecture } from '../architecture'
+import { requireSupportedRelease } from '../host'
 
 type Tool = (typeof INSTALLER_SPEC.tools)[number]
 

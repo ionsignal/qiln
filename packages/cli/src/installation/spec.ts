@@ -181,7 +181,6 @@ export const INSTALLER_SPEC = Object.freeze({
     installationFileName: 'installation.json',
     configureFileName: 'configure.json',
     lockFileName: 'installation.lock',
-    legacyLockFileName: 'installer.lock',
     localName: 'dev',
   },
   limits: {

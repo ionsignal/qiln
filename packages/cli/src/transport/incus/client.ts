@@ -1,8 +1,8 @@
 import { randomBytes } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { request as createHttpRequest, type ClientRequest, type IncomingMessage } from 'node:http'
-import { InstallerError } from '../diagnostic/error'
-import { isRecord } from '../guards'
+import { InstallerError } from '../../diagnostic/error'
+import { isRecord } from '../../guards'
 import type {
   IncusConfigMap,
   IncusDevicesMap,
@@ -32,6 +32,11 @@ const OPERATION_PATH_PATTERN = /^\/1\.0\/operations\/([0-9a-f]{8}-[0-9a-f]{4}-[0
 
 export interface IncusClientOptions {
   connection: IncusConnection
+  /**
+   * Cancellation of the whole invocation. Reads, operation waits, and uploads
+   * stop at once. A short mutation finishes, and later requests refuse to start.
+   */
+  signal: AbortSignal
   projectName: string
   requestTimeoutMs: number
   uploadTimeoutMs: number
@@ -51,6 +56,12 @@ interface RequestOptions {
   expectedStatus: number
   expectedType: 'sync' | 'async'
   timeoutMs: number
+  /**
+   * Whether cancellation may abandon the request while it is in flight. Short
+   * mutations are not interruptible, because abandoning one leaves its effect
+   * unknown for no benefit within its own deadline.
+   */
+  interruptible: boolean
   headers?: Readonly<Record<string, string>>
   write?: (request: ClientRequest, signal: AbortSignal) => Promise<void>
   waitOperationPath?: string
@@ -106,6 +117,22 @@ export class IncusOperationWaitTimeoutError extends Error {
     this.name = 'IncusOperationWaitTimeoutError'
     this.operationPath = operationPath
     this.timeoutMs = timeoutMs
+  }
+}
+
+/**
+ * The invocation was cancelled. `dispatched` is false only when the request
+ * was refused before a connection existed, so it cannot have had any effect.
+ * Otherwise the request may have reached the daemon, and cancelling it does not
+ * show that nothing changed.
+ */
+export class IncusCancelledError extends Error {
+  public readonly dispatched: boolean
+
+  constructor(dispatched: boolean) {
+    super('The Incus request was cancelled.')
+    this.name = 'IncusCancelledError'
+    this.dispatched = dispatched
   }
 }
 
@@ -415,6 +442,7 @@ function multipartPart(boundary: string, name: string, filename: string): Buffer
 
 export class IncusClient {
   private readonly connection: IncusConnection
+  private readonly signal: AbortSignal
   private readonly projectName: string
   private readonly requestTimeoutMs: number
   private readonly uploadTimeoutMs: number
@@ -438,6 +466,7 @@ export class IncusClient {
       throw new RangeError('The Incus response limit must be a positive safe integer.')
     }
     this.connection = options.connection
+    this.signal = options.signal
     this.projectName = options.projectName
     this.requestTimeoutMs = options.requestTimeoutMs
     this.uploadTimeoutMs = options.uploadTimeoutMs
@@ -550,6 +579,7 @@ export class IncusClient {
       expectedStatus: 202,
       expectedType: 'async',
       timeoutMs: this.requestTimeoutMs,
+      interruptible: false,
     })
     return operationRef(result.operation)
   }
@@ -572,7 +602,8 @@ export class IncusClient {
 
   /**
    * Imports without assigning an alias, so the caller can check the stored
-   * image before any alias or previous image is touched.
+   * image before any alias or previous image is touched. The upload can take a
+   * long time, so cancellation abandons it.
    */
   public async importSplitImage(input: IncusSplitImageImport): Promise<IncusOperationRef> {
     if (!FULL_FINGERPRINT_PATTERN.test(input.fingerprint)) {
@@ -604,6 +635,7 @@ export class IncusClient {
       expectedStatus: 202,
       expectedType: 'async',
       timeoutMs: this.uploadTimeoutMs,
+      interruptible: true,
       headers: {
         'Content-Type': `multipart/form-data; boundary=${boundary}`,
         'Content-Length': String(contentLength),
@@ -632,6 +664,7 @@ export class IncusClient {
       expectedStatus: 200,
       expectedType: 'sync',
       timeoutMs: this.operationWaitTimeoutMs,
+      interruptible: true,
       waitOperationPath: operation.path,
     })
     const completed = parseOperation(result.metadata)
@@ -746,11 +779,16 @@ export class IncusClient {
       expectedStatus: 200,
       expectedType: 'sync',
       timeoutMs: this.requestTimeoutMs,
+      interruptible: true,
     })
   }
 
+  /**
+   * Every JSON body belongs to a short mutation, which cancellation never
+   * interrupts.
+   */
   private async json(
-    options: Omit<RequestOptions, 'write' | 'headers'> & {
+    options: Omit<RequestOptions, 'write' | 'headers' | 'interruptible'> & {
       data: Readonly<Record<string, unknown>>
       headers?: Readonly<Record<string, string>>
     },
@@ -758,6 +796,7 @@ export class IncusClient {
     const body = Buffer.from(JSON.stringify(options.data), 'utf8')
     return await this.request({
       ...options,
+      interruptible: false,
       headers: {
         'Content-Type': JSON_CONTENT_TYPE,
         'Content-Length': String(body.byteLength),
@@ -770,31 +809,55 @@ export class IncusClient {
   /**
    * One wall-clock deadline covers opening the connection and the whole
    * exchange. The deadline aborts the request's lifetime instead of waiting for
-   * a transport event, because a dead connection may never emit one.
+   * a transport event, because a dead connection may never emit one. An
+   * interruptible request also ends its lifetime when the invocation is
+   * cancelled, and the two causes are reported separately. A request that has
+   * not started when the cancellation is already pending is refused.
    */
   private async request(options: RequestOptions): Promise<EnvelopeResult> {
+    if (this.signal.aborted) {
+      throw new IncusCancelledError(false)
+    }
     const path = this.projectPath(options.path)
     const lifetime = new AbortController()
     const writers: Promise<void>[] = []
-    const timer = setTimeout(() => lifetime.abort(), options.timeoutMs)
+    let timedOut = false
+    let dispatched = false
+    const cancel = () => lifetime.abort()
+    const timer = setTimeout(() => {
+      timedOut = true
+      lifetime.abort()
+    }, options.timeoutMs)
+    if (options.interruptible) {
+      this.signal.addEventListener('abort', cancel, { once: true })
+    }
     try {
       const socket = await this.connection.open(lifetime.signal)
+      dispatched = true
       return await this.exchange(socket, path, options, lifetime.signal, writers)
     } catch (error: unknown) {
-      throw this.failure(error, options, lifetime.signal.aborted)
+      if (timedOut) {
+        throw this.deadlineFailure(error, options)
+      }
+      if (lifetime.signal.aborted) {
+        throw new IncusCancelledError(dispatched)
+      }
+      throw this.failure(error)
     } finally {
       clearTimeout(timer)
+      this.signal.removeEventListener('abort', cancel)
       lifetime.abort()
       await Promise.all(writers)
     }
   }
 
-  private failure(error: unknown, options: RequestOptions, timedOut: boolean): Error {
-    if (timedOut) {
-      return options.waitOperationPath === undefined
-        ? new IncusTransportError(this.connection.endpoint, { cause: error })
-        : new IncusOperationWaitTimeoutError(options.waitOperationPath, options.timeoutMs)
-    }
+  private deadlineFailure(error: unknown, options: RequestOptions): Error {
+    return options.waitOperationPath === undefined
+      ? new IncusTransportError(this.connection.endpoint, { cause: error })
+      : new IncusOperationWaitTimeoutError(options.waitOperationPath, options.timeoutMs)
+  }
+
+  private failure(error: unknown): Error {
     if (
       error instanceof InstallerError ||
       error instanceof IncusApiError ||

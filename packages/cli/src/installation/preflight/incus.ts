@@ -1,10 +1,16 @@
 import { lstat } from 'node:fs/promises'
-import { InstallerError } from '../diagnostic/error'
-import { INSTALLER_SPEC } from '../install/spec'
-import { requireIncusArchitecture, type Architecture } from '../install/architecture'
-import { IncusApiError, IncusProtocolError, IncusTransportError, IncusClient } from '../incus/client'
-import { localConnection, type IncusConnection } from '../incus/connection'
-import type { IncusServer } from '../incus/types'
+import { InstallerError } from '../../diagnostic/error'
+import { INSTALLER_SPEC } from '../spec'
+import { requireIncusArchitecture, type Architecture } from '../architecture'
+import {
+  IncusApiError,
+  IncusCancelledError,
+  IncusProtocolError,
+  IncusTransportError,
+  IncusClient,
+} from '../../transport/incus/client'
+import { localConnection, type IncusConnection } from '../../transport/incus/connection'
+import type { IncusServer } from '../../transport/incus/types'
 
 export interface IncusPreflight {
   client: IncusClient
@@ -22,11 +28,12 @@ function parseIncusMajorVersion(value: string): number | null {
 
 /**
  * Builds the installer's client over any connection, so a local socket and a
- * relayed one share the same project and limits.
+ * relayed one share the same project, limits, and cancellation.
  */
-export function createIncusClient(connection: IncusConnection): IncusClient {
+export function createIncusClient(connection: IncusConnection, signal: AbortSignal): IncusClient {
   return new IncusClient({
     connection,
+    signal,
     projectName: INSTALLER_SPEC.projectName,
     requestTimeoutMs: INSTALLER_SPEC.incus.requestTimeoutMs,
     uploadTimeoutMs: INSTALLER_SPEC.incus.uploadTimeoutMs,
@@ -42,6 +49,11 @@ export async function readIncusServer(client: IncusClient, endpoint: string, ret
   try {
     return await client.getServer()
   } catch (error: unknown) {
+    if (error instanceof IncusCancelledError) {
+      throw new InstallerError({
+        code: 'COMMAND_CANCELLED',
+      })
+    }
     if (error instanceof IncusTransportError) {
       throw new InstallerError({
         code: 'INCUS_ACCESS_UNAVAILABLE',
@@ -119,7 +131,11 @@ export function requireIncusExtensions(extensions: readonly string[], retry: str
   })
 }
 
-export async function validateLocalIncus(architecture: Architecture, retry: string): Promise<IncusPreflight> {
+export async function validateLocalIncus(
+  architecture: Architecture,
+  retry: string,
+  signal: AbortSignal,
+): Promise<IncusPreflight> {
   const socketPath = INSTALLER_SPEC.incus.socketPath
   try {
     const metadata = await lstat(socketPath)
@@ -140,7 +156,7 @@ export async function validateLocalIncus(architecture: Architecture, retry: stri
       retry,
     })
   }
-  const client = createIncusClient(localConnection(socketPath))
+  const client = createIncusClient(localConnection(socketPath), signal)
   const server = await readIncusServer(client, socketPath, retry)
   validateIncusServer(server, architecture, retry)
   return {

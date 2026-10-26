@@ -27,7 +27,7 @@ import {
   type HostBinding,
   type InstallationRecord,
 } from './records'
-import type { Retry } from '../retry'
+import type { Retry } from './retry'
 import type { InstallationInputs } from './types'
 
 const MAX_RECORD_BYTES = 65_536
@@ -47,17 +47,6 @@ function installationLock(retry: string): LockOptions {
     codes: LOCK_CODES,
   }
 }
-
-/**
- * What earlier versions kept directly in the state directory. These entries
- * would be a second credential authority, so they are refused and never read,
- * copied, migrated, or deleted.
- */
-const LEGACY_ENTRIES: readonly string[] = [
-  FILES.installationFileName,
-  FILES.legacyLockFileName,
-  ...Object.values(INSTALLER_SPEC.credentials.files),
-]
 
 /**
  * The record once an image is pinned.
@@ -146,8 +135,7 @@ function stateError(error: unknown, path: string, retry: string, expectedDirecto
 }
 
 /**
- * Opens the directory that holds every named installation, refusing a state
- * directory that still holds the earlier root-level layout. Without `create`,
+ * Opens the directory that holds every named installation. Without `create`,
  * an absent directory is null.
  */
 async function openRegistry(environment: NodeJS.ProcessEnv, create: boolean, retry: string): Promise<Dir | null> {
@@ -167,20 +155,6 @@ async function openRegistry(environment: NodeJS.ProcessEnv, create: boolean, ret
     } catch (creationError: unknown) {
       throw stateError(creationError, path, retry, true)
     }
-  }
-  let names: string[]
-  try {
-    names = await root.list()
-  } catch (error: unknown) {
-    throw stateError(error, path, retry, true)
-  }
-  const legacy = LEGACY_ENTRIES.filter(name => names.includes(name))
-  if (legacy.length > 0) {
-    throw new InstallerError({
-      code: 'INSTALLER_LEGACY_STATE',
-      facts: [['Observed', `${path} holds superseded entries: ${legacy.join(', ')}.`]],
-      retry,
-    })
   }
   try {
     return await openChildDir(root, FILES.directory, ownership(), create)

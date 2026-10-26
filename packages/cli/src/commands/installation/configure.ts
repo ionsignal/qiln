@@ -1,18 +1,18 @@
-import { INSTALLER_SPEC } from '../../install/spec'
+import { INSTALLER_SPEC } from '../../installation/spec'
 import { withInspection } from './inspect'
 import { approvalLabel, reportPlan } from './plan'
-import { requireIncusExtensions } from '../../checks/incus'
-import { withImageSource, type InstallerImageSelection } from '../../install/image'
-import { isEmpty } from '../../install/journal/types'
-import { readRoster, validateRoster } from '../../install/roster'
-import { acquireInstallationLock, loadInstallation, registerInstallation } from '../../install/state'
-import { Configurer, type ConfigureResult } from '../../install/configure'
-import { Prompts, withCancellation } from '../../terminal/prompts'
-import type { InstallationInputs } from '../../install/types'
+import { requireIncusExtensions } from '../../installation/preflight/incus'
+import { withImageSource, type InstallerImageSelection } from '../../installation/image'
+import { isEmpty } from '../../installation/journal/types'
+import { readRoster, validateRoster } from '../../installation/roster'
+import { acquireInstallationLock, loadInstallation, registerInstallation } from '../../installation/state'
+import { Configurer, type ConfigureResult } from '../../installation/configure'
+import { Prompts } from '../../terminal/prompts'
+import type { InstallationInputs } from '../../installation/types'
 import type { FileSnapshot } from '../../state/files'
 import type { InstallerLock } from '../../state/lock'
 import type { Reporter } from '../../terminal/reporter'
-import type { InstallationTarget } from './target'
+import type { InstallationTarget } from '../../installation/target/types'
 
 export interface ConfigureOptions {
   sourcePath: string
@@ -91,14 +91,14 @@ function reportResult(reporter: Reporter, inputs: InstallationInputs, { plan, ob
 /**
  * Observes the target first, then displays one installation plan and applies
  * it only after an explicit approval. Registration, locking and image-source
- * handling are shared by every target.
+ * handling are shared by every target. Cancellation is owned by the target.
  */
 export async function configure(
   target: InstallationTarget,
   options: ConfigureOptions,
   reporter: Reporter,
 ): Promise<void> {
-  const { retry } = target
+  const { retry, signal } = target
   await withInspection(target, reporter, retry.configure, async ({ host, incus }) => {
     requireIncusExtensions(incus.extensions, retry.inspect)
 
@@ -126,26 +126,24 @@ export async function configure(
     try {
       lock = await acquireInstallationLock(directory, retry.inspect)
       const installation = await loadInstallation(directory, host.binding, inputs, retry.inspect)
-      const result = await withCancellation(signal =>
-        withImageSource(options.image, async imageSource => {
-          const prompts = new Prompts(signal, retry.configure, reporter)
-          const configurer = await Configurer.open({
-            directory,
-            installation,
-            client: incus.client,
-            inputs,
-            source: imageSource,
-            sshKeygen: host.sshKeygen,
-            roster,
-            hooks: {
-              show: plan => reportPlan(reporter, { plan, inputs, source: imageSource }),
-              approve: plan => prompts.approve(approvalLabel(plan)),
-            },
-            retry,
-          })
-          return await configurer.run(signal)
-        }),
-      )
+      const result = await withImageSource(options.image, async imageSource => {
+        const prompts = new Prompts(signal, retry.configure, reporter)
+        const configurer = await Configurer.open({
+          directory,
+          installation,
+          client: incus.client,
+          inputs,
+          source: imageSource,
+          sshKeygen: host.sshKeygen,
+          roster,
+          hooks: {
+            show: plan => reportPlan(reporter, { plan, inputs, source: imageSource }),
+            approve: plan => prompts.approve(approvalLabel(plan)),
+          },
+          retry,
+        })
+        return await configurer.run(signal)
+      })
       reportResult(reporter, inputs, result)
     } finally {
       await lock?.release()

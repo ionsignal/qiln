@@ -1,8 +1,8 @@
-import { INSTALLER_SPEC } from '../../install/spec'
-import { isEmpty, type ConfigurePlan } from '../../install/journal/types'
+import { INSTALLER_SPEC } from '../../installation/spec'
+import { isEmpty, type ConfigurePlan } from '../../installation/journal/types'
 import type { DiagnosticFact } from '../../diagnostic/error'
-import type { ImageSource } from '../../install/image'
-import type { InstallationInputs } from '../../install/types'
+import type { ImageSource } from '../../installation/image'
+import type { InstallationInputs } from '../../installation/types'
 import type { Reporter } from '../../terminal/reporter'
 
 export interface PlanPreview {

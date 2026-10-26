@@ -1,23 +1,23 @@
-import { INSTALLER_SPEC } from './spec'
-import { InstallerError } from '../diagnostic/error'
-import { notFound, type DeploymentSelector } from '../aws/deployment/alias'
-import { optionsOf, requireReady } from '../aws/deployment/access'
-import { evidence as incusEvidence } from '../aws/deployment/incus/evidence'
-import { bindingOf } from '../aws/deployment/journal/binding'
-import { withConfirmedOperation } from '../aws/operation'
-import { openAwsRoot } from '../aws/root'
-import { readPrivateKey } from '../aws/ssh/private'
-import { withSsh, type Remote } from '../ssh/connections'
-import { withSocket } from '../ssh/socket'
-import { devLayout, type Layout } from './layout'
-import { requireSettled as requireZfsSettled } from '../aws/deployment/zfs/facts'
-import { requireSettled as requireIncusSettled, retainedPreseed, storageHeld } from '../aws/deployment/incus/facts'
-import * as deployments from '../aws/deployment/records'
-import * as lineage from '../aws/deployment/zfs/lineage'
-import type { Deployment } from '../aws/deployment/types'
-import type { IncusConnection } from '../incus/connection'
-import type { IncusConfigMap } from '../incus/types'
-import type { HostBinding } from './records'
+import { INSTALLER_SPEC } from '../../spec'
+import { InstallerError } from '../../../diagnostic/error'
+import { notFound, type DeploymentSelector } from '../../../aws/deployment/alias'
+import { optionsOf, requireReady } from '../../../aws/deployment/access'
+import { evidence as incusEvidence } from '../../../aws/deployment/incus/evidence'
+import { bindingOf } from '../../../aws/deployment/journal/binding'
+import { withConfirmedOperation } from '../../../aws/operation'
+import { openAwsRoot } from '../../../aws/root'
+import { readPrivateKey } from '../../../aws/ssh/private'
+import { withSsh, type Remote } from '../../../ssh/connections'
+import { withSocket } from '../../../ssh/socket'
+import { devLayout, type Layout } from '../../layout'
+import { requireSettled as requireZfsSettled } from '../../../aws/deployment/zfs/facts'
+import { requireSettled as requireIncusSettled, retainedPreseed, storageHeld } from '../../../aws/deployment/incus/facts'
+import * as deployments from '../../../aws/deployment/records'
+import * as lineage from '../../../aws/deployment/zfs/lineage'
+import type { Deployment } from '../../../aws/deployment/types'
+import type { IncusConnection } from '../../../transport/incus/connection'
+import type { IncusConfigMap } from '../../../transport/incus/types'
+import type { HostBinding } from '../../records'
 
 /**
  * Proposed AWS policy: a memory limit and no CPU limit. The installation
@@ -26,6 +26,14 @@ import type { HostBinding } from './records'
 const LIMITS: Readonly<IncusConfigMap> = Object.freeze({
   'limits.memory': '16GiB',
 })
+
+/**
+ * The relay session never observes the command signal. Cancellation reaches the
+ * Incus requests through the client instead, so a request that is allowed to
+ * finish keeps its connection, exactly as it does on a local socket. The
+ * session closes when the work that uses it unwinds.
+ */
+const RELAY_SIGNAL = new AbortController().signal
 
 /**
  * Derived from the deployment's immutable ID, never from its alias or operator
@@ -50,7 +58,7 @@ export interface AwsHost {
   layout: Layout
   record: Deployment
   shell<T>(signal: AbortSignal, use: (remote: Remote) => Promise<T>): Promise<T>
-  relay<T>(signal: AbortSignal, use: (connection: IncusConnection) => Promise<T>): Promise<T>
+  relay<T>(use: (connection: IncusConnection) => Promise<T>): Promise<T>
 }
 
 function refusal(record: Deployment, reason: string): InstallerError {
@@ -137,8 +145,8 @@ export async function withAwsHost<T>(
       },
       record,
       shell: (signal, use) => withKey(key => withSsh(ssh, key, signal, use)),
-      relay: (signal, use) =>
-        withKey(key => withSocket(ssh, key, signal, INSTALLER_SPEC.incus.socketPath, use)),
+      relay: use =>
+        withKey(key => withSocket(ssh, key, RELAY_SIGNAL, INSTALLER_SPEC.incus.socketPath, use)),
     })
   })
 }

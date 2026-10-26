@@ -1,9 +1,9 @@
 import { constants } from 'node:fs'
 import { access, lstat, readFile, realpath } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
-import { InstallerError } from '../diagnostic/error'
-import { isRecord } from '../guards'
-import { runProcess } from '../process'
+import { InstallerError } from '../../diagnostic/error'
+import { isRecord } from '../../guards'
+import { runProcess } from '../../process'
 
 const MAX_PACKAGE_JSON_BYTES = 1_048_576
 

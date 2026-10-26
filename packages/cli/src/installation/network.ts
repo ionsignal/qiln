@@ -1,6 +1,6 @@
 import { InstallerError } from '../diagnostic/error'
 import { INSTALLER_SPEC } from './spec'
-import type { IncusNetwork, IncusNetworkCreate } from '../incus/types'
+import type { IncusNetwork, IncusNetworkCreate } from '../transport/incus/types'
 import type { Layout } from './layout'
 
 function configDifferences(

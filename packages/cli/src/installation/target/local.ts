@@ -1,22 +1,23 @@
-import { INSTALLER_SPEC } from '../../install/spec'
-import { validateHostPreflight } from '../../checks/host'
-import { validateLocalIncus } from '../../checks/incus'
-import { validateNetworkPreflight } from '../../checks/network'
-import { validateSourcePreflight } from '../../checks/source'
-import { validateStoragePreflight } from '../../checks/storage'
-import { devLayout } from '../../install/layout'
-import { localBinding } from '../../install/records'
-import type { Retry } from '../../retry'
-import type { InstallationTarget } from './target'
+import { INSTALLER_SPEC } from '../spec'
+import { validateHostPreflight } from '../preflight/host'
+import { validateLocalIncus } from '../preflight/incus'
+import { validateNetworkPreflight } from '../preflight/network'
+import { validateSourcePreflight } from '../preflight/source'
+import { validateStoragePreflight } from '../preflight/storage'
+import { devLayout } from '../layout'
+import { localBinding } from '../records'
+import type { Retry } from '../retry'
+import type { InstallationTarget } from './types'
 
 /**
  * This machine: the operator-side host checks, the local Incus socket, and the
  * development layout. `commands` names the workflow that diagnostics tell the
- * operator to run again.
+ * operator to run again, and `signal` is the cancellation of the invocation.
  */
-export const localTarget = (commands: Retry): InstallationTarget => ({
+export const localTarget = (commands: Retry, signal: AbortSignal): InstallationTarget => ({
   name: INSTALLER_SPEC.state.localName,
   retry: commands,
+  signal,
   async withHost(reporter, retry, use) {
     const layout = devLayout
     const preflight = await validateHostPreflight(retry)
@@ -37,7 +38,7 @@ export const localTarget = (commands: Retry): InstallationTarget => ({
       sshKeygen: preflight.commandPaths['ssh-keygen'],
       checkout: async path => (await validateSourcePreflight(path, preflight.commandPaths.git, retry)).sourceRoot,
       withIncus: async useIncus => {
-        const incus = await validateLocalIncus(preflight.architecture, retry)
+        const incus = await validateLocalIncus(preflight.architecture, retry, signal)
         reporter.row(
           'verified',
           'Incus',

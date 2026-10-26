@@ -1,9 +1,9 @@
-import type { IncusClient } from '../../incus/client'
+import type { IncusClient } from '../../transport/incus/client'
 import type { DeploymentSelector } from '../../aws/deployment/alias'
-import type { Architecture } from '../../install/architecture'
-import type { Layout } from '../../install/layout'
-import type { HostBinding } from '../../install/records'
-import type { Retry } from '../../retry'
+import type { Architecture } from '../architecture'
+import type { Layout } from '../layout'
+import type { HostBinding } from '../records'
+import type { Retry } from '../retry'
 import type { Reporter } from '../../terminal/reporter'
 
 /**
@@ -41,10 +41,13 @@ export interface HostAccess {
 /**
  * Everything that differs between targets of the same installation workflow.
  * `name` is the installation name, and `retry` supplies the commands that
- * diagnostics tell the operator to run again.
+ * diagnostics tell the operator to run again. `signal` is the one cancellation
+ * signal of the invocation: the Incus client of the target observes it, so
+ * every request class decides for itself how to react.
  */
 export interface InstallationTarget {
   name: string
   retry: Retry
+  signal: AbortSignal
   withHost<T>(reporter: Reporter, retry: string, use: (host: HostAccess) => Promise<T>): Promise<T>
 }

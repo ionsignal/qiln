@@ -1,13 +1,13 @@
-import { INSTALLER_SPEC } from '../../install/spec'
-import { requireNoCollision } from '../../install/credentials'
-import { assertInstance } from '../../install/instance'
-import { requireBound, type InstallationRecord } from '../../install/records'
-import { inspectInstallation } from '../../install/state'
-import { toInstallerError } from '../../incus/errors'
-import type { IncusInstance } from '../../incus/types'
-import type { InstallationInputs } from '../../install/types'
+import { INSTALLER_SPEC } from '../../installation/spec'
+import { requireNoCollision } from '../../installation/credentials'
+import { assertInstance } from '../../installation/instance'
+import { requireBound, type InstallationRecord } from '../../installation/records'
+import { inspectInstallation } from '../../installation/state'
+import { toInstallerError } from '../../transport/incus/errors'
+import type { IncusInstance } from '../../transport/incus/types'
+import type { InstallationInputs } from '../../installation/types'
 import type { Reporter } from '../../terminal/reporter'
-import type { HostAccess, IncusAccess, InstallationTarget } from './target'
+import type { HostAccess, IncusAccess, InstallationTarget } from '../../installation/target/types'
 
 /**
  * A target whose checks have all passed, and the retained installation record

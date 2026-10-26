@@ -1,4 +1,4 @@
-import { listInstallations } from '../../install/state'
+import { listInstallations } from '../../installation/state'
 import type { Reporter, TableCell } from '../../terminal/reporter'
 
 export async function list(reporter: Reporter): Promise<void> {

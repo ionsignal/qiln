@@ -1,6 +1,6 @@
 import { hasCollision, matchesCredentials } from './credentials'
 import { instanceFits } from './instance'
-import type { IncusInstance } from '../incus/types'
+import type { IncusInstance } from '../transport/incus/types'
 import type { InstallAction, ConfigurePlan } from './journal/types'
 import type { Observation } from './observe'
 import type { InstallationInputs } from './types'

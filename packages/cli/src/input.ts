@@ -1,12 +1,12 @@
-import { installationRetry } from './retry'
+import { installationRetry } from './installation/retry'
 import { AWS_SPEC } from './aws/spec'
 import { InstallerError } from './diagnostic/error'
 import { isOperationId } from './guards'
 import { validName, validRegion } from './aws/types'
-import type { Retry } from './retry' 
+import type { Retry } from './installation/retry' 
 import type { DeploymentSelector } from './aws/deployment/alias'
 import type { ConfigureOptions } from './commands/installation/configure'
-import type { InstallationSelector } from './commands/installation/target'
+import type { InstallationSelector } from './installation/target/types'
 
 export interface AwsInput {
   name?: string

@@ -1,6 +1,7 @@
-import { InstallerError } from '../diagnostic/error'
+import { InstallerError } from '../../diagnostic/error'
 import {
   IncusApiError,
+  IncusCancelledError,
   IncusOperationError,
   IncusOperationWaitTimeoutError,
   IncusProtocolError,
@@ -28,11 +29,17 @@ export function isIncusApiStatus(error: unknown, statusCode: number): error is I
 /**
  * Converts unhandled Incus client failures into non-secret installer
  * diagnostics. Expected resource absence and guarded update conflicts remain
- * caller-owned decisions.
+ * caller-owned decisions. A cancellation is not a failure of Incus, so it
+ * carries no operation or retry wording.
  */
 export function toInstallerError(error: unknown, context: IncusErrorContext): InstallerError {
   if (error instanceof InstallerError) {
     return error
+  }
+  if (error instanceof IncusCancelledError) {
+    return new InstallerError({
+      code: 'COMMAND_CANCELLED',
+    })
   }
   if (error instanceof IncusOperationWaitTimeoutError) {
     return new InstallerError({

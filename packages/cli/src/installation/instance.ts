@@ -3,7 +3,7 @@ import { InstallerError } from '../diagnostic/error'
 import { INSTALLER_SPEC } from './spec'
 import type { InstallationInputs } from './types'
 import type { Layout } from './layout'
-import type { IncusConfigMap, IncusDevicesMap, IncusInstance, IncusInstanceCreate } from '../incus/types'
+import type { IncusConfigMap, IncusDevicesMap, IncusInstance, IncusInstanceCreate } from '../transport/incus/types'
 
 const STOPPED_STATUS_CODE = 102
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/

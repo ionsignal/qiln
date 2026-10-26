@@ -1,9 +1,9 @@
 import { INSTALLER_SPEC } from './spec'
-import { validateImagePreflight } from '../checks/image'
-import { toInstallerError } from '../incus/errors'
+import { validateImagePreflight } from './preflight/image'
+import { toInstallerError } from '../transport/incus/errors'
 import { loadCredentials, type Credentials } from './credentials'
 import type { ImageSource } from './image'
-import type { IncusClient } from '../incus/client'
+import type { IncusClient } from '../transport/incus/client'
 import type {
   IncusImage,
   IncusImageAlias,
@@ -11,8 +11,8 @@ import type {
   IncusNetwork,
   IncusRead,
   IncusStorageVolume,
-} from '../incus/types'
-import type { Retry } from '../retry'
+} from '../transport/incus/types'
+import type { Retry } from './retry'
 import type { Dir } from '../state/files'
 import type { InstallationState } from './state'
 import type { InstallationInputs } from './types'

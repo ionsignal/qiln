@@ -1,11 +1,11 @@
 import { z } from 'zod'
 import inspectScript from './scripts/inspect.sh?raw'
-import { outputOf, type Section } from '../output'
-import { parseOsRelease } from '../parse'
-import { shellCommand } from '../shell'
-import { InstallerError } from '../../diagnostic/error'
-import type { CheckoutObservation, HostObservation } from '../../install/host'
-import type { Remote } from '../../ssh/connections'
+import { outputOf, type Section } from '../../../remote/output'
+import { parseOsRelease } from '../../../remote/parse'
+import { shellCommand } from '../../../remote/shell'
+import { InstallerError } from '../../../diagnostic/error'
+import type { CheckoutObservation, HostObservation } from '../../host'
+import type { Remote } from '../../../ssh/connections'
 
 const LIMITS = {
   timeoutMs: 30_000,

@@ -1,13 +1,13 @@
-import { INSTALLER_SPEC } from '../../install/spec'
-import { awsInstallationName } from '../../install/aws'
-import { unsettled } from '../../install/journal/facts'
-import { listInstallations } from '../../install/state'
+import { INSTALLER_SPEC } from '../../installation/spec'
+import { awsInstallationName } from '../../installation/target/aws/host'
+import { unsettled } from '../../installation/journal/facts'
+import { listInstallations } from '../../installation/state'
 import { stateOf } from '../../journal/step'
-import { selectorFlags } from '../../retry'
-import * as journal from '../../install/journal/records'
-import type { HostBinding } from '../../install/records'
+import { selectorFlags } from '../../installation/retry'
+import * as journal from '../../installation/journal/records'
+import type { HostBinding } from '../../installation/records'
 import type { Reporter } from '../../terminal/reporter'
-import type { InstallationSelector } from './target'
+import type { InstallationSelector } from '../../installation/target/types'
 
 function describeHost(host: HostBinding): string {
   return host.kind === 'local' ? 'this machine' : `AWS deployment ${host.deployment} · instance ${host.instanceId}`

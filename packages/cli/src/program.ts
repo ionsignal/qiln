@@ -26,7 +26,7 @@ import type {
 } from './input'
 import type { CommanderError } from 'commander'
 import type { ConfigureOptions } from './commands/installation/configure'
-import type { InstallationSelector } from './commands/installation/target'
+import type { InstallationSelector } from './installation/target/types'
 
 export interface GlobalOptions {
   color: ColorMode

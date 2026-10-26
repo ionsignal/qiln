@@ -140,13 +140,6 @@ export const installationDiagnostics = Object.freeze({
     'Credentials may be delivered only to an instance matching the persisted image identity.',
     'Re-run qiln installation configure for the same target to reconcile the selected image and installation state.',
   ),
-  INSTALLER_LEGACY_STATE: entry(
-    'Installer state uses a superseded layout',
-    'Earlier versions kept the installation record, credentials, and lock directly in the Qiln state directory. Installations now live in named directories, each the single authority for its own credentials. Qiln never reads, copies, migrates, or deletes the earlier entries, so two credential authorities can never exist.',
-    'Review the listed entries in the Qiln state directory.',
-    'Remove them manually once you no longer need them, then re-run the command. An orchestrator whose credentials are no longer available locally is refused until it is reviewed manually.',
-    preservePostgresStep,
-  ),
   INSTALLATION_HOST_UNIDENTIFIED: entry(
     'Local host identity is unavailable',
     'Installation records are bound to this machine through an application-specific digest of /etc/machine-id. The identifier was unreadable or malformed. The binding is evidence of identity and not attestation, and the raw identifier is never retained or displayed.',

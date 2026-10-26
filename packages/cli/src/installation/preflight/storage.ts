@@ -1,12 +1,12 @@
-import { InstallerError } from '../diagnostic/error'
-import { INSTALLER_SPEC } from '../install/spec'
-import { assertVolume } from '../install/storage'
-import { runProcess } from '../process'
-import { toInstallerError } from '../incus/errors'
-import type { Layout } from '../install/layout'
-import type { IncusClient } from '../incus/client'
+import { InstallerError } from '../../diagnostic/error'
+import { INSTALLER_SPEC } from '../spec'
+import { assertVolume } from '../storage'
+import { runProcess } from '../../process'
+import { toInstallerError } from '../../transport/incus/errors'
+import type { Layout } from '../layout'
+import type { IncusClient } from '../../transport/incus/client'
 import type { HostPreflight } from './host'
-import type { IncusStoragePool, IncusStorageVolume } from '../incus/types'
+import type { IncusStoragePool, IncusStorageVolume } from '../../transport/incus/types'
 
 export interface IncusStoragePreflight {
   incusPool: IncusStoragePool

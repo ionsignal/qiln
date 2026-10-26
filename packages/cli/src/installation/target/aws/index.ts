@@ -1,16 +1,16 @@
 import { isAbsolute } from 'node:path'
-import { InstallerError } from '../../diagnostic/error'
-import { requireTool } from '../../checks/host'
-import { createIncusClient, readIncusServer, validateIncusServer } from '../../checks/incus'
-import { validateIncusNetwork } from '../../checks/network'
-import { validateIncusStorage } from '../../checks/storage'
-import { architectureOf } from '../../install/architecture'
-import { withAwsHost, type AwsHost } from '../../install/aws'
-import { requireCapacity, requireCheckout, requireSupportedRelease } from '../../install/host'
-import { inspectHost } from '../../remote/install/inspect'
+import { InstallerError } from '../../../diagnostic/error'
+import { requireTool } from '../../preflight/host'
+import { createIncusClient, readIncusServer, validateIncusServer } from '../../preflight/incus'
+import { validateIncusNetwork } from '../../preflight/network'
+import { validateIncusStorage } from '../../preflight/storage'
+import { architectureOf } from '../../architecture'
+import { withAwsHost, type AwsHost } from './host'
+import { requireCapacity, requireCheckout, requireSupportedRelease } from '../../host'
+import { inspectHost } from './inspect'
 import { installationRetry, type Retry } from '../../retry'
-import type { DeploymentSelector } from '../../aws/deployment/alias'
-import type { InstallationTarget } from './target'
+import type { DeploymentSelector } from '../../../aws/deployment/alias'
+import type { InstallationTarget } from '../types'
 
 const GIB = 1_073_741_824
 
@@ -20,12 +20,15 @@ const GIB = 1_073_741_824
  * host inspection and a new one for the Incus socket relay. Nothing is
  * observed about the operator's machine except `ssh-keygen`. The AWS lock held
  * by `withAwsHost` outlives the target, so it is only valid inside that scope.
+ * The signal bounds the inspection sessions, while the relay session ignores it
+ * and the Incus client observes it instead.
  */
 function awsTarget(aws: AwsHost, signal: AbortSignal, commands: Retry): InstallationTarget {
   const observe = (checkout: string | null) => aws.shell(signal, remote => inspectHost(remote, checkout))
   return {
     name: aws.name,
     retry: commands,
+    signal,
     async withHost(reporter, retry, use) {
       const sshKeygen = await requireTool('ssh-keygen', retry)
       const observation = await observe(null)
@@ -53,8 +56,8 @@ function awsTarget(aws: AwsHost, signal: AbortSignal, commands: Retry): Installa
           return requireCheckout((await observe(path)).checkout, retry).path
         },
         withIncus: useIncus =>
-          aws.relay(signal, async connection => {
-            const client = createIncusClient(connection)
+          aws.relay(async connection => {
+            const client = createIncusClient(connection, signal)
             const server = await readIncusServer(client, connection.endpoint, retry)
             validateIncusServer(server, architecture, retry)
             reporter.row(
@@ -94,7 +97,7 @@ function awsTarget(aws: AwsHost, signal: AbortSignal, commands: Retry): Installa
 
 /**
  * Resolves the selected deployment under the AWS-operation lock and hands the
- * resulting target to `run`. The signal bounds every SSH session of the target.
+ * resulting target to `run`. The signal is the cancellation of the invocation.
  */
 export function withAwsTarget<T>(
   selector: DeploymentSelector,

@@ -1,4 +1,4 @@
-import type { InstallationSelector } from './commands/installation/target'
+import type { InstallationSelector } from './target/types'
 
 /**
  * The one authority for the commands that diagnostics tell an operator to run

@@ -7,13 +7,19 @@ import { observe, type Observation } from './observe'
 import { createCredentials, replaceRoster } from './credentials'
 import { pinImage, pinned } from './state'
 import { requireNotStuck, returned } from './journal/facts'
-import { validateContainerImage } from '../checks/image'
+import { validateContainerImage } from './preflight/image'
 import { canonical, sameJson } from '../json'
 import { InstallerError } from '../diagnostic/error'
-import { toInstallerError } from '../incus/errors'
+import { stateOf, type StepState } from '../journal/step'
+import { toInstallerError } from '../transport/incus/errors'
 import { checkCancellation } from '../terminal/prompts'
 import { currentUserId } from '../state/user'
-import { IncusApiError, IncusOperationError, type IncusClient } from '../incus/client'
+import {
+  IncusApiError,
+  IncusCancelledError,
+  IncusOperationError,
+  type IncusClient,
+} from '../transport/incus/client'
 import {
   actionsOf,
   isEmpty,
@@ -24,7 +30,7 @@ import {
   type InstallAction,
 } from './journal/types'
 import * as records from './journal/records'
-import type { Retry } from '../retry'
+import type { Retry } from './retry'
 import type { Dir, FileSnapshot } from '../state/files'
 import type { ImageSource } from './image'
 import type { InstallationRecord } from './records'
@@ -57,6 +63,17 @@ const OPERATIONS: Record<InstallAction, string> = {
   'create-volume': 'create the Qiln PostgreSQL custom volume',
   'create-instance': 'create the stopped orchestrator instance',
   'update-instance': 'deliver the credentials to the stopped orchestrator instance',
+}
+
+/**
+ * What a cancellation leaves behind for the newest step, by its journal state.
+ */
+const CANCELLED_STEP_OUTCOMES: Record<StepState, string> = {
+  open: 'uncertain; the step may have run partly or fully, and it blocks configuration until resolved',
+  uncertain: 'uncertain; the step may have run partly or fully, and it blocks configuration until resolved',
+  returned: 'exited zero; the next run verifies it from a fresh observation',
+  refused: 'settled; the step had no effect',
+  verified: 'settled; a fresh observation agreed',
 }
 
 /**
@@ -136,10 +153,12 @@ function unverified(installation: string, subject: string, retry: string): Insta
  * observation must agree before `verifiedAt` is persisted. The plan is derived
  * again after approval and must be unchanged before anything is persisted.
  * A split image is imported without an alias and must be a container image for
- * the target architecture before the previous image is deleted. Nothing is
- * replayed, resumed, or rolled back, and an interrupted step stays open as
- * evidence. The pin and the local credential files are atomic local writes
- * covered by the approval, and they are not journaled steps.
+ * the target architecture before it is verified and before the previous image
+ * is deleted. Nothing is replayed, resumed, or rolled back, and an interrupted
+ * step stays open as evidence. The pin and the local credential files are
+ * atomic local writes covered by the approval, and they are not journaled
+ * steps. Cancellation stops before the next step, and the diagnostic states
+ * what it left behind for the newest one.
  */
 export class Configurer {
   private constructor(
@@ -206,11 +225,27 @@ export class Configurer {
   }
 
   /**
+   * Applies the approved plan, and reports a cancellation together with what it
+   * left behind for the newest step.
+   */
+  private async execute(plan: ConfigurePlan, observation: Observation, signal: AbortSignal): Promise<ConfigureResult> {
+    try {
+      return await this.applyActions(plan, observation, signal)
+    } catch (error: unknown) {
+      throw this.describeCancellation(error)
+    }
+  }
+
+  /**
    * Runs the approved actions: the image actions first, then the pin, then the
    * rest. The whole installation is observed once more at the end, and it must
    * need nothing further.
    */
-  private async execute(plan: ConfigurePlan, observation: Observation, signal: AbortSignal): Promise<ConfigureResult> {
+  private async applyActions(
+    plan: ConfigurePlan,
+    observation: Observation,
+    signal: AbortSignal,
+  ): Promise<ConfigureResult> {
     const authorization = await this.authorize(plan)
     const actions = actionsOf(plan)
     let latest = observation
@@ -225,7 +260,25 @@ export class Configurer {
     if (!isEmpty(planOf(final, this.planRequest))) {
       throw unverified(this.installation.name, 'the complete installation', this.context.retry.configure)
     }
+    checkCancellation(signal)
     return { plan, observation: final }
+  }
+
+  private describeCancellation(error: unknown): unknown {
+    const step = this.evidence.steps.at(-1)
+    if (!(error instanceof InstallerError) || error.code !== 'COMMAND_CANCELLED' || step === undefined) {
+      return error
+    }
+    const state = stateOf(step)
+    return new InstallerError({
+      code: error.code,
+      facts: [
+        ['Installation', this.installation.name],
+        ['Last step', `${step.action} (${state})`],
+        ['Last step outcome', CANCELLED_STEP_OUTCOMES[state]],
+      ],
+      retry: this.context.retry.configure,
+    })
   }
 
   private get lastStep(): ConfigureStep {
@@ -297,8 +350,8 @@ export class Configurer {
   /**
    * One approved action. Credentials are written locally just before the
    * guarded instance update and observed again, so the update is built from a
-   * snapshot that includes them. An imported image is judged here, before any
-   * later step can delete the previous image, create the alias, or pin it.
+   * snapshot that includes them. Cancellation is checked before each action,
+   * so none starts after it.
    */
   private async perform(
     authorization: string,
@@ -313,11 +366,7 @@ export class Configurer {
       await this.writeCredentials(plan)
       current = await this.fresh()
     }
-    const next = await this.step(authorization, plan, action, current)
-    if (action === 'import-image') {
-      this.requireContainerImage(next)
-    }
-    return next
+    return await this.step(authorization, plan, action, current)
   }
 
   /**
@@ -396,14 +445,24 @@ export class Configurer {
 
   /**
    * A client error before the request was accepted, or a local refusal raised
-   * before any request was sent, is a definite absence of effect. A completed
-   * but unsuccessful operation is recorded as a nonzero completion. Anything
-   * else leaves the step open, because a timeout or lost connection does not
-   * show that nothing changed.
+   * before any request was sent, is a definite absence of effect. A cancelled
+   * request is the same only when it never reached the daemon and no operation
+   * was accepted. A completed but unsuccessful operation is recorded as a
+   * nonzero completion. Anything else leaves the step open, because a timeout,
+   * a cancelled wait or upload, or a lost connection does not show that nothing
+   * changed.
    */
   private async conclude(action: InstallAction, error: unknown, accepted: boolean): Promise<never> {
     const { retry } = this.context
     const at = new Date().toISOString()
+    if (error instanceof IncusCancelledError) {
+      if (!accepted && !error.dispatched) {
+        await this.amend({ refusedAt: at })
+      }
+      throw new InstallerError({
+        code: 'COMMAND_CANCELLED',
+      })
+    }
     if (error instanceof IncusOperationError) {
       await this.amend({ completion: { exitCode: 1, completedAt: at } })
       throw failure(action, 'uncertain', error, retry.configure)
@@ -419,11 +478,19 @@ export class Configurer {
     throw failure(action, 'uncertain', error, retry.configure)
   }
 
+  /**
+   * An imported image is judged here, before its step is stamped verified, so a
+   * step never claims an image that is not a container image for the target
+   * architecture.
+   */
   private async verified(plan: ConfigurePlan, action: InstallAction): Promise<Observation> {
     const { inputs, retry } = this.context
     const observation = await this.fresh()
     if (!verify(action, plan, observation, inputs, retry.configure)) {
       throw unverified(this.installation.name, `step ${action}`, retry.configure)
+    }
+    if (action === 'import-image') {
+      this.requireContainerImage(observation)
     }
     await this.amend({ verifiedAt: new Date().toISOString() })
     return observation

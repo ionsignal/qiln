@@ -1,10 +1,10 @@
-import { InstallerError } from '../diagnostic/error'
-import { INSTALLER_SPEC } from '../install/spec'
-import { isIncusApiStatus, toInstallerError } from '../incus/errors'
-import type { Architecture } from '../install/architecture'
-import type { InstallationState } from '../install/state'
-import type { IncusClient } from '../incus/client'
-import type { IncusImage, IncusImageAlias } from '../incus/types'
+import { InstallerError } from '../../diagnostic/error'
+import { INSTALLER_SPEC } from '../spec'
+import { isIncusApiStatus, toInstallerError } from '../../transport/incus/errors'
+import type { Architecture } from '../architecture'
+import type { InstallationState } from '../state'
+import type { IncusClient } from '../../transport/incus/client'
+import type { IncusImage, IncusImageAlias } from '../../transport/incus/types'
 import type { Retry } from '../retry'
 
 const FULL_FINGERPRINT_PATTERN = /^[a-f0-9]{64}$/

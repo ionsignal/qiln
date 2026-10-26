@@ -9,7 +9,7 @@ import { runProcess } from '../process'
 import { currentUserId } from '../state/user'
 import type { FileSnapshot } from '../state/files'
 import { Dir, FileValidationError, read, readChild, withDir, withTemp, writeChild } from '../state/files'
-import type { IncusConfigMap, IncusDevicesMap, IncusInstance, IncusInstancePut } from '../incus/types'
+import type { IncusConfigMap, IncusDevicesMap, IncusInstance, IncusInstancePut } from '../transport/incus/types'
 
 const UNSUPPORTED_CONTROL_PATTERN = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/
 

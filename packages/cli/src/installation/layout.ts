@@ -1,4 +1,4 @@
-import type { IncusConfigMap } from '../incus/types'
+import type { IncusConfigMap } from '../transport/incus/types'
 
 /**
  * The pool, network, volume, and limits that one installation expects. It
