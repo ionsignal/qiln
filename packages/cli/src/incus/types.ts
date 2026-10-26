@@ -147,7 +147,6 @@ export interface IncusOperation {
 
 export interface IncusSplitImageImport {
   fingerprint: string
-  alias: string
   metadataPath: string
   metadataSize: number
   rootfsPath: string

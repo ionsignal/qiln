@@ -69,7 +69,6 @@ export async function apply(
         context,
         await client.importSplitImage({
           fingerprint: plan.fingerprint,
-          alias: INSTALLER_SPEC.orchestrator.imageAlias,
           metadataPath: source.metadata.path,
           metadataSize: source.metadata.size,
           rootfsPath: source.rootfs.path,

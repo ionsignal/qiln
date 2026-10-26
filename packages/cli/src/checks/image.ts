@@ -18,6 +18,13 @@ export interface ImagePreflight {
   selectedAlias: string | null
 }
 
+/**
+ * The one canonical image identity: a full lowercase SHA-256.
+ */
+export function isImageFingerprint(value: string): boolean {
+  return FULL_FINGERPRINT_PATTERN.test(value)
+}
+
 function validateImageSelector(value: string, retry: Retry): string {
   if (value === '' || value.length > 512 || value.trim() !== value || CONTROL_CHARACTER_PATTERN.test(value)) {
     throw new InstallerError({
@@ -31,7 +38,7 @@ function validateImageSelector(value: string, retry: Retry): string {
       retry: retry.configure,
     })
   }
-  if (CASE_INSENSITIVE_FINGERPRINT_PATTERN.test(value) && !FULL_FINGERPRINT_PATTERN.test(value)) {
+  if (CASE_INSENSITIVE_FINGERPRINT_PATTERN.test(value) && !isImageFingerprint(value)) {
     throw new InstallerError({
       code: 'IMAGE_FINGERPRINT_NOT_LOWERCASE',
       facts: [['Observed', 'The supplied 64-character fingerprint contains uppercase hexadecimal characters.']],
@@ -47,7 +54,7 @@ export function validateContainerImage(
   architecture: Architecture,
   retry: string,
 ): IncusImage {
-  if (!FULL_FINGERPRINT_PATTERN.test(image.fingerprint) || image.fingerprint !== fingerprint) {
+  if (!isImageFingerprint(image.fingerprint) || image.fingerprint !== fingerprint) {
     throw new InstallerError({
       code: 'IMAGE_FINGERPRINT_MISMATCH',
       facts: [
@@ -91,7 +98,7 @@ export async function validateImagePreflight(
   let fingerprint: string
   let resolvedFrom: ImagePreflight['resolvedFrom']
   let selectedAlias: string | null
-  if (FULL_FINGERPRINT_PATTERN.test(selector)) {
+  if (isImageFingerprint(selector)) {
     fingerprint = selector
     resolvedFrom = 'fingerprint'
     selectedAlias = null
@@ -116,7 +123,7 @@ export async function validateImagePreflight(
         retry: retry.configure,
       })
     }
-    if (!FULL_FINGERPRINT_PATTERN.test(resolvedAlias.target)) {
+    if (!isImageFingerprint(resolvedAlias.target)) {
       throw new InstallerError({
         code: 'IMAGE_ALIAS_TARGET_INVALID',
         facts: [

@@ -26,8 +26,10 @@ const text = z.string().min(1).max(256)
 /**
  * The complete configuration change as the operator approved it. Each flag is a
  * decision made from one observation, so an empty plan shows that nothing is
- * left to apply. `image.replace` names the previous managed target and every
- * alias attached to it, which is the only destructive step.
+ * left to apply. `image.import` uploads the staged content without an alias,
+ * and `image.alias` points the managed alias at the selected image.
+ * `image.replace` names the previous managed target and every alias attached to
+ * it, which is the only destructive step.
  */
 export const planSchema = z.strictObject({
   kind: z.literal('configure'),
@@ -81,15 +83,17 @@ export type ConfigureOperation = ConfigureEvidence['operations'][number]
 
 /**
  * The Incus-side steps one approved plan allows, in the order they run. A step
- * whose action is not listed here was never authorized.
+ * whose action is not listed here was never authorized. The import comes first
+ * so the destructive deletion waits until the new image has been checked, and
+ * the alias is created last because deleting the old image removes its aliases.
  */
 export function actionsOf(plan: ConfigurePlan): readonly InstallAction[] {
   const actions: InstallAction[] = []
-  if (plan.image.replace !== null) {
-    actions.push('delete-image')
-  }
   if (plan.image.import) {
     actions.push('import-image')
+  }
+  if (plan.image.replace !== null) {
+    actions.push('delete-image')
   }
   if (plan.image.alias) {
     actions.push('create-alias')

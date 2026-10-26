@@ -15,6 +15,8 @@ const NOTICE =
   'Approval authorizes only the listed changes. Each Incus change is one fenced request followed by a fresh observation that must agree, ' +
   'and the whole installation is observed again afterwards. The plan is derived again from the host after approval and must be unchanged before anything is recorded. ' +
   'A failed or cancelled step is not replayed, resumed, or rolled back, and interrupted work may already have completed. ' +
+  'A staged split image is imported without an alias and checked as a container image for the target architecture before any previous image is deleted. ' +
+  'If it does not fit, it remains in the image store without an alias, Qiln never deletes it, and you must remove it manually. ' +
   'The selected image is trusted guest code: Qiln has not established its provenance, authenticity, guest compatibility, or bootstrap readiness. ' +
   'No service is started.'
 
@@ -45,17 +47,20 @@ export function reportPlan(reporter: Reporter, { plan, inputs, source }: PlanPre
       `${plan.fingerprint} · ${source.kind === 'split' ? 'staged split artifacts' : 'existing local image; never pulled or replaced'}`,
     ],
   ]
+  if (image.import) {
+    facts.push([
+      'Image import',
+      'the staged artifacts are uploaded without an alias, then checked as a container image for the target architecture before anything else changes',
+    ])
+  }
   if (image.replace !== null) {
     facts.push([
       'Image deletion',
-      `${image.replace.fingerprint} · destructive · the managed alias ${imageAlias} targets different content · aliases removed with it: ${image.replace.aliases.join(', ') || 'none'}`,
+      `${image.replace.fingerprint} · destructive · deleted only after the new image passes its check · the managed alias ${imageAlias} targets different content · aliases removed with it: ${image.replace.aliases.join(', ') || 'none'}`,
     ])
   }
-  if (image.import) {
-    facts.push(['Image import', `the staged artifacts are uploaded under the managed alias ${imageAlias}`])
-  }
   if (image.alias) {
-    facts.push(['Image alias', `${imageAlias} is created for the image already in the store`])
+    facts.push(['Image alias', `${imageAlias} is pointed at the selected image`])
   }
   if (plan.pin) {
     facts.push(['Image pin', 'the full fingerprint is written to the installation record'])

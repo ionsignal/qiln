@@ -6,13 +6,14 @@ import { planOf, type PlanRequest } from './plan'
 import { observe, type Observation } from './observe'
 import { createCredentials, replaceRoster } from './credentials'
 import { pinImage, pinned } from './state'
+import { requireNotStuck, returned } from './journal/facts'
+import { validateContainerImage } from '../checks/image'
 import { canonical, sameJson } from '../json'
 import { InstallerError } from '../diagnostic/error'
-import { IncusApiError, IncusOperationError, type IncusClient } from '../incus/client'
 import { toInstallerError } from '../incus/errors'
 import { checkCancellation } from '../terminal/prompts'
 import { currentUserId } from '../state/user'
-import { requireNotStuck, returned } from './journal/facts'
+import { IncusApiError, IncusOperationError, type IncusClient } from '../incus/client'
 import {
   actionsOf,
   isEmpty,
@@ -42,7 +43,11 @@ const RECIPE = Object.freeze({
  * The installation pin is written once these have run, so a failed image step
  * never leaves a pin for content that is not in the store.
  */
-const IMAGE_ACTIONS: readonly InstallAction[] = ['delete-image', 'import-image', 'create-alias']
+const IMAGE_ACTIONS: readonly InstallAction[] = ['import-image', 'delete-image', 'create-alias']
+
+function isImageAction(action: InstallAction): boolean {
+  return IMAGE_ACTIONS.includes(action)
+}
 
 const OPERATIONS: Record<InstallAction, string> = {
   'delete-image': 'delete the previous image targeted by the managed orchestrator alias',
@@ -130,9 +135,11 @@ function unverified(installation: string, subject: string, retry: string): Insta
  * the single Incus request runs, then its outcome is persisted, then a fresh
  * observation must agree before `verifiedAt` is persisted. The plan is derived
  * again after approval and must be unchanged before anything is persisted.
- * Nothing is replayed, resumed, or rolled back, and an interrupted step stays
- * open as evidence. The pin and the local credential files are atomic local
- * writes covered by the approval, and they are not journaled steps.
+ * A split image is imported without an alias and must be a container image for
+ * the target architecture before the previous image is deleted. Nothing is
+ * replayed, resumed, or rolled back, and an interrupted step stays open as
+ * evidence. The pin and the local credential files are atomic local writes
+ * covered by the approval, and they are not journaled steps.
  */
 export class Configurer {
   private constructor(
@@ -153,41 +160,19 @@ export class Configurer {
    * evidence. An installation that already matches needs no approval.
    */
   public async run(signal: AbortSignal): Promise<ConfigureResult> {
-    const { hooks, inputs, roster, retry } = this.context
-    const request: PlanRequest = { inputs, roster, retry }
     const observation = (await this.settleReturned()) ?? (await this.fresh())
-    const plan = planOf(observation, request)
-    hooks.show(plan)
+    const plan = planOf(observation, this.planRequest)
+    this.context.hooks.show(plan)
     if (isEmpty(plan)) {
       return { plan, observation }
     }
-    await hooks.approve(plan)
-    const current = await this.fresh()
-    if (!sameJson(planOf(current, request), plan)) {
-      throw new InstallerError({
-        code: 'INSTALLATION_PLAN_CHANGED',
-        retry: retry.configure,
-      })
-    }
-    const authorization = await this.authorize(plan)
-    let latest = current
-    for (const action of actionsOf(plan)) {
-      checkCancellation(signal)
-      if (!IMAGE_ACTIONS.includes(action)) {
-        await this.pin(plan)
-      }
-      if (action === 'update-instance') {
-        await this.writeCredentials(plan)
-        latest = await this.fresh()
-      }
-      latest = await this.step(authorization, plan, action, latest)
-    }
-    await this.pin(plan)
-    const final = await this.fresh()
-    if (!isEmpty(planOf(final, request))) {
-      throw unverified(this.installation.name, 'the complete installation', retry.configure)
-    }
-    return { plan, observation: final }
+    const current = await this.confirm(plan)
+    return await this.execute(plan, current, signal)
+  }
+
+  private get planRequest(): PlanRequest {
+    const { inputs, roster, retry } = this.context
+    return { inputs, roster, retry }
   }
 
   private async fresh(): Promise<Observation> {
@@ -201,6 +186,46 @@ export class Configurer {
       inputs,
       retry,
     })
+  }
+
+  /**
+   * The operator may take a while to approve, so the plan is derived again from
+   * a fresh observation, and it must be exactly the plan that was approved.
+   * This refuses before anything is persisted.
+   */
+  private async confirm(plan: ConfigurePlan): Promise<Observation> {
+    await this.context.hooks.approve(plan)
+    const current = await this.fresh()
+    if (!sameJson(planOf(current, this.planRequest), plan)) {
+      throw new InstallerError({
+        code: 'INSTALLATION_PLAN_CHANGED',
+        retry: this.context.retry.configure,
+      })
+    }
+    return current
+  }
+
+  /**
+   * Runs the approved actions: the image actions first, then the pin, then the
+   * rest. The whole installation is observed once more at the end, and it must
+   * need nothing further.
+   */
+  private async execute(plan: ConfigurePlan, observation: Observation, signal: AbortSignal): Promise<ConfigureResult> {
+    const authorization = await this.authorize(plan)
+    const actions = actionsOf(plan)
+    let latest = observation
+    for (const action of actions.filter(isImageAction)) {
+      latest = await this.perform(authorization, plan, action, latest, signal)
+    }
+    await this.pin(plan)
+    for (const action of actions.filter(item => !isImageAction(item))) {
+      latest = await this.perform(authorization, plan, action, latest, signal)
+    }
+    const final = await this.fresh()
+    if (!isEmpty(planOf(final, this.planRequest))) {
+      throw unverified(this.installation.name, 'the complete installation', this.context.retry.configure)
+    }
+    return { plan, observation: final }
   }
 
   private get lastStep(): ConfigureStep {
@@ -269,6 +294,61 @@ export class Configurer {
     }
   }
 
+  /**
+   * One approved action. Credentials are written locally just before the
+   * guarded instance update and observed again, so the update is built from a
+   * snapshot that includes them. An imported image is judged here, before any
+   * later step can delete the previous image, create the alias, or pin it.
+   */
+  private async perform(
+    authorization: string,
+    plan: ConfigurePlan,
+    action: InstallAction,
+    observation: Observation,
+    signal: AbortSignal,
+  ): Promise<Observation> {
+    checkCancellation(signal)
+    let current = observation
+    if (action === 'update-instance') {
+      await this.writeCredentials(plan)
+      current = await this.fresh()
+    }
+    const next = await this.step(authorization, plan, action, current)
+    if (action === 'import-image') {
+      this.requireContainerImage(next)
+    }
+    return next
+  }
+
+  /**
+   * The imported image stays in the store without an alias when it does not
+   * fit. Qiln never deletes it, so the diagnostic says the operator must.
+   */
+  private requireContainerImage({ image, fingerprint }: Observation): void {
+    const { inputs, retry } = this.context
+    if (image === null) {
+      throw unverified(this.installation.name, 'the imported image', retry.configure)
+    }
+    try {
+      validateContainerImage(image, fingerprint, inputs.architecture, retry.configure)
+    } catch (error: unknown) {
+      if (!(error instanceof InstallerError)) {
+        throw error
+      }
+      throw new InstallerError({
+        code: error.code,
+        facts: [
+          ...error.facts,
+          [
+            'Imported image',
+            `${fingerprint} remains in the Incus image store without an alias. The previous image was not deleted, and Qiln never deletes the imported one: remove it manually.`,
+          ],
+        ],
+        retry: error.retry,
+      })
+    }
+  }
+
   private async step(
     authorization: string,
     plan: ConfigurePlan,
@@ -290,7 +370,7 @@ export class Configurer {
         },
       ],
     })
-    const request = { accepted: false }
+    let accepted = false
     try {
       await apply(action, plan, observation, {
         client,
@@ -298,7 +378,7 @@ export class Configurer {
         source,
         retry,
         accepted: async operation => {
-          request.accepted = true
+          accepted = true
           await this.persist({
             operations: [
               ...this.evidence.operations,
@@ -308,7 +388,7 @@ export class Configurer {
         },
       })
     } catch (error: unknown) {
-      return await this.conclude(action, error, request.accepted)
+      return await this.conclude(action, error, accepted)
     }
     await this.amend({ completion: { exitCode: 0, completedAt: new Date().toISOString() } })
     return await this.verified(plan, action)

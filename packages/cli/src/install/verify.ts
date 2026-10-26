@@ -21,8 +21,9 @@ function compatible(
 /**
  * Pure check of one step's approved result against a fresh observation. A step
  * is verified only when the target agrees, never because its request was
- * accepted. Compatibility of the whole installation is judged by planning
- * again after the last step.
+ * accepted. An imported image is only present here: its type and architecture
+ * are judged by the configurer before anything is deleted. Compatibility of
+ * the whole installation is judged by planning again after the last step.
  */
 export function verify(
   action: InstallAction,
@@ -36,7 +37,7 @@ export function verify(
     case 'delete-image':
       return plan.image.replace !== null && (alias === null || alias.target !== plan.image.replace.fingerprint)
     case 'import-image':
-      return image?.fingerprint === plan.fingerprint && alias?.target === plan.fingerprint
+      return image?.fingerprint === plan.fingerprint
     case 'create-alias':
       return alias?.target === plan.fingerprint
     case 'create-network':

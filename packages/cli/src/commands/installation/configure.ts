@@ -45,7 +45,7 @@ function reportResult(reporter: Reporter, inputs: InstallationInputs, { plan, ob
   )
   if (replaced) {
     reporter.notice(
-      'The approved plan deleted the previous managed alias target. Other aliases attached to that image may also have been removed, and no automatic rollback was attempted.',
+      'The approved plan deleted the previous managed alias target after the replacement was imported and checked. Other aliases attached to that image may also have been removed, and no automatic rollback was attempted.',
     )
   }
   reporter.row(

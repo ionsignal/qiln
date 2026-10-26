@@ -1,4 +1,4 @@
-import { validateContainerImage } from '../checks/image'
+import { isImageFingerprint, validateContainerImage } from '../checks/image'
 import { InstallerError } from '../diagnostic/error'
 import { hasManagedCredentials, matchesCredentials, requireNoCollision } from './credentials'
 import { assertInstance } from './instance'
@@ -11,8 +11,6 @@ import type { ConfigurePlan } from './journal/types'
 import type { Observation } from './observe'
 import type { InstallationInputs } from './types'
 
-const FULL_FINGERPRINT_PATTERN = /^[a-f0-9]{64}$/
-
 export interface PlanRequest {
   inputs: InstallationInputs
   roster: FileSnapshot | null
@@ -24,7 +22,7 @@ export interface PlanRequest {
  * still holds, because a replacement names it and its aliases for approval.
  */
 function managedTarget(alias: IncusImageAlias, aliased: IncusImage | null, retry: string): IncusImage {
-  if (!FULL_FINGERPRINT_PATTERN.test(alias.target)) {
+  if (!isImageFingerprint(alias.target)) {
     throw new InstallerError({
       code: 'MANAGED_IMAGE_ALIAS_TARGET_INVALID',
       facts: [['Observed', `Alias '${alias.name}' targets '${alias.target}'.`]],
@@ -44,9 +42,9 @@ function managedTarget(alias: IncusImageAlias, aliased: IncusImage | null, retry
 }
 
 /**
- * Identical content is never replaced. Only an alias that targets different
- * content deletes an image, and then the selected content is imported, or
- * aliased when the store already holds it.
+ * Identical content is never replaced. Content that is not in the store is
+ * imported without an alias, and the configurer checks it before the previous
+ * target is deleted. The managed alias is then pointed at the selected image.
  */
 function imagePlan(observation: Observation, inputs: InstallationInputs, retry: string): ConfigurePlan['image'] {
   const { kind, fingerprint, image, alias, aliased } = observation
@@ -57,7 +55,7 @@ function imagePlan(observation: Observation, inputs: InstallationInputs, retry: 
     validateContainerImage(image, fingerprint, inputs.architecture, retry)
   }
   if (alias === null) {
-    return { replace: null, import: image === null, alias: image !== null }
+    return { replace: null, import: image === null, alias: true }
   }
   const target = managedTarget(alias, aliased, retry)
   if (alias.target === fingerprint) {
@@ -66,7 +64,7 @@ function imagePlan(observation: Observation, inputs: InstallationInputs, retry: 
   return {
     replace: { fingerprint: target.fingerprint, aliases: target.aliases },
     import: image === null,
-    alias: image !== null,
+    alias: true,
   }
 }
 

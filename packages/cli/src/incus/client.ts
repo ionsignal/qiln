@@ -1,10 +1,8 @@
 import { randomBytes } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { request as createHttpRequest, type ClientRequest, type IncomingMessage } from 'node:http'
-import type { Duplex } from 'node:stream'
 import { InstallerError } from '../diagnostic/error'
 import { isRecord } from '../guards'
-import type { IncusConnection } from './connection'
 import type {
   IncusConfigMap,
   IncusDevicesMap,
@@ -24,6 +22,8 @@ import type {
   IncusStorageVolume,
   IncusStorageVolumeCreate,
 } from './types'
+import type { Duplex } from 'node:stream'
+import type { IncusConnection } from './connection'
 
 const JSON_CONTENT_TYPE = 'application/json'
 const FULL_FINGERPRINT_PATTERN = /^[a-f0-9]{64}$/
@@ -106,6 +106,21 @@ export class IncusOperationWaitTimeoutError extends Error {
     this.name = 'IncusOperationWaitTimeoutError'
     this.operationPath = operationPath
     this.timeoutMs = timeoutMs
+  }
+}
+
+/**
+ * Only a 404 means the optional resource is absent. Every other failure keeps
+ * propagating, so absence is never inferred from an unreliable read.
+ */
+async function nullIfMissing<T>(read: () => Promise<T>): Promise<T | null> {
+  try {
+    return await read()
+  } catch (error: unknown) {
+    if (error instanceof IncusApiError && error.statusCode === 404) {
+      return null
+    }
+    throw error
   }
 }
 
@@ -439,14 +454,7 @@ export class IncusClient {
   }
 
   public async getStoragePoolOrNull(name: string): Promise<IncusStoragePool | null> {
-    try {
-      return await this.getStoragePool(name)
-    } catch (error: unknown) {
-      if (error instanceof IncusApiError && error.statusCode === 404) {
-        return null
-      }
-      throw error
-    }
+    return await nullIfMissing(() => this.getStoragePool(name))
   }
 
   public async getStoragePoolVolume(
@@ -466,14 +474,7 @@ export class IncusClient {
     volumeType: string,
     volumeName: string,
   ): Promise<IncusStorageVolume | null> {
-    try {
-      return await this.getStoragePoolVolume(poolName, volumeType, volumeName)
-    } catch (error: unknown) {
-      if (error instanceof IncusApiError && error.statusCode === 404) {
-        return null
-      }
-      throw error
-    }
+    return await nullIfMissing(() => this.getStoragePoolVolume(poolName, volumeType, volumeName))
   }
 
   public async createStoragePoolVolume(poolName: string, volume: IncusStorageVolumeCreate): Promise<void> {
@@ -499,14 +500,7 @@ export class IncusClient {
   }
 
   public async getNetworkOrNull(name: string): Promise<IncusNetwork | null> {
-    try {
-      return await this.getNetwork(name)
-    } catch (error: unknown) {
-      if (error instanceof IncusApiError && error.statusCode === 404) {
-        return null
-      }
-      throw error
-    }
+    return await nullIfMissing(() => this.getNetwork(name))
   }
 
   public async getNetworks(): Promise<IncusNetwork[]> {
@@ -538,14 +532,7 @@ export class IncusClient {
   }
 
   public async getImageAliasOrNull(name: string): Promise<IncusImageAlias | null> {
-    try {
-      return await this.getImageAlias(name)
-    } catch (error: unknown) {
-      if (error instanceof IncusApiError && error.statusCode === 404) {
-        return null
-      }
-      throw error
-    }
+    return await nullIfMissing(() => this.getImageAlias(name))
   }
 
   public async getImage(fingerprint: string): Promise<IncusImage> {
@@ -553,14 +540,7 @@ export class IncusClient {
   }
 
   public async getImageOrNull(fingerprint: string): Promise<IncusImage | null> {
-    try {
-      return await this.getImage(fingerprint)
-    } catch (error: unknown) {
-      if (error instanceof IncusApiError && error.statusCode === 404) {
-        return null
-      }
-      throw error
-    }
+    return await nullIfMissing(() => this.getImage(fingerprint))
   }
 
   public async deleteImage(fingerprint: string): Promise<IncusOperationRef> {
@@ -590,6 +570,10 @@ export class IncusClient {
     })
   }
 
+  /**
+   * Imports without assigning an alias, so the caller can check the stored
+   * image before any alias or previous image is touched.
+   */
   public async importSplitImage(input: IncusSplitImageImport): Promise<IncusOperationRef> {
     if (!FULL_FINGERPRINT_PATTERN.test(input.fingerprint)) {
       throw new RangeError('Split-image imports require a full lowercase SHA-256 fingerprint.')
@@ -624,7 +608,6 @@ export class IncusClient {
         'Content-Type': `multipart/form-data; boundary=${boundary}`,
         'Content-Length': String(contentLength),
         'X-Incus-fingerprint': input.fingerprint,
-        'X-Incus-aliases': `alias=${input.alias}`,
       },
       write: async (request, signal) => {
         await writeChunk(request, metadataPrefix, signal)
@@ -679,25 +662,11 @@ export class IncusClient {
   }
 
   public async getInstanceOrNull(name: string): Promise<IncusInstance | null> {
-    try {
-      return await this.getInstance(name)
-    } catch (error: unknown) {
-      if (error instanceof IncusApiError && error.statusCode === 404) {
-        return null
-      }
-      throw error
-    }
+    return await nullIfMissing(() => this.getInstance(name))
   }
 
   public async getInstanceWithEtagOrNull(name: string): Promise<IncusRead<IncusInstance> | null> {
-    try {
-      return await this.getInstanceWithEtag(name)
-    } catch (error: unknown) {
-      if (error instanceof IncusApiError && error.statusCode === 404) {
-        return null
-      }
-      throw error
-    }
+    return await nullIfMissing(() => this.getInstanceWithEtag(name))
   }
 
   public async createInstance(instance: IncusInstanceCreate): Promise<IncusOperationRef> {
