@@ -3,9 +3,15 @@ import { AWS_RECORD_VERSION, AWS_SPEC } from '../spec'
 import { validCidr, validSource } from './cidr'
 import { expectation, matches } from './expect'
 import { deploymentFacts, removable } from './facts'
-import { notify, withWaiting, type Place, type ProgressSink, type ProgressTask } from './progress'
-import { stateOf } from './step'
+import { declined, stateOf } from './step'
+import { notify, withWaiting, type Place, type ProgressSink, type StepTask } from './progress'
 import { creationPlan, removalPlan, type Planned } from './topology'
+import { diagnostic } from '../errors'
+import { generateAdminKey } from '../ssh/generate'
+import { deploymentRecovery, originalCode, terminationConfirmed } from '../recovery'
+import { InstallerError, type InstallerErrorCode } from '../../diagnostic/error'
+import { checkCancellation } from '../../terminal/prompts'
+import { request, type ChildEvidence } from '../child/request'
 import {
   hostKeyName,
   isReceipt,
@@ -26,12 +32,6 @@ import {
   type Request,
   type Result,
 } from '../ec2/protocol'
-import { diagnostic } from '../errors'
-import { generateAdminKey } from '../ssh/generate'
-import { deploymentRecovery, originalCode, terminationConfirmed } from '../recovery'
-import { InstallerError, type InstallerErrorCode } from '../../diagnostic/error'
-import { checkCancellation } from '../../terminal/prompts'
-import { request, type ChildEvidence } from '../child/request'
 import * as records from './records'
 import type { Dir } from '../../state/files'
 import type { Session } from '../auth/session'
@@ -42,10 +42,11 @@ import type { Reuse } from './reuse'
 import type { AwsConnection } from '../types'
 
 /**
- * A reply from the EC2 child. The certainty is kept so the fence can record a
- * definite refusal differently from an unknown outcome.
+ * The outcome of one call. The certainty is kept so the fence can record a
+ * definite refusal differently from an unknown outcome. It comes from the EC2
+ * child's reply, or from a call that was cancelled before any child started.
  */
-class ChildFailure extends InstallerError {
+class CallFailure extends InstallerError {
   constructor(
     code: InstallerErrorCode,
     public readonly certainty: Certainty,
@@ -65,11 +66,15 @@ function withLast(steps: readonly Step[], change: Partial<Step>): Step[] {
   return [...steps.slice(0, -1), { ...last, ...change }]
 }
 
+function stepTask(planned: Planned, place: Place): StepTask {
+  return { kind: 'step', action: planned.action, slot: planned.slot, ...place }
+}
+
 function outcomeOf(error: InstallerError): FailureOutcome {
-  if (!(error instanceof ChildFailure) || error.certainty !== 'rejected') {
+  if (!(error instanceof CallFailure) || error.certainty !== 'rejected') {
     return 'uncertain'
   }
-  if (error.code === 'AWS_DEPLOYMENT_NOT_ATTEMPTED') {
+  if (error.code === 'AWS_DEPLOYMENT_NOT_ATTEMPTED' || error.code === 'COMMAND_CANCELLED') {
     return 'unattempted'
   }
   return error.code === 'AWS_DEPLOYMENT_BLOCKED' ? 'blocked' : 'rejected'
@@ -80,8 +85,9 @@ function outcomeOf(error: InstallerError): FailureOutcome {
  * copied from one frozen host plan, so the zones, administrator network, and
  * launch configuration the operator reviewed are the ones the record governs.
  * A plan exists only when nothing blocked the proposal. The idempotency tokens
- * are generated once, here, and are never regenerated for a retry. The
- * administrative key is generated after approval, so the proposal has none.
+ * are generated once, here, one per launch candidate, and are never
+ * regenerated for a retry. The administrative key is generated after approval,
+ * so the proposal has none.
  * `previous` is the immutable ID of the deployment whose alias this one takes
  * over. A `reuse` attaches that deployment's retained data volume by identity,
  * with its original tags, instead of creating a new one; it must come from
@@ -137,7 +143,7 @@ export function propose(
       host: {
         plan: structuredClone(plan),
         keyName: hostKeyName(id),
-        launchToken: randomUUID(),
+        launchTokens: plan.hostSlots.map(() => randomUUID()),
         volume:
           reuse === null
             ? { kind: 'new', token: randomUUID() }
@@ -238,7 +244,7 @@ export class Deployer {
    * later generation rather than something Qiln repairs.
    */
   private async generateKey(signal: AbortSignal): Promise<void> {
-    const task: ProgressTask = { kind: 'key' }
+    const task = { kind: 'key' } as const
     notify(this.progress, { phase: 'working', task })
     await this.persist({
       termination: 'unconfirmed',
@@ -296,7 +302,15 @@ export class Deployer {
     }
   }
 
+  /**
+   * A call cancelled before it starts never reaches a child, so a fenced step
+   * is definitely unattempted. A mutating reply that arrived before cancellation
+   * is kept and recorded first, and the cancellation is honored by the next call.
+   */
   private async call(input: Request, signal: AbortSignal, evidence?: ChildEvidence): Promise<Result> {
+    if (signal.aborted) {
+      throw new CallFailure('COMMAND_CANCELLED', 'rejected')
+    }
     if (this.current.termination === 'confirmed') {
       await this.persist({
         termination: 'unconfirmed',
@@ -305,12 +319,13 @@ export class Deployer {
     const reply = await request(AWS_SPEC.children.ec2, this.session.credentialEnvironment(), input, isReply, signal, {
       timeoutMs: requestDeadlineMs(input),
       evidence,
+      keepReply: input.kind === 'mutate',
     })
     await this.persist({
       termination: 'confirmed',
     })
     if (!reply.ok) {
-      throw new ChildFailure(reply.code, reply.certainty)
+      throw new CallFailure(reply.code, reply.certainty)
     }
     return reply.result
   }
@@ -422,7 +437,7 @@ export class Deployer {
     removalApproval: Partial<Deployment> = {},
   ): Promise<void> {
     checkCancellation(signal)
-    const task: ProgressTask = { kind: 'step', action: planned.action, slot: planned.slot, ...place }
+    const task = stepTask(planned, place)
     notify(this.progress, { phase: 'working', task })
     const step: Step = {
       id: randomUUID(),
@@ -462,6 +477,57 @@ export class Deployer {
   }
 
   /**
+   * Whether this failure is a definite capacity refusal that is now durably
+   * recorded on the launch attempt. Only that failure may move on to the next
+   * approved zone. The child reply that carries it also ended the child, so
+   * termination is confirmed, and anything uncertain, cancelled, or already
+   * past a returned response is never a decline. `AWS_DEPLOYMENT_CAPACITY` must
+   * stay exclusive to the child's `InsufficientInstanceCapacity` mapping.
+   */
+  private async recordDeclined(error: unknown): Promise<boolean> {
+    if (
+      !(error instanceof CallFailure) ||
+      error.code !== 'AWS_DEPLOYMENT_CAPACITY' ||
+      error.certainty !== 'rejected' ||
+      !terminationConfirmed(error)
+    ) {
+      return false
+    }
+    try {
+      await this.close(error, true)
+    } catch {
+      return false
+    }
+    const last = this.current.steps.at(-1)
+    return last !== undefined && declined(last)
+  }
+
+  /**
+   * Tries each approved zone once, in order, stopping at the first attempt that
+   * returns. When the attempt succeeds, any verification failure ends creation
+   * as before. The last approved zone is never retried, and its refusal is
+   * recorded by the ordinary failure path.
+   */
+  private async launch(planned: Planned, signal: AbortSignal, place: Place): Promise<void> {
+    const { hostSlots, zones } = this.current.approval.host.plan
+    for (const [index, slot] of hostSlots.entries()) {
+      const attempt: Place = {
+        ...place,
+        attempt: { number: index + 1, total: hostSlots.length, zone: zones[slot].name },
+      }
+      try {
+        await this.runStep(planned, null, signal, attempt)
+        return
+      } catch (error: unknown) {
+        if (index + 1 === hostSlots.length || !(await this.recordDeclined(error))) {
+          throw error
+        }
+        notify(this.progress, { phase: 'declined', task: stepTask(planned, attempt) })
+      }
+    }
+  }
+
+  /**
    * One read-only AWS health read, not a ledger step: it has no fence, receipt,
    * or removal. Only a passing read is retained, in a write that changes
    * nothing else. With `wait` an exhausted budget is an error; without it a
@@ -469,7 +535,7 @@ export class Deployer {
    */
   private async recordHealth(wait: boolean, signal: AbortSignal): Promise<Health | null> {
     checkCancellation(signal)
-    const task: ProgressTask = { kind: 'health' }
+    const task = { kind: 'health' } as const
     notify(this.progress, { phase: 'working', task })
     const result = await withWaiting(this.progress, task, () =>
       this.call(
@@ -503,7 +569,12 @@ export class Deployer {
       await this.generateKey(signal)
       const plan = creationPlan(this.current.approval)
       for (const [index, planned] of plan.entries()) {
-        await this.runStep(planned, null, signal, { position: index + 1, total: plan.length })
+        const place = { position: index + 1, total: plan.length }
+        if (planned.action === 'run-instances') {
+          await this.launch(planned, signal, place)
+        } else {
+          await this.runStep(planned, null, signal, place)
+        }
       }
       await this.recordHealth(true, signal)
     } catch (error: unknown) {
@@ -535,7 +606,7 @@ export class Deployer {
     this.requireReady()
     try {
       checkCancellation(signal)
-      const task: ProgressTask = { kind: 'hostkey' }
+      const task = { kind: 'hostkey' } as const
       notify(this.progress, { phase: 'working', task })
       const result = await withWaiting(this.progress, task, () =>
         this.call(

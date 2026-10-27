@@ -11,7 +11,7 @@ import {
   type Kind,
   type Shape,
 } from './graph'
-import { stateOf } from './step'
+import { declined, stateOf } from './step'
 import type { Approval, Deployment, Ingress, Placement, Step, Tag, Zone } from './types'
 
 export interface Planned {
@@ -70,6 +70,40 @@ export function stepOf(record: Deployment, action: Action, slot = 0): Step | und
   return record.steps.findLast(step => step.action === action && step.slot === slot)
 }
 
+/**
+ * Every launch attempt, oldest first. All but the newest were declined for
+ * capacity, and a declined attempt has no receipt, so it names no resource.
+ */
+export function launches(record: Deployment): Step[] {
+  return record.steps.filter(step => step.action === IMPLICIT.parent)
+}
+
+/**
+ * The index of the newest launch attempt, which selects its approved zone and
+ * token. Before any attempt is fenced it is the first.
+ */
+export function attemptOf(record: Deployment): number {
+  return Math.max(launches(record).length - 1, 0)
+}
+
+/**
+ * The zone slot of the newest launch attempt, which is the launched zone once
+ * an instance exists.
+ */
+export function hostSlotOf(record: Deployment): number {
+  return record.approval.host.plan.hostSlots[attemptOf(record)]
+}
+
+/**
+ * The creation steps that make up the plan. A declined launch attempt that a
+ * later attempt replaced is not one of them.
+ */
+export function creationsOf(steps: readonly Step[]): Step[] {
+  return steps.filter(
+    (step, index) => step.removal === null && !(declined(step) && steps.at(index + 1)?.action === step.action),
+  )
+}
+
 export function resourceId(record: Deployment, action: Action, slot = 0): string | null {
   return stepOf(record, action, slot)?.returned?.resourceId ?? null
 }
@@ -95,9 +129,10 @@ export function dataTags(record: Deployment): Tag[] {
 /**
  * Every planned creation step exists and is verified. Creation steps precede
  * removal steps and run in plan order, so the count alone identifies the plan.
+ * A replaced declined launch attempt is not counted.
  */
 export function creationVerified(record: Deployment): boolean {
-  const creations = record.steps.filter(step => step.removal === null)
+  const creations = creationsOf(record.steps)
   return creations.length === creationPlan(record.approval).length && creations.every(step => stateOf(step) === 'verified')
 }
 

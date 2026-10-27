@@ -4,9 +4,16 @@ import type { StepAction } from '../../host/zfs/spec'
 
 const WAITING_INTERVAL_MS = 10_000
 
+export interface LaunchAttempt {
+  number: number
+  total: number
+  zone: string
+}
+
 export interface Place {
   position: number
   total: number
+  attempt?: LaunchAttempt
 }
 
 export interface KeyTask {
@@ -47,10 +54,13 @@ export type ProgressTask = KeyTask | StepTask | HealthTask | HostKeyTask | ZfsTa
 /**
  * `working` precedes the activity, `waiting` repeats while it lasts, and
  * `verified` follows only after the observation and its persistence succeeded.
- * No event states that an activity failed or was rolled back.
+ * `declined` is the one event that reports a failure: AWS definitely refused
+ * one launch attempt for lack of capacity, it was durably recorded, and the
+ * next approved zone is tried. No other event states that an activity failed
+ * or was rolled back.
  */
 export type ProgressEvent =
-  | { phase: 'working' | 'verified'; task: ProgressTask }
+  | { phase: 'working' | 'verified' | 'declined'; task: ProgressTask }
   | { phase: 'waiting'; task: ProgressTask; elapsedMs: number }
 
 export type ProgressSink = (event: ProgressEvent) => void

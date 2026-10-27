@@ -84,7 +84,11 @@ function subject(task: ProgressTask): string {
       return INCUS_LABELS[task.action]
     case 'step': {
       const label = LABELS[task.action]
-      return task.slot > 0 ? `${label} #${task.slot + 1}` : label
+      const numbered = task.slot > 0 ? `${label} #${task.slot + 1}` : label
+      const { attempt } = task
+      return attempt === undefined
+        ? numbered
+        : `${numbered} in ${attempt.zone} (attempt ${attempt.number}/${attempt.total})`
     }
   }
 }
@@ -114,6 +118,11 @@ export function progressSink(reporter: Reporter): ProgressSink {
         return
       case 'waiting':
         reporter.info(`Waiting on '${subject(task)}' · ${Math.round(event.elapsedMs / 1000)}s elapsed.`)
+        return
+      case 'declined':
+        reporter.notice(
+          `AWS has no capacity for '${subject(task)}'. The refusal is recorded and nothing was launched. The next approved zone is tried.`,
+        )
         return
       case 'verified':
         reporter.row('verified', title(task), `${subject(task)} · ${verifiedDetail(task)}`)

@@ -1,9 +1,11 @@
 import { IMPLICIT, undoes } from './graph'
-import { settled, stateOf } from './step'
+import { declined, settled, stateOf } from './step'
 import {
   creationPlan,
+  creationsOf,
   creationVerified,
   dataVolumeId,
+  launches,
   resourceId,
   resources,
   stepOf,
@@ -24,8 +26,9 @@ function uniqueIds(record: Deployment): boolean {
 
 function inPlan(record: Deployment): boolean {
   const plan = creationPlan(record.approval)
-  const creations = record.steps.filter(step => step.removal === null)
-  const deletions = record.steps.slice(creations.length)
+  const creationSteps = record.steps.filter(step => step.removal === null)
+  const deletions = record.steps.slice(creationSteps.length)
+  const creations = creationsOf(creationSteps)
   let attempt = -1
   for (const { removal } of deletions) {
     if (removal === null || (removal !== attempt && removal !== attempt + 1)) {
@@ -41,14 +44,24 @@ function inPlan(record: Deployment): boolean {
 }
 
 /**
- * Creation continues only from a verified step. A removal attempt continues
+ * Only approved zones are attempted, and every launch attempt but the newest
+ * was definitely declined for capacity.
+ */
+function launchesOrdered(record: Deployment): boolean {
+  const attempts = launches(record)
+  return attempts.length <= record.approval.host.plan.hostSlots.length && attempts.slice(0, -1).every(declined)
+}
+
+/**
+ * Creation continues only from a verified step, except that a launch attempt
+ * may follow one that was declined for capacity. A removal attempt continues
  * from a verified step, and a new attempt starts from any settled one.
  */
 function ordered(steps: readonly Step[]): boolean {
   return steps.slice(1).every((step, index) => {
     const previous = steps[index]
     if (step.removal === null || step.removal === previous.removal) {
-      return stateOf(previous) === 'verified'
+      return stateOf(previous) === 'verified' || (declined(previous) && step.action === previous.action)
     }
     return settled(previous)
   })
@@ -196,6 +209,7 @@ export function isConsistent(record: Deployment): boolean {
   return (
     uniqueIds(record) &&
     inPlan(record) &&
+    launchesOrdered(record) &&
     ordered(record.steps) &&
     timed(record) &&
     keyed(record) &&

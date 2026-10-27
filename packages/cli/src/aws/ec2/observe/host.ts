@@ -9,7 +9,7 @@ import {
   type NetworkInterface,
   type Volume,
 } from '@aws-sdk/client-ec2'
-import { dataTags, resourceId } from '../../deployment/topology'
+import { dataTags, hostSlotOf, resourceId } from '../../deployment/topology'
 import { collect } from '../../observe'
 import { sameFingerprint } from '../../../transport/ssh/key'
 import { byId, judge, listed, PAGES, tagFilters, tagged, unverified } from './shared'
@@ -23,19 +23,24 @@ interface Launched {
   instance: Instance
 }
 
+/**
+ * The zone and subnet are those of the newest launch attempt: the launched
+ * zone once an instance exists, and the first approved zone before any attempt.
+ */
 function targetOf(record: Deployment) {
   const { host, tags } = record.approval
   const { plan } = host
+  const slot = hostSlotOf(record)
   return {
     plan,
     tags,
     keyName: host.keyName,
     adminKey: record.adminKey,
     dataTags: dataTags(record),
-    zone: plan.zones[plan.hostSlot],
+    zone: plan.zones[slot],
     accountId: record.binding.accountId,
     vpcId: resourceId(record, 'create-vpc'),
-    subnetId: resourceId(record, 'create-subnet', plan.hostSlot),
+    subnetId: resourceId(record, 'create-subnet', slot),
     groupId: resourceId(record, 'create-group'),
     instanceId: resourceId(record, 'run-instances'),
   }

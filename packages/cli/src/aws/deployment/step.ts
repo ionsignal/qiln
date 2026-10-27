@@ -7,7 +7,8 @@ import type { Step } from './types'
  * - open: fenced with no outcome recorded. Only an open step may have a child
  *   run against it; a lost parent can also leave one behind.
  * - uncertain: a child ran and the effect is unknown.
- * - refused: the provider definitely refused. `failure.outcome` says how.
+ * - refused: the provider definitely refused, or the call was never dispatched.
+ *   `failure.outcome` says how.
  * - returned: the response is retained but not yet observed.
  * - verified: a polled observation agreed with the ledger.
  *
@@ -23,6 +24,20 @@ export function stateOf(step: Step): StepState {
     return 'verified'
   }
   return step.returned === null ? 'open' : 'returned'
+}
+
+/**
+ * A launch attempt that AWS definitely refused for lack of capacity, with child
+ * termination confirmed. It launched nothing, and it is the only failure after
+ * which the next approved zone may be tried.
+ */
+export function declined(step: Step): boolean {
+  return (
+    step.action === 'run-instances' &&
+    step.failure?.outcome === 'rejected' &&
+    step.failure.code === 'AWS_DEPLOYMENT_CAPACITY' &&
+    step.failure.termination === 'confirmed'
+  )
 }
 
 /**
@@ -46,8 +61,11 @@ export function settled(step: Step): boolean {
 /**
  * Removal steps the provider definitely refused. Each one spends the removal
  * budget, while verified deletions never do, so progress is bounded by the
- * resource count alone.
+ * resource count alone. A step that was never dispatched, because it was
+ * refused or cancelled locally, did not involve the provider and is not counted.
  */
 export function refusals(steps: readonly Step[]): number {
-  return steps.filter(step => step.removal !== null && stateOf(step) === 'refused').length
+  return steps.filter(
+    step => step.removal !== null && stateOf(step) === 'refused' && step.failure?.outcome !== 'unattempted',
+  ).length
 }

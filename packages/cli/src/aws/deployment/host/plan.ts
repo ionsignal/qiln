@@ -13,19 +13,23 @@ export interface PlanInputs {
   pin: ImagePin
   administrator: string
   zones: readonly Placement[]
-  hostZoneId: string
+  hostZoneIds: readonly string[]
   root: RootSource
 }
 
 /**
  * Pure freeze of one reviewed proposal into a launch configuration. Every
  * constant comes from the spec, so the plan and the compute policy cannot
- * diverge. Null means the host zone is not among the allocated zones.
+ * diverge. Null means a launch zone is not among the allocated zones.
  */
 export function planOf(inputs: PlanInputs): HostPlan | null {
   const zones = allocate(deployment.defaultCidr, inputs.zones)
-  const hostSlot = zones.findIndex(zone => zone.id === inputs.hostZoneId)
-  if (hostSlot < 0 || zones.length > deployment.maximumZones) {
+  const hostSlots = zones.flatMap((zone, slot) => (inputs.hostZoneIds.includes(zone.id) ? [slot] : []))
+  if (
+    hostSlots.length === 0 ||
+    hostSlots.length !== inputs.hostZoneIds.length ||
+    zones.length > deployment.maximumZones
+  ) {
     return null
   }
   const volume = {
@@ -35,7 +39,7 @@ export function planOf(inputs: PlanInputs): HostPlan | null {
   }
   return {
     zones,
-    hostSlot,
+    hostSlots,
     region: inputs.region,
     pin: { imageId: inputs.pin.imageId, ownerId: inputs.pin.ownerId },
     instanceType: compute.defaultInstanceType,

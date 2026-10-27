@@ -118,9 +118,10 @@ function instanceFindings(instance: InstanceTypeEvidence | null): Finding[] {
  * shape, so compatibility and cross-field consistency are judged here, and
  * missing evidence never passes. The reviewed pin alone selects the image; a
  * newer release is never substituted. Subnets cover every available standard
- * zone. The host zone is the lowest zone ID that is both available and
- * offered, or, when a retained data volume is reused, that volume's own zone,
- * which must itself be available and offered: no other zone is substituted.
+ * zone. The launch candidates are every zone that is both available and
+ * offered, in zone ID order, each tried once by the launch. When a retained
+ * data volume is reused, the only candidate is that volume's own zone, which
+ * must itself be available and offered: no other zone is substituted.
  * A reused volume must also match the data volume settings planned for this
  * launch. The frozen plan exists only when nothing blocks.
  */
@@ -131,7 +132,7 @@ export function evaluate(discovery: Discovery, inputs: Inputs): HostProposal {
   const offered = allocate(deployment.defaultCidr, available).filter(zone =>
     discovery.offeredZoneIds.includes(zone.id),
   )
-  const hostZone = (reuse === null ? offered.at(0) : offered.find(zone => zone.id === reuse.zone.id)) ?? null
+  const hostZones = reuse === null ? offered : offered.filter(zone => zone.id === reuse.zone.id)
   const { root, instanceStore, findings: storageFindings } = storageOf(image)
   const findings: Finding[] = [
     ...(image === null
@@ -151,7 +152,7 @@ export function evaluate(discovery: Discovery, inputs: Inputs): HostProposal {
       [available.length > 0, 'No standard Availability Zone reports available.'],
       [available.length <= deployment.maximumZones, `More than ${deployment.maximumZones} standard Availability Zones are available.`],
       [
-        hostZone !== null,
+        hostZones.length > 0,
         reuse === null
           ? `${compute.defaultInstanceType} is not offered in any available standard Availability Zone.`
           : `The retained data volume is in ${reuse.zone.name} (${reuse.zone.id}), which is not an available standard Availability Zone that offers ${compute.defaultInstanceType}. No other zone is substituted.`,
@@ -160,14 +161,14 @@ export function evaluate(discovery: Discovery, inputs: Inputs): HostProposal {
     ...storageFindings,
   ]
   const candidate =
-    hasBlocker(findings) || hostZone === null || root === null
+    hasBlocker(findings) || hostZones.length === 0 || root === null
       ? null
       : planOf({
           region: inputs.region,
           pin: inputs.pin,
           administrator: inputs.administrator,
           zones: available,
-          hostZoneId: hostZone.id,
+          hostZoneIds: hostZones.map(zone => zone.id),
           root,
         })
   const storageMatches = reuse === null || candidate === null || sameJson(candidate.data, reuse.data)

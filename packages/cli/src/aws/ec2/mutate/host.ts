@@ -14,7 +14,7 @@ import {
 } from '@aws-sdk/client-ec2'
 import { notAttempted } from '../context'
 import { contradicts, need, receipt, tags, unavailable } from './shared'
-import { dataVolumeId } from '../../deployment/topology'
+import { attemptOf, dataVolumeId, hostSlotOf } from '../../deployment/topology'
 import type { Action } from '../../deployment/graph'
 import type { Deployment, Step } from '../../deployment/types'
 import type { PublicKeyReader } from '../../ssh/store'
@@ -49,7 +49,9 @@ type VolumeType = NonNullable<CreateVolumeCommandInput['VolumeType']>
 /**
  * The complete frozen launch. Subnet and group live inside the interface entry
  * only, and no instance profile is attached. Anything the ledger cannot supply
- * fails before dispatch.
+ * fails before dispatch. Only the subnet and the client token vary by attempt,
+ * and the step being sent is always the newest, so the newest attempt selects
+ * its approved zone's subnet and its own token.
  */
 function launchInput(record: Deployment): RunInstancesCommandInput {
   const { approval } = record
@@ -61,14 +63,14 @@ function launchInput(record: Deployment): RunInstancesCommandInput {
     InstanceType: plan.instanceType as InstanceTypeName,
     MinCount: plan.count,
     MaxCount: plan.count,
-    ClientToken: host.launchToken,
+    ClientToken: host.launchTokens[attemptOf(record)],
     KeyName: host.keyName,
     Placement: { Tenancy: approval.tenancy },
     NetworkInterfaces: [
       {
         DeviceIndex: network.deviceIndex,
         NetworkCardIndex: network.networkCardIndex,
-        SubnetId: need(record, 'create-subnet', plan.hostSlot),
+        SubnetId: need(record, 'create-subnet', hostSlotOf(record)),
         Groups: [need(record, 'create-group')],
         AssociatePublicIpAddress: network.associatePublicIp,
         DeleteOnTermination: network.deleteOnTermination,
@@ -146,7 +148,7 @@ export async function mutateHost(
         return notAttempted()
       }
       const command = new CreateVolumeCommand({
-        AvailabilityZone: plan.zones[plan.hostSlot].name,
+        AvailabilityZone: plan.zones[hostSlotOf(record)].name,
         Size: data.sizeGiB,
         VolumeType: data.volumeType as VolumeType,
         Iops: data.iops,

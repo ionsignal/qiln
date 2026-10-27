@@ -4,6 +4,7 @@ import {
   healthDisclosure,
   hostKeyDisclosure,
   keyDisclosure,
+  launchDisclosure,
   phase,
   volumeDisclosure,
   type Phase,
@@ -48,7 +49,7 @@ const STATES: Record<Phase, RecordedState> = {
   unattempted: {
     label: 'Not attempted',
     tone: 'warning',
-    text: 'The last mutation was refused before dispatch, so it changed nothing.',
+    text: 'The last mutation was refused or cancelled locally before dispatch, so it changed nothing.',
   },
   rejected: { label: 'Rejected', tone: 'warning', text: 'AWS definitively refused the last mutation.' },
   blocked: {
@@ -167,6 +168,7 @@ export function reportDeployment(reporter: Reporter, record: Deployment): void {
     ['SSH host key', hostKeyDisclosure(record)],
     [historical ? 'VPC (historical)' : 'VPC', resourceId(record, 'create-vpc') ?? 'no identity retained'],
     ['Instance', resourceId(record, 'run-instances') ?? 'no identity retained'],
+    ['Launch attempts', launchDisclosure(record)],
     ['Data volume', volumeDisclosure(record)],
     ['AWS health', healthDisclosure(record)],
     [
@@ -213,9 +215,6 @@ export function reportDeployment(reporter: Reporter, record: Deployment): void {
       ? [
           'Retained resources are never deleted by Qiln. They keep incurring charges for as long as they exist, including after the instance is terminated, until they are deleted outside Qiln.',
         ]
-      : []),
-    ...(record.latest?.resources.some(resource => resource.state === 'absent')
-      ? ['Absence never proves who deleted a resource.']
       : []),
   ])
   reportResources(reporter, record)

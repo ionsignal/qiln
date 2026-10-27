@@ -100,16 +100,30 @@ function reviewedFacts(): DiagnosticFact[] {
   ]
 }
 
+/**
+ * The launch candidates in the order they are tried. A retained data volume
+ * fixes the zone, so it has exactly one candidate and never falls back. An
+ * offering is not a capacity reservation, so capacity stays unverified.
+ */
+function launchFacts(plan: HostPlan, proposal: HostProposal): DiagnosticFact[] {
+  const candidates = plan.hostSlots.map(slot => plan.zones[slot])
+  const policy =
+    proposal.reuse === null
+      ? `${candidates.length} ${candidates.length === 1 ? 'zone offers' : 'zones offer'} ${plan.instanceType}, tried once each in zone ID order; the next is tried only after AWS definitively refuses capacity in the previous one`
+      : 'fixed by the retained data volume; offered in this AZ; no other zone is tried'
+  return [
+    ['Launch zones', `${policy}; capacity unverified`],
+    ...candidates.map(
+      (zone, index): DiagnosticFact => [`Launch candidate ${index + 1}`, `${zone.name} (${zone.id}) · host subnet ${zone.cidr}`],
+    ),
+  ]
+}
+
 function networkFacts(plan: HostPlan, proposal: HostProposal, target: PreviewTarget): DiagnosticFact[] {
-  const host = plan.zones[plan.hostSlot]
   const { network, metadata } = plan
   return [
     ['Instance', `${plan.count} ${plan.instanceType} · ${plan.purchase} · default tenancy`],
-    [
-      'Availability Zone',
-      `${host.name} (${host.id}) · ${proposal.reuse === null ? 'offered in selected AZ' : 'fixed by the retained data volume; offered in this AZ'}; capacity unverified; never changed automatically`,
-    ],
-    ['Host subnet', host.cidr],
+    ...launchFacts(plan, proposal),
     ['VPC CIDR', plan.cidr],
     ...plan.zones.map((zone): DiagnosticFact => ['Subnet', `${zone.name} (${zone.id}) · ${zone.cidr}`]),
     ...proposal.excludedZones.map((zone): DiagnosticFact => ['Excluded zone', `${zone.name} (${zone.id}) · ${zone.state}`]),
@@ -119,7 +133,7 @@ function networkFacts(plan: HostPlan, proposal: HostProposal, target: PreviewTar
     ['Egress', "allow-all IPv4 (AWS's initial rule, retained)"],
     [
       'Network interface',
-      `one new primary interface in the host subnet · device index ${network.deviceIndex} · network card ${network.networkCardIndex} · ${network.associatePublicIp ? 'automatic public IPv4' : 'no automatic public IPv4'} · ${termination(network.deleteOnTermination)}`,
+      `one new primary interface in the subnet of the launched zone · device index ${network.deviceIndex} · network card ${network.networkCardIndex} · ${network.associatePublicIp ? 'automatic public IPv4' : 'no automatic public IPv4'} · ${termination(network.deleteOnTermination)}`,
     ],
     [
       'Public address',
@@ -160,7 +174,7 @@ function dataVolumeFacts(plan: HostPlan, reuse: Reuse | null): DiagnosticFact[] 
     return [
       [
         'Data volume',
-        `${volumeSummary(data)} · attached as ${data.deviceName} · ${termination(data.deleteOnTermination)} (expected from the attach-time default and verified after attach; Qiln cannot change it)`,
+        `${volumeSummary(data)} · created in the zone that the instance launches in, after the launch succeeds · attached as ${data.deviceName} · ${termination(data.deleteOnTermination)} (expected from the attach-time default and verified after attach; Qiln cannot change it)`,
       ],
     ]
   }
@@ -329,15 +343,19 @@ export function reportProposal(reporter: Reporter, proposal: HostProposal, targe
  */
 export function reportCreationEffects(reporter: Reporter, plan: HostPlan, reuse: Reuse | null): void {
   const { data } = plan
+  const candidates = plan.hostSlots.length
   reporter.section('Creation approval')
   reporter.facts([
     ['Network', `one VPC ${plan.cidr} · one subnet in each of ${plan.zones.length} zones · internet gateway · route table · one security group`],
     ['Access key', `generate one local ${plan.key.algorithm} key and import its public half to AWS as a key pair`],
-    ['Host', `launch ${plan.count} ${plan.instanceType} (${plan.purchase}) with the reviewed cloud-init user-data`],
+    [
+      'Host',
+      `launch ${plan.count} ${plan.instanceType} (${plan.purchase}) with the reviewed cloud-init user-data, trying ${candidates} approved ${candidates === 1 ? 'zone' : 'zones'} once each; the next zone is tried only after AWS definitively refuses capacity`,
+    ],
     [
       'Storage',
       reuse === null
-        ? `create and attach one ${data.sizeGiB} GiB data volume · ${termination(data.deleteOnTermination)}`
+        ? `create and attach one ${data.sizeGiB} GiB data volume in the launched zone · ${termination(data.deleteOnTermination)}`
         : `attach existing data volume ${reuse.volumeId} from deployment ${reuse.from} · no new volume is created · ${termination(data.deleteOnTermination)}`,
     ],
     ['Public address', 'allocate and associate one Elastic IP'],

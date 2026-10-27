@@ -69,10 +69,14 @@ export type VolumeSource =
   | { kind: 'new'; token: string }
   | { kind: 'reuse'; from: string; volumeId: string; tags: Tag[] }
 
+/**
+ * `launchTokens` holds one idempotency token per launch candidate, in the order
+ * of the plan's `hostSlots`. Each is sent only with its own attempt.
+ */
 export interface HostIntent {
   plan: HostPlan
   keyName: string
-  launchToken: string
+  launchTokens: string[]
   volume: VolumeSource
 }
 
@@ -101,8 +105,10 @@ export interface AdminKey {
 }
 
 /**
- * `unattempted` and `rejected` are definite refusals of one call, `blocked`
- * is a removal refused for dependencies, and `uncertain` keeps any effect open.
+ * `unattempted` is a call that was refused or cancelled locally before any
+ * provider call was dispatched, and `rejected` is a definite provider refusal.
+ * Both are definite refusals of one call. `blocked` is a removal refused for
+ * dependencies, and `uncertain` keeps any effect open.
  */
 export type FailureOutcome = 'unattempted' | 'rejected' | 'blocked' | 'uncertain'
 
@@ -400,20 +406,35 @@ function isHandoff(value: unknown): value is Handoff {
 }
 
 /**
+ * One distinct token per launch candidate, and none shared with a new volume's
+ * creation. A reused volume fixes the zone, so it allows exactly one candidate.
+ */
+function isLaunchTokens(value: unknown, plan: HostPlan, volume: VolumeSource): boolean {
+  if (!Array.isArray(value)) {
+    return false
+  }
+  const tokens: unknown[] = value
+  return (
+    tokens.length === plan.hostSlots.length &&
+    tokens.every(isOperationId) &&
+    new Set(tokens).size === tokens.length &&
+    (volume.kind === 'reuse' ? tokens.length === 1 : !tokens.includes(volume.token))
+  )
+}
+
+/**
  * The plan is judged structurally here, and `isApproval` then requires it to
  * agree with the approval. It is never rebuilt from today's constants. Tokens
- * are UUIDs, well inside the 64-character ClientToken limit, and the launch and
- * a new volume's creation never share one.
+ * are UUIDs, well inside the 64-character ClientToken limit.
  */
 function isHostIntent(value: unknown, id: string): value is HostIntent {
   return (
     isRecord(value) &&
-    hasKeys(value, ['plan', 'keyName', 'launchToken', 'volume']) &&
+    hasKeys(value, ['plan', 'keyName', 'launchTokens', 'volume']) &&
     isHostPlan(value.plan) &&
     value.keyName === hostKeyName(id) &&
-    isOperationId(value.launchToken) &&
     isVolumeSource(value.volume) &&
-    (value.volume.kind !== 'new' || value.launchToken !== value.volume.token)
+    isLaunchTokens(value.launchTokens, value.plan, value.volume)
   )
 }
 

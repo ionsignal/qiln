@@ -57,8 +57,9 @@ export interface ElasticIp {
 }
 
 /**
- * The complete launch configuration, frozen from reviewed evidence. The host
- * zone is a slot into `zones` and is never changed or replaced by another zone.
+ * The complete launch configuration, frozen from reviewed evidence. The launch
+ * candidates are slots into `zones`, in ascending zone ID order, and each is
+ * tried once. They are never changed or replaced by another zone.
  * There is deliberately no instance profile. The bootstrap is the exact
  * cloud-init user-data the launch sends. Qiln-normalized shapes only: the
  * provider mapping belongs to `ec2/`.
@@ -71,7 +72,7 @@ export interface HostPlan {
   purchase: string
   cidr: string
   zones: Zone[]
-  hostSlot: number
+  hostSlots: number[]
   ingress: Ingress[]
   root: RootVolume
   data: DataVolume
@@ -91,7 +92,7 @@ const PLAN_KEYS = [
   'purchase',
   'cidr',
   'zones',
-  'hostSlot',
+  'hostSlots',
   'ingress',
   'root',
   'data',
@@ -138,6 +139,25 @@ function isZone(value: unknown): value is Zone {
     isText(value.name) &&
     isText(value.cidr)
   )
+}
+
+/**
+ * At least one slot, each inside the zones, strictly ascending so the order is
+ * the zone ID order that the zones themselves keep.
+ */
+function isCandidateSlots(value: unknown, zoneCount: number): boolean {
+  if (!Array.isArray(value) || value.length === 0) {
+    return false
+  }
+  const slots: unknown[] = value
+  let previous = -1
+  return slots.every(slot => {
+    if (!isCount(slot) || slot >= zoneCount || slot <= previous) {
+      return false
+    }
+    previous = slot
+    return true
+  })
 }
 
 function isRule(value: unknown): value is Ingress {
@@ -236,7 +256,7 @@ export function isHostPlan(value: unknown): value is HostPlan {
     purchase,
     cidr,
     zones,
-    hostSlot,
+    hostSlots,
     ingress,
     root,
     data,
@@ -259,8 +279,7 @@ export function isHostPlan(value: unknown): value is HostPlan {
     Array.isArray(zones) &&
     zones.length > 0 &&
     zones.every(isZone) &&
-    isCount(hostSlot) &&
-    hostSlot < zones.length &&
+    isCandidateSlots(hostSlots, zones.length) &&
     Array.isArray(ingress) &&
     ingress.length > 0 &&
     ingress.every(isRule) &&

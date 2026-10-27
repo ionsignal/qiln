@@ -13,6 +13,11 @@ export interface ChildOptions {
   terminal?: boolean
   timeoutMs?: number
   evidence?: ChildEvidence
+  keepReply?: boolean
+}
+
+function cancelledAfterClose(error: unknown): boolean {
+  return error instanceof SupervisedProcessError && error.kind === 'cancelled' && error.terminationConfirmed
 }
 
 /**
@@ -94,6 +99,12 @@ export async function request<T>(
         },
         accept: () => result !== undefined && !retaining,
       }).done
+    } catch (error: unknown) {
+      // Cancellation after the reply, with the child confirmed terminated, does
+      // not undo the reply. Any other failure keeps its own classification.
+      if (!(options.keepReply && result !== undefined && cancelledAfterClose(error))) {
+        throw error
+      }
     } finally {
       // Evidence persistence belongs to the parent's locked transaction. Drain
       // it before recovery can remove inputs or release the connection lock.
@@ -104,7 +115,10 @@ export async function request<T>(
     }
     // Waiting for close, rather than just the reply, terminates the credential
     // context before callers approve, persist, or remove authentication state.
-    checkCancellation(signal)
+    // A caller that keeps the reply checks the signal after accounting for it.
+    if (!options.keepReply) {
+      checkCancellation(signal)
+    }
     return result
   } catch (error: unknown) {
     if (error instanceof SupervisedProcessError) {

@@ -1,9 +1,9 @@
+import { AWS_SPEC } from '../spec'
 import { InstallerError } from '../../diagnostic/error'
 import { sameJson } from '../../json'
-import { AWS_SPEC } from '../spec'
 import { expectation, matches } from './expect'
-import { refusals, settled, stateOf } from './step'
-import { creationPlan, creationVerified, hostKeyDue, removalPlan, resourceId } from './topology'
+import { declined, refusals, settled, stateOf } from './step'
+import { creationPlan, creationsOf, creationVerified, hostKeyDue, removalPlan, resourceId } from './topology'
 import type { Deployment, Step } from './types'
 
 const FIXED_FIELDS = ['version', 'id', 'alias', 'previous', 'connection', 'binding', 'approval', 'createdAt'] as const
@@ -83,8 +83,10 @@ function requireRemovalApproval(current: Deployment, updated: Deployment, previo
 
 /**
  * A new step is open, follows the fixed plan, and starts only after the previous
- * step was verified. Creation never resumes once any removal exists, and never
- * starts without the administrative key binding.
+ * step was verified, except that a launch attempt may follow one that was
+ * declined for capacity. Creation never resumes once any removal exists, and
+ * never starts without the administrative key binding. The plan position
+ * counts creations without the declined attempts that a later attempt replaced.
  */
 function requireNewStep(current: Deployment, updated: Deployment, step: Step): void {
   const previous = current.steps.at(-1)
@@ -92,14 +94,16 @@ function requireNewStep(current: Deployment, updated: Deployment, step: Step): v
     return invalid()
   }
   if (step.removal === null) {
-    const planned = creationPlan(updated.approval).at(current.steps.length)
+    const planned = creationPlan(updated.approval).at(creationsOf(updated.steps).length - 1)
     if (
       updated.adminKey === null ||
       current.removals.length !== 0 ||
       updated.removals.length !== 0 ||
       planned?.action !== step.action ||
       planned.slot !== step.slot ||
-      (previous !== undefined && stateOf(previous) !== 'verified')
+      (previous !== undefined &&
+        stateOf(previous) !== 'verified' &&
+        !(declined(previous) && previous.action === step.action))
     ) {
       return invalid()
     }

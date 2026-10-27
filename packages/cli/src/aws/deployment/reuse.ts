@@ -1,5 +1,5 @@
 import { phase } from './facts'
-import { dataTags, dataVolumeId } from './topology'
+import { dataTags, dataVolumeId, hostSlotOf } from './topology'
 import type { DataVolume } from './host/types'
 import type { Deployment, Placement, Tag } from './types'
 
@@ -28,7 +28,7 @@ export function reusable(record: Deployment): Reuse | null {
     return null
   }
   const { plan } = record.approval.host
-  const { id, name } = plan.zones[plan.hostSlot]
+  const { id, name } = plan.zones[hostSlotOf(record)]
   return {
     from: record.id,
     volumeId,

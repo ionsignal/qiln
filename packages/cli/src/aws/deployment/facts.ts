@@ -1,10 +1,20 @@
-import type { DiagnosticFact } from '../../diagnostic/error'
 import { AWS_SPEC } from '../spec'
 import { deploymentName } from './alias'
 import { expectation, matches } from './expect'
-import { refusals, settled, stateOf } from './step'
-import { creationPlan, removalPlan, resourceId, resources, retained, unnamed, unreleased } from './topology'
+import { declined, refusals, settled, stateOf } from './step'
+import {
+  creationPlan,
+  creationsOf,
+  launches,
+  removalPlan,
+  resourceId,
+  resources,
+  retained,
+  unnamed,
+  unreleased,
+} from './topology'
 import type { Deployment } from './types'
+import type { DiagnosticFact } from '../../diagnostic/error'
 
 export type Phase =
   | 'approved'
@@ -76,7 +86,7 @@ export function phase(record: Deployment): Phase {
   if (last.removal !== null) {
     return 'removing'
   }
-  if (record.steps.length !== creationPlan(record.approval).length) {
+  if (creationsOf(record.steps).length !== creationPlan(record.approval).length) {
     return 'partial'
   }
   return record.health === null ? 'created' : 'healthy'
@@ -123,8 +133,23 @@ export function volumeDisclosure(record: Deployment): string {
 }
 
 /**
- * The single wording for AWS health. Retained health is point-in-time
- * evidence, not a statement about the current state of the instance.
+ * The single wording for launch attempts, one per approved zone at most. A
+ * declined attempt was definitely refused by AWS for lack of capacity in its
+ * zone and launched nothing.
+ */
+export function launchDisclosure(record: Deployment): string {
+  const { hostSlots, zones } = record.approval.host.plan
+  const attempts = launches(record).map((step, index) => {
+    const zone = zones[hostSlots[index]].name
+    return declined(step) ? `${zone} declined for capacity` : `${zone} ${stateOf(step)}`
+  })
+  const approved = `${hostSlots.length} approved ${hostSlots.length === 1 ? 'zone' : 'zones'}, each tried once`
+  return `${attempts.join(', ') || 'none yet'} · ${approved}`
+}
+
+/**
+ * The single wording for AWS health. Retained health is point-in-time evidence,
+ * not a statement about the current state of the instance.
  */
 export function healthDisclosure(record: Deployment): string {
   return record.health === null
@@ -132,14 +157,19 @@ export function healthDisclosure(record: Deployment): string {
     : `running with system, instance and attached-EBS checks ok at ${record.health.checkedAt}; point-in-time AWS status only`
 }
 
+/**
+ * An open or uncertain step has an unknown effect, so nothing continues from
+ * it. A returned step is not stuck: a fresh observation can verify it.
+ */
+function stuck(record: Deployment): boolean {
+  return record.steps.some(step => {
+    const state = stateOf(step)
+    return state === 'open' || state === 'uncertain'
+  })
+}
+
 export function verification(record: Deployment): Verification {
-  if (
-    record.termination === 'unconfirmed' ||
-    record.steps.some(step => {
-      const state = stateOf(step)
-      return state === 'open' || state === 'uncertain'
-    })
-  ) {
+  if (record.termination === 'unconfirmed' || stuck(record)) {
     return 'uncertain'
   }
   const recordedPhase = phase(record)
@@ -172,30 +202,67 @@ export function effects(record: Deployment): Effects {
 }
 
 /**
- * Whether the record's removal was verified and nothing remains unresolved, so
- * that a later deployment may take over its alias. Resources kept by design,
- * or already handed off, do not prevent it.
+ * Nothing was provisioned: child termination is confirmed, every recorded step
+ * was definitely refused or never dispatched, and no resource identity is
+ * recorded. A reused data volume is named by the approval, so an attempt that
+ * reuses one is never unprovisioned.
  */
-export function vacated(record: Deployment): boolean {
-  const recordedPhase = phase(record)
+function unprovisioned(record: Deployment): boolean {
   return (
-    (recordedPhase === 'removed' || recordedPhase === 'retained' || recordedPhase === 'handed-off') &&
-    effects(record) !== 'outstanding'
+    record.termination === 'confirmed' &&
+    resources(record).length === 0 &&
+    record.steps.every(step => stateOf(step) === 'refused')
   )
 }
 
 /**
+ * Whether a later deployment may take over the record's alias: its removal was
+ * verified and nothing remains unresolved, or it never provisioned anything.
+ * Resources kept by design, or already handed off, do not prevent it.
+ */
+export function vacated(record: Deployment): boolean {
+  const recordedPhase = phase(record)
+  return (
+    unprovisioned(record) ||
+    ((recordedPhase === 'removed' || recordedPhase === 'retained' || recordedPhase === 'handed-off') &&
+      effects(record) !== 'outstanding')
+  )
+}
+
+/**
+ * Why nothing may continue from this record, ignoring returned steps. Null
+ * means every step has a known effect or can still be verified by observation.
+ */
+function unresolvedReason(record: Deployment): string | null {
+  if (record.termination !== 'confirmed') {
+    return 'child termination is not confirmed'
+  }
+  return stuck(record) ? 'a recorded step is unresolved or uncertain, and Qiln never repeats it' : null
+}
+
+/**
+ * Whether returned steps may be verified from fresh evidence. This is
+ * accounting and never replay, so it says nothing about removal eligibility;
+ * `removable` stays the strict judgement.
+ */
+export function canSettle(record: Deployment): boolean {
+  return unresolvedReason(record) === null
+}
+
+/**
  * Whether a new removal attempt may be offered, and if not, why. Blockers are
- * confirmed termination, no step that is unresolved or uncertain, and refusal
- * budget remaining. `eligible` only permits a fresh observation and approval;
- * it does not promise that removal succeeds.
+ * confirmed termination, no step that is unresolved or uncertain, every
+ * deletion response verified, and refusal budget remaining. `eligible` only
+ * permits a fresh observation and approval; it does not promise that removal
+ * succeeds.
  */
 export function cleanup(record: Deployment): Cleanup {
-  if (record.termination !== 'confirmed') {
-    return { status: 'blocked', detail: 'child termination is not confirmed' }
+  const reason = unresolvedReason(record)
+  if (reason !== null) {
+    return { status: 'blocked', detail: reason }
   }
   if (!record.steps.every(settled)) {
-    return { status: 'blocked', detail: 'a recorded step is unresolved or uncertain, and Qiln never repeats it' }
+    return { status: 'blocked', detail: 'a removal response is retained but not yet verified by observation' }
   }
   if (removalPlan(record).length === 0) {
     const kept = retained(record).length
@@ -239,6 +306,7 @@ export function deploymentFacts(record: Deployment): readonly DiagnosticFact[] {
     ['Zones', approval.zones.map(zone => zone.name).join(', ')],
     ['VPC', resourceId(record, 'create-vpc') ?? 'no identity retained'],
     ['Instance', resourceId(record, 'run-instances') ?? 'no identity retained'],
+    ['Launch attempts', launchDisclosure(record)],
     ['Data volume', volumeDisclosure(record)],
     ['AWS health', healthDisclosure(record)],
     [
