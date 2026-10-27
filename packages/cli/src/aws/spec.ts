@@ -133,12 +133,12 @@ export const AWS_SPEC = Object.freeze({
     }),
   }),
   compute: Object.freeze({
-    defaultInstanceType: 'i8g.xlarge',
+    defaultInstanceType: 'g7.2xlarge',
     storage: Object.freeze({
       volumeType: 'gp3',
       iops: 3_000,
       throughput: 250,
-      rootSizeGiB: 16,
+      rootSizeGiB: 24,
       dataSizeGiB: 250,
     }),
     launch: Object.freeze({
@@ -171,14 +171,14 @@ export const AWS_SPEC = Object.freeze({
       tagged: Object.freeze(['instance', 'volume', 'network-interface', 'key-pair', 'elastic-ip']),
     }),
     image: Object.freeze({
-      name: 'ubuntu/images/hvm-ssd-gp3/ubuntu-resolute-26.04-arm64-server-20260604',
-      release: '20260604',
+      // name: 'ubuntu/images/hvm-ssd-gp3/ubuntu-resolute-26.04-arm64-server-20260604',
+      // release: '20260604',
+      // owner: '099720109477',
+      // architecture: 'arm64',
+      name: 'ubuntu/images/hvm-ssd-gp3/ubuntu-resolute-26.04-amd64-server-20261022',
+      release: '20261022',
       owner: '099720109477',
-      architecture: 'arm64',
-      // name: 'Deep Learning Base OSS Nvidia Driver GPU AMI (Ubuntu 26.04) 20261006',
-      // release: '20261006',
-      // owner: 'amazon',
-      // architecture: 'x86_64',      
+      architecture: 'x86_64',      
     }),
     discovery: Object.freeze({
       maximumDevices: 32,
