@@ -72,13 +72,13 @@ function failure(
 }
 
 /**
- * Coordinates ZFS preparation under the AWS-operation lock held by the
- * command. Per step: authorization is persisted, then the fence, then the
- * script runs, then its completion or refusal is persisted, then a fresh
- * inspection must agree before `verifiedAt` is persisted. Nothing is replayed,
- * resumed, or rolled back, and an interrupted step stays open as evidence.
- * SSH uncertainty never affects the AWS child termination, because the
- * durable ZFS guards keep blocking instead.
+ * Coordinates ZFS preparation under the AWS-operation lock held by the command.
+ * Per step: authorization is persisted, then the fence, then the script runs,
+ * then its completion or refusal is persisted, then a fresh inspection must
+ * agree before `verifiedAt` is persisted. Nothing is replayed, resumed, or
+ * rolled back, and an interrupted step stays open as evidence. SSH uncertainty
+ * never affects the AWS child termination, because the durable ZFS guards keep
+ * blocking instead.
  */
 export class ZfsPreparer {
   private constructor(
@@ -168,6 +168,15 @@ export class ZfsPreparer {
   }
 
   /**
+   * Verifies a step left returned by an earlier run from a fresh inspection,
+   * before any release is planned. This is accounting only: nothing is rerun,
+   * and it needs no approval. Returns whether a step was verified.
+   */
+  public async settle(): Promise<boolean> {
+    return (await this.settleReturned()) !== null
+  }
+
+  /**
    * Freshly checks the recorded pool before AWS removal. A pool observed
    * imported is cleanly exported under its own approval. A pool observed absent
    * is accepted only when the evidence already records its verified export, and
@@ -176,6 +185,7 @@ export class ZfsPreparer {
    */
   public async release(signal: AbortSignal): Promise<void> {
     const { target, hooks } = this.context
+    const observation = (await this.settleReturned()) ?? (await this.inspect())
     const recorded = this.recorded()
     if (recorded === null) {
       throw new InstallerError({
@@ -183,7 +193,6 @@ export class ZfsPreparer {
         retry: this.retry,
       })
     }
-    const observation = (await this.settleReturned()) ?? (await this.inspect())
     const plan = releasePlanOf(observation, target, recorded, poolState(this.evidence) === 'exported')
     hooks.show(observation, plan)
     switch (plan.kind) {
@@ -203,9 +212,10 @@ export class ZfsPreparer {
   }
 
   /**
-   * The inspection reports on the pool the plan names, else on the recorded one,
-   * else on the policy default. It asks about the approved packages too, so the
-   * whole frozen transaction is checked and not only the direct prerequisite.
+   * The inspection reports on the pool the plan names, else on the recorded
+   * one, else on the policy default. It asks about the approved packages too,
+   * so the whole frozen transaction is checked and not only the direct
+   * prerequisite.
    */
   private async inspect(plan?: ApprovedPlan): Promise<Observation> {
     const pool =

@@ -7,22 +7,18 @@ import { withConfirmedOperation } from '../../../aws/operation'
 import { InstallerError, type DiagnosticFact } from '../../../diagnostic/error'
 import { deploymentName } from '../../../aws/deployment/alias'
 import { expectation, matches } from '../../../aws/deployment/expect'
-import { cleanup, deploymentFacts, removable } from '../../../aws/deployment/facts'
+import { canSettle, cleanup, deploymentFacts, removable } from '../../../aws/deployment/facts'
 import { removalPlan, retained, sshReady, unreleased } from '../../../aws/deployment/topology'
 import { evidence as incusEvidence } from '../../../aws/deployment/incus/evidence'
 import { IncusPreparer } from '../../../aws/deployment/incus/prepare'
-import { poolState, requirePoolReleased, requirePoolSettled } from '../../../aws/deployment/zfs/facts'
+import { poolReturned, poolState, requirePoolNotStuck, requirePoolReleased } from '../../../aws/deployment/zfs/facts'
 import { ZfsPreparer } from '../../../aws/deployment/zfs/prepare'
 import { targetOf } from '../../../aws/deployment/zfs/target'
 import { requireAwsHost } from '../../../aws/host'
 import { Prompts, withCancellation } from '../../../terminal/prompts'
 import { approvalLabel as incusApproval, reportPlan as reportIncusPlan } from './prepare/incus'
 import { approvalLabel as zfsApproval, reportPlan as reportZfsPlan } from './prepare/zfs'
-import {
-  requireStorageNotStuck,
-  requireStorageReleased,
-  storageTouched,
-} from '../../../aws/deployment/incus/facts'
+import { requireStorageNotStuck, requireStorageReleased, storageTouched } from '../../../aws/deployment/incus/facts'
 import * as lineage from '../../../aws/deployment/zfs/lineage'
 import type { Action } from '../../../aws/deployment/graph'
 import type { Dir } from '../../../state/files'
@@ -46,14 +42,29 @@ const EFFECTS: Partial<Record<Action, string>> = {
 }
 
 /**
- * What the host may still hold that must be checked before AWS removal: Incus
- * initialized by Qiln, which is inspected freshly even when an earlier release
- * is retained because it may have been restarted since, and a ZFS pool recorded
- * as imported or exported.
+ * What the host may still need before AWS removal: a pool step that returned
+ * but was never verified, Incus initialized by Qiln, which is inspected freshly
+ * even when an earlier release is retained because it may have been restarted
+ * since, and a ZFS pool recorded as imported or exported.
  */
 interface Holds {
+  returned: boolean
   incus: boolean
   pool: boolean
+}
+
+/**
+ * Read from the retained evidence on every call, because settling a returned
+ * step can change the recorded pool state.
+ */
+async function holdsOf(root: Dir, record: Deployment): Promise<Holds> {
+  const zfs = await lineage.evidence(root, record)
+  const pool = poolState(zfs)
+  return {
+    returned: poolReturned(zfs).length > 0,
+    incus: storageTouched(await incusEvidence(root, record)),
+    pool: pool === 'imported' || pool === 'exported',
+  }
 }
 
 function refusal(record: Deployment, observation?: Observation): InstallerError {
@@ -78,7 +89,10 @@ function reportTarget(reporter: Reporter, record: Deployment, observation: Obser
     ['Account', record.binding.accountId],
     ['Deployment region', record.binding.region],
     ['CIDR', record.approval.cidr],
-    ...[...unreleased(record), ...kept].map((resource): DiagnosticFact => [resource.kind, `${resource.id} · ${lifecycleOf(resource)}`]),
+    ...[...unreleased(record), ...kept].map((resource): DiagnosticFact => [
+      resource.kind,
+      `${resource.id} · ${lifecycleOf(resource)}`,
+    ]),
     ...record.approval.tags.map((tag): DiagnosticFact => ['Tag', `${tag.Key}=${tag.Value}`]),
   ])
   reporter.row('verified', 'Fresh observation', observationSummary(observation))
@@ -107,19 +121,20 @@ function reportTarget(reporter: Reporter, record: Deployment, observation: Obser
 
 /**
  * Releases the host over the pinned SSH connection, so a successor host can
- * import the recorded pool without force. Incus is checked first, under its own
- * default-no approval when it must be stopped, because a running daemon holds
- * the pool; Incus already observed inactive is only recorded. Then a pool still
- * imported is exported under its own approval, and one observed absent only
- * corroborates the retained export evidence. Declining leaves the host
- * untouched, and an unreachable host refuses removal. Resolving access may
- * retain a host-key pin, so the returned target carries the access record,
- * which includes it, and the caller never holds a stale record.
+ * import the recorded pool without force. A pool step that returned but was
+ * never verified is settled first from a fresh inspection, which repeats
+ * nothing and needs no approval. Then Incus is checked, under its own default-no
+ * approval when it must be stopped, because a running daemon holds the pool;
+ * Incus already observed inactive is only recorded. Then a pool still imported
+ * is exported under its own approval, and one observed absent only corroborates
+ * the retained export evidence. Declining leaves the host untouched, and an
+ * unreachable host refuses removal. Resolving access may retain a host-key pin,
+ * so the returned target carries the access record, which includes it, and the
+ * caller never holds a stale record.
  */
 async function releaseHost(
   root: Dir,
   target: Target,
-  holds: Holds,
   prompts: Prompts,
   reporter: Reporter,
   signal: AbortSignal,
@@ -134,22 +149,38 @@ async function releaseHost(
     })
   }
   const access = await resolveAccess(root, target, retry, reporter, signal)
-  const recorded = await lineage.pool(root, record)
-  if (recorded === null) {
-    throw new InstallerError({
-      code: 'INTERNAL_ERROR',
-      retry,
-    })
-  }
   const { host, port, username, fingerprint } = access.options
   reporter.section('Host release check')
   reporter.row('working', 'Connecting', `${username}@${host}:${port} · pinned host key SHA256:${fingerprint}`)
   await withRemote(root, access, signal, async remote => {
     await requireBaseline(reporter, remote, username, record.id, [
       'Removal',
-      'no Incus or ZFS release, check, or export was completed and no AWS resource was changed',
+      'no Incus or ZFS settlement, release, check, or export was completed and no AWS resource was changed',
     ])
+    const zfsPreparer = await ZfsPreparer.open({
+      root,
+      deployment: record,
+      target: zfsTarget,
+      recorded: await lineage.pool(root, record),
+      remote,
+      hooks: {
+        show: (observation, plan) => reportZfsPlan(reporter, { observation, plan, target: zfsTarget }),
+        approve: plan => prompts.approve(zfsApproval(plan)),
+        progress: progressSink(reporter),
+      },
+    })
+    if (await zfsPreparer.settle()) {
+      reporter.row('verified', 'ZFS step', 'a returned step was verified by fresh inspection; nothing was rerun')
+    }
+    const holds = await holdsOf(root, record)
     if (holds.incus) {
+      const recorded = await lineage.pool(root, record)
+      if (recorded === null) {
+        throw new InstallerError({
+          code: 'INTERNAL_ERROR',
+          retry,
+        })
+      }
       const incusPreparer = await IncusPreparer.open({
         root,
         deployment: record,
@@ -163,18 +194,6 @@ async function releaseHost(
       await incusPreparer.release({ pool: recorded.name, guid: recorded.guid, account: username }, signal)
     }
     if (holds.pool) {
-      const zfsPreparer = await ZfsPreparer.open({
-        root,
-        deployment: record,
-        target: zfsTarget,
-        recorded,
-        remote,
-        hooks: {
-          show: (observation, plan) => reportZfsPlan(reporter, { observation, plan, target: zfsTarget }),
-          approve: plan => prompts.approve(zfsApproval(plan)),
-          progress: progressSink(reporter),
-        },
-      })
       await zfsPreparer.release(signal)
     }
   })
@@ -188,22 +207,21 @@ export async function remove(options: AwsDeploymentOptions, reporter: Reporter):
     const prompts = new Prompts(signal, `qiln aws deployment remove --${selector.kind} ${selector.value}`, reporter)
     return await withConfirmedOperation(false, async ({ root, connections: store }) => {
       let target = await openTarget(root, store, selector)
-      requirePoolSettled(await lineage.evidence(root, target.record), target.record.id)
+      requirePoolNotStuck(await lineage.evidence(root, target.record), target.record.id)
       requireStorageNotStuck(await incusEvidence(root, target.record), target.record.id)
-      if (!removable(target.record)) {
-        if (cleanup(target.record).status === 'not-needed' && retained(target.record).length > 0) {
-          reportDeployment(reporter, target.record)
-          return 'No removable resource remains. Retained resources are not removed by Qiln and keep incurring charges until they are deleted outside Qiln.'
-        }
+      if (!canSettle(target.record)) {
         throw refusal(target.record)
       }
-      const poolOnRecord = poolState(await lineage.evidence(root, target.record))
-      const holds: Holds = {
-        incus: storageTouched(await incusEvidence(root, target.record)),
-        pool: poolOnRecord === 'imported' || poolOnRecord === 'exported',
+      if (cleanup(target.record).status === 'not-needed') {
+        if (retained(target.record).length === 0) {
+          throw refusal(target.record)
+        }
+        reportDeployment(reporter, target.record)
+        return 'No removable resource remains. Retained resources are not removed by Qiln and keep incurring charges until they are deleted outside Qiln.'
       }
-      if ((holds.incus || holds.pool) && sshReady(target.record)) {
-        target = await releaseHost(root, target, holds, prompts, reporter, signal)
+      const holds = await holdsOf(root, target.record)
+      if ((holds.returned || holds.incus || holds.pool) && sshReady(target.record)) {
+        target = await releaseHost(root, target, prompts, reporter, signal)
       }
       requirePoolReleased(await lineage.evidence(root, target.record), target.record.id)
       requireStorageReleased(await incusEvidence(root, target.record), target.record.id)
@@ -216,7 +234,7 @@ export async function remove(options: AwsDeploymentOptions, reporter: Reporter):
           ? 'All recorded resources were observed absent; no deletion call was made.'
           : 'All removable resources were observed absent; no deletion call was made. Retained resources remain; see the recorded resources.'
       }
-      if (!matches(expectation(record), observation)) {
+      if (!removable(record) || !matches(expectation(record), observation)) {
         throw refusal(record, observation)
       }
       reportTarget(reporter, record, observation)

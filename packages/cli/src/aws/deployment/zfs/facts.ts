@@ -11,8 +11,8 @@ import { establishesPool, type ZfsRecord, type ZfsStep } from './types'
 export type PoolState = 'none' | 'imported' | 'exported' | 'unknown'
 
 /**
- * Steps whose effect is unknown and which only an operator can resolve: open
- * or uncertain. Nothing clears them, and they are never replayed or resumed.
+ * Steps whose effect is unknown and which only an operator can resolve: open or
+ * uncertain. Nothing clears them, and they are never replayed or resumed.
  */
 export function stuck(record: ZfsRecord | null): ZfsStep[] {
   return journal.stuck(record?.steps ?? [])
@@ -35,6 +35,18 @@ export function unsettled(record: ZfsRecord | null): ZfsStep[] {
 
 function poolUnsettled(record: ZfsRecord | null): ZfsStep[] {
   return unsettled(record).filter(step => isPoolAction(step.action))
+}
+
+function poolStuck(record: ZfsRecord | null): ZfsStep[] {
+  return stuck(record).filter(step => isPoolAction(step.action))
+}
+
+/**
+ * Pool-affecting steps that exited zero and wait for a fresh inspection to
+ * verify them.
+ */
+export function poolReturned(record: ZfsRecord | null): ZfsStep[] {
+  return returned(record).filter(step => isPoolAction(step.action))
 }
 
 function expectsPool(record: ZfsRecord, step: ZfsStep): boolean {
@@ -74,8 +86,8 @@ export function poolState(record: ZfsRecord | null): PoolState {
 
 /**
  * The pool was last created or imported with a verified step, its scrub timer
- * was verified after that, and no export has been attempted since. Like the pool
- * state, this is the last recorded outcome and not a fresh observation.
+ * was verified after that, and no export has been attempted since. Like the
+ * pool state, this is the last recorded outcome and not a fresh observation.
  */
 export function prepared(record: ZfsRecord | null): boolean {
   const steps = record?.steps ?? []
@@ -94,7 +106,9 @@ function poolDisclosure(record: ZfsRecord | null): string {
   const state = poolState(record)
   const pool = record?.pool ?? null
   if (pool === null) {
-    return state === 'unknown' ? 'unknown; a pool-affecting step is unresolved or a package install may have imported a pool' : 'none recorded'
+    return state === 'unknown'
+      ? 'unknown; a pool-affecting step is unresolved or a package install may have imported a pool'
+      : 'none recorded'
   }
   const labels: Record<PoolState, string> = {
     none: 'not verified',
@@ -109,7 +123,10 @@ export function zfsFacts(record: ZfsRecord | null): readonly DiagnosticFact[] {
   const open = unsettled(record)
   return [
     ['ZFS pool', poolDisclosure(record)],
-    ['Unresolved ZFS steps', open.length === 0 ? 'none' : open.map(step => `${step.action} (${journal.stateOf(step)})`).join(', ')],
+    [
+      'Unresolved ZFS steps',
+      open.length === 0 ? 'none' : open.map(step => `${step.action} (${journal.stateOf(step)})`).join(', '),
+    ],
   ]
 }
 
@@ -141,6 +158,17 @@ export function requireNotStuck(record: ZfsRecord | null, deploymentId: string):
 }
 
 /**
+ * Removal starts here: only a pool-affecting step with an unknown effect blocks
+ * it. A returned pool step is verified from a fresh inspection before the pool
+ * is judged, which is settlement and not replay.
+ */
+export function requirePoolNotStuck(record: ZfsRecord | null, deploymentId: string): void {
+  if (poolStuck(record).length > 0) {
+    throw refusal('ZFS_PREPARATION_UNRESOLVED', record, deploymentId)
+  }
+}
+
+/**
  * Only pool-affecting uncertainty blocks disconnect, so an interrupted package
  * or ARC step never makes a deployment unmanageable.
  */
@@ -151,8 +179,8 @@ export function requirePoolSettled(record: ZfsRecord | null, deploymentId: strin
 }
 
 /**
- * Removing the host or handing off its volume needs a pool whose state is
- * known and that is not left imported.
+ * Removing the host or handing off its volume needs a pool whose state is known
+ * and that is not left imported.
  */
 export function requirePoolReleased(record: ZfsRecord | null, deploymentId: string): void {
   requirePoolSettled(record, deploymentId)
