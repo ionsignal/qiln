@@ -208,7 +208,7 @@ export function deploymentRecovery(
     before: facts,
     steps: [
       confirmation('Child termination', outcomes.termination),
-      confirmation('Deployment evidence persistence', outcomes.persistence),
+      confirmation('Deployment persistence', outcomes.persistence),
     ],
     after: retainedLock(outcomes.termination),
   })

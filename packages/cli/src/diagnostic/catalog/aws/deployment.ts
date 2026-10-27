@@ -21,7 +21,7 @@ export const awsDeploymentDiagnostics = Object.freeze({
   ),
   AWS_DEPLOYMENT_ALIAS_TAKEN: entry(
     'Deployment alias is already in use',
-    'An alias can be taken over only when the newest deployment using it has verified removal and nothing remains unresolved. Deployment records are never deleted, so a taken-over alias selects the newest deployment while older records stay reachable by ID. The alias is checked before the proposal and again when the approval is saved. No deployment record was created for this alias and no AWS resource was created.',
+    'An alias can be taken over only when the newest deployment using it has verified removal and nothing remains unresolved, or never provisioned anything: every recorded step was refused or not attempted, no resource identity was retained, and child termination was confirmed. Deployment records are never deleted, so a taken-over alias selects the newest deployment while older records stay reachable by ID. The alias is checked before the proposal and again when the approval is saved. No deployment record was created for this alias and no AWS resource was created.',
     'Run qiln aws deployment list to see the aliases in use and the recorded state of each deployment.',
     'Remove the deployment that uses the alias with qiln aws deployment remove, or choose another alias with --alias.',
   ),
@@ -54,9 +54,9 @@ export const awsDeploymentDiagnostics = Object.freeze({
   ),
   AWS_DEPLOYMENT_PREREQUISITES_BLOCKED: entry(
     'Proposed host has blocking findings',
-    'Read-only discovery completed, but at least one displayed blocker means the proposed host could not be launched as reviewed. No approval prompt was offered, and no approval, alias, SSH key, or AWS resource was created. An image or instance type that was not returned means it was not visible to this account and region, not that it does not exist. When a retained data volume is being reused, its own Availability Zone must be available and offer the instance type, and its settings must match the reviewed data volume; no other zone, instance type, or storage is substituted.',
+    'Read-only discovery completed, but at least one displayed blocker means the proposed host could not be launched as reviewed. No approval prompt was offered, and no approval, alias, SSH key, or AWS resource was created. An image or instance type that was not returned means it was not visible to this account and region, not that it does not exist. The launch candidates are the available standard Availability Zones that offer the instance type, so a blocker can mean that none does. When a retained data volume is being reused, its own Availability Zone must be available and offer the instance type, and its settings must match the reviewed data volume; that zone is then the only candidate, and no other zone, instance type, or storage is substituted.',
     'Review the displayed blockers against the recorded deployment region and the account’s visible images and zones.',
-    'Qiln never substitutes another image, distribution, architecture, region, or Availability Zone. Retry after the cause has been resolved outside Qiln.',
+    'Qiln never substitutes another image, distribution, architecture, region, or instance type, and never adds a zone that discovery did not show as available and offering the type. Retry after the cause has been resolved outside Qiln.',
     'To avoid the retained-volume placement requirement, choose to create a new data volume instead of reusing the retained one.',
   ),
   AWS_DEPLOYMENT_REUSE_REFUSED: entry(
@@ -71,14 +71,14 @@ export const awsDeploymentDiagnostics = Object.freeze({
     'Creation runs once, from an approved record that has no administrative key, no recorded provider steps, and no removal history. Qiln never continues, replays, or regenerates abandoned work. This command attempted no new AWS mutation and changed nothing. It does not clear earlier effects or establish that no AWS resources exist.',
     'Inspect the displayed deployment evidence with qiln aws deployment status.',
     'If AWS resources may remain, use qiln aws deployment inspect, and remove only what the record names.',
-    'A new deployment needs a free alias: one that is unused, or whose newest deployment has verified removal with nothing unresolved.',
+    'A new deployment needs a free alias: one that is unused, whose newest deployment has verified removal with nothing unresolved, or whose newest deployment never provisioned anything.',
   ),
   AWS_DEPLOYMENT_KEY_GENERATION_FAILED: entry(
     'Administrative SSH key generation did not complete',
     'Qiln generates one Ed25519 key pair locally, under a protected directory bound to this deployment, before any AWS step. It requires ssh-keygen on PATH and stops before creating any key storage when that is missing. The pair is validated, and both files are flushed to storage, before it is recorded. No new AWS mutation was attempted. This does not establish that no AWS resources exist from earlier work. Partial key files, if any, are retained as evidence and are never repaired, regenerated, or replaced, so this deployment cannot be continued.',
     'Inspect the displayed protected key directory, if one is shown, and the recorded child termination.',
     'Confirm that no ssh-keygen process remains active before removing anything. ssh-keygen is required only to generate this key; install the OpenSSH client tools through an approved procedure if it was not found.',
-    'Create a new deployment with a different alias after the cause is resolved; this record never reaches verified removal, so its alias is not taken over.',
+    'Create a new deployment after the cause is resolved. Once ssh-keygen termination is confirmed, this record provisioned nothing, so a new deployment can take over its alias. Its key files stay where they are and are never deleted by Qiln. While termination is unconfirmed, the alias stays reserved.',
     'Do not delete deployment evidence or lock files to bypass this state.',
   ),
   AWS_DEPLOYMENT_INGRESS_INVALID: entry(
@@ -96,7 +96,7 @@ export const awsDeploymentDiagnostics = Object.freeze({
   ),
   AWS_DEPLOYMENT_NOT_ATTEMPTED: entry(
     'AWS deployment mutation was not attempted',
-    'The isolated credential process stopped before sending any mutating call: the retained deployment evidence, approval, bindings, or authenticated identity did not match, or a credential or read step failed before the mutation was dispatched. Read-only calls may have been made. This describes only that attempt and does not clear earlier effects.',
+    'The mutating call was never sent: the command was cancelled before the isolated credential process started, the retained deployment evidence, approval, bindings, or authenticated identity did not match, or a credential or read step failed before the mutation was dispatched. Read-only calls may have been made. This describes only that attempt and does not clear earlier effects.',
     'Inspect the retained deployment evidence and the authenticated operator before repeating the command.',
     'Do not edit or delete protected deployment state to bypass the refusal.',
   ),
@@ -109,15 +109,16 @@ export const awsDeploymentDiagnostics = Object.freeze({
   ),
   AWS_DEPLOYMENT_LIMIT: entry(
     'AWS resource limit prevents creation',
-    'AWS definitively refused a creation call because a regional limit was reached for VPCs, subnets, internet gateways, route tables, security groups, security group rules, instances or vCPUs, volumes, provisioned IOPS, or Elastic IPs. That call created nothing. Qiln does not probe, raise, or manage quotas; a limit is only reported when AWS refuses a call.',
+    'AWS definitively refused a creation call because a regional limit was reached for VPCs, subnets, internet gateways, route tables, security groups, security group rules, instances or vCPUs, volumes, provisioned IOPS, or Elastic IPs. That call created nothing. Qiln does not probe, raise, or manage quotas; a limit is only reported when AWS refuses a call. A limit refusal of a launch never moves on to another Availability Zone.',
     'Review existing resources in the account and region through an explicitly approved procedure, or request a quota change outside Qiln.',
     'Clean up any resources already created with qiln aws deployment remove, then create a new deployment; the refused attempt is never retried.',
   ),
   AWS_DEPLOYMENT_CAPACITY: entry(
     'AWS has no capacity for the requested instance',
-    'AWS definitively refused the launch because it cannot currently provide the requested instance type in the selected Availability Zone. That call launched nothing. Qiln never changes the zone automatically, substitutes another instance type, or retries the refused launch, and the proposal never reserved or proved capacity.',
-    'Clean up any resources already created with qiln aws deployment remove. Resources retained by design remain and are not removed by Qiln.',
-    'Create a new deployment later, when capacity may be available; the refused attempt is never retried.',
+    'AWS definitively refused the launch for insufficient capacity of the requested instance type in the last approved Availability Zone, or in the only one. Qiln tries each approved zone once, in zone ID order, and moves on only after a definite capacity refusal with child termination confirmed and the refusal recorded. Every refused attempt launched nothing, and the attempted zones are listed as launch attempts. Qiln never retries a refused zone, adds a zone that was not approved, or substitutes another instance type, image, region, or storage. A retained data volume fixes its zone, so reuse has a single candidate. The proposal never reserved or proved capacity.',
+    'Review the launch attempts to see which zones were tried.',
+    'No instance was launched and no new data volume was created by this deployment, but earlier resources such as the network remain. Clean them up with qiln aws deployment remove. Resources retained by design remain and are not removed by Qiln.',
+    'Create a new deployment later, when capacity may be available; the refused attempts are never retried.',
   ),
   AWS_DEPLOYMENT_BLOCKED: entry(
     'Deployment removal is blocked by dependencies',
@@ -153,7 +154,7 @@ export const awsDeploymentDiagnostics = Object.freeze({
   ),
   AWS_DEPLOYMENT_EVIDENCE_UNAVAILABLE: entry(
     'Step response evidence was not retained',
-    'The provider call may have completed, but its returned identity could not be validated or retained locally. Network creation calls carry no idempotency token, and the instance and data-volume creations carry one only to guard a single dispatch. Qiln never repeats an uncertain mutation, adopts candidate resources, or treats an empty listing as proof.',
+    'The provider call may have completed, but its returned identity could not be validated or retained locally. Network creation calls carry no idempotency token. The instance launch carries one per approved zone and the data-volume creation carries one, each only to guard a single dispatch. Qiln never repeats an uncertain mutation, never tries another zone after a response that might have launched an instance, adopts candidate resources, or treats an empty listing as proof.',
     'Inspect the deployment evidence and the actual AWS resources tagged with the recorded operator and deployment.',
     'Resolve any resource through an explicitly reviewed procedure; a new create is a new deployment, never a retry.',
   ),
@@ -167,7 +168,7 @@ export const awsDeploymentDiagnostics = Object.freeze({
   ),
   AWS_DEPLOYMENT_REMOVAL_REFUSED: entry(
     'Deployment removal was refused locally',
-    'Removal requires confirmed prior termination, retained resource identities, refusal budget remaining (at most three definitely refused removal steps), no earlier step that is unresolved or uncertain, and a fresh observation matching the recorded resources. Qiln cannot remove resources it cannot match to the record, including after partial external deletion or when a volume’s attachment or retention setting differs from the approval. Retained resources are never removed. No deletion call was made.',
+    'Removal requires confirmed prior termination, retained resource identities, refusal budget remaining (at most three removal steps definitely refused by AWS), no earlier step that is unresolved or uncertain, and a fresh observation matching the recorded resources. Qiln cannot remove resources it cannot match to the record, including after partial external deletion or when a volume’s attachment or retention setting differs from the approval. Retained resources are never removed. No deletion call was made.',
     'Inspect the displayed deployment evidence and the actual resources.',
     'Inspect the deployment again to retain a fresh observation before offering removal.',
     'Resolve unexpected changes to the deployment through an explicitly reviewed procedure outside Qiln.',

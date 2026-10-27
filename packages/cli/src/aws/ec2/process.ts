@@ -6,7 +6,6 @@ import { undispatched } from './dispatch'
 import { execute } from './operations'
 import { FAILURES, isRequest, type Code } from './protocol'
 
-
 interface ContextualFailure extends Failure<Code> {
   context?: Issue
 }
@@ -29,7 +28,6 @@ const classify = classifier(
     VolumeLimitExceeded: rejected('AWS_DEPLOYMENT_LIMIT'),
     MaxIOPSLimitExceeded: rejected('AWS_DEPLOYMENT_LIMIT'),
     AddressLimitExceeded: rejected('AWS_DEPLOYMENT_LIMIT'),
-    // A definite refusal of the launch: nothing was started.
     InsufficientInstanceCapacity: rejected('AWS_DEPLOYMENT_CAPACITY'),
     DependencyViolation: rejected('AWS_DEPLOYMENT_BLOCKED'),
     // The reviewed AMI is inspected read-only and then named in the launch, so these are definite refusals.
@@ -46,14 +44,9 @@ serveChild({
   execute,
   classify: (error: unknown): ContextualFailure => {
     const failure = classify(error)
-    // A mutating request that failed before its send() cannot have changed
-    // anything. Failures during or after dispatch, and specific provider
-    // refusals, keep their own classification.
     if (failure.certainty === 'uncertain' && undispatched()) {
       return rejected('AWS_DEPLOYMENT_NOT_ATTEMPTED')
     }
-    // Only the authored validation issue crosses the boundary. Arbitrary
-    // diagnostic facts are never forwarded.
     return error instanceof DiscoveryError ? { ...failure, context: error.issue } : failure
   },
   invalidRequest: 'AWS_DEPLOYMENT_NOT_ATTEMPTED',
