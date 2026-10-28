@@ -119,8 +119,10 @@ function refusal(record: IncusRecord | null, deploymentId: string): InstallerErr
 }
 
 /**
- * A stuck step blocks further preparation, while a returned one is verified by
- * the next fresh inspection.
+ * A stuck step of any action blocks further preparation, while a returned one
+ * is verified by the next fresh inspection. Removal that must stop Incus also
+ * calls this before connecting, because the journal accepts no new work after
+ * an unresolved step.
  */
 export function requireNotStuck(record: IncusRecord | null, deploymentId: string): void {
   if (stuck(record).length > 0) {
@@ -130,8 +132,9 @@ export function requireNotStuck(record: IncusRecord | null, deploymentId: string
 
 /**
  * Removal starts here: only a storage-affecting step with an unknown effect
- * blocks it. A step that exited zero is left for the release check to verify
- * from a fresh inspection, which is settlement and not replay.
+ * blocks this gate. Once Incus was initialized, removal is additionally refused
+ * by `requireNotStuck`. A step that exited zero is left for the release check
+ * to verify from a fresh inspection, which is settlement and not replay.
  */
 export function requireStorageNotStuck(record: IncusRecord | null, deploymentId: string): void {
   if (stuck(record).some(step => affectsStorage(step.action))) {

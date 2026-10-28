@@ -148,8 +148,10 @@ export function requireSettled(record: ZfsRecord | null, deploymentId: string): 
 }
 
 /**
- * A stuck step blocks further preparation, while a returned one is verified by
- * the next fresh inspection.
+ * A stuck step of any action blocks further preparation, while a returned one
+ * is verified by the next fresh inspection. Removal that must release the host
+ * over SSH also calls this before connecting, because the journal accepts no
+ * new work after an unresolved step.
  */
 export function requireNotStuck(record: ZfsRecord | null, deploymentId: string): void {
   if (stuck(record).length > 0) {
@@ -159,8 +161,9 @@ export function requireNotStuck(record: ZfsRecord | null, deploymentId: string):
 
 /**
  * Removal starts here: only a pool-affecting step with an unknown effect blocks
- * it. A returned pool step is verified from a fresh inspection before the pool
- * is judged, which is settlement and not replay.
+ * this gate. Removal that then needs the host released over SSH is additionally
+ * refused by `requireNotStuck`. A returned pool step is verified from a fresh
+ * inspection before the pool is judged, which is settlement and not replay.
  */
 export function requirePoolNotStuck(record: ZfsRecord | null, deploymentId: string): void {
   if (poolStuck(record).length > 0) {
@@ -170,7 +173,7 @@ export function requirePoolNotStuck(record: ZfsRecord | null, deploymentId: stri
 
 /**
  * Only pool-affecting uncertainty blocks disconnect, so an interrupted package
- * or ARC step never makes a deployment unmanageable.
+ * or ARC step never blocks disconnecting a deployment.
  */
 export function requirePoolSettled(record: ZfsRecord | null, deploymentId: string): void {
   if (poolUnsettled(record).length > 0) {

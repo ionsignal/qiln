@@ -11,14 +11,25 @@ import { canSettle, cleanup, deploymentFacts, removable } from '../../../aws/dep
 import { removalPlan, retained, sshReady, unreleased } from '../../../aws/deployment/topology'
 import { evidence as incusEvidence } from '../../../aws/deployment/incus/evidence'
 import { IncusPreparer } from '../../../aws/deployment/incus/prepare'
-import { poolReturned, poolState, requirePoolNotStuck, requirePoolReleased } from '../../../aws/deployment/zfs/facts'
+import {
+  poolReturned,
+  poolState,
+  requireNotStuck as requireZfsNotStuck,
+  requirePoolNotStuck,
+  requirePoolReleased,
+} from '../../../aws/deployment/zfs/facts'
 import { ZfsPreparer } from '../../../aws/deployment/zfs/prepare'
 import { targetOf } from '../../../aws/deployment/zfs/target'
 import { requireAwsHost } from '../../../aws/host'
 import { Prompts, withCancellation } from '../../../terminal/prompts'
 import { approvalLabel as incusApproval, reportPlan as reportIncusPlan } from './prepare/incus'
 import { approvalLabel as zfsApproval, reportPlan as reportZfsPlan } from './prepare/zfs'
-import { requireStorageNotStuck, requireStorageReleased, storageTouched } from '../../../aws/deployment/incus/facts'
+import {
+  requireNotStuck as requireIncusNotStuck,
+  requireStorageNotStuck,
+  requireStorageReleased,
+  storageTouched,
+} from '../../../aws/deployment/incus/facts'
 import * as lineage from '../../../aws/deployment/zfs/lineage'
 import type { Action } from '../../../aws/deployment/graph'
 import type { Dir } from '../../../state/files'
@@ -64,6 +75,19 @@ async function holdsOf(root: Dir, record: Deployment): Promise<Holds> {
     returned: poolReturned(zfs).length > 0,
     incus: storageTouched(await incusEvidence(root, record)),
     pool: pool === 'imported' || pool === 'exported',
+  }
+}
+
+/**
+ * Releasing the host writes to the ZFS journal, and to the Incus journal once
+ * Incus was initialized. Neither journal accepts new work after an unresolved
+ * step, whatever its action, so such a step refuses removal here, before any
+ * connection or AWS call, instead of after the host was reached.
+ */
+async function requireReleaseJournals(root: Dir, record: Deployment, holds: Holds): Promise<void> {
+  requireZfsNotStuck(await lineage.evidence(root, record), record.id)
+  if (holds.incus) {
+    requireIncusNotStuck(await incusEvidence(root, record), record.id)
   }
 }
 
@@ -221,6 +245,7 @@ export async function remove(options: AwsDeploymentOptions, reporter: Reporter):
       }
       const holds = await holdsOf(root, target.record)
       if ((holds.returned || holds.incus || holds.pool) && sshReady(target.record)) {
+        await requireReleaseJournals(root, target.record, holds)
         target = await releaseHost(root, target, prompts, reporter, signal)
       }
       requirePoolReleased(await lineage.evidence(root, target.record), target.record.id)

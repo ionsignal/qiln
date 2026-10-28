@@ -13,11 +13,13 @@ interface StepSpec {
 
 /**
  * The one enumeration of preparation steps. `pool` marks the steps that can
- * leave a pool imported or its outcome unknown, and only those block removal
- * and volume handoff. A step names one embedded script, its deadline, and the
- * wording of every exit code that script uses to refuse before any effect.
- * Arguments are built from the approved plan by `apply.ts`, never supplied by a
- * caller.
+ * leave a pool imported or its outcome unknown, and only those block disconnect
+ * and volume handoff, and they alone block the first removal gate. Removal that
+ * must release the host over SSH additionally needs every other step settled,
+ * because the journal accepts no new work after an unresolved step. A step
+ * names one embedded script, its deadline, and the wording of every exit code
+ * that script uses to refuse before any effect. Arguments are built from the
+ * approved plan by `apply.ts`, never supplied by a caller.
  */
 const STEPS = {
   'install-packages': {
