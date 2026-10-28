@@ -1,37 +1,21 @@
 import { z } from 'zod'
 import { parse, stringify } from 'yaml'
 import { INCUS_SPEC } from './spec'
-import { InstallerError } from '../../diagnostic/error'
 import { sha256Of } from './recipe'
-import defaultProfile from '../../../../../catalog/profiles/qiln-default.yaml?raw'
 
 const settings = z.record(z.string(), z.string())
-const devices = z.record(z.string(), settings)
-
-const profileSchema = z.strictObject({
-  description: z.string(),
-  config: settings,
-  devices,
-})
 
 /**
- * The accepted preseed shape: one ZFS pool, one managed bridge, and the default
- * profile, in Incus API configuration form. Server config is deliberately
- * absent, so the remote API listener stays unset.
+ * The accepted preseed shape: one ZFS pool and one managed bridge, in Incus API
+ * configuration form. Server config and profiles are deliberately absent, so
+ * the remote API listener stays unset and the pristine default profile is
+ * neither populated nor modified. The installation attaches its instance to the
+ * pool and the bridge explicitly.
  */
 const preseedSchema = z.strictObject({
   storage_pools: z.tuple([z.strictObject({ name: z.string(), driver: z.literal('zfs'), config: settings })]),
   networks: z.tuple([
     z.strictObject({ name: z.string(), project: z.literal('default'), type: z.literal('bridge'), config: settings }),
-  ]),
-  profiles: z.tuple([
-    z.strictObject({
-      name: z.literal('default'),
-      project: z.literal('default'),
-      description: z.string(),
-      config: settings,
-      devices,
-    }),
   ]),
 })
 
@@ -47,32 +31,12 @@ export interface Preseed {
 }
 
 /**
- * The catalog profile and the pool name are repository and evidence inputs, so
- * a mismatch is a defect and not an operator-correctable input.
- */
-function defect(): never {
-  throw new InstallerError({
-    code: 'INTERNAL_ERROR',
-  })
-}
-
-/**
- * Builds the preseed once from the catalog default profile and Qiln-owned
- * constants. The result is serialized once, so the approved bytes are the bytes
- * that run. `zfs.export` stays false so that stopping Incus leaves the pool
- * imported for the separate, approved ZFS export. Never sets `source.wipe`.
+ * Builds the preseed once from Qiln-owned constants. The result is serialized
+ * once, so the approved bytes are the bytes that run. `zfs.export` stays false
+ * so that stopping Incus leaves the pool imported for the separate, approved
+ * ZFS export. Never sets `source.wipe`.
  */
 export function preseedOf(pool: string): Preseed {
-  let profile: z.infer<typeof profileSchema>
-  try {
-    const value: unknown = parse(defaultProfile)
-    profile = profileSchema.parse(value)
-  } catch {
-    return defect()
-  }
-  if (profile.devices.root?.pool !== pool) {
-    return defect()
-  }
   const { network } = INCUS_SPEC
   const document = preseedSchema.parse({
     storage_pools: [
@@ -96,15 +60,6 @@ export function preseedOf(pool: string): Preseed {
           'ipv4.firewall': 'true',
           'ipv6.address': 'none',
         },
-      },
-    ],
-    profiles: [
-      {
-        name: 'default',
-        project: 'default',
-        description: profile.description,
-        config: profile.config,
-        devices: profile.devices,
       },
     ],
   })

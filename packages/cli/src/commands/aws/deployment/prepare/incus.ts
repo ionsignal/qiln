@@ -130,7 +130,6 @@ function reportInitialize(reporter: Reporter, plan: InitializePlan): void {
   const document = readPreseed(plan.preseed.yaml)
   const [pool] = document?.storage_pools ?? []
   const [network] = document?.networks ?? []
-  const [profile] = document?.profiles ?? []
   const entries = (settings: Record<string, string>) =>
     Object.entries(settings)
       .map(([key, value]) => `${key}=${value}`)
@@ -143,11 +142,7 @@ function reportInitialize(reporter: Reporter, plan: InitializePlan): void {
     ['Bridge', network === undefined ? 'unreadable' : `${network.name} · ${entries(network.config)}`],
     [
       'Default profile',
-      profile === undefined
-        ? 'unreadable'
-        : Object.entries(profile.devices)
-            .map(([name, device]) => `${name}: ${entries(device)}`)
-            .join(' · ') || 'no devices',
+      'not configured; it stays as found, and the installation attaches its instance to the pool and bridge explicitly',
     ],
     ['Remote API', 'no listener address is configured; administration is the local Unix socket only'],
     ['Created', 'no image, instance, or project is created'],
@@ -221,7 +216,7 @@ export function reportPlan(reporter: Reporter, preview: PlanPreview): void {
       reporter.facts([
         [
           'Incus',
-          `pool ${plan.pool} · GUID ${plan.guid} · the approved packages, local Unix-socket API, pool, bridge, and default profile were observed matching the retained preseed, and the administrator account was observed in ${INCUS_SPEC.access.group}. Instances and images are not part of this check, and SSH forwarding to the socket was not tested.`,
+          `pool ${plan.pool} · GUID ${plan.guid} · the approved packages, local Unix-socket API, pool, and bridge were observed matching the retained preseed, and the administrator account was observed in ${INCUS_SPEC.access.group}. The default profile, instances, and images are not part of this check, and SSH forwarding to the socket was not tested.`,
         ],
       ])
       return

@@ -24,11 +24,11 @@ import type { Reporter } from '../../../../terminal/reporter'
  * each displayed plan. ZFS first: the prerequisites, then one single-disk pool,
  * created on a blank volume or imported by its recorded GUID, together with its
  * packaged monthly scrub timer. Then Incus, each from a fresh inspection: the
- * repository, the exact packages, one initialization from a retained preseed,
- * and finally the administrator account's membership in the Incus
- * administration group. The local writes are the host-key pin, retained before
- * connecting exactly as for verify, and the retained ZFS and Incus preparation
- * evidence.
+ * repository, the exact packages, one initialization from a retained preseed
+ * that registers the pool and the bridge, and finally the administrator
+ * account's membership in the Incus administration group. The local writes are
+ * the host-key pin, retained before connecting exactly as for verify, and the
+ * retained ZFS and Incus preparation evidence.
  */
 export async function prepare(options: AwsDeploymentOptions, reporter: Reporter): Promise<void> {
   requireAwsHost()
@@ -104,7 +104,7 @@ export async function prepare(options: AwsDeploymentOptions, reporter: Reporter)
           applied === 0
             ? 'Nothing was changed.'
             : `${applied} approved ${applied === 1 ? 'step was' : 'steps were'} applied and verified by fresh inspection.`
-        return `Incus baseline prepared: the approved packages, daemon Unix-socket access, the recorded ZFS pool, the bridge, the default profile, and ${username}'s membership in the Incus administration group were verified as observed. Instances and images were not part of this check. ${changed} Group membership applies to new SSH connections only, and SSH forwarding to the Incus socket was not tested. The pool is a single disk with no redundancy or backup. Qiln is not installed; restoration and runtime readiness are not established.`
+        return `Incus baseline prepared: the approved packages, daemon Unix-socket access, the recorded ZFS pool, the bridge, and ${username}'s membership in the Incus administration group were verified as observed. The default profile was left untouched, and instances and images were not part of this check. ${changed} Group membership applies to new SSH connections only, and SSH forwarding to the Incus socket was not tested. The pool is a single disk with no redundancy or backup. Qiln is not installed; restoration and runtime readiness are not established.`
       })
     })
   })

@@ -8,20 +8,6 @@ function covers(actual: Record<string, string>, expected: Record<string, string>
   return Object.entries(expected).every(([key, value]) => actual[key] === value)
 }
 
-function same(actual: Record<string, string>, expected: Record<string, string>): boolean {
-  return covers(actual, expected) && Object.keys(actual).length === Object.keys(expected).length
-}
-
-function sameDevices(actual: Record<string, Record<string, string>>, expected: Record<string, Record<string, string>>) {
-  return (
-    Object.keys(actual).length === Object.keys(expected).length &&
-    Object.entries(expected).every(([name, device]) => {
-      const found = actual[name]
-      return found !== undefined && same(found, device)
-    })
-  )
-}
-
 /**
  * Whether a candidate's source row names the approved repository.
  */
@@ -87,8 +73,9 @@ export function daemonReasons(observation: Observation, api: Api): string[] {
  * the verification of `initialize`, so they cannot disagree. Instances and
  * images are deliberately not part of it: workloads are expected after
  * initialization, and only the first initialization requires an empty
- * inventory. Socket access is deliberately not part of it either: it is a later
- * stage with its own plan and verification.
+ * inventory. The default profile is not part of it either, because preparation
+ * neither populates nor modifies it. Socket access is deliberately not part of
+ * it: it is a later stage with its own plan and verification.
  */
 export function baselineDrift(observation: Observation, target: IncusTarget, document: PreseedDocument): string[] {
   const { api } = observation
@@ -103,7 +90,6 @@ export function baselineDrift(observation: Observation, target: IncusTarget, doc
   }
   const [pool] = document.storage_pools
   const [network] = document.networks
-  const [profile] = document.profiles
   check(
     REQUIRED_PACKAGES.every(name => observation.packages.some(item => item.name === name)),
     'The approved Incus packages are not all installed.',
@@ -128,15 +114,6 @@ export function baselineDrift(observation: Observation, target: IncusTarget, doc
         covers(found.config, network.config),
     ),
     'The managed bridge does not match the approved configuration.',
-  )
-  check(
-    api.profiles.some(
-      found =>
-        found.name === profile.name &&
-        same(found.config, profile.config) &&
-        sameDevices(found.devices, profile.devices),
-    ),
-    'The default profile does not match the approved configuration.',
   )
   check(
     api.projects.length === 1 && api.projects.every(name => name === 'default'),
