@@ -2,7 +2,7 @@ import { stripVTControlCharacters, styleText } from 'node:util'
 import { catalog } from '../diagnostic/catalog'
 import { InstallerError, type DiagnosticFact } from '../diagnostic/error'
 
-const LABEL_WIDTH = 18
+const LABEL_WIDTH = 20
 const BADGE_WIDTH = 13
 const MIN_FACT_VALUE_WIDTH = 24
 const MAX_VALUE_LENGTH = 2_000
