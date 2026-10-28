@@ -1,8 +1,10 @@
 # Cleanly exports the recorded pool, without force. It refuses before any effect
 # unless the pool is imported with the approved GUID, nothing is mounted, and no
-# scrub or resilver is running. Exit codes 20 to 99 mean nothing was changed. A
-# failed disable or export is reported as 100, because it may have changed the
-# host.
+# scrub or resilver is running. GUIDs are decimal strings that awk could
+# otherwise compare as doubles, so every identity comparison concatenates an
+# empty string to force an exact text comparison. Exit codes 20 to 99 mean
+# nothing was changed. A failed disable or export is reported as 100, because
+# it may have changed the host.
 LC_ALL=C
 export LC_ALL
 PATH=/usr/sbin:/usr/bin:/sbin:/bin
@@ -17,8 +19,8 @@ case $guid in '' | *[!0-9]*) exit 20 ;; esac
 
 test -d /sys/module/zfs && command -v zpool >/dev/null || exit 21
 imported=$(zpool list -H -o name,guid) || exit 21
-printf '%s\n' "$imported" | awk -v pool="$pool" '$1 == pool { found = 1 } END { exit !found }' || exit 22
-printf '%s\n' "$imported" | awk -v pool="$pool" -v guid="$guid" '$1 == pool && $2 == guid { found = 1 } END { exit !found }' || exit 23
+printf '%s\n' "$imported" | awk -v pool="$pool" '($1 "") == (pool "") { found = 1 } END { exit !found }' || exit 22
+printf '%s\n' "$imported" | awk -v pool="$pool" -v guid="$guid" '($1 "") == (pool "") && ($2 "") == (guid "") { found = 1 } END { exit !found }' || exit 23
 
 mounted=$(zfs list -H -r -o mounted "$pool") || exit 24
 if printf '%s\n' "$mounted" | grep -Fxq yes; then

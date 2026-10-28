@@ -6,8 +6,10 @@
 # no TCP listener, no host route in the bridge subnet, and the recorded ZFS pool
 # is still imported with the approved GUID and no datasets. These repeat the
 # planning conditions just before the effect and cannot exclude a concurrent
-# administrator. Any Incus failure is reported as 100 so it can never read as a
-# refusal. Exit codes 20 to 99 mean nothing was changed.
+# administrator. The pool GUID is a decimal string that awk could otherwise
+# compare as a double, so the identity comparison concatenates an empty string
+# to force an exact text comparison. Any Incus failure is reported as 100 so it
+# can never read as a refusal. Exit codes 20 to 99 mean nothing was changed.
 LC_ALL=C
 export LC_ALL
 PATH=/usr/sbin:/usr/bin:/sbin:/bin:/opt/incus/bin
@@ -78,7 +80,7 @@ done
 
 # Checked last, so nothing can export the pool between this check and the effect.
 imported=$(zpool list -H -o name,guid) || exit 28
-printf '%s\n' "$imported" | awk -v pool="$pool" -v guid="$guid" '$1 == pool && $2 == guid { found = 1 } END { exit !found }' || exit 28
+printf '%s\n' "$imported" | awk -v pool="$pool" -v guid="$guid" '($1 "") == (pool "") && ($2 "") == (guid "") { found = 1 } END { exit !found }' || exit 28
 datasets=$(zfs list -H -r -o name "$pool") || exit 28
 test "$datasets" = "$pool" || exit 35
 
