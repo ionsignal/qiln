@@ -170,10 +170,13 @@ timer_info() {
   return 0
 }
 
-# The status of systemctl is the status of the section, so a failed listing is
-# an inspection failure and not an empty result.
+# A filtered systemctl listing can exit nonzero when no unit matches, which is
+# expected before the ZFS prerequisite packages are installed. Enumerate the
+# full inventory first and require success, then filter it, so missing ZFS units
+# produce an empty successful section without hiding a failed enumeration.
 unit_info() {
-  systemctl list-unit-files --no-legend --no-pager 'zfs*'
+  out=$(systemctl list-unit-files --no-legend --no-pager) || return 1
+  printf '%s\n' "$out" | awk '$1 ~ /^zfs/ { print }'
 }
 
 section system system_info
