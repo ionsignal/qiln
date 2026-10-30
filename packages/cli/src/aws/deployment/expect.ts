@@ -1,6 +1,7 @@
 import { dataVolumeId, resourceId, resources, stepOf } from './topology'
 import type { Action } from './graph'
-import type { Deployment, Implicit, Ingress, Observation, ObservedResource } from './types'
+import type { Ingress } from './layout'
+import type { Deployment, Implicit, Observation, ObservedResource } from './types'
 
 export interface Association {
   subnetId: string

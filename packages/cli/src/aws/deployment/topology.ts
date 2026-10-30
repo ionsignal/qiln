@@ -12,7 +12,8 @@ import {
   type Shape,
 } from './graph'
 import { declined, stateOf } from './step'
-import type { Approval, Deployment, Ingress, Placement, Step, Tag, Zone } from './types'
+import type { Ingress, Placement, Tag, Zone } from './layout'
+import type { Approval, Deployment, Step } from './types'
 
 export interface Planned {
   action: Action

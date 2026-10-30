@@ -1,7 +1,7 @@
 import type { ImagePin } from '../../ami'
 import { AWS_SPEC } from '../../spec'
+import type { Placement } from '../layout'
 import { allocate, ingressRules } from '../topology'
-import type { Placement } from '../types'
 import { bootstrapOf } from './bootstrap'
 import type { HostPlan, RootSource } from './types'
 

@@ -1,7 +1,8 @@
 import { phase } from './facts'
+import type { Placement, Tag } from './layout'
 import { dataTags, dataVolumeId, hostSlotOf } from './topology'
 import type { DataVolume } from './host/types'
-import type { Deployment, Placement, Tag } from './types'
+import type { Deployment } from './types'
 
 /**
  * What a later deployment would inherit from a previous one: the retained data
