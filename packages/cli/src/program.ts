@@ -128,7 +128,7 @@ export function createProgram(handlers: ProgramHandlers, output: ProgramOutput):
     .description(
       'Manage the Qiln development installation, AWS operator connections, and AWS deployments.',
     )
-    .version('0.2.0', '-v, --version', 'Display the Qiln version.')
+    .version('0.1.2', '-v, --version', 'Display the Qiln version.')
     .helpOption('-h, --help', 'Display help.')
     .helpCommand(false)
     .allowExcessArguments(false)
