@@ -10,10 +10,15 @@ import type { HostProposal, ImageDevice, ImageEvidence, InstanceTypeEvidence } f
 
 const { compute } = AWS_SPEC
 
+/**
+ * `retained` is the package architecture of the Incus installation
+ * that a reused volume preserves, or null when none is recorded.
+ */
 export interface PreviewTarget {
   alias: string
   identity: AwsIdentity
   previous: string | null
+  retained: string | null
 }
 
 function list(values: readonly string[]): string {
@@ -167,8 +172,9 @@ function instanceStorageFact(proposal: HostProposal): DiagnosticFact {
 /**
  * A reused volume is named by identity and keeps its original tags. The
  * previous deployment is shown by its immutable ID, never only by its alias.
+ * The retained Incus architecture is judged against the image in the findings.
  */
-function dataVolumeFacts(plan: HostPlan, reuse: Reuse | null): DiagnosticFact[] {
+function dataVolumeFacts(plan: HostPlan, reuse: Reuse | null, retained: string | null): DiagnosticFact[] {
   const { data } = plan
   if (reuse === null) {
     return [
@@ -188,20 +194,26 @@ function dataVolumeFacts(plan: HostPlan, reuse: Reuse | null): DiagnosticFact[] 
       `${reuse.from} · removal verified, and a fresh AWS read found the volume available and unattached`,
     ],
     [
+      'Retained Incus',
+      retained === null
+        ? 'no Incus installation is recorded on this volume; a later prepare initializes a fresh one'
+        : `${retained} installation preserved on this volume · the reviewed image must have the same architecture, which is judged in the findings`,
+    ],
+    [
       'Volume tags',
       'The original tags are kept, so the volume stays tagged for the previous deployment. Nothing is retagged, copied, resized, or replaced, and its contents were not inspected.',
     ],
   ]
 }
 
-function storageFacts(plan: HostPlan, proposal: HostProposal): DiagnosticFact[] {
+function storageFacts(plan: HostPlan, proposal: HostProposal, target: PreviewTarget): DiagnosticFact[] {
   const { root } = plan
   return [
     [
       'Root volume',
       `${volumeSummary(root)} · ${root.deviceName} from snapshot ${root.snapshotId} · ${termination(root.deleteOnTermination)} (set at launch)`,
     ],
-    ...dataVolumeFacts(plan, proposal.reuse),
+    ...dataVolumeFacts(plan, proposal.reuse, target.retained),
     instanceStorageFact(proposal),
     ['Encryption', 'No KMS authority or encryption requirement; account defaults and the image snapshot settings apply.'],
     [
@@ -316,7 +328,7 @@ export function reportProposal(reporter: Reporter, proposal: HostProposal, targe
     reporter.section('Proposed placement and network (intended)')
     reporter.facts(networkFacts(plan, proposal, target))
     reporter.section('Proposed storage and access (intended)')
-    reporter.facts([...storageFacts(plan, proposal), ...accessFacts(plan)])
+    reporter.facts([...storageFacts(plan, proposal, target), ...accessFacts(plan)])
     reporter.section('Intended removal (separate approval)')
     reporter.facts(removalFacts(plan))
   }

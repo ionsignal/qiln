@@ -1,8 +1,10 @@
 import { z } from 'zod'
 import { ZFS_SPEC } from './spec'
 import { SCRIPTS } from './recipe'
+import { datasetsOf } from './dataset'
 import { blockDevices, inspectionFailure } from './parse'
 import { transactionOf } from '../apt'
+import { mountOf, STATE_MOUNTPOINT } from '../mount'
 import { outputOf, tagged, type Section } from '../output'
 import { shellCommand } from '../shell'
 import { observationSchema, type Observation } from './types'
@@ -204,6 +206,7 @@ function detailOf(status: Section, properties: Section, name: string) {
   const dataset: Record<string, string> = {}
   const ashifts: number[] = []
   const mounted: string[] = []
+  const entries: string[] = []
   for (const [tag, value] of tagged(properties.lines)) {
     if (tag === 'ashift') {
       ashifts.push(ashiftOf(value))
@@ -213,6 +216,10 @@ function detailOf(status: Section, properties: Section, name: string) {
       mounted.push(value)
       continue
     }
+    if (tag === 'properties') {
+      entries.push(value)
+      continue
+    }
     const separator = value.indexOf(' ')
     if ((tag !== 'pool' && tag !== 'dataset') || separator < 1) {
       throw inspectionFailure('The pool inspection reported an unrecognized property line.')
@@ -220,7 +227,7 @@ function detailOf(status: Section, properties: Section, name: string) {
     const properties = tag === 'pool' ? pool : dataset
     properties[value.slice(0, separator)] = value.slice(separator + 1)
   }
-  return { data, auxiliary, ashifts, mounted, pool, dataset }
+  return { data, auxiliary, ashifts, mounted, topLevel: datasetsOf(entries, inspectionFailure), pool, dataset }
 }
 
 function timerOf(section: Section) {
@@ -256,7 +263,7 @@ export async function inspectHost(
   const extras = extraPackages.filter(name => !ZFS_SPEC.packages.some(direct => direct === name))
   const command = shellCommand(
     SCRIPTS.inspect,
-    [poolName, ZFS_SPEC.arc.file, ...ZFS_SPEC.packages, '--', ...extras],
+    [poolName, ZFS_SPEC.arc.file, STATE_MOUNTPOINT, ...ZFS_SPEC.packages, '--', ...extras],
     { privileged: true },
   )
   const result = await remote.exec(command, ZFS_SPEC.inspect)
@@ -280,6 +287,7 @@ export async function inspectHost(
       detail: imported ? detailOf(succeeded(found, 'poolstatus'), succeeded(found, 'poolprops'), poolName) : null,
     },
     timer: timerOf(succeeded(found, 'timer')),
+    stateMount: mountOf(succeeded(found, 'mount'), inspectionFailure),
     units: unitsOf(succeeded(found, 'units')),
   }
   const parsed = observationSchema.safeParse(draft)

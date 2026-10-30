@@ -9,12 +9,13 @@ DEBIAN_FRONTEND=noninteractive
 export DEBIAN_FRONTEND
 exec 2>/dev/null
 
-# Arguments: the pool name to report on, the owned ARC file, the direct
-# packages, `--`, then extra packages whose installed state is reported but
-# never simulated.
+# Arguments: the pool name to report on, the owned ARC file, the state
+# mountpoint, the direct packages, `--`, then extra packages whose installed
+# state is reported but never simulated.
 POOL=$1
 ARC_FILE=$2
-shift 2
+STATE=$3
+shift 3
 PACKAGES=
 while test $# -gt 0 && test "$1" != --; do
   PACKAGES="$PACKAGES $1"
@@ -147,6 +148,10 @@ status_info() {
   zpool status -j -L -P -p "$POOL"
 }
 
+# The `properties` lines describe the pool dataset and its direct children only,
+# as `properties <dataset> <property> <source> <value>`. The source is reduced
+# to its first word, because `inherited from X` contains spaces. The value comes
+# last, so it may.
 property_info() {
   pool_imported || return 0
   out=$(zpool get -H -p -o property,value autotrim,cachefile,health "$POOL") || return 1
@@ -157,6 +162,8 @@ property_info() {
   printf '%s\n' "$out" | awk -F'\t' '$2 == "ashift" { print "ashift " $3 }'
   out=$(zfs list -H -r -o name,mounted "$POOL") || return 1
   printf '%s\n' "$out" | awk -F'\t' '$2 == "yes" { print "mounted " $1 }'
+  out=$(zfs get -H -p -d 1 -t filesystem,volume -o name,property,value,source guid,type,mountpoint,canmount,mounted "$POOL") || return 1
+  printf '%s\n' "$out" | awk -F'\t' 'NF == 4 { source = $4; sub(/ .*/, "", source); print "properties " $1 " " $2 " " source " " $3 }'
 }
 
 # Enablement and activation are reported separately, because each command exits
@@ -167,6 +174,16 @@ timer_info() {
   active=$(systemctl is-active "zfs-scrub-monthly@$POOL.timer")
   printf 'enablement %s\n' "${enabled:-unknown}"
   printf 'activation %s\n' "${active:-unknown}"
+  return 0
+}
+
+# The kernel mount table entry at the state directory. --mountpoint matches only
+# an exact mountpoint, because --target could return the containing root
+# filesystem. findmnt exits 1 both when nothing is mounted there and on failure,
+# so its status is ignored and an empty section is only a missing observation.
+mount_info() {
+  command -v findmnt >/dev/null || return 1
+  findmnt --kernel --json --mountpoint "$STATE" --output SOURCE,FSTYPE,TARGET,FSROOT,OPTIONS
   return 0
 }
 
@@ -190,5 +207,6 @@ section pools pool_info
 section poolstatus status_info
 section poolprops property_info
 section timer timer_info
+section mount mount_info
 section units unit_info
 exit 0

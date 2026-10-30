@@ -21,6 +21,10 @@ import {
 import { ZfsPreparer } from '../../../aws/deployment/zfs/prepare'
 import { targetOf } from '../../../aws/deployment/zfs/target'
 import { requireAwsHost } from '../../../aws/host'
+import { awsInstallationName } from '../../../installation/target/aws/host'
+import { unsettled as installationUnsettled } from '../../../installation/journal/facts'
+import { listInstallations } from '../../../installation/state'
+import { stateOf } from '../../../journal/step'
 import { Prompts, withCancellation } from '../../../terminal/prompts'
 import { approvalLabel as incusApproval, reportPlan as reportIncusPlan } from './prepare/incus'
 import { approvalLabel as zfsApproval, reportPlan as reportZfsPlan } from './prepare/zfs'
@@ -30,6 +34,7 @@ import {
   requireStorageReleased,
   storageTouched,
 } from '../../../aws/deployment/incus/facts'
+import * as configureJournal from '../../../installation/journal/records'
 import * as lineage from '../../../aws/deployment/zfs/lineage'
 import type { Action } from '../../../aws/deployment/graph'
 import type { Dir } from '../../../state/files'
@@ -79,15 +84,43 @@ async function holdsOf(root: Dir, record: Deployment): Promise<Holds> {
 }
 
 /**
+ * Stopping the workloads of an installation that is still being configured
+ * could interleave with its Incus changes, so an unsettled configuration step
+ * refuses the release. The journal is read without a lock, like status does.
+ */
+async function requireInstallationSettled(record: Deployment): Promise<void> {
+  const retry = `qiln installation status --id ${record.id}`
+  const name = await awsInstallationName({ kind: 'id', value: record.id })
+  const entry = (await listInstallations(retry)).find(item => item.name === name)
+  if (entry === undefined) {
+    return
+  }
+  const open = installationUnsettled(await configureJournal.read(entry.directory, entry.record, retry))
+  if (open.length > 0) {
+    throw new InstallerError({
+      code: 'INSTALLATION_UNRESOLVED',
+      facts: [
+        ['Installation', name],
+        ['Unresolved steps', open.map(step => `${step.action} (${stateOf(step)})`).join(', ')],
+      ],
+      retry,
+    })
+  }
+}
+
+/**
  * Releasing the host writes to the ZFS journal, and to the Incus journal once
  * Incus was initialized. Neither journal accepts new work after an unresolved
  * step, whatever its action, so such a step refuses removal here, before any
- * connection or AWS call, instead of after the host was reached.
+ * connection or AWS call, instead of after the host was reached. The same holds
+ * for an unsettled installation configuration, which the release must not
+ * interleave with.
  */
 async function requireReleaseJournals(root: Dir, record: Deployment, holds: Holds): Promise<void> {
   requireZfsNotStuck(await lineage.evidence(root, record), record.id)
   if (holds.incus) {
     requireIncusNotStuck(await incusEvidence(root, record), record.id)
+    await requireInstallationSettled(record)
   }
 }
 
@@ -148,13 +181,13 @@ function reportTarget(reporter: Reporter, record: Deployment, observation: Obser
  * import the recorded pool without force. A pool step that returned but was
  * never verified is settled first from a fresh inspection, which repeats
  * nothing and needs no approval. Then Incus is checked, under its own default-no
- * approval when it must be stopped, because a running daemon holds the pool;
- * Incus already observed inactive is only recorded. Then a pool still imported
- * is exported under its own approval, and one observed absent only corroborates
- * the retained export evidence. Declining leaves the host untouched, and an
- * unreachable host refuses removal. Resolving access may retain a host-key pin,
- * so the returned target carries the access record, which includes it, and the
- * caller never holds a stale record.
+ * approval when it must be released, because a running daemon holds the pool;
+ * Incus with a verified release already retained and every unit inactive is only
+ * observed. Then a pool still imported is exported under its own approval, and
+ * one observed absent only corroborates the retained export evidence. Declining
+ * leaves the host untouched, and an unreachable host refuses removal. Resolving
+ * access may retain a host-key pin, so the returned target carries the access
+ * record, which includes it, and the caller never holds a stale record.
  */
 async function releaseHost(
   root: Dir,

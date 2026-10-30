@@ -31,29 +31,35 @@ export function blank(deployment: Deployment): ZfsRecord | null {
 /**
  * Pool evidence exists if and only if a create-pool or import-pool step was
  * verified. It names the pool of that step's approved plan, and for an import
- * the GUID of that plan. It sits on the recorded data volume, and was observed
- * after the step completed and no later than its verification.
+ * the GUID and datasets of that plan. It sits on the recorded data volume, and
+ * was observed after the step completed and no later than its verification. The
+ * datasets of a created pool are recorded once a later dataset step was
+ * verified, and not before.
  */
 function isPoolConsistent({ pool, steps, authorizations, binding }: ZfsRecord): boolean {
-  const established = steps
-    .flatMap(step =>
-      step.completion !== null && step.verifiedAt !== null && establishesPool(step.action)
-        ? [{ authorization: step.authorization, completedAt: step.completion.completedAt, verifiedAt: step.verifiedAt }]
-        : [],
-    )
-    .at(-1)
-  if (established === undefined) {
+  const index = steps.findLastIndex(
+    step => step.completion !== null && step.verifiedAt !== null && establishesPool(step.action),
+  )
+  if (index < 0) {
     return pool === null
   }
+  const established = steps[index]
   const plan = authorizations.find(({ id }) => id === established.authorization)?.plan
+  const completedAt = established.completion?.completedAt
+  const verifiedAt = established.verifiedAt
+  if (pool === null || plan === undefined || completedAt === undefined || verifiedAt === null) {
+    return false
+  }
+  const datasetsCreated = steps
+    .slice(index + 1)
+    .some(step => step.action === 'create-datasets' && step.verifiedAt !== null)
   return (
-    pool !== null &&
     pool.volumeId === binding.dataVolumeId &&
-    pool.observedAt >= established.completedAt &&
-    pool.observedAt <= established.verifiedAt &&
-    plan !== undefined &&
+    pool.observedAt >= completedAt &&
+    pool.observedAt <= verifiedAt &&
     poolNameOf(plan) === pool.name &&
-    (plan.kind !== 'import' || plan.guid === pool.guid)
+    (plan.kind !== 'import' || plan.guid === pool.guid) &&
+    (plan.kind === 'import' ? sameJson(pool.datasets, plan.datasets) : (pool.datasets !== null) === datasetsCreated)
   )
 }
 
@@ -109,13 +115,13 @@ export async function read(directory: Dir, deployment: Deployment): Promise<ZfsR
 
 /**
  * Whether this write is the one that verifies the last step, and that step is
- * the one that establishes pool evidence.
+ * the one that establishes pool evidence or records its datasets.
  */
 function verifiesPool(before: ZfsRecord, after: ZfsRecord): boolean {
   const last = after.steps.at(-1)
   return (
     last !== undefined &&
-    establishesPool(last.action) &&
+    (establishesPool(last.action) || last.action === 'create-datasets') &&
     last.verifiedAt !== null &&
     before.steps.length === after.steps.length &&
     before.steps.at(-1)?.verifiedAt === null
@@ -123,9 +129,10 @@ function verifiesPool(before: ZfsRecord, after: ZfsRecord): boolean {
 }
 
 /**
- * Pool identity (name, GUID, volume) is immutable once recorded. The pool
- * evidence changes only in the write that verifies the create-pool or
- * import-pool step it describes, and its observation time only advances.
+ * Pool identity (name, GUID, volume) is immutable once recorded, and so are the
+ * dataset GUIDs once they were recorded. The pool evidence changes only in the
+ * write that verifies the create-pool, import-pool, or create-datasets step it
+ * describes, and its observation time only advances.
  */
 function requirePool(before: ZfsRecord, after: ZfsRecord): void {
   const { pool: previous } = before
@@ -136,7 +143,8 @@ function requirePool(before: ZfsRecord, after: ZfsRecord): void {
       previous.name !== pool.name ||
       previous.guid !== pool.guid ||
       previous.volumeId !== pool.volumeId ||
-      pool.observedAt < previous.observedAt)
+      pool.observedAt < previous.observedAt ||
+      (previous.datasets !== null && !sameJson(previous.datasets, pool.datasets)))
   ) {
     return invalid()
   }

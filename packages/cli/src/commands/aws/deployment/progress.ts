@@ -39,18 +39,25 @@ const ZFS_LABELS: Record<StepAction, string> = {
   'load-module': 'Load the ZFS kernel module',
   'apply-arc': 'Apply the running ZFS ARC limit',
   'create-pool': 'Create the ZFS pool',
+  'create-datasets': 'Create the state and storage ZFS datasets',
   'import-pool': 'Import the ZFS pool',
+  'mount-state': 'Mount the Incus state dataset',
+  'unmount-state': 'Unmount the Incus state dataset',
   'export-pool': 'Export the ZFS pool',
   'enable-scrub': 'Enable the monthly ZFS scrub timer',
 }
 
 const INCUS_LABELS: Record<IncusAction, string> = {
+  close: 'Mask the Incus units so no package can start them',
+  guard: 'Install the storage-identity startup guard',
   'add-repository': 'Add the Zabbly signing key and APT source',
   'refresh-lists': 'Refresh APT package lists',
   'install-packages': 'Install the approved Incus packages',
+  open: 'Unmask and start the Incus daemon units',
   initialize: 'Initialize Incus from the approved preseed',
   'grant-access': 'Add the administrator account to the Incus administration group',
-  release: 'Stop Incus and release its sockets',
+  'stop-workloads': 'Set the Incus instances not to autostart and stop them gracefully',
+  release: 'Mask the Incus units, then stop Incus and release its sockets',
 }
 
 function title(task: ProgressTask): string {

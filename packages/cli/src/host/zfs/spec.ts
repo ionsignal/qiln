@@ -1,7 +1,7 @@
 const MIB = 1_048_576
 
 interface RunSpec {
-  script: 'packages' | 'arc' | 'module' | 'create' | 'import' | 'scrub' | 'export'
+  script: 'packages' | 'arc' | 'module' | 'create' | 'datasets' | 'import' | 'state' | 'scrub' | 'export'
   timeoutMs: number
   refusals: Readonly<Record<number, string>>
 }
@@ -13,13 +13,14 @@ interface StepSpec {
 
 /**
  * The one enumeration of preparation steps. `pool` marks the steps that can
- * leave a pool imported or its outcome unknown, and only those block disconnect
- * and volume handoff, and they alone block the first removal gate. Removal that
- * must release the host over SSH additionally needs every other step settled,
- * because the journal accepts no new work after an unresolved step. A step
- * names one embedded script, its deadline, and the wording of every exit code
- * that script uses to refuse before any effect. Arguments are built from the
- * approved plan by `apply.ts`, never supplied by a caller.
+ * leave a pool imported, its datasets or state mount changed, or its outcome
+ * unknown, and only those block disconnect and volume handoff, and they alone
+ * block the first removal gate. Removal that must release the host over SSH
+ * additionally needs every other step settled, because the journal accepts no
+ * new work after an unresolved step. A step names one embedded script, its
+ * deadline, and the wording of every exit code that script uses to refuse
+ * before any effect. Arguments are built from the approved plan by `apply.ts`,
+ * never supplied by a caller.
  */
 const STEPS = {
   'install-packages': {
@@ -84,6 +85,19 @@ const STEPS = {
       },
     },
   },
+  'create-datasets': {
+    pool: true,
+    run: {
+      script: 'datasets',
+      timeoutMs: 60_000,
+      refusals: {
+        20: 'The pool name, a dataset name, or the state mountpoint was not given or is malformed.',
+        21: 'The ZFS module or tools are not available.',
+        22: 'The pool is not imported.',
+        23: 'The pool already holds datasets, or its datasets could not be listed.',
+      },
+    },
+  },
   'import-pool': {
     pool: true,
     run: {
@@ -97,6 +111,37 @@ const STEPS = {
         24: 'A pool with the approved name or GUID is already imported under a different identity.',
         25: 'The target device does not carry the approved EBS volume ID.',
         26: 'The target device no longer has exactly the approved ZFS member partition.',
+      },
+    },
+  },
+  'mount-state': {
+    pool: true,
+    run: {
+      script: 'state',
+      timeoutMs: 60_000,
+      refusals: {
+        20: 'The pool name, a GUID, the dataset name, or the mountpoint was not given or is malformed.',
+        21: 'The ZFS module, the ZFS tools, or findmnt is not available.',
+        22: 'The recorded pool is not imported with the approved GUID.',
+        23: 'The state dataset is missing, is not a filesystem, or does not have the approved GUID.',
+        24: 'The state dataset does not have the approved mountpoint and canmount=noauto set locally.',
+        25: 'Something is already mounted at the state directory.',
+      },
+    },
+  },
+  'unmount-state': {
+    pool: true,
+    run: {
+      script: 'state',
+      timeoutMs: 120_000,
+      refusals: {
+        20: 'The pool name, a GUID, the dataset name, or the mountpoint was not given or is malformed.',
+        21: 'The ZFS module, the ZFS tools, or findmnt is not available.',
+        22: 'The recorded pool is not imported with the approved GUID.',
+        23: 'The state dataset is missing, is not a filesystem, or does not have the approved GUID.',
+        24: 'The state dataset does not have the approved mountpoint and canmount=noauto set locally.',
+        26: 'The state dataset is not mounted.',
+        27: 'Another filesystem is mounted beneath the state directory.',
       },
     },
   },
@@ -134,6 +179,10 @@ const STEPS = {
  * selects how a pool is configured, never which resource is touched.
  * `cachefile=none` keeps pool import explicit: no unattended import mechanism
  * is introduced here, and boot persistence belongs to the later host slice.
+ * `layout` names the two datasets of the pool: `state` is mounted at the Incus
+ * state directory only by an explicit step, and `incus` is reserved for the
+ * Incus storage driver. Its revision identifies this arrangement, so another
+ * arrangement is never mistaken for it.
  * `maximumInstalls` bounds the resolved package transaction that an approval
  * would freeze, so an unexpectedly large dependency closure is refused.
  * Script exit codes from `refusalCodes.first` to `refusalCodes.last` are
@@ -157,6 +206,11 @@ export const ZFS_SPEC = Object.freeze({
     mountpoint: 'none',
     acltype: 'posixacl',
     xattr: 'sa',
+  },
+  layout: {
+    revision: 1,
+    state: 'server-state',
+    incus: 'incus',
   },
   arc: {
     file: '/etc/modprobe.d/qiln-zfs.conf',
@@ -187,6 +241,13 @@ export function isPoolAction(action: StepAction): boolean {
 
 export function scrubTimerOf(pool: string): string {
   return `zfs-scrub-monthly@${pool}.timer`
+}
+
+/**
+ * The full dataset names of one pool's layout.
+ */
+export function datasetNamesOf(pool: string): { state: string; incus: string } {
+  return { state: `${pool}/${ZFS_SPEC.layout.state}`, incus: `${pool}/${ZFS_SPEC.layout.incus}` }
 }
 
 export function arcLine(bytes: number): string {

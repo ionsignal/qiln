@@ -1,7 +1,12 @@
 import { InstallerError, type DiagnosticFact, type InstallerErrorCode } from '../../../diagnostic/error'
-import { isPoolAction } from '../../../host/zfs/spec'
-import * as journal from '../../../journal/step'
+import { isPoolAction, type StepAction } from '../../../host/zfs/spec'
 import { establishesPool, type ZfsRecord, type ZfsStep } from './types'
+import * as journal from '../../../journal/step'
+
+/**
+ * Steps that hand the pool or its state mount back to the host.
+ */
+const RELEASES: readonly StepAction[] = ['unmount-state', 'export-pool']
 
 /**
  * The pool's last recorded state, not a fresh observation. `unknown` means a
@@ -84,22 +89,46 @@ export function poolState(record: ZfsRecord | null): PoolState {
   return last.action === 'export-pool' ? 'exported' : 'imported'
 }
 
+function verified(step: ZfsStep): boolean {
+  return journal.stateOf(step) === 'verified'
+}
+
 /**
- * The pool was last created or imported with a verified step, its scrub timer
- * was verified after that, and no export has been attempted since. Like the
- * pool state, this is the last recorded outcome and not a fresh observation.
+ * The steps after the last verified create or import, with that step.
  */
-export function prepared(record: ZfsRecord | null): boolean {
+function sinceEstablished(record: ZfsRecord | null): { established: ZfsStep; later: ZfsStep[] } | null {
   const steps = record?.steps ?? []
-  const established = steps.findLastIndex(step => establishesPool(step.action) && journal.stateOf(step) === 'verified')
-  if (established < 0) {
+  const index = steps.findLastIndex(step => establishesPool(step.action) && verified(step))
+  return index < 0 ? null : { established: steps[index], later: steps.slice(index + 1) }
+}
+
+/**
+ * The pool was last created or imported with a verified step, its datasets
+ * were verified when it was created, its scrub timer was verified after that,
+ * and no unmount or export has been attempted since. Like the pool state, this
+ * is the last recorded outcome and not a fresh observation. The state dataset
+ * may still be unmounted.
+ */
+export function staged(record: ZfsRecord | null): boolean {
+  const since = sinceEstablished(record)
+  if (since === null) {
     return false
   }
-  const later = steps.slice(established + 1)
+  const required: StepAction[] =
+    since.established.action === 'create-pool' ? ['create-datasets', 'enable-scrub'] : ['enable-scrub']
   return (
-    later.some(step => step.action === 'enable-scrub' && journal.stateOf(step) === 'verified') &&
-    !later.some(step => step.action === 'export-pool' && step.refusedAt === null)
+    required.every(action => since.later.some(step => step.action === action && verified(step))) &&
+    !since.later.some(step => RELEASES.includes(step.action) && step.refusedAt === null)
   )
+}
+
+/**
+ * The pool is staged and the state dataset was mounted with a verified step
+ * after it was established.
+ */
+export function prepared(record: ZfsRecord | null): boolean {
+  const since = sinceEstablished(record)
+  return staged(record) && since !== null && since.later.some(step => step.action === 'mount-state' && verified(step))
 }
 
 function poolDisclosure(record: ZfsRecord | null): string {

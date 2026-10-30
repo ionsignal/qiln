@@ -27,6 +27,7 @@ import { observationSummary, reportDeployment } from './report'
 import { evidence as incusEvidence } from '../../../aws/deployment/incus/evidence'
 import * as deployments from '../../../aws/deployment/records'
 import * as connections from '../../../aws/connection/records'
+import * as incusLineage from '../../../aws/deployment/incus/lineage'
 import * as lineage from '../../../aws/deployment/zfs/lineage'
 import type { Dir } from '../../../state/files'
 import type { Deployment } from '../../../aws/deployment/types'
@@ -86,10 +87,12 @@ async function requireVolumeAvailable(
  * nothing is saved, reserved, generated, or created until the single approval.
  * When the alias takes over a removed deployment that retained its data volume,
  * the operator explicitly chooses between a new volume and reusing that one;
- * the choice is part of the same approval. After it, the immutable approval is
- * retained and the fenced creation steps and the AWS health read run under the
- * operation lock. Success establishes AWS provisioning and health only; create
- * makes no SSH connection to the instance.
+ * the choice is part of the same approval. A reused volume that preserves an
+ * Incus installation also fixes the image architecture, which is judged before
+ * approval. After approval, the immutable approval is retained and the fenced
+ * creation steps and the AWS health read run under the operation lock. Success
+ * establishes AWS provisioning and health only; create makes no SSH connection
+ * to the instance.
  */
 export async function create(options: AwsDeploymentCreateOptions, reporter: Reporter): Promise<void> {
   requireAwsHost()
@@ -137,7 +140,7 @@ export async function create(options: AwsDeploymentCreateOptions, reporter: Repo
       let reuse: Reuse | null = null
       if (offer !== null) {
         reporter.notice(
-          'Incus preparation cannot initialize a reused pool that holds retained Incus datasets, because restoration is not supported. Choose a new data volume if Incus is required.',
+          'Attaching a retained data volume does not reopen Incus. When an earlier deployment initialized and released Incus on it, a later prepare reopens that preserved installation only after verifying its recorded software and retained metadata, and never initializes over it. Only the Incus state and storage on the data volume are preserved: the host root volume and its files are not.',
         )
         const choice = await prompts.select('Data storage', [
           'Create a new data volume',
@@ -145,9 +148,11 @@ export async function create(options: AwsDeploymentCreateOptions, reporter: Repo
         ])
         reuse = choice === 1 ? offer : null
       }
+      let retained: string | null = null
       if (previous !== null && reuse !== null) {
         requirePoolReleased(await lineage.evidence(root, previous), previous.id)
         requireStorageReleased(await incusEvidence(root, previous), previous.id)
+        retained = (await incusLineage.retained(root, previous))?.baseline.architecture ?? null
       }
       const session = await Session.open(directory, connection.region)
       const authentication = await authenticate(session, connection.identity, signal)
@@ -164,11 +169,18 @@ export async function create(options: AwsDeploymentCreateOptions, reporter: Repo
         )
       }
       const discovery = await prepare(session, signal)
-      const proposal = evaluate(discovery, { region: managed.deploymentRegion, administrator, pin, reuse })
+      const proposal = evaluate(discovery, {
+        region: managed.deploymentRegion,
+        administrator,
+        pin,
+        reuse,
+        retained,
+      })
       reportProposal(reporter, proposal, {
         alias: options.alias,
         identity: connection.identity,
         previous: previous?.id ?? null,
+        retained,
       })
       if (isBlocked(proposal)) {
         throw new InstallerError({

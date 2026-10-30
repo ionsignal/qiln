@@ -1,4 +1,4 @@
-import type { ImagePin } from '../../ami'
+import { packageArchitectureOf, type ImagePin } from '../../ami'
 import { AWS_SPEC } from '../../spec'
 import { sameJson } from '../../../json'
 import { planOf } from '../host/plan'
@@ -11,11 +11,16 @@ const { compute, deployment } = AWS_SPEC
 
 type Requirement = readonly [passed: boolean, message: string]
 
+/**
+ * `retained` is the package architecture of the Incus installation
+ * that a reused volume preserves, or null when none is recorded.
+ */
 export interface Inputs {
   region: string
   administrator: string
   pin: ImagePin
   reuse: Reuse | null
+  retained: string | null
 }
 
 function hasBlocker(findings: readonly Finding[]): boolean {
@@ -97,6 +102,23 @@ function imageFindings(
   return findings
 }
 
+/**
+ * A preserved Incus installation is only reopened on its recorded package
+ * architecture, so a mismatch is found here and not after billable creation.
+ * A missing image is reported by its own finding.
+ */
+function retainedFindings(image: ImageEvidence | null, retained: string | null): Finding[] {
+  if (image === null || retained === null || packageArchitectureOf(image.architecture) === retained) {
+    return []
+  }
+  return [
+    {
+      severity: 'blocker',
+      message: `The reviewed image architecture (${image.architecture}) does not match the ${retained} Incus installation retained on the data volume. Qiln never reopens retained Incus state on another architecture or substitutes another image.`,
+    },
+  ]
+}
+
 function instanceFindings(instance: InstanceTypeEvidence | null): Finding[] {
   if (instance === null) {
     return [{ severity: 'blocker', message: `${compute.defaultInstanceType} was not returned for this region.` }]
@@ -123,7 +145,9 @@ function instanceFindings(instance: InstanceTypeEvidence | null): Finding[] {
  * data volume is reused, the only candidate is that volume's own zone, which
  * must itself be available and offered: no other zone is substituted.
  * A reused volume must also match the data volume settings planned for this
- * launch. The frozen plan exists only when nothing blocks.
+ * launch, and the image architecture must match the Incus installation that it
+ * preserves, when one is recorded. The frozen plan exists only when nothing
+ * blocks.
  */
 export function evaluate(discovery: Discovery, inputs: Inputs): HostProposal {
   const { image } = discovery
@@ -143,6 +167,7 @@ export function evaluate(discovery: Discovery, inputs: Inputs): HostProposal {
           },
         ]
       : imageFindings(image, inputs.pin, discovery.instanceType, discovery.discoveredAt)),
+    ...retainedFindings(image, inputs.retained),
     ...instanceFindings(discovery.instanceType),
     ...blockers([
       [

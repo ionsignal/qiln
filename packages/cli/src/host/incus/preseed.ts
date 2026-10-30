@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { parse, stringify } from 'yaml'
 import { INCUS_SPEC } from './spec'
 import { sha256Of } from './recipe'
+import { datasetNamesOf } from '../zfs/spec'
 
 const settings = z.record(z.string(), z.string())
 
@@ -32,18 +33,21 @@ export interface Preseed {
 
 /**
  * Builds the preseed once from Qiln-owned constants. The result is serialized
- * once, so the approved bytes are the bytes that run. `zfs.export` stays false
- * so that stopping Incus leaves the pool imported for the separate, approved
- * ZFS export. Never sets `source.wipe`.
+ * once, so the approved bytes are the bytes that run. The logical Incus pool is
+ * named like the zpool, but its storage source is only the `incus` dataset, so
+ * the state dataset stays outside the driver's exclusive control. `zfs.export`
+ * stays false so that stopping Incus leaves the pool imported for the separate,
+ * approved ZFS export. Never sets `source.wipe`.
  */
 export function preseedOf(pool: string): Preseed {
   const { network } = INCUS_SPEC
+  const dataset = datasetNamesOf(pool).incus
   const document = preseedSchema.parse({
     storage_pools: [
       {
         name: pool,
         driver: 'zfs',
-        config: { source: pool, 'zfs.pool_name': pool, 'zfs.export': 'false' },
+        config: { source: dataset, 'zfs.pool_name': dataset, 'zfs.export': 'false' },
       },
     ],
     networks: [

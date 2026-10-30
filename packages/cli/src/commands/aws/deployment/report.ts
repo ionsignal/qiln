@@ -261,7 +261,9 @@ export function reportZfsUnreadable(reporter: Reporter): void {
 
 /**
  * Retained Incus preparation evidence only. Absence is not a statement about
- * the host or the Incus daemon.
+ * the host or the Incus daemon. The server identity is the certificate
+ * fingerprint of the initialized installation, which is not an SSH host-key
+ * fingerprint.
  */
 export function reportIncus(reporter: Reporter, preparation: IncusRecord | null): void {
   reporter.section('Incus preparation')
@@ -271,6 +273,12 @@ export function reportIncus(reporter: Reporter, preparation: IncusRecord | null)
   }
   reporter.facts([
     ...incusFacts(preparation),
+    [
+      'Incus server identity',
+      preparation.identity === null
+        ? 'not recorded'
+        : `certificate SHA-256 ${preparation.identity.certificateFingerprint} · standalone · recorded with the verified initialization`,
+    ],
     [
       'Baseline preparation',
       retainedPreseed(preparation) !== null && !storageReleased(preparation)

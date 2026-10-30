@@ -1,5 +1,7 @@
+import { STATE_MOUNTPOINT } from '../mount'
 import { diskOf, layers } from './disk'
-import type { Observation } from './types'
+import { datasetNamesOf } from './spec'
+import type { Observation, PoolDatasets } from './types'
 
 /**
  * `guid` is null only while a pool is being created, because ZFS assigns the
@@ -10,6 +12,14 @@ export interface ExpectedPool {
   guid: string | null
   volumeId: string
 }
+
+/**
+ * Whether the state dataset is mounted at the state directory according to ZFS
+ * and the kernel mount table together. `unexpected` means they disagree or
+ * the dataset is missing, and a missing kernel entry alone is never proof of
+ * absence.
+ */
+export type StateMount = 'mounted' | 'unmounted' | 'unexpected'
 
 /**
  * The one definition of a pool in the supported state: imported under the
@@ -36,6 +46,53 @@ export function isLivePool(observation: Observation, expected: ExpectedPool): bo
     vdev.children === 0 &&
     layers(disk).some(layer => layer.path === vdev.path)
   )
+}
+
+/**
+ * The GUIDs of the two datasets when the pool holds exactly its root, the
+ * state dataset, and the storage dataset. The state dataset must be a
+ * filesystem with its mountpoint and canmount=noauto set locally, because
+ * `noauto` is not inherited. Anything else is null.
+ */
+export function readLayout(observation: Observation, pool: string): PoolDatasets | null {
+  const topLevel = observation.pools.detail?.topLevel ?? []
+  const names = datasetNamesOf(pool)
+  const state = topLevel.find(dataset => dataset.name === names.state)
+  const incus = topLevel.find(dataset => dataset.name === names.incus)
+  if (
+    state === undefined ||
+    incus === undefined ||
+    topLevel.length !== 3 ||
+    !topLevel.some(dataset => dataset.name === pool) ||
+    state.type !== 'filesystem' ||
+    incus.type !== 'filesystem' ||
+    state.mountpoint.value !== STATE_MOUNTPOINT ||
+    state.mountpoint.source !== 'local' ||
+    state.canmount.value !== 'noauto' ||
+    state.canmount.source !== 'local'
+  ) {
+    return null
+  }
+  return { state: state.guid, incus: incus.guid }
+}
+
+export function sameDatasets(left: PoolDatasets | null, right: PoolDatasets | null): boolean {
+  return left !== null && right !== null && left.state === right.state && left.incus === right.incus
+}
+
+export function stateMountOf(observation: Observation, pool: string): StateMount {
+  const name = datasetNamesOf(pool).state
+  const dataset = observation.pools.detail?.topLevel.find(item => item.name === name)
+  const mount = observation.stateMount
+  if (dataset === undefined) {
+    return 'unexpected'
+  }
+  if (mount === null) {
+    return dataset.mounted ? 'unexpected' : 'unmounted'
+  }
+  return dataset.mounted && mount.source === name && mount.fstype === 'zfs' && mount.target === STATE_MOUNTPOINT
+    ? 'mounted'
+    : 'unexpected'
 }
 
 /**

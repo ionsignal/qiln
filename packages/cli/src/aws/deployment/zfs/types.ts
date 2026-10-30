@@ -5,6 +5,8 @@ import {
   createPlanSchema,
   exportPlanSchema,
   importPlanSchema,
+  mountPlanSchema,
+  poolDatasetsSchema,
   poolNameSchema,
   prerequisitePlanSchema,
 } from '../../../host/zfs/types'
@@ -13,18 +15,30 @@ import { authorizationSchemaOf } from '../../../journal/history'
 import { stepSchemaOf, timestamp } from '../../../journal/step'
 
 const authorizationSchema = authorizationSchemaOf(
-  z.discriminatedUnion('kind', [prerequisitePlanSchema, createPlanSchema, importPlanSchema, exportPlanSchema]),
+  z.discriminatedUnion('kind', [
+    prerequisitePlanSchema,
+    createPlanSchema,
+    importPlanSchema,
+    mountPlanSchema,
+    exportPlanSchema,
+  ]),
 )
 
 const stepSchema = stepSchemaOf(z.enum(STEP_ACTIONS))
 
 /**
- * The GUID stays a decimal string and is never converted to a number.
+ * The GUID stays a decimal string and is never converted to a number. `layout`
+ * is the revision of the dataset arrangement, a literal of the record version,
+ * and `datasets` holds the GUIDs of its two datasets once they were verified.
+ * `observedAt` is the observation of the verified create or import step and
+ * does not move when the datasets are recorded.
  */
 const poolSchema = z.strictObject({
   name: poolNameSchema,
   guid: z.string().regex(/^[0-9]+$/),
   volumeId,
+  layout: z.literal(1),
+  datasets: poolDatasetsSchema.nullable(),
   observedAt: timestamp,
 })
 
@@ -79,11 +93,13 @@ export function actionsOf(plan: ZfsAuthorization['plan']): readonly StepAction[]
       return actions
     }
     case 'create':
-      return ['create-pool', 'enable-scrub']
+      return ['create-pool', 'create-datasets', 'enable-scrub']
     case 'import':
       return ['import-pool', 'enable-scrub']
+    case 'mount':
+      return ['mount-state']
     case 'export':
-      return ['export-pool']
+      return plan.unmount ? ['unmount-state', 'export-pool'] : ['export-pool']
   }
 }
 

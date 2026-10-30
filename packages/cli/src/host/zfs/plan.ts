@@ -1,7 +1,8 @@
-import { arcFileMatches, scrubTimerOf, ZFS_SPEC } from './spec'
+import { arcFileMatches, datasetNamesOf, scrubTimerOf, ZFS_SPEC } from './spec'
 import { diskOf, layers, memberOf } from './disk'
-import { isLivePool, poolsEnumerated, scrubTimerRunning } from './live'
+import { isLivePool, poolsEnumerated, readLayout, sameDatasets, scrubTimerRunning, stateMountOf } from './live'
 import { transactionViolations } from '../apt'
+import { STATE_MOUNTPOINT } from '../mount'
 import type {
   AbsentPlan,
   BlockDevice,
@@ -9,6 +10,7 @@ import type {
   Observation,
   PackageChange,
   Policy,
+  PoolDatasets,
   PreparationPlan,
   RecordedPool,
   RefusedPlan,
@@ -78,7 +80,9 @@ function targetDisk(disk: BlockDevice, target: ZfsTarget) {
  * reports everything that blocks. A pool is never adopted by name alone: with
  * no recorded pool the volume must be blank and no pool of the policy name may
  * be imported, and with a recorded pool only one that matches both its name and
- * GUID is accepted.
+ * GUID, and holds exactly its recorded datasets, is accepted. Mounting the
+ * state dataset is a plan of its own, decided only once the pool is imported
+ * and its scrub timer is verified.
  */
 export function planOf(
   observation: Observation,
@@ -108,6 +112,10 @@ export function planOf(
     'The recorded root volume was not found as the one disk that holds /.',
   )
   expect(data !== null, 'The recorded data volume was not found exactly once among the host disks.')
+  expect(
+    pools.detail !== null || observation.stateMount === null,
+    `Something is already mounted at ${STATE_MOUNTPOINT} while the pool is not imported, and Qiln does not adopt unexplained mounts.`,
+  )
   const sectors = data === null || recorded !== null ? null : sectorsOf(data, policy.ashift)
   if (data !== null) {
     expect(
@@ -227,6 +235,16 @@ export function planOf(
       scrubTimer: scrubTimerOf(policy.poolName),
     }
   }
+  const { datasets } = recorded
+  if (datasets === null) {
+    return {
+      kind: 'refused',
+      reasons: [
+        'The recorded pool has no verified dataset layout, and Qiln does not create or repair datasets on an existing pool.',
+      ],
+    }
+  }
+  const names = datasetNamesOf(recorded.name)
   const imported = pools.imported.some(pool => pool.name === recorded.name && pool.guid === recorded.guid)
   if (imported) {
     const live = isLivePool(observation, { name: recorded.name, guid: recorded.guid, volumeId: target.dataVolumeId })
@@ -238,8 +256,35 @@ export function planOf(
         ],
       }
     }
-    if (recorded.ready && scrubTimerRunning(observation)) {
-      return { kind: 'ready', pool: recorded.name, guid: recorded.guid }
+    if (!sameDatasets(readLayout(observation, recorded.name), datasets)) {
+      return {
+        kind: 'refused',
+        reasons: [
+          `The imported pool ${recorded.name} (GUID ${recorded.guid}) does not hold exactly the recorded ${names.state} and ${names.incus} datasets, and Qiln does not repair or adopt it.`,
+        ],
+      }
+    }
+    const state = stateMountOf(observation, recorded.name)
+    if (state === 'unexpected') {
+      return {
+        kind: 'refused',
+        reasons: [
+          `The mount state of ${names.state} does not agree with the kernel mount table at ${STATE_MOUNTPOINT}, and Qiln does not adopt unexplained mounts.`,
+        ],
+      }
+    }
+    if (recorded.staged && scrubTimerRunning(observation)) {
+      if (state === 'mounted' && recorded.ready) {
+        return { kind: 'ready', pool: recorded.name, guid: recorded.guid }
+      }
+      return {
+        kind: 'mount',
+        pool: recorded.name,
+        guid: recorded.guid,
+        datasets,
+        disk: targetDisk(data, target),
+        mounted: state === 'mounted',
+      }
     }
   }
   const member = memberOf(data)
@@ -254,20 +299,55 @@ export function planOf(
     kind: 'import',
     pool: recorded.name,
     guid: recorded.guid,
+    datasets,
     disk: { ...targetDisk(data, target), member: member.path },
     scrubTimer: scrubTimerOf(recorded.name),
   }
 }
 
+type ReleaseLayout = { datasets: PoolDatasets } | { reasons: string[] }
+
+/**
+ * An imported pool may be released only when it holds exactly its recorded
+ * datasets and nothing but the state dataset is mounted, in agreement with the
+ * kernel mount table.
+ */
+function releaseLayout(observation: Observation, recorded: RecordedPool): ReleaseLayout {
+  const { datasets } = recorded
+  if (datasets === null) {
+    return { reasons: ['The recorded pool has no verified dataset layout, so Qiln cannot tell what to unmount.'] }
+  }
+  const reasons: string[] = []
+  const names = datasetNamesOf(recorded.name)
+  if (!sameDatasets(readLayout(observation, recorded.name), datasets)) {
+    reasons.push(
+      `The imported pool ${recorded.name} (GUID ${recorded.guid}) does not hold exactly the recorded ${names.state} and ${names.incus} datasets, and Qiln does not adopt it.`,
+    )
+  }
+  const others = (observation.pools.detail?.mounted ?? []).filter(name => name !== names.state)
+  if (others.length > 0) {
+    reasons.push(
+      `Datasets of the recorded pool ${recorded.name} are mounted (${others.join(', ')}), and Qiln does not unmount them or force an export.`,
+    )
+  }
+  if (stateMountOf(observation, recorded.name) === 'unexpected') {
+    reasons.push(
+      `The mount state of ${names.state} does not agree with the kernel mount table at ${STATE_MOUNTPOINT}, and Qiln does not adopt unexplained mounts.`,
+    )
+  }
+  return reasons.length === 0 ? { datasets } : { reasons }
+}
+
 /**
  * Decides what the recorded pool needs before the first AWS removal step. A pool
- * observed imported with its recorded name and GUID gets an export plan, unless
- * ZFS reports a mounted dataset, which is refused here rather than at the
- * script. A pool observed absent is accepted only when the pool listing could
- * run and retained evidence already records its verified clean export
- * (`exported`), because Qiln never records an export that did nothing and a
- * missing pool without that evidence is unexplained. A pool that matches only
- * the name or only the GUID is never adopted.
+ * observed imported with its recorded name and GUID gets an export plan, which
+ * unmounts the state dataset first when it is mounted. Any other mounted
+ * dataset refuses it here rather than at the script. A pool observed absent is
+ * accepted only when the pool listing could run and retained evidence already
+ * records its verified clean export (`exported`), because Qiln never records
+ * an export that did nothing and a missing pool without that evidence is
+ * unexplained. A pool that matches only the name or only the GUID is never
+ * adopted.
  */
 export function releasePlanOf(
   observation: Observation,
@@ -276,7 +356,7 @@ export function releasePlanOf(
   exported: boolean,
 ): RefusedPlan | ExportPlan | AbsentPlan {
   const data = diskOf(observation.disks, target.dataVolumeId)
-  const { imported, detail } = observation.pools
+  const { imported } = observation.pools
   const holdsRecorded = imported.some(pool => pool.name === recorded.name && pool.guid === recorded.guid)
   const reasons: string[] = []
   if (data === null) {
@@ -295,21 +375,22 @@ export function releasePlanOf(
       `The recorded pool ${recorded.name} (GUID ${recorded.guid}) is not imported on the host. Run prepare, which re-imports it, then export it.`,
     )
   }
-  if (holdsRecorded && detail !== null && detail.mounted.length > 0) {
-    reasons.push(
-      `Datasets of the recorded pool ${recorded.name} are mounted (${detail.mounted.join(', ')}), and Qiln does not unmount them or force an export.`,
-    )
-  }
   if (data === null || reasons.length > 0) {
     return { kind: 'refused', reasons }
   }
   if (!holdsRecorded) {
     return { kind: 'absent', pool: recorded.name, guid: recorded.guid }
   }
+  const layout = releaseLayout(observation, recorded)
+  if ('reasons' in layout) {
+    return { kind: 'refused', reasons: layout.reasons }
+  }
   return {
     kind: 'export',
     pool: recorded.name,
     guid: recorded.guid,
+    datasets: layout.datasets,
+    unmount: stateMountOf(observation, recorded.name) === 'mounted',
     disk: targetDisk(data, target),
     scrubTimer: scrubTimerOf(recorded.name),
   }

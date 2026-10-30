@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto'
 import { RECIPE } from '../../../host/zfs/recipe'
+import { ZFS_SPEC, type StepAction } from '../../../host/zfs/spec'
 import { InstallerError, type DiagnosticFact } from '../../../diagnostic/error'
 import { inspectHost } from '../../../host/zfs/inspect'
+import { readLayout } from '../../../host/zfs/live'
 import { planOf, releasePlanOf } from '../../../host/zfs/plan'
 import { apply } from '../../../host/zfs/apply'
 import {
@@ -16,15 +18,19 @@ import { verify } from '../../../host/zfs/verify'
 import { checkCancellation } from '../../../terminal/prompts'
 import { userId } from '../../host'
 import { notify, withWaiting, type ProgressSink, type ProgressTask } from '../progress'
-import { poolState, prepared, requireNotStuck, returned, zfsFacts } from './facts'
+import { poolState, prepared, requireNotStuck, returned, staged, zfsFacts } from './facts'
 import { actionsOf, establishesPool, type ZfsAuthorization, type ZfsRecord, type ZfsStep } from './types'
 import * as deployments from '../records'
 import * as records from './records'
 import type { StepOutcome } from '../../../host/step'
-import type { StepAction } from '../../../host/zfs/spec'
 import type { Remote } from '../../../transport/ssh/connections'
 import type { Dir } from '../../../state/files'
 import type { Deployment } from '../types'
+
+/**
+ * The plans that concern the pool itself. The software scope stops before them.
+ */
+const STORAGE_PLANS: readonly Plan['kind'][] = ['create', 'import', 'mount', 'ready']
 
 /**
  * The command owns presentation and consent. `show` renders every plan the
@@ -113,7 +119,14 @@ export class ZfsPreparer {
     const { deployment, recorded } = this.context
     return pool === null
       ? recorded
-      : { name: pool.name, guid: pool.guid, deployment: deployment.id, ready: prepared(this.evidence) }
+      : {
+          name: pool.name,
+          guid: pool.guid,
+          datasets: pool.datasets,
+          deployment: deployment.id,
+          staged: staged(this.evidence),
+          ready: prepared(this.evidence),
+        }
   }
 
   /**
@@ -123,15 +136,23 @@ export class ZfsPreparer {
    * load, asks again. The package step always ends its approval: the remaining
    * steps are re-planned from the post-install observation and need a fresh
    * approval, and a prerequisite approval never authorizes the storage plan.
-   * Returns how many steps were applied, and stops once the pool is imported
-   * with its scrub timer enabled.
+   * The same holds for the storage plan and the mount of the state dataset,
+   * which is planned afresh once the pool is created or imported with its scrub
+   * timer enabled. The `software` scope stops as soon as the next plan concerns
+   * the pool itself, without displaying it, so Incus software can be prepared
+   * while no pool is mounted. The `storage` scope continues until the pool is
+   * imported with its scrub timer enabled and its state dataset mounted. Returns
+   * how many steps were applied.
    */
-  public async run(signal: AbortSignal): Promise<number> {
+  public async run(signal: AbortSignal, scope: 'software' | 'storage'): Promise<number> {
     const { target, hooks, deployment } = this.context
     let observation = (await this.settleReturned()) ?? (await this.inspect())
     let applied = 0
     while (true) {
       const plan = planOf(observation, target, DEFAULT_POLICY, this.recorded())
+      if (scope === 'software' && STORAGE_PLANS.includes(plan.kind)) {
+        return applied
+      }
       hooks.show(observation, plan)
       switch (plan.kind) {
         case 'refused':
@@ -150,7 +171,8 @@ export class ZfsPreparer {
           return applied
         case 'prerequisites':
         case 'create':
-        case 'import': {
+        case 'import':
+        case 'mount': {
           const authorization = await this.authorize(plan)
           for (const action of actionsOf(plan)) {
             observation = await this.step(authorization, plan, action, signal)
@@ -178,8 +200,9 @@ export class ZfsPreparer {
 
   /**
    * Freshly checks the recorded pool before AWS removal. A pool observed
-   * imported is cleanly exported under its own approval. A pool observed absent
-   * is accepted only when the evidence already records its verified export, and
+   * imported is cleanly exported under its own approval, after its state
+   * dataset is unmounted when that is mounted. A pool observed absent is
+   * accepted only when the evidence already records its verified export, and
    * records nothing itself, so no no-op export is ever recorded. Only called
    * when a pool is recorded as imported or exported.
    */
@@ -206,7 +229,9 @@ export class ZfsPreparer {
         return
       case 'export': {
         const authorization = await this.authorize(plan)
-        await this.step(authorization, plan, 'export-pool', signal)
+        for (const action of actionsOf(plan)) {
+          await this.step(authorization, plan, action, signal)
+        }
       }
     }
   }
@@ -308,14 +333,14 @@ export class ZfsPreparer {
   }
 
   /**
-   * A verified create or import is persisted together with the pool evidence it
-   * establishes, so the evidence never exists without its verified step. The
-   * GUID recorded by an earlier verified create is what the scrub step of that
-   * pool must still find.
+   * A verified create, import, or dataset step is persisted together with the
+   * pool evidence it establishes, so the evidence never exists without its
+   * verified step. The identity recorded by an earlier verified create is what
+   * the dataset and scrub steps of that pool must still find.
    */
   private async verified(plan: ApprovedPlan, action: StepAction): Promise<Observation> {
     const observation = await this.inspect(plan)
-    if (!verify(action, plan, observation, this.evidence.pool?.guid ?? null)) {
+    if (!verify(action, plan, observation, this.evidence.pool)) {
       throw new InstallerError({
         code: 'ZFS_PREPARATION_UNRESOLVED',
         facts: [['Deployment', this.context.deployment.id], ...zfsFacts(this.evidence)],
@@ -331,6 +356,16 @@ export class ZfsPreparer {
     action: StepAction,
     observation: Observation,
   ): NonNullable<ZfsRecord['pool']> | undefined {
+    if (action === 'create-datasets') {
+      const { pool } = this.evidence
+      const datasets = plan.kind === 'create' ? readLayout(observation, plan.pool) : null
+      if (pool === null || datasets === null) {
+        throw new InstallerError({
+          code: 'INTERNAL_ERROR',
+        })
+      }
+      return { ...pool, datasets }
+    }
     if (!establishesPool(action)) {
       return undefined
     }
@@ -345,7 +380,14 @@ export class ZfsPreparer {
         code: 'INTERNAL_ERROR',
       })
     }
-    return { name: plan.pool, guid, volumeId: plan.disk.volumeId, observedAt: observation.observedAt }
+    return {
+      name: plan.pool,
+      guid,
+      volumeId: plan.disk.volumeId,
+      layout: ZFS_SPEC.layout.revision,
+      datasets: plan.kind === 'import' ? plan.datasets : null,
+      observedAt: observation.observedAt,
+    }
   }
 
   /**

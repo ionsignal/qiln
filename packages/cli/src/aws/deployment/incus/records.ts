@@ -8,9 +8,11 @@ import { InstallerError } from '../../../diagnostic/error'
 import { readChild, writeChild, type Dir } from '../../../state/files'
 import { readPreseed } from '../../../host/incus/preseed'
 import { sha256Of } from '../../../host/incus/recipe'
+import { opens, releases } from '../../../host/incus/spec'
 import { actionsOf } from '../../../host/incus/types'
 import { bindingOf } from '../journal/binding'
 import { isAppendOnly, isHistoryConsistent } from '../../../journal/history'
+import { establishes } from './facts'
 import { incusSchema, type IncusRecord } from './types'
 import type { Deployment } from '../types'
 
@@ -28,19 +30,21 @@ export function blank(deployment: Deployment): IncusRecord | null {
   const binding = bindingOf(deployment)
   return binding === null
     ? null
-    : { version: AWS_RECORD_VERSION.incus, binding, authorizations: [], steps: [], quiescence: null }
+    : { version: AWS_RECORD_VERSION.incus, binding, authorizations: [], steps: [], baseline: null, identity: null }
 }
 
 /**
- * Every retained preseed must still hash to its approved digest and read back
- * as a preseed that Qiln would have produced, because verification trusts it.
+ * Every retained preseed, whether approved for an initialization or carried by
+ * the open of a preserved installation, must still hash to its approved digest
+ * and read back as a preseed that Qiln would have produced, because
+ * verification trusts it.
  */
 function hasValidPreseeds({ authorizations }: IncusRecord): boolean {
-  return authorizations.every(
-    ({ plan }) =>
-      plan.kind !== 'initialize' ||
-      (sha256Of(plan.preseed.yaml) === plan.preseed.sha256 && readPreseed(plan.preseed.yaml) !== null),
-  )
+  return authorizations.every(({ plan }) => {
+    const preseed =
+      plan.kind === 'initialize' ? plan.preseed : plan.kind === 'open' ? plan.retained?.preseed : undefined
+    return preseed === undefined || (sha256Of(preseed.yaml) === preseed.sha256 && readPreseed(preseed.yaml) !== null)
+  })
 }
 
 /**
@@ -48,33 +52,32 @@ function hasValidPreseeds({ authorizations }: IncusRecord): boolean {
  */
 function hasOnePool({ authorizations }: IncusRecord): boolean {
   const pools = authorizations.flatMap(({ plan }) =>
-    plan.kind === 'initialize' || plan.kind === 'release' ? [`${plan.pool}:${plan.guid}`] : [],
+    plan.kind === 'guard' || plan.kind === 'open' || plan.kind === 'initialize' || plan.kind === 'release'
+      ? [`${plan.pool}:${plan.guid}`]
+      : [],
   )
   return new Set(pools).size <= 1
 }
 
 /**
- * A release only makes sense after an initialization that was not refused.
+ * A release step only makes sense after an open or initialization that was not
+ * refused.
  */
-function releasesFollowInitialization({ steps }: IncusRecord): boolean {
+function releasesFollowOpening({ steps }: IncusRecord): boolean {
   return steps.every(
     (step, index) =>
-      step.action !== 'release' ||
-      steps.slice(0, index).some(earlier => earlier.action === 'initialize' && earlier.refusedAt === null),
+      !releases(step.action) ||
+      steps.slice(0, index).some(earlier => opens(earlier.action) && earlier.refusedAt === null),
   )
 }
 
 /**
- * An observed inactivity is evidence about an initialization, so it cannot
- * predate the fence of one that was not refused.
+ * The baseline and the server identity exist if and only if an establishing
+ * step was verified, because both are recorded in the write that verifies it.
  */
-function observesAfterInitialization({ quiescence, steps }: IncusRecord): boolean {
-  return (
-    quiescence === null ||
-    steps.some(
-      step => step.action === 'initialize' && step.refusedAt === null && step.fencedAt <= quiescence.observedAt,
-    )
-  )
+function isEstablishedWithStep(record: IncusRecord): boolean {
+  const established = record.steps.some(step => establishes(record, step))
+  return (record.baseline !== null) === established && (record.identity !== null) === established
 }
 
 /**
@@ -90,8 +93,8 @@ function isConsistent(record: IncusRecord, deployment: Deployment): boolean {
     sameJson(record.binding, bound) &&
     hasValidPreseeds(record) &&
     hasOnePool(record) &&
-    releasesFollowInitialization(record) &&
-    observesAfterInitialization(record) &&
+    releasesFollowOpening(record) &&
+    isEstablishedWithStep(record) &&
     isHistoryConsistent(record, actionsOf)
   )
 }
@@ -128,18 +131,28 @@ export async function read(directory: Dir, deployment: Deployment): Promise<Incu
 }
 
 /**
- * The inactivity observation only advances, and the write that changes it
- * changes nothing else, so it can never alter or settle a step.
+ * The baseline and the identity are set once, together, and only in the write
+ * that verifies the newest step, which must be the establishing step they
+ * describe. Neither is ever rewritten or dropped.
  */
-function requireQuiescence(before: IncusRecord, after: IncusRecord): void {
-  const { quiescence } = after
-  if (sameJson(before.quiescence, quiescence)) {
+function requireEstablished(before: IncusRecord, after: IncusRecord): void {
+  if (before.baseline !== null) {
+    if (!sameJson(before.baseline, after.baseline) || !sameJson(before.identity, after.identity)) {
+      return invalid()
+    }
     return
   }
+  if (after.baseline === null) {
+    return
+  }
+  const last = after.steps.at(-1)
+  const previous = before.steps.at(-1)
   if (
-    quiescence === null ||
-    (before.quiescence !== null && quiescence.observedAt < before.quiescence.observedAt) ||
-    !sameJson({ ...before, quiescence }, after)
+    last === undefined ||
+    !establishes(after, last) ||
+    previous === undefined ||
+    previous.verifiedAt !== null ||
+    before.steps.length !== after.steps.length
   ) {
     return invalid()
   }
@@ -147,14 +160,14 @@ function requireQuiescence(before: IncusRecord, after: IncusRecord): void {
 
 /**
  * The journal's write rule: the binding is fixed and the history only grows by
- * the shared append-only rule, while the inactivity observation follows its
+ * the shared append-only rule, while the baseline and the identity follow their
  * own. Both records are already validated.
  */
 function requireTransition(before: IncusRecord, after: IncusRecord): void {
   if (!sameJson(before.binding, after.binding) || !isAppendOnly(before, after)) {
     return invalid()
   }
-  requireQuiescence(before, after)
+  requireEstablished(before, after)
 }
 
 /**

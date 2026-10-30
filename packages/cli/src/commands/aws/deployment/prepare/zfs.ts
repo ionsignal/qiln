@@ -1,6 +1,7 @@
 import { RECIPE } from '../../../../host/zfs/recipe'
-import { ZFS_SPEC } from '../../../../host/zfs/spec'
+import { ZFS_SPEC, datasetNamesOf } from '../../../../host/zfs/spec'
 import { diskOf } from '../../../../host/zfs/disk'
+import { STATE_MOUNTPOINT } from '../../../../host/mount'
 import type { DiagnosticFact } from '../../../../diagnostic/error'
 import type { ApprovedPlan, Observation, Plan, ZfsTarget } from '../../../../host/zfs/types'
 import type { Reporter } from '../../../../terminal/reporter'
@@ -27,16 +28,20 @@ export function approvalLabel(plan: ApprovedPlan): string {
     case 'prerequisites':
       return 'Apply the displayed prerequisite plan to the deployment host'
     case 'create':
-      return 'Create the displayed ZFS pool on the recorded data volume and enable its scrub timer'
+      return 'Create the displayed ZFS pool and its datasets on the recorded data volume and enable its scrub timer'
     case 'import':
       return 'Import the displayed ZFS pool and enable its scrub timer'
+    case 'mount':
+      return `Mount the displayed state dataset at ${STATE_MOUNTPOINT} on the deployment host`
     case 'export':
-      return 'Export the displayed ZFS pool from the deployment host'
+      return plan.unmount
+        ? 'Unmount the displayed state dataset and export the displayed ZFS pool from the deployment host'
+        : 'Export the displayed ZFS pool from the deployment host'
   }
 }
 
 function hostFacts({ observation, target }: PlanPreview): DiagnosticFact[] {
-  const { system, module: zfsModule, packages, arc, disks, pools, timer } = observation
+  const { system, module: zfsModule, packages, arc, disks, pools, timer, stateMount } = observation
   const root = diskOf(disks, target.rootVolumeId)
   const data = diskOf(disks, target.dataVolumeId)
   const others = disks.filter(disk => disk.type === 'disk' && disk !== root && disk !== data)
@@ -63,6 +68,23 @@ function hostFacts({ observation, target }: PlanPreview): DiagnosticFact[] {
     [
       'Mounted datasets',
       pools.detail === null ? 'inspected pool not imported' : pools.detail.mounted.join(', ') || 'none',
+    ],
+    [
+      'Top-level datasets',
+      pools.detail === null
+        ? 'inspected pool not imported'
+        : pools.detail.topLevel
+            .map(
+              dataset =>
+                `${dataset.name} · GUID ${dataset.guid} · mountpoint ${dataset.mountpoint.value} (${dataset.mountpoint.source}) · canmount ${dataset.canmount.value} (${dataset.canmount.source}) · ${dataset.mounted ? 'mounted' : 'not mounted'}`,
+            )
+            .join(', ') || 'none',
+    ],
+    [
+      'State mount',
+      stateMount === null
+        ? `nothing reported mounted at ${STATE_MOUNTPOINT}`
+        : `${stateMount.source} · ${stateMount.fstype} · root ${stateMount.fsroot} · kernel mount table, read just now`,
     ],
     ['Scrub timer', `${timer.enablement} · ${timer.activation}`],
     [
@@ -113,6 +135,7 @@ function reportPrerequisites(reporter: Reporter, plan: Extract<Plan, { kind: 'pr
 
 function reportCreate(reporter: Reporter, plan: Extract<Plan, { kind: 'create' }>): void {
   const { pool, defaults } = ZFS_SPEC
+  const names = datasetNamesOf(plan.pool)
   reporter.section('Proposed storage (applied only after approval)')
   reporter.facts([
     ['Pool', plan.pool],
@@ -123,17 +146,27 @@ function reportCreate(reporter: Reporter, plan: Extract<Plan, { kind: 'create' }
       'Root dataset',
       `mountpoint=${pool.mountpoint} compression=${defaults.compression} acltype=${pool.acltype} xattr=${pool.xattr} atime=${defaults.atime}`,
     ],
-    ['Scrub', `${plan.scrubTimer} · packaged monthly timer, enabled and started once the pool is verified`],
+    [
+      'State dataset',
+      `${names.state} · mountpoint=${STATE_MOUNTPOINT} canmount=noauto · never mounted by this plan; a separate plan mounts it`,
+    ],
+    ['Storage dataset', `${names.incus} · mountpoint=none · reserved for Incus storage and left unmanaged afterwards`],
+    ['Scrub', `${plan.scrubTimer} · packaged monthly timer, enabled and started once the datasets are verified`],
     ['Boot import', BOOT_IMPORT],
   ])
 }
 
 function reportImport(reporter: Reporter, plan: Extract<Plan, { kind: 'import' }>): void {
+  const names = datasetNamesOf(plan.pool)
   reporter.section('Proposed storage (applied only after approval)')
   reporter.facts([
     ['Pool', `${plan.pool} · GUID ${plan.guid} · recorded for this volume by earlier preparation evidence`],
     ['Target', `${plan.disk.path} · ${plan.disk.volumeId} · ${gib(plan.disk.sizeBytes)} · whole disk`],
     ['Member', `${plan.disk.member} · the only ZFS member partition of the target disk; pool labels are read here`],
+    [
+      'Datasets',
+      `${names.state} · GUID ${plan.datasets.state}, ${names.incus} · GUID ${plan.datasets.incus} · the pool must hold exactly these two, verified after the import`,
+    ],
     [
       'Import',
       plan.imported
@@ -141,18 +174,45 @@ function reportImport(reporter: Reporter, plan: Extract<Plan, { kind: 'import' }
         : 'imported by GUID and original name, without mounting, forcing, renaming, or a cache file',
     ],
     ['Scrub', `${plan.scrubTimer} · packaged monthly timer, enabled and started once the pool is verified`],
+    ['Mount', `${names.state} stays unmounted by this plan; a separate plan mounts it`],
     ['Boot import', BOOT_IMPORT],
   ])
 }
 
+function reportMount(reporter: Reporter, plan: Extract<Plan, { kind: 'mount' }>): void {
+  const names = datasetNamesOf(plan.pool)
+  reporter.section('Proposed mount (applied only after approval)')
+  reporter.facts([
+    ['Pool', `${plan.pool} · GUID ${plan.guid}`],
+    [
+      'Dataset',
+      `${names.state} · GUID ${plan.datasets.state} · mountpoint ${STATE_MOUNTPOINT} · canmount noauto`,
+    ],
+    [
+      'Mount',
+      plan.mounted
+        ? 'already mounted; a fenced, idempotent step records and verifies it'
+        : `mounted with zfs mount, never forced, after the script confirms that nothing else is mounted at ${STATE_MOUNTPOINT}`,
+    ],
+    ['Boot mount', 'Qiln configures none; the dataset stays unmounted after a reboot until a later prepare mounts it'],
+  ])
+}
+
 function reportExport(reporter: Reporter, plan: Extract<Plan, { kind: 'export' }>): void {
+  const names = datasetNamesOf(plan.pool)
   reporter.section('Proposed export (applied only after approval)')
   reporter.facts([
     ['Pool', `${plan.pool} · GUID ${plan.guid}`],
     ['Target', `${plan.disk.path} · ${plan.disk.volumeId} · ${gib(plan.disk.sizeBytes)} · whole disk`],
     [
+      'Unmount',
+      plan.unmount
+        ? `${names.state} · GUID ${plan.datasets.state} · unmounted first without force, and refused if another filesystem is mounted beneath ${STATE_MOUNTPOINT}`
+        : `${names.state} is already unmounted, so no unmount step is planned`,
+    ],
+    [
       'Export',
-      'refused before any change if a dataset is mounted or a scrub or resilver is in progress; otherwise the scrub timer is disabled and the pool is exported without force',
+      'refused before any change if another dataset is mounted or a scrub or resilver is in progress; otherwise the scrub timer is disabled and the pool is exported without force',
     ],
     ['Scrub', `${plan.scrubTimer} · disabled before the export`],
   ])
@@ -168,7 +228,8 @@ const PREREQUISITE_NOTICE =
 const STORAGE_NOTICE =
   'Approval authorizes only the listed steps, each one fenced remote script followed by a fresh inspection that must agree. ' +
   'Nothing is forced, wiped, repaired, or renamed. A failed or cancelled step is not replayed, resumed, or rolled back, and ' +
-  'interrupted work may already have completed. A single-disk pool provides no redundancy or backup.'
+  'interrupted work may already have completed. A single-disk pool provides no redundancy or backup. ' +
+  'Mounting the state dataset is a separate plan with its own approval.'
 
 /**
  * Renders what was observed and what a later approved step would do. Every
@@ -188,7 +249,7 @@ export function reportPlan(reporter: Reporter, preview: PlanPreview): void {
       reporter.facts([
         [
           'Pool',
-          `${plan.pool} · GUID ${plan.guid} · observed imported and online as a single plain disk on the recorded data volume, with its monthly scrub timer enabled and active`,
+          `${plan.pool} · GUID ${plan.guid} · observed imported and online as a single plain disk on the recorded data volume, holding exactly its recorded state and storage datasets, with the state dataset mounted at ${STATE_MOUNTPOINT} (ZFS and the kernel mount table agree) and its monthly scrub timer enabled and active`,
         ],
       ])
       return
@@ -209,6 +270,9 @@ export function reportPlan(reporter: Reporter, preview: PlanPreview): void {
       break
     case 'import':
       reportImport(reporter, plan)
+      break
+    case 'mount':
+      reportMount(reporter, plan)
       break
     case 'export':
       reportExport(reporter, plan)
