@@ -83,7 +83,7 @@ export const INSTALLER_SPEC = Object.freeze({
   supportedHost: {
     distributionId: 'ubuntu',
     versionId: '26.04',
-    minimumKernelRelease: '6.8.0-138-generic',
+    minimumKernelRelease: '6.12.0-0-generic',
     minimumIncusVersion: '7.0',
     maximumIncusVersionExclusive: '8.0',
   },

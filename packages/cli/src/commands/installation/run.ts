@@ -4,7 +4,9 @@ import { installationRetry } from '../../installation/retry'
 import { withCancellation } from '../../terminal/prompts'
 import { inspect as inspectTarget } from './inspect'
 import { configure as configureTarget, type ConfigureOptions } from './configure'
+import { reassign as reassignTarget } from './reassign'
 import type { Reporter } from '../../terminal/reporter'
+import type { DeploymentSelector } from '../../aws/deployment/alias'
 import type { InstallationSelector, InstallationTarget } from '../../installation/target/types'
 
 /**
@@ -34,4 +36,13 @@ export async function configure(
   reporter: Reporter,
 ): Promise<void> {
   await withTarget(selector, target => configureTarget(target, options, reporter))
+}
+
+/**
+ * Only an AWS deployment can be reassigned, so a local selector is not accepted.
+ */
+export async function reassign(selector: DeploymentSelector, reporter: Reporter): Promise<void> {
+  await withCancellation(signal =>
+    withAwsTarget(selector, signal, (target, aws) => reassignTarget(target, aws, reporter)),
+  )
 }

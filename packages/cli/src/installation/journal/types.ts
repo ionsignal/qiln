@@ -49,7 +49,11 @@ export const planSchema = z.strictObject({
 
 export type ConfigurePlan = z.infer<typeof planSchema>
 
-const authorizationSchema = authorizationSchemaOf(planSchema)
+/**
+ * Each authorization names the host that was assigned when it was approved, so
+ * a host reassignment never rewrites earlier evidence.
+ */
+const authorizationSchema = authorizationSchemaOf(planSchema).extend({ host: hostSchema })
 const stepSchema = stepSchemaOf(z.enum(INSTALL_ACTIONS))
 
 /**
@@ -64,13 +68,13 @@ const operationSchema = z.strictObject({
 
 /**
  * Accounting and recovery evidence for configuration, not a resumable
- * checkpoint. The binding names the host the evidence belongs to. Before the
- * first release, changing any literal or format rule resets local development
- * state. After it, a change needs a version bump and a versioned reader.
+ * checkpoint. Every authorization names its host, which must be the installation's
+ * current host or one of its earlier ones. Before the first release, changing
+ * any literal or format rule resets local development state. After it, a
+ * change needs a version bump and a versioned reader.
  */
 export const evidenceSchema = z.strictObject({
   version: z.literal(INSTALLER_SPEC.evidenceVersion),
-  binding: z.strictObject({ host: hostSchema }),
   authorizations: z.array(authorizationSchema).max(32),
   steps: z.array(stepSchema).max(64),
   operations: z.array(operationSchema).max(64),

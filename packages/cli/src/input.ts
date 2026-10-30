@@ -67,7 +67,6 @@ export function convertAwsDeploymentCreateOptions(input: AwsDeploymentCreateInpu
   }
 }
 
-/** The ID and the alias are alternatives; with neither, the default alias is selected. */
 export function convertAwsDeploymentOptions(input: AwsDeploymentInput): AwsDeploymentOptions {
   if (input.id !== undefined && input.alias !== undefined) {
     throw new InstallerError({
@@ -212,7 +211,6 @@ export interface InstallationConfigureOptions {
   options: ConfigureOptions
 }
 
-/** Exactly one target is required, and there is no default. */
 export function convertInstallationSelector(input: InstallationInput): InstallationSelector {
   const supplied = [input.local === true, input.id !== undefined, input.alias !== undefined].filter(Boolean)
   if (supplied.length !== 1) {
@@ -232,6 +230,20 @@ export function convertInstallationSelector(input: InstallationInput): Installat
     return { kind: 'alias', value: validateAwsAlias(input.alias) }
   }
   return { kind: 'local' }
+}
+
+export function convertReassignSelector(input: AwsDeploymentInput): DeploymentSelector {
+  if ((input.id === undefined) === (input.alias === undefined)) {
+    throw new InstallerError({
+      code: 'INVALID_ARGUMENT',
+      facts: [
+        ['Option', '--id, --alias'],
+        ['Observed', 'Supply exactly one of --id or --alias.'],
+      ],
+      retry: 'qiln installation --help',
+    })
+  }
+  return convertAwsDeploymentOptions(input).selector
 }
 
 export function convertInstallationConfigureOptions(input: InstallationConfigureInput): InstallationConfigureOptions {

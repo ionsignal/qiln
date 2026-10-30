@@ -2,11 +2,13 @@ import { INSTALLER_SPEC } from '../../spec'
 import { InstallerError } from '../../../diagnostic/error'
 import { notFound, type DeploymentSelector } from '../../../aws/deployment/alias'
 import { optionsOf, requireReady } from '../../../aws/deployment/access'
+import { chain, originOf } from '../../../aws/deployment/chain'
 import { evidence as incusEvidence } from '../../../aws/deployment/incus/evidence'
 import { bindingOf } from '../../../aws/deployment/journal/binding'
 import { withConfirmedOperation } from '../../../aws/operation'
 import { openAwsRoot } from '../../../aws/root'
 import { readPrivateKey } from '../../../aws/ssh/private'
+import { datasetNamesOf } from '../../../host/zfs/spec'
 import { withSsh, type Remote } from '../../../transport/ssh/connections'
 import { withSocket } from '../../../transport/ssh/socket'
 import { devLayout, type Layout } from '../../layout'
@@ -17,7 +19,8 @@ import * as lineage from '../../../aws/deployment/zfs/lineage'
 import type { Deployment } from '../../../aws/deployment/types'
 import type { IncusConnection } from '../../../transport/incus/connection'
 import type { IncusConfigMap } from '../../../transport/incus/types'
-import type { HostBinding } from '../../records'
+import type { Link } from '../../assignment'
+import type { AwsBinding } from '../../records'
 
 /**
  * Proposed AWS policy: a memory limit and no CPU limit. The installation
@@ -25,6 +28,15 @@ import type { HostBinding } from '../../records'
  */
 const LIMITS: Readonly<IncusConfigMap> = Object.freeze({
   'limits.memory': '16GiB',
+})
+
+/**
+ * Instance settings beyond the limits. An unset `boot.autostart` restores an
+ * instance's previous state when the daemon starts, so a retained orchestrator
+ * must never resume by itself when Incus is reopened.
+ */
+const CONFIG: Readonly<IncusConfigMap> = Object.freeze({
+  'boot.autostart': 'false',
 })
 
 /**
@@ -36,27 +48,31 @@ const LIMITS: Readonly<IncusConfigMap> = Object.freeze({
 const RELAY_SIGNAL = new AbortController().signal
 
 /**
- * Derived from the deployment's immutable ID, never from its alias or operator
- * input, and within the installation name rule.
+ * Derived from the immutable ID of the deployment that created the retained
+ * data volume, never from an alias or operator input, and within the
+ * installation name rule. Every later deployment of the same volume chain keeps
+ * the name, so a host replacement keeps the installation directory.
  */
-function installationName(deploymentId: string): string {
-  return `aws-${deploymentId}`
+function installationName(originId: string): string {
+  return `aws-${originId}`
 }
 
 /**
  * Everything an installation needs from one deployment, taken from retained
  * evidence alone. The host binding is the deployment's own identity, and the
- * layout comes from its verified ZFS pool and retained Incus preseed. `shell`
- * and `relay` open one pinned, key-authenticated connection for the duration
- * of `use`: the administrative private key is read for that connection only and
- * zeroed afterwards, so it never leaves this module. Architecture is not known
- * here: it is observed on the target.
+ * layout comes from its verified ZFS pool and retained Incus preseed. `links`
+ * reads the preparation evidence of the whole volume chain, newest first, for
+ * the host reassignment. `shell` and `relay` open one pinned, key-authenticated
+ * connection for the duration of `use`: the administrative private key is read
+ * for that connection only and zeroed afterwards, so it never leaves this
+ * module. Architecture is not known here: it is observed on the target.
  */
 export interface AwsHost {
   name: string
-  host: HostBinding
+  host: AwsBinding
   layout: Layout
   record: Deployment
+  links(): Promise<Link[]>
   shell<T>(signal: AbortSignal, use: (remote: Remote) => Promise<T>): Promise<T>
   relay<T>(use: (connection: IncusConnection) => Promise<T>): Promise<T>
 }
@@ -81,7 +97,7 @@ export async function awsInstallationName(selector: DeploymentSelector): Promise
   if (root === null) {
     throw notFound(selector)
   }
-  return installationName((await deployments.select(root, selector)).id)
+  return installationName(await originOf(root, await deployments.select(root, selector)))
 }
 
 /**
@@ -91,7 +107,9 @@ export async function awsInstallationName(selector: DeploymentSelector): Promise
  * state first, then installation state. Nothing here authenticates to AWS or
  * writes evidence, and a missing host-key pin is refused rather than retained.
  * Every unsettled preparation step on either side blocks the handoff,
- * including a returned step not yet verified.
+ * including a returned step not yet verified. The retained preseed is the one
+ * of the verified initialization, or of the verified reopen of a preserved
+ * installation.
  */
 export async function withAwsHost<T>(
   selector: DeploymentSelector,
@@ -117,7 +135,7 @@ export async function withAwsHost<T>(
       throw refusal(record, 'The recorded ZFS pool is not verified imported with its scrub timer.')
     }
     if (preseed === null || !storageHeld(incus)) {
-      throw refusal(record, 'Incus is not recorded as initialized and still running. Qiln never restarts it.')
+      throw refusal(record, 'Incus is not recorded as initialized or reopened and still running. Qiln never restarts it.')
     }
     const [network] = preseed.networks
     const bridge = /^(\d{1,3}(?:\.\d{1,3}){2})\.1\/24$/.exec(network.config['ipv4.address'] ?? '')
@@ -135,15 +153,26 @@ export async function withAwsHost<T>(
       }
     }
     return await run({
-      name: installationName(record.id),
+      name: installationName(await originOf(root, record)),
       host: { kind: 'aws', ...identity },
       layout: {
-        pool: { name: pool.name },
+        pool: { name: pool.name, source: datasetNamesOf(pool.name).incus },
         network: { name: network.name, ipv4Subnet: `${prefix}.0/24`, config: network.config },
         postgres: devLayout.postgres,
-        orchestrator: { ipv4Address: `${prefix}.10`, limits: LIMITS },
+        orchestrator: { ipv4Address: `${prefix}.10`, limits: LIMITS, config: CONFIG },
       },
       record,
+      links: async () => {
+        const links: Link[] = []
+        for await (const deployment of chain(root, record)) {
+          links.push({
+            deployment,
+            zfs: await lineage.evidence(root, deployment),
+            incus: await incusEvidence(root, deployment),
+          })
+        }
+        return links
+      },
       shell: (signal, use) => withKey(key => withSsh(ssh, key, signal, use)),
       relay: use =>
         withKey(key => withSocket(ssh, key, RELAY_SIGNAL, INSTALLER_SPEC.incus.socketPath, use)),

@@ -24,6 +24,7 @@ import {
   requireHost,
   requireTransition,
   sameHost,
+  type AwsBinding,
   type HostBinding,
   type InstallationRecord,
 } from './records'
@@ -284,6 +285,39 @@ export async function pinImage(
   }
   const next = { ...record, imageFingerprint }
   await saveRecord(directory, next, retry.inspect)
+  return next
+}
+
+/**
+ * Persists a new host assignment under the installation lock. The superseded
+ * host and the approval move to the history in the same atomic record write.
+ */
+export async function assignHost(
+  directory: Dir,
+  record: InstallationRecord,
+  host: AwsBinding,
+  retry: string,
+): Promise<InstallationRecord> {
+  const { host: previous } = record
+  if (previous.kind !== 'aws') {
+    throw new InstallerError({
+      code: 'INTERNAL_ERROR',
+      retry,
+    })
+  }
+  const next: InstallationRecord = {
+    ...record,
+    host,
+    history: [
+      ...record.history,
+      {
+        host: previous,
+        reassignedAt: new Date().toISOString(),
+        approvedBy: { method: 'local-interactive', userId: currentUserId() },
+      },
+    ],
+  }
+  await saveRecord(directory, next, retry)
   return next
 }
 

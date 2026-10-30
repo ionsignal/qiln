@@ -4,14 +4,10 @@ import { unsettled } from '../../installation/journal/facts'
 import { listInstallations } from '../../installation/state'
 import { stateOf } from '../../journal/step'
 import { selectorFlags } from '../../installation/retry'
+import { describeHost } from './host'
 import * as journal from '../../installation/journal/records'
-import type { HostBinding } from '../../installation/records'
 import type { Reporter } from '../../terminal/reporter'
 import type { InstallationSelector } from '../../installation/target/types'
-
-function describeHost(host: HostBinding): string {
-  return host.kind === 'local' ? 'this machine' : `AWS deployment ${host.deployment} · instance ${host.instanceId}`
-}
 
 /**
  * Reports retained evidence only. It connects to no target, authenticates to
@@ -33,6 +29,12 @@ export async function status(selector: InstallationSelector, reporter: Reporter)
   reporter.facts([
     ['Installation', record.name],
     ['Host', describeHost(record.host)],
+    [
+      'Previous hosts',
+      record.history.length === 0
+        ? 'none'
+        : record.history.map(entry => `${describeHost(entry.host)} (until ${entry.reassignedAt})`).join(', '),
+    ],
     ['Architecture', record.architecture],
     ['Checkout', record.checkoutPath],
     ['Image pin', record.imageFingerprint ?? 'none'],

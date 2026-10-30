@@ -7,8 +7,8 @@ import { InstallerError } from '../../diagnostic/error'
 import { readChild, writeChild, type Dir } from '../../state/files'
 import { currentUserId } from '../../state/user'
 import { requireInstallationLock } from '../state'
+import { sameHost, type InstallationRecord } from '../records'
 import { actionsOf, evidenceSchema, type ConfigureEvidence } from './types'
-import type { InstallationRecord } from '../records'
 
 function invalid(retry: string): never {
   throw new InstallerError({
@@ -17,28 +17,28 @@ function invalid(retry: string): never {
   })
 }
 
-function bindingOf(record: InstallationRecord): ConfigureEvidence['binding'] {
-  return { host: record.host }
-}
-
 /**
- * Evidence of an installation with no configuration history. Its binding is
- * copied from the installation record, so it can never describe another host.
+ * Evidence of an installation with no configuration history.
  */
-export function blank(record: InstallationRecord): ConfigureEvidence {
+export function blank(): ConfigureEvidence {
   return {
     version: INSTALLER_SPEC.evidenceVersion,
-    binding: bindingOf(record),
     authorizations: [],
     steps: [],
     operations: [],
   }
 }
 
+/**
+ * Every authorization names the current host or one of the earlier hosts that
+ * the installation record retains, so evidence can never describe another
+ * installation.
+ */
 function isConsistent(evidence: ConfigureEvidence, record: InstallationRecord): boolean {
-  const { operations, steps } = evidence
+  const { authorizations, operations, steps } = evidence
+  const hosts = [record.host, ...record.history.map(entry => entry.host)]
   return (
-    sameJson(evidence.binding, bindingOf(record)) &&
+    authorizations.every(({ host }) => hosts.some(known => sameHost(known, host))) &&
     new Set(operations.map(operation => operation.step)).size === operations.length &&
     operations.every(operation => steps.some(step => step.id === operation.step)) &&
     isHistoryConsistent(evidence, actionsOf)
@@ -101,12 +101,22 @@ function operationRecorded(before: ConfigureEvidence, after: ConfigureEvidence):
 }
 
 /**
- * The write rule: the binding is fixed, history grows only through the shared
- * append-only rule, and operation references are added only as described above.
- * Both records are already validated.
+ * The write rule: history grows only through the shared append-only rule, a new
+ * authorization names the installation's current host, and operation references
+ * are added only as described above. Both records are already validated.
  */
-function requireTransition(before: ConfigureEvidence, after: ConfigureEvidence, retry: string): void {
-  if (!sameJson(before.binding, after.binding) || !isAppendOnly(before, after) || !operationRecorded(before, after)) {
+function requireTransition(
+  before: ConfigureEvidence,
+  after: ConfigureEvidence,
+  record: InstallationRecord,
+  retry: string,
+): void {
+  const added = after.authorizations.slice(before.authorizations.length)
+  if (
+    !isAppendOnly(before, after) ||
+    !operationRecorded(before, after) ||
+    !added.every(({ host }) => sameHost(host, record.host))
+  ) {
     invalid(retry)
   }
 }
@@ -124,7 +134,7 @@ export async function save(
 ): Promise<void> {
   await requireInstallationLock(directory, retry)
   const next = parse(evidence, record, retry)
-  requireTransition((await read(directory, record, retry)) ?? blank(record), next, retry)
+  requireTransition((await read(directory, record, retry)) ?? blank(), next, record, retry)
   await writeChild(
     directory,
     INSTALLER_SPEC.state.configureFileName,

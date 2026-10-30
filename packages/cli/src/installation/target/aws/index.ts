@@ -97,13 +97,14 @@ function awsTarget(aws: AwsHost, signal: AbortSignal, commands: Retry): Installa
 
 /**
  * Resolves the selected deployment under the AWS-operation lock and hands the
- * resulting target to `run`. The signal is the cancellation of the invocation.
+ * resulting target, and the resolved host behind it, to `run`. The signal is
+ * the cancellation of the invocation.
  */
 export function withAwsTarget<T>(
   selector: DeploymentSelector,
   signal: AbortSignal,
-  run: (target: InstallationTarget) => Promise<T>,
+  run: (target: InstallationTarget, aws: AwsHost) => Promise<T>,
 ): Promise<T> {
   const commands = installationRetry(selector)
-  return withAwsHost(selector, aws => run(awsTarget(aws, signal, commands)))
+  return withAwsHost(selector, aws => run(awsTarget(aws, signal, commands), aws))
 }

@@ -7,6 +7,7 @@ import {
   convertAwsOptions,
   convertInstallationConfigureOptions,
   convertInstallationSelector,
+  convertReassignSelector,
 } from './input'
 import { configureHelp } from './terminal/help'
 import { Reporter, type ColorMode, type OutputStream } from './terminal/reporter'
@@ -25,6 +26,7 @@ import type {
   InstallationInput,
 } from './input'
 import type { CommanderError } from 'commander'
+import type { DeploymentSelector } from './aws/deployment/alias'
 import type { ConfigureOptions } from './commands/installation/configure'
 import type { InstallationSelector } from './installation/target/types'
 
@@ -38,6 +40,7 @@ export interface ProgramHandlers {
     status(selector: InstallationSelector, color: ColorMode): void | Promise<void>
     inspect(selector: InstallationSelector, color: ColorMode): void | Promise<void>
     configure(selector: InstallationSelector, options: ConfigureOptions, color: ColorMode): void | Promise<void>
+    reassign(selector: DeploymentSelector, color: ColorMode): void | Promise<void>
   }
   aws?: {
     connect(options: AwsCommandOptions, color: ColorMode): void | Promise<void>
@@ -76,7 +79,6 @@ function addSingleOption(command: Command, option: Option): void {
   })
 }
 
-/** The ID and the alias are alternatives. The converter rejects supplying both. */
 function addSelectorOptions(command: Command): void {
   addSingleOption(command, new Option('--id <deployment-id>', 'Select the deployment by the ID shown by list.'))
   addSingleOption(
@@ -85,11 +87,14 @@ function addSelectorOptions(command: Command): void {
   )
 }
 
-/** Installation targets have no default: the converter requires exactly one of these. */
-function addTargetOptions(command: Command): void {
-  addSingleOption(command, new Option('--local', 'Select the installation on this machine.'))
+function addDeploymentOptions(command: Command): void {
   addSingleOption(command, new Option('--id <deployment-id>', 'Select the AWS deployment by its immutable ID.'))
   addSingleOption(command, new Option('--alias <alias>', 'Select the AWS deployment by its local alias.'))
+}
+
+function addTargetOptions(command: Command): void {
+  addSingleOption(command, new Option('--local', 'Select the installation on this machine.'))
+  addDeploymentOptions(command)
 }
 
 function addInstallOptions(command: Command): void {
@@ -195,6 +200,18 @@ export function createProgram(handlers: ProgramHandlers, output: ProgramOutput):
     )
     return handlers.installation.configure(selector, options, program.opts<GlobalOptions>().color)
   })
+  const installationReassign = installation
+    .command('reassign')
+    .description('Validate an existing installation against a replacement AWS deployment that holds its retained volume and, after approval, record that deployment as its current host.')
+    .summary('Move the installation to a replacement host.')
+  addDeploymentOptions(installationReassign)
+  describeHelp(installationReassign, installationHelp.reassign)
+  installationReassign.action(() =>
+    handlers.installation.reassign(
+      convertReassignSelector(installationReassign.opts<AwsDeploymentInput>()),
+      program.opts<GlobalOptions>().color,
+    ),
+  )
   const awsHandlers = handlers.aws
   if (awsHandlers) {
     const aws = program

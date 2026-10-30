@@ -26,6 +26,7 @@ function validateSourceRoot(sourceRoot: string, retry: string): void {
 function expectedConfig(layout: Layout): IncusConfigMap {
   return {
     ...layout.orchestrator.limits,
+    ...layout.orchestrator.config,
     ...INSTALLER_SPEC.orchestrator.config,
   }
 }

@@ -20,7 +20,8 @@ export interface StoragePreflight extends IncusStoragePreflight {
 /**
  * The Incus-API half of the storage check, shared by every target: the layout's
  * pool must exist and be compatible, and an existing PostgreSQL volume must be
- * compatible.
+ * compatible. The pool's source is the layout's dataset when it names one, and
+ * otherwise the whole pool of the same name.
  */
 export async function validateIncusStorage(
   client: IncusClient,
@@ -28,6 +29,7 @@ export async function validateIncusStorage(
   retry: string,
 ): Promise<IncusStoragePreflight> {
   const poolName = layout.pool.name
+  const source = layout.pool.source ?? poolName
   let incusPool: IncusStoragePool | null
   try {
     incusPool = await client.getStoragePoolOrNull(poolName)
@@ -49,14 +51,14 @@ export async function validateIncusStorage(
     incusPool.name === poolName &&
     incusPool.driver === INSTALLER_SPEC.storage.driver &&
     incusPool.status === 'Created' &&
-    incusPool.config.source === poolName
+    incusPool.config.source === source
   if (!incusPoolCompatible) {
     throw new InstallerError({
       code: 'INCOMPATIBLE_INCUS_STORAGE_POOL',
       facts: [
         [
           'Observed',
-          `Incus reports driver='${incusPool.driver}', status='${incusPool.status || 'unknown'}', and source='${incusPool.config.source ?? 'unset'}'.`,
+          `Incus reports driver='${incusPool.driver}', status='${incusPool.status || 'unknown'}', and source='${incusPool.config.source ?? 'unset'}' (expected source '${source}').`,
         ],
       ],
       retry,

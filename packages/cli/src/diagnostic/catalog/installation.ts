@@ -122,12 +122,22 @@ export const installationDiagnostics = Object.freeze({
     'The source device requires a canonical absolute non-root path without unsupported characters.',
     'Select the canonical Qiln Git checkout root with --source.',
   ),
+  INSTALLATION_HOST_REGISTERED: entry(
+    '',
+    '',
+    '',
+  ),
   INSTALLATION_HOST_INSPECTION_FAILED: entry(
     'Target host inspection did not complete reliably',
     'Qiln runs one fixed read-only inspection script on the target and validates each section of its output before judging the host or its checkout. The displayed reason names what was missing, malformed, or out of range. The inspection changes nothing and runs without elevated privilege.',
     'Review the displayed reason.',
     'Confirm that the target is reachable and passes its baseline checks, then try again.',
     'Qiln does not retry or accept partial inspection output.',
+  ),
+  INSTALLATION_HOST_UNIDENTIFIED: entry(
+    'Local host identity is unavailable',
+    'Installation records are bound to this machine through an application-specific digest of /etc/machine-id. The identifier was unreadable or malformed. The binding is evidence of identity and not attestation, and the raw identifier is never retained or displayed.',
+    'Restore a readable, valid /etc/machine-id through normal host administration.',
   ),
   INSTALLATION_TARGET_CAPACITY: entry(
     'Target host has less memory than the installation limit',
@@ -140,22 +150,23 @@ export const installationDiagnostics = Object.freeze({
     'Credentials may be delivered only to an instance matching the persisted image identity.',
     'Re-run qiln installation configure for the same target to reconcile the selected image and installation state.',
   ),
-  INSTALLATION_HOST_UNIDENTIFIED: entry(
-    'Local host identity is unavailable',
-    'Installation records are bound to this machine through an application-specific digest of /etc/machine-id. The identifier was unreadable or malformed. The binding is evidence of identity and not attestation, and the raw identifier is never retained or displayed.',
-    'Restore a readable, valid /etc/machine-id through normal host administration.',
-  ),
   INSTALLATION_BINDING_MISMATCH: entry(
     'Installation record does not match this invocation',
-    'A retained installation record binds one host, architecture, layout, and checkout path. Qiln refuses a different one rather than rebinding, replacing, or migrating the record.',
+    'A retained installation record binds one current host, architecture, layout, and checkout path. Qiln refuses a different one rather than rebinding, replacing, or migrating the record. A later deployment of the same retained volume is handled by reassignment instead.',
     'Use the original host, source checkout, and layout, or review the retained state manually.',
     preservePostgresStep,
   ),
-  INSTALLATION_HOST_REGISTERED: entry(
-    'Another installation is already registered for this host',
-    'This release supports one installation per host, because the orchestrator instance name is fixed. Qiln never merges, renames, or replaces an existing installation record.',
-    'Use the installation that is already registered for this host.',
-    'Review and remove the other installation state manually only if it is obsolete.',
+  INSTALLATION_REASSIGNMENT_REQUIRED: entry(
+    'Installation is assigned to an earlier host',
+    'The installation record assigns this installation to an earlier deployment that held the same retained data volume. Qiln never rebinds a record implicitly, so nothing was created, changed, or moved. The assignment changes only through the separately approved reassignment, which validates the retained handoff, release, export, and identity evidence and the live target first.',
+    'Run qiln installation reassign for the selected deployment.',
+    'Until then, the installation remains assigned to its earlier deployment, whose host may already have been removed.',
+  ),
+  INSTALLATION_REASSIGNMENT_REFUSED: entry(
+    'Installation cannot be reassigned to this host',
+    'Reassignment needs a configured, settled AWS installation whose assigned host is an earlier deployment of the selected deployment’s volume chain. Every earlier deployment must have verifiably released Incus, exported the pool, been removed, and handed the volume on, and the selected deployment must hold the same Incus server identity, retained preseed, and ZFS pool. The recorded checkout must exist at the same path, and the live installation must already match, with the stopped orchestrator, the network, the PostgreSQL volume, and the instance credentials unchanged. Nothing was changed: no Incus resource, credential, image, or workload, and the installation record was not written. Reassignment never repairs or completes a configuration.',
+    'Review the displayed reason.',
+    'Resolve the cause through the preparation, removal, or configuration workflow of the deployment that owns it, then run reassign again.',
     preservePostgresStep,
   ),
   AWS_INSTALLATION_BINDING_REFUSED: entry(
@@ -194,7 +205,7 @@ export const installationDiagnostics = Object.freeze({
   ),
   INVALID_INSTALLATION_STATE: entry(
     'Installation state is invalid or incompatible',
-    'The record must match the supported schema exactly: version, name, project, instance name, host binding, architecture, layout digest, checkout path, and an image fingerprint that is absent or a full lowercase SHA-256. A permitted write changes only the image pin.',
+    'The record must match the supported schema exactly: version, name, project, instance name, current host, the history of earlier hosts of one retained volume, architecture, layout digest, checkout path, and an image fingerprint that is absent or a full lowercase SHA-256. A permitted write changes only the image pin or appends one host reassignment.',
     'Review the CLI version and inspect the installation record manually before recovery.',
     'Do not discard retained credentials or persistent data.',
   ),
@@ -216,13 +227,13 @@ export const installationDiagnostics = Object.freeze({
   ),
   INSTALLATION_UNRESOLVED: entry(
     'Installation has an unresolved step',
-    'A previous configuration step has an effect that is unknown. Qiln never replays, resumes, or clears it.',
+    'A previous configuration step has an effect that is unknown or not yet verified. Qiln never replays, resumes, or clears it.',
     'Inspect the Incus daemon, images, and network named in the diagnostic facts manually.',
     preservePostgresStep,
   ),
   INSTALLATION_EVIDENCE_INVALID: entry(
     'Installation evidence is invalid or incompatible',
-    'Configuration evidence must match its installation record, the approved plan shape, and its step and operation history. It is never repaired or rebound.',
+    'Configuration evidence must match its installation record, the approved plan shape, and its step and operation history, and every authorization must name the current host of the installation or one of its earlier hosts. It is never repaired or rebound.',
     'Review configure.json in the installation directory before any recovery.',
     preservePostgresStep,
   ),

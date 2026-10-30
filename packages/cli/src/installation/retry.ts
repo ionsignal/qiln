@@ -7,6 +7,7 @@ import type { InstallationSelector } from './target/types'
  */
 export interface Retry {
   inspect: string
+  reassign: string
   configure: string
   configureImage(image: string): string
 }
@@ -23,6 +24,7 @@ export function installationRetry(selector: InstallationSelector): Retry {
   const configure = `qiln installation configure ${flags} --source <checkout>`
   return Object.freeze({
     inspect: `qiln installation inspect ${flags}`,
+    reassign: `qiln installation reassign ${flags}`,
     configure: `${configure} (--image <alias-or-fingerprint> | --image-meta <incus.tar.xz> --image-rootfs <rootfs.squashfs>) [--authorized-keys <roster>]`,
     configureImage: (image: string) => `${configure} --image ${image} [--authorized-keys <roster>]`,
   })

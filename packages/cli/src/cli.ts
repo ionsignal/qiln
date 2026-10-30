@@ -99,6 +99,12 @@ export async function run(argumentsList: readonly string[]): Promise<number> {
             begin('installation', color, 'installation configure', 'stopped installation convergence'),
           )
         },
+        async reassign(selector, color) {
+          await installation.reassign(
+            selector,
+            begin('installation', color, 'installation reassign', 'approved host reassignment'),
+          )
+        },
       },
       aws: {
         async connect(options, color) {

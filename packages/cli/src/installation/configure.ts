@@ -169,7 +169,7 @@ export class Configurer {
 
   public static async open(context: ConfigureContext): Promise<Configurer> {
     const { directory, installation, retry } = context
-    const evidence = (await records.read(directory, installation, retry.inspect)) ?? records.blank(installation)
+    const evidence = (await records.read(directory, installation, retry.inspect)) ?? records.blank()
     requireNotStuck(evidence, installation.name, retry.inspect)
     return new Configurer(context, installation, evidence)
   }
@@ -310,6 +310,7 @@ export class Configurer {
       approvedBy: { method: 'local-interactive', userId: currentUserId() },
       recipe: { revision: RECIPE.revision, digest: RECIPE.digest },
       plan,
+      host: this.installation.host,
     }
     await this.persist({ authorizations: [...this.evidence.authorizations, authorization] })
     return authorization.id
