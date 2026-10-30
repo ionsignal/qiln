@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto'
 import { RECIPE } from '../../../host/zfs/recipe'
 import { ZFS_SPEC, type StepAction } from '../../../host/zfs/spec'
 import { InstallerError, type DiagnosticFact } from '../../../diagnostic/error'
@@ -15,14 +14,12 @@ import {
   type ZfsTarget,
 } from '../../../host/zfs/types'
 import { verify } from '../../../host/zfs/verify'
-import { checkCancellation } from '../../../terminal/prompts'
-import { userId } from '../../host'
-import { notify, withWaiting, type ProgressSink, type ProgressTask } from '../progress'
-import { poolState, prepared, requireNotStuck, returned, staged, zfsFacts } from './facts'
-import { actionsOf, establishesPool, type ZfsAuthorization, type ZfsRecord, type ZfsStep } from './types'
+import { poolState, prepared, requireNotStuck, staged, zfsFacts } from './facts'
+import { actionsOf, establishesPool, type ZfsRecord } from './types'
+import { StepJournal } from '../journal/steps'
 import * as deployments from '../records'
 import * as records from './records'
-import type { StepOutcome } from '../../../host/step'
+import type { ProgressSink } from '../progress'
 import type { Remote } from '../../../transport/ssh/connections'
 import type { Dir } from '../../../state/files'
 import type { Deployment } from '../types'
@@ -52,29 +49,10 @@ export interface Context {
   hooks: Hooks
 }
 
-function failure(
-  action: StepAction,
-  outcome: Exclude<StepOutcome, { kind: 'returned' }>,
-  retry: string,
-): InstallerError {
-  if (outcome.cause?.kind === 'cancelled') {
-    return outcome.cause
-  }
-  return new InstallerError({
-    code: 'ZFS_STEP_FAILED',
-    facts: [
-      ['Step', action],
-      [
-        'Outcome',
-        outcome.kind === 'refused'
-          ? 'refused; the step had no effect'
-          : 'uncertain; the step may have run partly or fully',
-      ],
-      ['Reason', outcome.reason],
-      ...(outcome.cause?.facts ?? []),
-    ],
-    retry,
-  })
+type ZfsJournal = StepJournal<ZfsRecord, ApprovedPlan, StepAction>
+
+function retryOf(deployment: Deployment): string {
+  return `qiln aws deployment prepare --id ${deployment.id}`
 }
 
 /**
@@ -89,25 +67,35 @@ function failure(
 export class ZfsPreparer {
   private constructor(
     private readonly context: Context,
-    private readonly directory: Dir,
-    private evidence: ZfsRecord,
+    private readonly journal: ZfsJournal,
   ) {}
 
   public static async open(context: Context): Promise<ZfsPreparer> {
-    const { root, deployment } = context
+    const { root, deployment, remote, hooks } = context
     const directory = await deployments.directoryOf(root, deployment.id)
-    const evidence = (await records.read(directory, deployment)) ?? records.blank(deployment)
-    if (evidence === null) {
+    const record = (await records.read(directory, deployment)) ?? records.blank(deployment)
+    if (record === null) {
       throw new InstallerError({
         code: 'INTERNAL_ERROR',
       })
     }
-    requireNotStuck(evidence, deployment.id)
-    return new ZfsPreparer(context, directory, evidence)
+    requireNotStuck(record, deployment.id)
+    const journal: ZfsJournal = new StepJournal({
+      record,
+      save: next => records.save(root, directory, deployment, next),
+      recipe: RECIPE,
+      failureCode: 'ZFS_STEP_FAILED',
+      retry: retryOf(deployment),
+      task: action => ({ kind: 'zfs', action }),
+      run: (plan, action) => apply(remote, plan, action),
+      approve: plan => hooks.approve(plan),
+      progress: hooks.progress,
+    })
+    return new ZfsPreparer(context, journal)
   }
 
   private get retry(): string {
-    return `qiln aws deployment prepare --id ${this.context.deployment.id}`
+    return retryOf(this.context.deployment)
   }
 
   /**
@@ -115,7 +103,8 @@ export class ZfsPreparer {
    * open time, so it wins once a create or import step has been verified.
    */
   private recorded(): RecordedPool | null {
-    const { pool } = this.evidence
+    const record = this.journal.record
+    const { pool } = record
     const { deployment, recorded } = this.context
     return pool === null
       ? recorded
@@ -124,8 +113,8 @@ export class ZfsPreparer {
           guid: pool.guid,
           datasets: pool.datasets,
           deployment: deployment.id,
-          staged: staged(this.evidence),
-          ready: prepared(this.evidence),
+          staged: staged(record),
+          ready: prepared(record),
         }
   }
 
@@ -173,7 +162,7 @@ export class ZfsPreparer {
         case 'create':
         case 'import':
         case 'mount': {
-          const authorization = await this.authorize(plan)
+          const authorization = await this.journal.authorize(plan)
           for (const action of actionsOf(plan)) {
             observation = await this.step(authorization, plan, action, signal)
             applied += 1
@@ -216,7 +205,7 @@ export class ZfsPreparer {
         retry: this.retry,
       })
     }
-    const plan = releasePlanOf(observation, target, recorded, poolState(this.evidence) === 'exported')
+    const plan = releasePlanOf(observation, target, recorded, poolState(this.journal.record) === 'exported')
     hooks.show(observation, plan)
     switch (plan.kind) {
       case 'refused':
@@ -228,7 +217,7 @@ export class ZfsPreparer {
       case 'absent':
         return
       case 'export': {
-        const authorization = await this.authorize(plan)
+        const authorization = await this.journal.authorize(plan)
         for (const action of actionsOf(plan)) {
           await this.step(authorization, plan, action, signal)
         }
@@ -251,85 +240,8 @@ export class ZfsPreparer {
     return await inspectHost(this.context.remote, pool, packages)
   }
 
-  private async persist(changes: Partial<ZfsRecord>): Promise<void> {
-    const next = { ...this.evidence, ...changes }
-    await records.save(this.context.root, this.directory, this.context.deployment, next)
-    this.evidence = next
-  }
-
-  private async amend(change: Partial<ZfsStep>, pool?: ZfsRecord['pool']): Promise<void> {
-    const { steps } = this.evidence
-    await this.persist({
-      steps: [...steps.slice(0, -1), { ...steps[steps.length - 1], ...change }],
-      ...(pool === undefined ? {} : { pool }),
-    })
-  }
-
-  private async authorize(plan: ApprovedPlan): Promise<string> {
-    await this.context.hooks.approve(plan)
-    const authorization: ZfsAuthorization = {
-      id: randomUUID(),
-      approvedAt: new Date().toISOString(),
-      approvedBy: { method: 'local-interactive', userId: userId() },
-      recipe: { revision: RECIPE.revision, digest: RECIPE.digest },
-      plan,
-    }
-    await this.persist({ authorizations: [...this.evidence.authorizations, authorization] })
-    return authorization.id
-  }
-
-  private async step(
-    authorization: string,
-    plan: ApprovedPlan,
-    action: StepAction,
-    signal: AbortSignal,
-  ): Promise<Observation> {
-    const { remote, hooks } = this.context
-    checkCancellation(signal)
-    const task: ProgressTask = { kind: 'zfs', action }
-    notify(hooks.progress, { phase: 'working', task })
-    await this.persist({
-      steps: [
-        ...this.evidence.steps,
-        {
-          id: randomUUID(),
-          authorization,
-          action,
-          fencedAt: new Date().toISOString(),
-          completion: null,
-          refusedAt: null,
-          verifiedAt: null,
-        },
-      ],
-    })
-    const observation = await withWaiting(hooks.progress, task, async () => {
-      await this.conclude(action, await apply(remote, plan, action))
-      return await this.verified(plan, action)
-    })
-    notify(hooks.progress, { phase: 'verified', task })
-    return observation
-  }
-
-  /**
-   * Records what the script reported. A refusal or an unconfirmed outcome is
-   * recorded and then thrown, so cancellation is classified before it
-   * propagates. A step with no exit status stays open, which is uncertain.
-   */
-  private async conclude(action: StepAction, outcome: StepOutcome): Promise<void> {
-    const at = new Date().toISOString()
-    switch (outcome.kind) {
-      case 'returned':
-        await this.amend({ completion: { exitCode: 0, completedAt: at } })
-        return
-      case 'refused':
-        await this.amend({ refusedAt: at })
-        throw failure(action, outcome, this.retry)
-      case 'uncertain':
-        if (outcome.exitCode !== null) {
-          await this.amend({ completion: { exitCode: outcome.exitCode, completedAt: at } })
-        }
-        throw failure(action, outcome, this.retry)
-    }
+  private step(authorization: string, plan: ApprovedPlan, action: StepAction, signal: AbortSignal): Promise<Observation> {
+    return this.journal.step(authorization, plan, action, signal, () => this.verified(plan, action))
   }
 
   /**
@@ -339,35 +251,32 @@ export class ZfsPreparer {
    * the dataset and scrub steps of that pool must still find.
    */
   private async verified(plan: ApprovedPlan, action: StepAction): Promise<Observation> {
+    const record = this.journal.record
     const observation = await this.inspect(plan)
-    if (!verify(action, plan, observation, this.evidence.pool)) {
+    if (!verify(action, plan, observation, record.pool)) {
       throw new InstallerError({
         code: 'ZFS_PREPARATION_UNRESOLVED',
-        facts: [['Deployment', this.context.deployment.id], ...zfsFacts(this.evidence)],
+        facts: [['Deployment', this.context.deployment.id], ...zfsFacts(record)],
         retry: this.retry,
       })
     }
-    await this.amend({ verifiedAt: new Date().toISOString() }, this.poolEvidence(plan, action, observation))
+    await this.journal.amend({ verifiedAt: new Date().toISOString() }, this.poolEvidence(plan, action, observation))
     return observation
   }
 
-  private poolEvidence(
-    plan: ApprovedPlan,
-    action: StepAction,
-    observation: Observation,
-  ): NonNullable<ZfsRecord['pool']> | undefined {
+  private poolEvidence(plan: ApprovedPlan, action: StepAction, observation: Observation): Partial<ZfsRecord> {
     if (action === 'create-datasets') {
-      const { pool } = this.evidence
+      const { pool } = this.journal.record
       const datasets = plan.kind === 'create' ? readLayout(observation, plan.pool) : null
       if (pool === null || datasets === null) {
         throw new InstallerError({
           code: 'INTERNAL_ERROR',
         })
       }
-      return { ...pool, datasets }
+      return { pool: { ...pool, datasets } }
     }
     if (!establishesPool(action)) {
-      return undefined
+      return {}
     }
     if (plan.kind !== 'create' && plan.kind !== 'import') {
       throw new InstallerError({
@@ -381,12 +290,14 @@ export class ZfsPreparer {
       })
     }
     return {
-      name: plan.pool,
-      guid,
-      volumeId: plan.disk.volumeId,
-      layout: ZFS_SPEC.layout.revision,
-      datasets: plan.kind === 'import' ? plan.datasets : null,
-      observedAt: observation.observedAt,
+      pool: {
+        name: plan.pool,
+        guid,
+        volumeId: plan.disk.volumeId,
+        layout: ZFS_SPEC.layout.revision,
+        datasets: plan.kind === 'import' ? plan.datasets : null,
+        observedAt: observation.observedAt,
+      },
     }
   }
 
@@ -394,18 +305,7 @@ export class ZfsPreparer {
    * A step that exited zero but was never verified is accounting work, not
    * replay: only a fresh inspection is needed.
    */
-  private async settleReturned(): Promise<Observation | null> {
-    const pending = returned(this.evidence).at(-1)
-    if (pending === undefined) {
-      return null
-    }
-    const plan = this.evidence.authorizations.find(({ id }) => id === pending.authorization)?.plan
-    if (plan === undefined) {
-      throw new InstallerError({
-        code: 'INTERNAL_ERROR',
-        retry: this.retry,
-      })
-    }
-    return await this.verified(plan, pending.action)
+  private settleReturned(): Promise<Observation | null> {
+    return this.journal.settle((plan, action) => this.verified(plan, action))
   }
 }
