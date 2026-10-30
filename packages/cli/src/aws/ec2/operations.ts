@@ -13,8 +13,8 @@ import { expectation, matches } from '../deployment/expect'
 import { readPublicKey, type PublicKeyReader } from '../ssh/store'
 import { authorizeDeployment, authorizePreparation, notAttempted, type Credentials } from './context'
 import {
+  acknowledgmentFor,
   childDeadlineMs,
-  isAcknowledgment,
   type DeploymentRequest,
   type Evidence,
   type Request,
@@ -23,9 +23,10 @@ import {
 import type { Deployment } from '../deployment/types'
 
 function retain(evidence: Evidence, signal: AbortSignal): Promise<void> {
+  const acknowledgment = acknowledgmentFor(evidence)
   return sendEvidence(
     evidence,
-    message => isAcknowledgment(message, evidence),
+    message => acknowledgment.safeParse(message).success,
     signal,
     'AWS_DEPLOYMENT_EVIDENCE_UNAVAILABLE',
   )

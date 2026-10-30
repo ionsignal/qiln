@@ -1,9 +1,9 @@
+import { FAILURES, requestSchema } from './protocol'
 import { GetCallerIdentityCommand, STSClient } from '@aws-sdk/client-sts'
 import { configuration, credentials, expiresAt } from './credentials'
 import { classifier } from '../child/classify'
 import { serveChild } from '../child/serve'
 import { verifyIdentity } from './identity'
-import { FAILURES, isRequest } from './protocol'
 import { AWS_SPEC } from '../spec'
 import type { AwsAuthentication } from '../types'
 
@@ -31,7 +31,7 @@ async function authenticate(region: string): Promise<AwsAuthentication> {
 }
 
 serveChild({
-  isRequest,
+  requestSchema,
   execute: request => authenticate(request.region),
   classify: classifier(FAILURES),
   invalidRequest: 'AWS_PROFILE_INVALID',

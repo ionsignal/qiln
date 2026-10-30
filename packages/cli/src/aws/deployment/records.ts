@@ -4,11 +4,12 @@ import { isConsistent } from './audit'
 import { vacated } from './facts'
 import { reusable } from './reuse'
 import { requireTransition } from './transitions'
-import { isDeployment, type Deployment } from './types'
+import { deploymentSchema, type Deployment } from './types'
 import { notFound, type DeploymentSelector } from './alias'
 import { stateFailure } from '../errors'
 import { userId } from '../host'
 import { encodeRecord } from '../../json'
+import { accept } from '../primitives'
 import { requireOperationLock } from '../root'
 import { sameIdentity } from '../auth/identity'
 import { requireStorageReleased } from './incus/facts'
@@ -34,10 +35,11 @@ function ownership() {
 }
 
 export function parse(value: unknown): Deployment {
-  if (!isDeployment(value) || !isConsistent(value)) {
+  const record = accept(deploymentSchema, value)
+  if (record === null || !isConsistent(record)) {
     return invalid()
   }
-  return value
+  return record
 }
 
 async function optional(open: () => Promise<Dir>, create: boolean): Promise<Dir | null> {

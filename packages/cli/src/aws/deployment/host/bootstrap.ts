@@ -30,7 +30,7 @@ const CLOUD_CONFIG =
 
 const SHA256 = createHash('sha256').update(CLOUD_CONFIG, 'utf8').digest('hex')
 
-const schema = z.strictObject({
+export const bootstrapSchema = z.strictObject({
   user: z.literal(USER),
   cloudConfig: z.literal(CLOUD_CONFIG),
   sha256: z.literal(SHA256),
@@ -40,11 +40,7 @@ const schema = z.strictObject({
  * The exact approved UTF-8 text, the administrator account it creates, and the
  * digest of those bytes.
  */
-export interface Bootstrap {
-  user: string
-  cloudConfig: string
-  sha256: string
-}
+export type Bootstrap = z.infer<typeof bootstrapSchema>
 
 export function bootstrapOf(): Bootstrap {
   return {
@@ -52,8 +48,4 @@ export function bootstrapOf(): Bootstrap {
     cloudConfig: CLOUD_CONFIG,
     sha256: SHA256,
   }
-}
-
-export function isBootstrap(value: unknown): value is Bootstrap {
-  return schema.safeParse(value).success
 }

@@ -7,15 +7,25 @@ import { isPolicy, isSnapshots, policyArn, type PolicyIdentity, type PolicySnaps
 import { isEvidence, type PermissionEvidence, type PermissionSpec } from '../permission/spec'
 import { AWS_RECORD_VERSION } from '../spec'
 import {
+  identitySchema,
   isAccountId,
-  isIdentity,
-  isPermissionMetadata,
+  permissionMetadataSchema,
   validName,
   validRegion,
   type AwsIdentity,
   type PermissionMetadata,
 } from '../types'
 import { isReview } from './policy'
+
+// Phase 1b converts this file. Until then these adapt the shared schemas to the
+// narrowing that the guards below rely on.
+function isIdentity(value: unknown): value is AwsIdentity {
+  return identitySchema.safeParse(value).success
+}
+
+function isPermissionMetadata(value: unknown): value is PermissionMetadata {
+  return permissionMetadataSchema.safeParse(value).success
+}
 
 export interface Target {
   accountId: string

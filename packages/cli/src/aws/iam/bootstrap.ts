@@ -1,4 +1,7 @@
 import { randomUUID } from 'node:crypto'
+import { AWS_SPEC } from '../spec'
+import { POLICY_KEYS, policyMap, type PolicyKey } from '../permission/keys'
+import { POLICY_LIMITS, isPolicy, policyArn, type PolicyIdentity } from '../permission/policy'
 import { InstallerError, type DiagnosticFact } from '../../diagnostic/error'
 import { openChildDir, type Dir } from '../../state/files'
 import { checkCancellation } from '../../terminal/prompts'
@@ -8,19 +11,15 @@ import { login, type AwsCli } from '../auth/login'
 import { Session } from '../auth/session'
 import { diagnostic } from '../errors'
 import { iamRecovery, originalCode, terminationConfirmed, type RecoveryOutcomes } from '../recovery'
-import { POLICY_KEYS, policyMap, type PolicyKey } from '../permission/keys'
-import { POLICY_LIMITS, isPolicy, policyArn, type PolicyIdentity } from '../permission/policy'
 import { isSpec, reconciliation, specification } from '../permission/spec'
 import { canonical, sameJson } from '../../json'
 import { operatorArn } from '../operator'
-import { AWS_SPEC } from '../spec'
 import { userId } from '../host'
-import type { AwsAuthentication, AwsConnection, LoginFlow } from '../types'
 import { pendingFacts } from './facts'
+import { isPasswordEvidence, type PasswordAcknowledgment, type PasswordEvidence } from './password'
+import { replySchema, type Action, type Request, type Result } from './protocol'
 import * as journal from './journal'
 import * as lifecycle from './lifecycle'
-import { isPasswordEvidence, type PasswordAcknowledgment, type PasswordEvidence } from './password'
-import { isReply, type Action, type Request, type Result } from './protocol'
 import * as transitions from './transitions'
 import {
   isInspection,
@@ -32,6 +31,7 @@ import {
   type Proposal,
   type Readiness,
 } from './types'
+import type { AwsAuthentication, AwsConnection, LoginFlow } from '../types'
 
 function emitProgress(onProgress: ((event: MutationProgress) => void) | undefined, event: MutationProgress): void {
   try {
@@ -186,7 +186,7 @@ export class Bootstrap {
       AWS_SPEC.children.iam,
       this.credentialEnvironment(),
       input,
-      isReply,
+      replySchema,
       signal,
       {
         timeoutMs: AWS_SPEC.iam.requestTimeoutMs,

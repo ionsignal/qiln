@@ -1,6 +1,7 @@
 import { expectation, matches, type Expected } from '../../deployment/expect'
-import { isObservation, type Deployment, type Observation } from '../../deployment/types'
+import { observationsSchema, type Deployment, type Observation } from '../../deployment/types'
 import { poll } from '../../observe'
+import { accept } from '../../primitives'
 import { AWS_SPEC } from '../../spec'
 import { hostCandidates, observeHost } from './host'
 import { networkCandidates, observeNetwork } from './network'
@@ -50,10 +51,10 @@ export async function observe(ec2: Ec2, record: Deployment, wait: boolean): Prom
 
 export async function candidates(ec2: Ec2, record: Deployment): Promise<Observation[]> {
   const found = [...(await networkCandidates(ec2, record)), ...(await hostCandidates(ec2, record))]
-  const observations: unknown[] = found.map(candidate => ({
+  const observations = found.map(candidate => ({
     observedAt: new Date().toISOString(),
     resources: [candidate],
     implicit: null,
   }))
-  return observations.every(isObservation) ? observations : unverified()
+  return accept(observationsSchema, observations) ?? unverified()
 }

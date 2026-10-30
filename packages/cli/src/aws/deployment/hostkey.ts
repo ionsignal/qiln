@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { KIND_IDS } from './graph'
-import { isTimestamp } from '../../guards'
+import { timestamp } from '../../journal/step'
 import { isFingerprint } from '../../transport/ssh/key'
 
 /**
@@ -17,12 +17,8 @@ export const hostKeySchema = z.strictObject({
   algorithm: z.literal('ed25519'),
   fingerprint: z.string().refine(isFingerprint, 'Expected an unpadded SHA-256 fingerprint.'),
   source: z.literal('ec2-console'),
-  consoleAt: z.string().refine(isTimestamp, 'Expected a canonical timestamp.'),
-  observedAt: z.string().refine(isTimestamp, 'Expected a canonical timestamp.'),
+  consoleAt: timestamp,
+  observedAt: timestamp,
 })
 
 export type HostKey = z.infer<typeof hostKeySchema>
-
-export function isHostKey(value: unknown): value is HostKey {
-  return hostKeySchema.safeParse(value).success
-}

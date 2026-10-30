@@ -1,10 +1,10 @@
+import { FAILURES, requestSchema } from './protocol'
 import { classifier, rejected, uncertain } from '../child/classify'
 import { serveChild } from '../child/serve'
 import { execute } from './operations'
-import { FAILURES, isRequest } from './protocol'
 
 serveChild({
-  isRequest,
+  requestSchema,
   execute,
   classify: classifier(FAILURES, {
     EntityAlreadyExistsException: rejected('AWS_BOOTSTRAP_CONFLICT'),

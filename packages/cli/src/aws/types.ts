@@ -1,75 +1,15 @@
+import { z } from 'zod'
 import { AWS_RECORD_VERSION } from './spec'
-import { hasKeys, isOperationId, isRecord, isTimestamp } from '../guards'
-import {
-  POLICY_KEYS,
-  POLICY_PATH,
-  bindingEntries,
-  enrolledKeys,
-  isPolicyKey,
-  type PolicyBindings,
-} from './permission/keys'
+import { operationId, timestamp } from '../journal/step'
+import { POLICY_PATH, bindingEntries, enrolledKeys, type PolicyKey } from './permission/keys'
 
 export type LoginFlow = 'browser' | 'remote'
-
-export interface AwsIdentity {
-  accountId: string
-  arn: string
-  userId: string
-}
-
-export interface AwsAuthentication {
-  identity: AwsIdentity
-  expiresAt: string
-}
-
-export interface PolicyBinding {
-  arn: string
-  id: string
-}
-
-export interface PolicyVerification {
-  policyVersion: string
-  sha256: string
-}
-
-/**
- * `sha256` is the digest of the complete verified set. Each policy keeps its own
- * verified default version and document digest beside it. Keys added after a
- * verification are absent until a later verification enrolls them.
- */
-export interface PermissionMetadata {
-  version: number
-  sha256: string
-  policies: PolicyBindings<PolicyVerification>
-  verifiedAt: string
-}
-
-/**
- * `deploymentRegion` is the immutable concrete deployment target. It is
- * independent of the editable login default in `AwsConnection.region`.
- */
-export interface ManagedOperator {
-  creationId: string
-  deploymentRegion: string
-  policies: PolicyBindings<PolicyBinding>
-  verified: PermissionMetadata
-}
-
-export interface AwsConnection {
-  version: typeof AWS_RECORD_VERSION.connection
-  name: string
-  region: string
-  identity: AwsIdentity
-  createdAt: string
-  managed: ManagedOperator | null
-}
 
 export function validName(value: string): boolean {
   return /^[a-z0-9][a-z0-9_-]{0,47}$/.test(value)
 }
 
 export function validRegion(value: string): boolean {
-  // This batch intentionally excludes non-commercial AWS partitions.
   return /^(af|ap|ca|eu|il|me|mx|sa|us)-[a-z]+-[1-9][0-9]*$/.test(value)
 }
 
@@ -77,121 +17,115 @@ export function isAccountId(value: unknown): value is string {
   return typeof value === 'string' && /^[0-9]{12}$/.test(value)
 }
 
-export function isIdentity(value: unknown): value is AwsIdentity {
-  if (
-    !isRecord(value) ||
-    !hasKeys(value, ['accountId', 'arn', 'userId']) ||
-    !isAccountId(value.accountId) ||
-    typeof value.arn !== 'string' ||
-    typeof value.userId !== 'string' ||
-    !/^[A-Za-z0-9]{1,128}$/.test(value.userId)
-  ) {
-    return false
-  }
-  const arn = /^arn:aws:iam::([0-9]{12}):user\/[A-Za-z0-9+=,.@_/-]+$/.exec(value.arn)
-  return arn?.[1] === value.accountId
-}
+/**
+ * Identity inputs abort further validation, so cross-field refinements that
+ * derive ARNs from them never run on an invalid account or name.
+ */
+export const accountIdSchema = z.string().refine(isAccountId, { message: 'Expected an account ID.', abort: true })
+export const nameSchema = z.string().refine(validName, { message: 'Expected a name.', abort: true })
+export const regionSchema = z.string().refine(validRegion, 'Expected a region.')
 
-export function isAuthentication(value: unknown): value is AwsAuthentication {
-  return (
-    isRecord(value) &&
-    hasKeys(value, ['identity', 'expiresAt']) &&
-    isIdentity(value.identity) &&
-    isTimestamp(value.expiresAt)
+export const identitySchema = z
+  .strictObject({
+    accountId: accountIdSchema,
+    arn: z.string(),
+    userId: z.string().regex(/^[A-Za-z0-9]{1,128}$/),
+  })
+  .refine(
+    ({ accountId, arn }) => /^arn:aws:iam::([0-9]{12}):user\/[A-Za-z0-9+=,.@_/-]+$/.exec(arn)?.[1] === accountId,
+    'Expected a user ARN in the account.',
   )
-}
 
-export function isPolicyBinding(value: unknown): value is PolicyBinding {
-  return (
-    isRecord(value) &&
-    hasKeys(value, ['arn', 'id']) &&
-    typeof value.arn === 'string' &&
-    /^arn:aws:iam::[0-9]{12}:policy\/[A-Za-z0-9+=,.@_/-]+$/.test(value.arn) &&
-    typeof value.id === 'string' &&
-    /^[A-Za-z0-9]{1,128}$/.test(value.id)
-  )
-}
+export const authenticationSchema = z.strictObject({
+  identity: identitySchema,
+  expiresAt: timestamp,
+})
 
-function isPolicyVerification(value: unknown): value is PolicyVerification {
-  return (
-    isRecord(value) &&
-    hasKeys(value, ['policyVersion', 'sha256']) &&
-    typeof value.policyVersion === 'string' &&
-    /^v[1-9][0-9]{0,9}$/.test(value.policyVersion) &&
-    typeof value.sha256 === 'string' &&
-    /^[a-f0-9]{64}$/.test(value.sha256)
-  )
-}
+export const policyBindingSchema = z.strictObject({
+  arn: z.string().regex(/^arn:aws:iam::[0-9]{12}:policy\/[A-Za-z0-9+=,.@_/-]+$/),
+  id: z.string().regex(/^[A-Za-z0-9]{1,128}$/),
+})
+
+const policyVerificationSchema = z.strictObject({
+  policyVersion: z.string().regex(/^v[1-9][0-9]{0,9}$/),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+})
 
 /**
  * Durable records tolerate key-set growth: `foundation` is required, and any
  * other present key must be a known one.
  */
-function isBindings<T>(value: unknown, isEntry: (entry: unknown) => entry is T): value is PolicyBindings<T> {
-  return (
-    isRecord(value) &&
-    Object.keys(value).every(key => isPolicyKey(key)) &&
-    isEntry(value.foundation) &&
-    POLICY_KEYS.every(key => !Object.hasOwn(value, key) || isEntry(value[key]))
-  )
+function policyBindingsSchemaOf<Entry extends z.ZodType>(entry: Entry) {
+  return z.strictObject({
+    foundation: entry,
+    compute: entry.optional(),
+  } satisfies Record<PolicyKey, z.ZodType>)
 }
 
 /**
  * Last verification remains readable when permission requirements or tooling
  * pins change. It is metadata, not a reconstruction of historical authority.
  */
-export function isPermissionMetadata(value: unknown): value is PermissionMetadata {
-  return (
-    isRecord(value) &&
-    hasKeys(value, ['version', 'sha256', 'policies', 'verifiedAt']) &&
-    typeof value.version === 'number' &&
-    Number.isSafeInteger(value.version) &&
-    value.version >= 1 &&
-    typeof value.sha256 === 'string' &&
-    /^[a-f0-9]{64}$/.test(value.sha256) &&
-    isBindings(value.policies, isPolicyVerification) &&
-    isTimestamp(value.verifiedAt)
-  )
-}
+export const permissionMetadataSchema = z.strictObject({
+  version: z.int().min(1),
+  sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  policies: policyBindingsSchemaOf(policyVerificationSchema),
+  verifiedAt: timestamp,
+})
 
-export function isManagedOperator(value: unknown): value is ManagedOperator {
-  return (
-    isRecord(value) &&
-    hasKeys(value, ['creationId', 'deploymentRegion', 'policies', 'verified']) &&
-    isOperationId(value.creationId) &&
-    typeof value.deploymentRegion === 'string' &&
-    validRegion(value.deploymentRegion) &&
-    isBindings(value.policies, isPolicyBinding) &&
-    isPermissionMetadata(value.verified) &&
-    enrolledKeys(value.policies).join() === enrolledKeys(value.verified.policies).join()
+export const managedOperatorSchema = z
+  .strictObject({
+    creationId: operationId,
+    deploymentRegion: regionSchema,
+    policies: policyBindingsSchemaOf(policyBindingSchema),
+    verified: permissionMetadataSchema,
+  })
+  .refine(
+    ({ policies, verified }) => enrolledKeys(policies).join() === enrolledKeys(verified.policies).join(),
+    'Expected the verification to cover the enrolled policies.',
   )
-}
 
-export function isConnection(value: unknown): value is AwsConnection {
-  if (
-    !isRecord(value) ||
-    !hasKeys(value, ['version', 'name', 'region', 'identity', 'createdAt', 'managed']) ||
-    value.version !== AWS_RECORD_VERSION.connection ||
-    typeof value.name !== 'string' ||
-    !validName(value.name) ||
-    typeof value.region !== 'string' ||
-    !validRegion(value.region) ||
-    !isIdentity(value.identity) ||
-    !isTimestamp(value.createdAt) ||
-    (value.managed !== null && !isManagedOperator(value.managed))
-  ) {
-    return false
-  }
-  if (value.managed === null) {
-    return true
-  }
-  const managed = value.managed
-  const accountId = value.identity.accountId
-  const operatorName = `qiln-${value.name}`
-  return (
-    value.identity.arn === `arn:aws:iam::${accountId}:user/qiln/operators/${operatorName}` &&
-    bindingEntries(managed.policies).every(
-      ([key, policy]) => policy.arn === `arn:aws:iam::${accountId}:policy${POLICY_PATH}${operatorName}-${key}`,
+/**
+ * The ARN checks apply only to managed connections, so an unmanaged connection
+ * keeps its identity unchecked here.
+ */
+export const connectionSchema = z
+  .strictObject({
+    version: z.literal(AWS_RECORD_VERSION.connection),
+    name: nameSchema,
+    region: regionSchema,
+    identity: identitySchema,
+    createdAt: timestamp,
+    managed: managedOperatorSchema.nullable(),
+  })
+  .refine(({ name, identity, managed }) => {
+    if (managed === null) {
+      return true
+    }
+    const operatorName = `qiln-${name}`
+    return (
+      identity.arn === `arn:aws:iam::${identity.accountId}:user/qiln/operators/${operatorName}` &&
+      bindingEntries(managed.policies).every(
+        ([key, policy]) => policy.arn === `arn:aws:iam::${identity.accountId}:policy${POLICY_PATH}${operatorName}-${key}`,
+      )
     )
-  )
-}
+  }, 'Expected Qiln-owned operator and policy ARNs.')
+
+export type AwsIdentity = z.infer<typeof identitySchema>
+export type AwsAuthentication = z.infer<typeof authenticationSchema>
+export type PolicyBinding = z.infer<typeof policyBindingSchema>
+export type PolicyVerification = z.infer<typeof policyVerificationSchema>
+
+/**
+ * `sha256` is the digest of the complete verified set. Each policy keeps its own
+ * verified default version and document digest beside it. Keys added after a
+ * verification are absent until a later verification enrolls them.
+ */
+export type PermissionMetadata = z.infer<typeof permissionMetadataSchema>
+
+/**
+ * `deploymentRegion` is the immutable concrete deployment target. It is
+ * independent of the editable login default in `AwsConnection.region`.
+ */
+export type ManagedOperator = z.infer<typeof managedOperatorSchema>
+export type AwsConnection = z.infer<typeof connectionSchema>

@@ -1,5 +1,6 @@
+import { z } from 'zod'
 import { InstallerError } from '../diagnostic/error'
-import { isAccountId } from './types'
+import { accountIdSchema } from './types'
 
 const IMAGE_ID = /^ami-[0-9a-f]{8,17}$/
 const SNAPSHOT_ID = /^snap-[0-9a-f]{8,17}$/
@@ -25,10 +26,12 @@ const PACKAGE_ARCHITECTURES: Readonly<Record<string, string>> = Object.freeze({
   arm64: 'arm64',
 })
 
-export interface ImagePin {
-  imageId: string
-  ownerId: string
-}
+export const imagePinSchema = z.strictObject({
+  imageId: z.string().refine(isImageId, 'Expected an image ID.'),
+  ownerId: accountIdSchema,
+})
+
+export type ImagePin = z.infer<typeof imagePinSchema>
 
 export function isImageId(value: unknown): value is string {
   return typeof value === 'string' && IMAGE_ID.test(value)
@@ -47,7 +50,7 @@ export function findPin(region: string): ImagePin | null {
   if (pin === undefined) {
     return null
   }
-  if (!isImageId(pin.imageId) || !isAccountId(pin.ownerId)) {
+  if (!imagePinSchema.safeParse(pin).success) {
     throw new InstallerError({
       code: 'INTERNAL_ERROR',
     })

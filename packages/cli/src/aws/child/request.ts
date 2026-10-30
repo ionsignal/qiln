@@ -1,6 +1,8 @@
 import { fork } from 'node:child_process'
+import type { z } from 'zod'
 import { checkCancellation } from '../../terminal/prompts'
 import { executionFailure } from '../errors'
+import { accept } from '../primitives'
 import { AWS_SPEC } from '../spec'
 import { interruptedBySignal, SupervisedProcessError, supervise } from './supervise'
 
@@ -22,16 +24,16 @@ function cancelledAfterClose(error: unknown): boolean {
 
 /**
  * Only the password request inherits terminal output. All other child output is
- * discarded, and every IPC reply must satisfy its caller's allowlist.
+ * discarded, and every IPC reply must satisfy its caller's schema.
  */
-export async function request<T>(
+export async function request<S extends z.ZodType>(
   entry: string,
   environment: NodeJS.ProcessEnv,
   input: object,
-  validate: (message: unknown) => message is T,
+  schema: S,
   signal: AbortSignal,
   options: ChildOptions = {},
-): Promise<T> {
+): Promise<z.output<S>> {
   checkCancellation(signal)
   try {
     const child = fork(new URL(entry, import.meta.url), [], {
@@ -42,7 +44,7 @@ export async function request<T>(
       serialization: 'json',
       stdio: ['ignore', options.terminal ? 'inherit' : 'ignore', 'ignore', 'ipc'],
     })
-    let result: T | undefined
+    let result: z.output<S> | undefined
     let evidenceSeen = false
     let retaining = false
     let evidenceWork: Promise<void> | undefined
@@ -67,8 +69,9 @@ export async function request<T>(
           if (result !== undefined || retaining) {
             return false
           }
-          if (validate(message)) {
-            result = message
+          const reply = accept(schema, message)
+          if (reply !== null) {
+            result = reply
             return true
           }
           const evidence = options.evidence

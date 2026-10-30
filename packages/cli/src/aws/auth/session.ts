@@ -1,13 +1,13 @@
 import { rm } from 'node:fs/promises'
 import { join } from 'node:path'
+import { AWS_SPEC } from '../spec'
 import { InstallerError } from '../../diagnostic/error'
 import { inspectChild, openChildDir, writeChild, type Dir } from '../../state/files'
 import { isErrorCode } from '../../guards'
-import { AWS_SPEC } from '../spec'
 import { userId } from '../host'
 import { validRegion, type AwsAuthentication } from '../types'
 import { request } from '../child/request'
-import { isReply, type Request } from './protocol'
+import { replySchema, type Request } from './protocol'
 
 /**
  * Browser sign-in needs the operator's desktop context, not AWS credentials,
@@ -196,7 +196,7 @@ export class Session {
       kind: 'identity',
       region: this.region,
     }
-    const reply = await request(AWS_SPEC.children.auth, this.credentialEnvironment(), input, isReply, signal)
+    const reply = await request(AWS_SPEC.children.auth, this.credentialEnvironment(), input, replySchema, signal)
     await inspectAuth(this.directory)
     if (!reply.ok) {
       throw new InstallerError({

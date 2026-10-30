@@ -1,5 +1,6 @@
 import { InstallerError } from '../../diagnostic/error'
-import { isAuthentication, isIdentity, type AwsAuthentication, type AwsIdentity } from '../types'
+import { accept } from '../primitives'
+import { authenticationSchema, identitySchema, type AwsAuthentication, type AwsIdentity } from '../types'
 
 export function verifyIdentity(value: { accountId: unknown; arn: unknown; userId: unknown }): AwsIdentity {
   if (
@@ -22,12 +23,13 @@ export function verifyIdentity(value: { accountId: unknown; arn: unknown; userId
       code: 'AWS_PRINCIPAL_UNSUPPORTED',
     })
   }
-  if (!isIdentity(value)) {
+  const identity = accept(identitySchema, value)
+  if (identity === null) {
     throw new InstallerError({
       code: 'AWS_IDENTITY_INVALID',
     })
   }
-  return value
+  return identity
 }
 
 export function sameIdentity(left: AwsIdentity, right: AwsIdentity): boolean {
@@ -52,7 +54,7 @@ export function requireIdentity(actual: AwsIdentity, expected: AwsIdentity): voi
 }
 
 export function requireAuthentication(authentication: AwsAuthentication, expected: AwsIdentity): void {
-  if (!isAuthentication(authentication)) {
+  if (!authenticationSchema.safeParse(authentication).success) {
     throw new InstallerError({
       code: 'AWS_IDENTITY_INVALID',
     })

@@ -1,8 +1,10 @@
-import { hasKeys, isOperationId, isRecord } from '../../guards'
-import { COMMON_CODES, replyGuard, type ChildReply } from '../child/protocol'
+import { z } from 'zod'
+import { hasKeys, isRecord } from '../../guards'
+import { operationId } from '../../journal/step'
+import { childReplySchema, COMMON_CODES } from '../child/protocol'
 import { isPolicyKey, type PolicyMap } from '../permission/keys'
 import { isIdentities, type PolicyIdentity } from '../permission/policy'
-import { validRegion } from '../types'
+import { regionSchema } from '../types'
 import {
   isInspection,
   isMutationResult,
@@ -16,11 +18,13 @@ export const ACTIONS = ['inspect', 'mutate', 'verify-mutation', 'readiness', 've
 
 export type Action = (typeof ACTIONS)[number]
 
-export interface Request {
-  kind: Action
-  operationId: string
-  region: string
-}
+export const requestSchema = z.strictObject({
+  kind: z.enum(ACTIONS),
+  operationId,
+  region: regionSchema,
+})
+
+export type Request = z.infer<typeof requestSchema>
 
 export type Result =
   | {
@@ -65,20 +69,7 @@ export const CODES = [...COMMON_CODES, ...FAILURES] as const
 
 export type Code = (typeof CODES)[number]
 
-export type Reply = ChildReply<Result, Code>
-
-export function isRequest(value: unknown): value is Request {
-  return (
-    isRecord(value) &&
-    hasKeys(value, ['kind', 'operationId', 'region']) &&
-    ACTIONS.some(action => action === value.kind) &&
-    isOperationId(value.operationId) &&
-    typeof value.region === 'string' &&
-    validRegion(value.region)
-  )
-}
-
-function isResult(value: unknown): value is Result {
+function checkResult(value: unknown): value is Result {
   if (!isRecord(value)) {
     return false
   }
@@ -111,4 +102,8 @@ function isResult(value: unknown): value is Result {
   }
 }
 
-export const isReply = replyGuard(isResult, CODES)
+const resultSchema = z.custom<Result>(checkResult)
+
+export const replySchema = childReplySchema(resultSchema, CODES)
+
+export type Reply = z.infer<typeof replySchema>

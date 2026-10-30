@@ -8,9 +8,9 @@ import {
   type Image,
   type InstanceTypeInfo,
 } from '@aws-sdk/client-ec2'
-import { InstallerError } from '../../diagnostic/error'
-import { assertDiscovery } from '../deployment/proposal/schema'
 import { collect } from '../observe'
+import { InstallerError } from '../../diagnostic/error'
+import { assertDiscovery } from '../deployment/proposal/validate'
 import type { Ec2 } from './client'
 import type { ImagePin } from '../ami'
 import type { Discovery } from '../deployment/proposal/types'

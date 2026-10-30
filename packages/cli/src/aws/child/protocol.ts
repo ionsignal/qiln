@@ -1,5 +1,5 @@
+import { z } from 'zod'
 import type { InstallerErrorCode } from '../../diagnostic/error'
-import { hasKeys, isRecord } from '../../guards'
 
 /**
  * `rejected` means the provider definitely refused the request, so it had no
@@ -8,7 +8,9 @@ import { hasKeys, isRecord } from '../../guards'
  * mutating provider call, and that call was the last provider call. A child
  * that cannot honor this rule must report every failure as uncertain.
  */
-export type Certainty = 'rejected' | 'uncertain'
+export const certaintySchema = z.enum(['rejected', 'uncertain'])
+
+export type Certainty = z.infer<typeof certaintySchema>
 
 export interface Failure<Code extends InstallerErrorCode> {
   code: Code
@@ -43,22 +45,12 @@ export const COMMON_CODES = [
 
 export type CommonCode = (typeof COMMON_CODES)[number]
 
-export function replyGuard<Result, Code extends InstallerErrorCode>(
-  isResult: (value: unknown) => value is Result,
+export function childReplySchema<Result extends z.ZodType, Code extends InstallerErrorCode>(
+  result: Result,
   codes: readonly Code[],
-): (value: unknown) => value is ChildReply<Result, Code> {
-  return (value: unknown): value is ChildReply<Result, Code> => {
-    if (!isRecord(value)) {
-      return false
-    }
-    if (value.ok === true) {
-      return hasKeys(value, ['ok', 'result']) && isResult(value.result)
-    }
-    return (
-      value.ok === false &&
-      hasKeys(value, ['ok', 'code', 'certainty']) &&
-      codes.some(code => code === value.code) &&
-      (value.certainty === 'rejected' || value.certainty === 'uncertain')
-    )
-  }
+) {
+  return z.discriminatedUnion('ok', [
+    z.strictObject({ ok: z.literal(true), result }),
+    z.strictObject({ ok: z.literal(false), code: z.enum(codes), certainty: certaintySchema }),
+  ])
 }

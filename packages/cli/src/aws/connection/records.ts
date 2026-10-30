@@ -9,8 +9,9 @@ import { stateFailure } from '../errors'
 import { isErrorCode } from '../../guards'
 import { isPending, type Pending } from '../iam/types'
 import { encodeRecord, sameJson } from '../../json'
+import { accept } from '../primitives'
 import { inspectChild, openChildDir, readChild, writeChild, type Dir } from '../../state/files'
-import { isConnection, validName, type AwsConnection, type PolicyBinding } from '../types'
+import { connectionSchema, validName, type AwsConnection, type PolicyBinding } from '../types'
 import { POLICY_KEYS, bindingEntries, type PolicyBindings, type PolicyKey } from '../permission/keys'
 
 export async function names(directory: Dir): Promise<string[]> {
@@ -45,13 +46,14 @@ export async function read(directory: Dir, name: string): Promise<AwsConnection 
   if (value === null) {
     return null
   }
-  if (!isConnection(value) || value.name !== name) {
+  const connection = accept(connectionSchema, value)
+  if (connection === null || connection.name !== name) {
     throw new InstallerError({
       code: 'AWS_STATE_INVALID',
       facts: [['Layout', 'Unsupported connection layouts are retained untouched and require reviewed recovery.']],
     })
   }
-  return value
+  return connection
 }
 
 export async function pending(directory: Dir): Promise<Pending | null> {
@@ -224,7 +226,7 @@ export async function open(directory: Dir, name: string, create = false): Promis
 }
 
 export async function save(directory: Dir, connection: AwsConnection): Promise<void> {
-  if (!isConnection(connection) || connection.name !== basename(directory.path)) {
+  if (accept(connectionSchema, connection) === null || connection.name !== basename(directory.path)) {
     throw new InstallerError({
       code: 'AWS_STATE_INVALID',
     })

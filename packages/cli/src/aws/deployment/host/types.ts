@@ -1,108 +1,9 @@
-import { isImageId, isSnapshotId, type ImagePin } from '../../ami'
-import { hasKeys, isRecord } from '../../../guards'
-import { isAccountId, validRegion } from '../../types'
+import { z } from 'zod'
+import { imagePinSchema, isSnapshotId } from '../../ami'
+import { count, positive, text } from '../../primitives'
+import { regionSchema } from '../../types'
 import { validCidr } from '../cidr'
-import type { Ingress, Zone } from '../types'
-import { isBootstrap, type Bootstrap } from './bootstrap'
-
-export interface RootSource {
-  deviceName: string
-  snapshotId: string
-}
-
-export interface RootVolume extends RootSource {
-  volumeType: string
-  sizeGiB: number
-  iops: number
-  throughput: number
-  deleteOnTermination: boolean
-}
-
-/**
- * `deleteOnTermination` is an expectation, not a request field: the volume is
- * created and attached separately, so retention is verified after attach.
- */
-export interface DataVolume {
-  deviceName: string
-  volumeType: string
-  sizeGiB: number
-  iops: number
-  throughput: number
-  deleteOnTermination: boolean
-}
-
-export interface PrimaryInterface {
-  deviceIndex: number
-  networkCardIndex: number
-  associatePublicIp: boolean
-  deleteOnTermination: boolean
-}
-
-export interface Metadata {
-  httpEndpoint: string
-  httpTokens: string
-  httpPutResponseHopLimit: number
-  httpProtocolIpv6: string
-  instanceMetadataTags: string
-}
-
-export interface KeyPolicy {
-  algorithm: string
-  passphrase: string
-  protection: string
-}
-
-export interface ElasticIp {
-  allowReassociation: boolean
-}
-
-/**
- * The complete launch configuration, frozen from reviewed evidence. The launch
- * candidates are slots into `zones`, in ascending zone ID order, and each is
- * tried once. They are never changed or replaced by another zone.
- * There is deliberately no instance profile. The bootstrap is the exact
- * cloud-init user-data the launch sends. Qiln-normalized shapes only: the
- * provider mapping belongs to `ec2/`.
- */
-export interface HostPlan {
-  region: string
-  pin: ImagePin
-  instanceType: string
-  count: number
-  purchase: string
-  cidr: string
-  zones: Zone[]
-  hostSlots: number[]
-  ingress: Ingress[]
-  root: RootVolume
-  data: DataVolume
-  network: PrimaryInterface
-  metadata: Metadata
-  key: KeyPolicy
-  bootstrap: Bootstrap
-  elasticIp: ElasticIp
-  tagged: string[]
-}
-
-const PLAN_KEYS = [
-  'region',
-  'pin',
-  'instanceType',
-  'count',
-  'purchase',
-  'cidr',
-  'zones',
-  'hostSlots',
-  'ingress',
-  'root',
-  'data',
-  'network',
-  'metadata',
-  'key',
-  'bootstrap',
-  'elasticIp',
-  'tagged',
-] as const
+import { bootstrapSchema } from './bootstrap'
 
 /**
  * Literals of the record version, not reads of today's spec. Generation always
@@ -111,128 +12,80 @@ const PLAN_KEYS = [
 const KEY_PASSPHRASE = 'none'
 const KEY_PROTECTION = 'owner-only directory 0700, file 0600'
 
-function isText(value: unknown): value is string {
-  return typeof value === 'string' && value.length >= 1 && value.length <= 256
+const rootSourceFields = {
+  deviceName: text,
+  snapshotId: z.string().refine(isSnapshotId, 'Expected a snapshot ID.'),
 }
 
-function isCount(value: unknown): value is number {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+const volumeFields = {
+  volumeType: text,
+  sizeGiB: positive,
+  iops: positive,
+  throughput: positive,
+  deleteOnTermination: z.boolean(),
 }
 
-function isPositive(value: unknown): value is number {
-  return isCount(value) && value > 0
-}
+const rootSourceSchema = z.strictObject(rootSourceFields)
 
-function isFlag(value: unknown): value is boolean {
-  return typeof value === 'boolean'
-}
-
-function isPin(value: unknown): value is ImagePin {
-  return isRecord(value) && hasKeys(value, ['imageId', 'ownerId']) && isImageId(value.imageId) && isAccountId(value.ownerId)
-}
-
-function isZone(value: unknown): value is Zone {
-  return (
-    isRecord(value) &&
-    hasKeys(value, ['id', 'name', 'cidr']) &&
-    isText(value.id) &&
-    isText(value.name) &&
-    isText(value.cidr)
-  )
-}
+const rootVolumeSchema = z.strictObject({
+  ...rootSourceFields,
+  ...volumeFields,
+})
 
 /**
- * At least one slot, each inside the zones, strictly ascending so the order is
- * the zone ID order that the zones themselves keep.
+ * `deleteOnTermination` is an expectation, not a request field: the volume is
+ * created and attached separately, so retention is verified after attach.
  */
-function isCandidateSlots(value: unknown, zoneCount: number): boolean {
-  if (!Array.isArray(value) || value.length === 0) {
-    return false
-  }
-  const slots: unknown[] = value
-  let previous = -1
-  return slots.every(slot => {
-    if (!isCount(slot) || slot >= zoneCount || slot <= previous) {
-      return false
-    }
-    previous = slot
-    return true
-  })
-}
+const dataVolumeSchema = z.strictObject({
+  deviceName: text,
+  ...volumeFields,
+})
 
-function isRule(value: unknown): value is Ingress {
-  return (
-    isRecord(value) &&
-    hasKeys(value, ['port', 'cidr']) &&
-    isPositive(value.port) &&
-    value.port <= 65_535 &&
-    isText(value.cidr)
-  )
-}
+const primaryInterfaceSchema = z.strictObject({
+  deviceIndex: count,
+  networkCardIndex: count,
+  associatePublicIp: z.boolean(),
+  deleteOnTermination: z.boolean(),
+})
 
-function hasVolumeFields(volume: Record<string, unknown>): boolean {
-  return (
-    isText(volume.deviceName) &&
-    isText(volume.volumeType) &&
-    isPositive(volume.sizeGiB) &&
-    isPositive(volume.iops) &&
-    isPositive(volume.throughput) &&
-    isFlag(volume.deleteOnTermination)
-  )
-}
+const metadataSchema = z.strictObject({
+  httpEndpoint: text,
+  httpTokens: text,
+  httpPutResponseHopLimit: positive,
+  httpProtocolIpv6: text,
+  instanceMetadataTags: text,
+})
 
-function isRootVolume(value: unknown): value is RootVolume {
-  return (
-    isRecord(value) &&
-    hasKeys(value, ['deviceName', 'snapshotId', 'volumeType', 'sizeGiB', 'iops', 'throughput', 'deleteOnTermination']) &&
-    isSnapshotId(value.snapshotId) &&
-    hasVolumeFields(value)
-  )
-}
+const keyPolicySchema = z.strictObject({
+  algorithm: text,
+  passphrase: z.string().refine(value => value === KEY_PASSPHRASE, 'Expected no passphrase.'),
+  protection: z.string().refine(value => value === KEY_PROTECTION, 'Expected owner-only key protection.'),
+})
 
-function isDataVolume(value: unknown): value is DataVolume {
-  return (
-    isRecord(value) &&
-    hasKeys(value, ['deviceName', 'volumeType', 'sizeGiB', 'iops', 'throughput', 'deleteOnTermination']) &&
-    hasVolumeFields(value)
-  )
-}
+const elasticIpSchema = z.strictObject({
+  allowReassociation: z.boolean(),
+})
 
-function isPrimaryInterface(value: unknown): value is PrimaryInterface {
-  return (
-    isRecord(value) &&
-    hasKeys(value, ['deviceIndex', 'networkCardIndex', 'associatePublicIp', 'deleteOnTermination']) &&
-    isCount(value.deviceIndex) &&
-    isCount(value.networkCardIndex) &&
-    isFlag(value.associatePublicIp) &&
-    isFlag(value.deleteOnTermination)
-  )
-}
+/**
+ * Zones and ingress rules are judged loosely here. The deployment approval
+ * judges them strictly and requires them to equal the plan's own.
+ */
+const hostZoneSchema = z.strictObject({
+  id: text,
+  name: text,
+  cidr: text,
+})
 
-function isMetadata(value: unknown): value is Metadata {
-  return (
-    isRecord(value) &&
-    hasKeys(value, ['httpEndpoint', 'httpTokens', 'httpPutResponseHopLimit', 'httpProtocolIpv6', 'instanceMetadataTags']) &&
-    isText(value.httpEndpoint) &&
-    isText(value.httpTokens) &&
-    isPositive(value.httpPutResponseHopLimit) &&
-    isText(value.httpProtocolIpv6) &&
-    isText(value.instanceMetadataTags)
-  )
-}
+const hostIngressSchema = z.strictObject({
+  port: z.int().min(1).max(65_535),
+  cidr: text,
+})
 
-function isKeyPolicy(value: unknown): value is KeyPolicy {
-  return (
-    isRecord(value) &&
-    hasKeys(value, ['algorithm', 'passphrase', 'protection']) &&
-    isText(value.algorithm) &&
-    value.passphrase === KEY_PASSPHRASE &&
-    value.protection === KEY_PROTECTION
-  )
-}
-
-function isElasticIp(value: unknown): value is ElasticIp {
-  return isRecord(value) && hasKeys(value, ['allowReassociation']) && isFlag(value.allowReassociation)
+/**
+ * Strictly ascending, so the order is the zone ID order that the zones keep.
+ */
+function isAscendingWithin(slots: readonly number[], zoneCount: number): boolean {
+  return slots.every((slot, index) => slot < zoneCount && (index === 0 || slot > slots[index - 1]))
 }
 
 /**
@@ -242,60 +95,53 @@ function isElasticIp(value: unknown): value is ElasticIp {
  * administrative key without a passphrase, and the exact approved bootstrap.
  * These are literals of the record version, not today's compute constants, so
  * a stored plan keeps its meaning when they change. Zone and ingress semantics
- * are judged by the approval guard, which requires them to equal its own.
+ * are judged by the approval schema, which requires them to equal its own.
  */
-export function isHostPlan(value: unknown): value is HostPlan {
-  if (!isRecord(value) || !hasKeys(value, PLAN_KEYS)) {
-    return false
-  }
-  const {
-    region,
-    pin,
-    instanceType,
-    count,
-    purchase,
-    cidr,
-    zones,
-    hostSlots,
-    ingress,
-    root,
-    data,
-    network,
-    metadata,
-    key,
-    bootstrap,
-    elasticIp,
-    tagged,
-  } = value
-  return (
-    typeof region === 'string' &&
-    validRegion(region) &&
-    isPin(pin) &&
-    isText(instanceType) &&
-    count === 1 &&
-    isText(purchase) &&
-    typeof cidr === 'string' &&
-    validCidr(cidr) &&
-    Array.isArray(zones) &&
-    zones.length > 0 &&
-    zones.every(isZone) &&
-    isCandidateSlots(hostSlots, zones.length) &&
-    Array.isArray(ingress) &&
-    ingress.length > 0 &&
-    ingress.every(isRule) &&
-    isRootVolume(root) &&
-    isDataVolume(data) &&
-    isPrimaryInterface(network) &&
-    isMetadata(metadata) &&
-    isKeyPolicy(key) &&
-    isBootstrap(bootstrap) &&
-    isElasticIp(elasticIp) &&
-    Array.isArray(tagged) &&
-    tagged.every(isText) &&
-    root.deleteOnTermination &&
-    network.deleteOnTermination &&
-    !data.deleteOnTermination &&
-    root.deviceName !== data.deviceName &&
-    key.algorithm === 'ed25519'
+export const hostPlanSchema = z
+  .strictObject({
+    region: regionSchema,
+    pin: imagePinSchema,
+    instanceType: text,
+    count: positive,
+    purchase: text,
+    cidr: z.string().refine(validCidr, 'Expected a private network CIDR.'),
+    zones: z.array(hostZoneSchema).min(1),
+    hostSlots: z.array(count).min(1),
+    ingress: z.array(hostIngressSchema).min(1),
+    root: rootVolumeSchema,
+    data: dataVolumeSchema,
+    network: primaryInterfaceSchema,
+    metadata: metadataSchema,
+    key: keyPolicySchema,
+    bootstrap: bootstrapSchema,
+    elasticIp: elasticIpSchema,
+    tagged: z.array(text),
+  })
+  .refine(({ hostSlots, zones }) => isAscendingWithin(hostSlots, zones.length), 'Expected ascending launch slots within the zones.')
+  .refine(
+    plan =>
+      plan.count === 1 &&
+      plan.root.deleteOnTermination &&
+      plan.network.deleteOnTermination &&
+      !plan.data.deleteOnTermination &&
+      plan.root.deviceName !== plan.data.deviceName &&
+      plan.key.algorithm === 'ed25519',
+    'Expected one host with a retained data volume and an Ed25519 key.',
   )
-}
+
+/**
+ * The complete launch configuration, frozen from reviewed evidence. The launch
+ * candidates are slots into `zones`, in ascending zone ID order, and each is
+ * tried once. They are never changed or replaced by another zone.
+ * There is deliberately no instance profile. The bootstrap is the exact
+ * cloud-init user-data the launch sends. Qiln-normalized shapes only: the
+ * provider mapping belongs to `ec2/`.
+ */
+export type HostPlan = z.infer<typeof hostPlanSchema>
+export type RootSource = z.infer<typeof rootSourceSchema>
+export type RootVolume = z.infer<typeof rootVolumeSchema>
+export type DataVolume = z.infer<typeof dataVolumeSchema>
+export type PrimaryInterface = z.infer<typeof primaryInterfaceSchema>
+export type Metadata = z.infer<typeof metadataSchema>
+export type KeyPolicy = z.infer<typeof keyPolicySchema>
+export type ElasticIp = z.infer<typeof elasticIpSchema>

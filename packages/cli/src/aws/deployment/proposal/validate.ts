@@ -1,8 +1,9 @@
+import { z } from 'zod'
 import { AWS_SPEC } from '../../spec'
 import { isImageId, isSnapshotId } from '../../ami'
 import { hasKeys, isRecord, isTimestamp } from '../../../guards'
 import { isAccountId } from '../../types'
-import { isPlacement } from '../types'
+import { placementSchema } from '../layout'
 import { DiscoveryError, kindOf, type Issue } from './failure'
 import type { Discovery } from './types'
 
@@ -157,7 +158,7 @@ const zone: Check = (value, path) => {
   if (issue !== null || !isRecord(value)) {
     return issue
   }
-  return isPlacement({ id: value.id, name: value.name }) ? null : fail(path, 'zone ID and name', value)
+  return placementSchema.safeParse({ id: value.id, name: value.name }).success ? null : fail(path, 'zone ID and name', value)
 }
 
 const discovery = record({
@@ -172,9 +173,11 @@ function discoveryIssue(value: unknown): Issue | null {
   return discovery(value, 'discovery')
 }
 
-export function isDiscovery(value: unknown): value is Discovery {
-  return discoveryIssue(value) === null
-}
+/**
+ * A permanent bridge: the checker above is authored to name the first failing
+ * field, which a native schema cannot do.
+ */
+export const discoverySchema = z.custom<Discovery>(value => discoveryIssue(value) === null)
 
 export function assertDiscovery(value: unknown): asserts value is Discovery {
   const issue = discoveryIssue(value)

@@ -4,14 +4,15 @@ import { validCidr, validSource } from './cidr'
 import { expectation, matches } from './expect'
 import { deploymentFacts, removable } from './facts'
 import { declined, stateOf } from './step'
-import { notify, withWaiting, type Place, type ProgressSink, type StepTask } from './progress'
-import { creationPlan, removalPlan, type Planned } from './topology'
 import { diagnostic } from '../errors'
+import { accept } from '../primitives'
 import { generateAdminKey } from '../ssh/generate'
-import { deploymentRecovery, originalCode, terminationConfirmed } from '../recovery'
-import { InstallerError, type InstallerErrorCode } from '../../diagnostic/error'
 import { checkCancellation } from '../../terminal/prompts'
 import { request, type ChildEvidence } from '../child/request'
+import { creationPlan, removalPlan, type Planned } from './topology'
+import { deploymentRecovery, originalCode, terminationConfirmed } from '../recovery'
+import { InstallerError, type InstallerErrorCode } from '../../diagnostic/error'
+import { notify, withWaiting, type Place, type ProgressSink, type StepTask } from './progress'
 import {
   hostKeyName,
   isReceipt,
@@ -24,8 +25,8 @@ import {
   type Step,
 } from './types'
 import {
-  isEvidence,
-  isReply,
+  evidenceSchema,
+  replySchema,
   requestDeadlineMs,
   type Acknowledgment,
   type Evidence,
@@ -270,16 +271,24 @@ export class Deployer {
   }
 
   /**
+   * The evidence a child message carries, or null unless it is well-formed and
+   * belongs to the open step of this deployment.
+   */
+  private ownedEvidence(message: unknown, step: Step): Evidence | null {
+    const evidence = accept(evidenceSchema, message)
+    return evidence?.deploymentId === this.current.id && evidence.operationId === step.id ? evidence : null
+  }
+
+  /**
    * The child may reply only after the response is durably retained here, so the
    * message must belong to the open step and carry an identity of the right shape.
    */
   private evidence(step: Step): ChildEvidence {
-    const owns = (message: unknown): message is Evidence =>
-      isEvidence(message) && message.deploymentId === this.current.id && message.operationId === step.id
     return {
-      accept: owns,
+      accept: message => this.ownedEvidence(message, step) !== null,
       retain: async message => {
-        if (!owns(message) || !isReceipt(step.action, message.resourceId)) {
+        const evidence = this.ownedEvidence(message, step)
+        if (evidence === null || !isReceipt(step.action, evidence.resourceId)) {
           throw new InstallerError({
             code: 'AWS_DEPLOYMENT_EVIDENCE_UNAVAILABLE',
           })
@@ -287,15 +296,15 @@ export class Deployer {
         await this.persist({
           steps: withLast(this.current.steps, {
             returned: {
-              returnedAt: message.returnedAt,
-              resourceId: message.resourceId,
+              returnedAt: evidence.returnedAt,
+              resourceId: evidence.resourceId,
             },
           }),
         })
         const acknowledgment: Acknowledgment = {
           kind: 'evidence-retained',
-          deploymentId: message.deploymentId,
-          operationId: message.operationId,
+          deploymentId: evidence.deploymentId,
+          operationId: evidence.operationId,
         }
         return acknowledgment
       },
@@ -316,7 +325,7 @@ export class Deployer {
         termination: 'unconfirmed',
       })
     }
-    const reply = await request(AWS_SPEC.children.ec2, this.session.credentialEnvironment(), input, isReply, signal, {
+    const reply = await request(AWS_SPEC.children.ec2, this.session.credentialEnvironment(), input, replySchema, signal, {
       timeoutMs: requestDeadlineMs(input),
       evidence,
       keepReply: input.kind === 'mutate',

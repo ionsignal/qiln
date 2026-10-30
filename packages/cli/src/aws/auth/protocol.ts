@@ -1,13 +1,7 @@
-import { hasKeys, isRecord } from '../../guards'
-import { COMMON_CODES, replyGuard, type ChildReply } from '../child/protocol'
-import { isAuthentication, validRegion, type AwsAuthentication } from '../types'
+import { z } from 'zod'
+import { childReplySchema, COMMON_CODES } from '../child/protocol'
+import { authenticationSchema, regionSchema } from '../types'
 
-export interface Request {
-  kind: 'identity'
-  region: string
-}
-
-/** Failures specific to this child, in addition to the common ones. */
 export const FAILURES = [
   'AWS_SSO_UNSUPPORTED',
   'AWS_PROFILE_INVALID',
@@ -20,16 +14,12 @@ export const CODES = [...COMMON_CODES, ...FAILURES] as const
 
 export type Code = (typeof CODES)[number]
 
-export type Reply = ChildReply<AwsAuthentication, Code>
+export const requestSchema = z.strictObject({
+  kind: z.literal('identity'),
+  region: regionSchema,
+})
 
-export function isRequest(value: unknown): value is Request {
-  return (
-    isRecord(value) &&
-    hasKeys(value, ['kind', 'region']) &&
-    value.kind === 'identity' &&
-    typeof value.region === 'string' &&
-    validRegion(value.region)
-  )
-}
+export const replySchema = childReplySchema(authenticationSchema, CODES)
 
-export const isReply = replyGuard(isAuthentication, CODES)
+export type Request = z.infer<typeof requestSchema>
+export type Reply = z.infer<typeof replySchema>

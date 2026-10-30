@@ -4,7 +4,7 @@ import { serveChild } from '../child/serve'
 import { DiscoveryError, type Issue } from '../deployment/proposal/failure'
 import { undispatched } from './dispatch'
 import { execute } from './operations'
-import { FAILURES, isRequest, type Code } from './protocol'
+import { FAILURES, requestSchema, type Code } from './protocol'
 
 interface ContextualFailure extends Failure<Code> {
   context?: Issue
@@ -22,7 +22,6 @@ const classify = classifier(
     RouteTableLimitExceeded: rejected('AWS_DEPLOYMENT_LIMIT'),
     SecurityGroupLimitExceeded: rejected('AWS_DEPLOYMENT_LIMIT'),
     RulesPerSecurityGroupLimitExceeded: rejected('AWS_DEPLOYMENT_LIMIT'),
-    // Quotas are never queried; these are only reported when AWS refuses a launch or creation.
     InstanceLimitExceeded: rejected('AWS_DEPLOYMENT_LIMIT'),
     VcpuLimitExceeded: rejected('AWS_DEPLOYMENT_LIMIT'),
     VolumeLimitExceeded: rejected('AWS_DEPLOYMENT_LIMIT'),
@@ -30,17 +29,15 @@ const classify = classifier(
     AddressLimitExceeded: rejected('AWS_DEPLOYMENT_LIMIT'),
     InsufficientInstanceCapacity: rejected('AWS_DEPLOYMENT_CAPACITY'),
     DependencyViolation: rejected('AWS_DEPLOYMENT_BLOCKED'),
-    // The reviewed AMI is inspected read-only and then named in the launch, so these are definite refusals.
     'InvalidAMIID.Malformed': rejected('AWS_DEPLOYMENT_IMAGE_UNAVAILABLE'),
     'InvalidAMIID.NotFound': rejected('AWS_DEPLOYMENT_IMAGE_UNAVAILABLE'),
     'InvalidAMIID.Unavailable': rejected('AWS_DEPLOYMENT_IMAGE_UNAVAILABLE'),
   },
-  // Raised only before any mutating call, so it is a definite refusal.
   ['AWS_DEPLOYMENT_NOT_ATTEMPTED'],
 )
 
 serveChild({
-  isRequest,
+  requestSchema,
   execute,
   classify: (error: unknown): ContextualFailure => {
     const failure = classify(error)

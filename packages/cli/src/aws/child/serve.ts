@@ -1,11 +1,12 @@
+import type { z } from 'zod'
 import type { InstallerErrorCode } from '../../diagnostic/error'
+import { accept } from '../primitives'
 import type { ChildReply, Failure } from './protocol'
 
-export interface ChildService<Request, Result, Code extends InstallerErrorCode> {
-  isRequest(message: unknown): message is Request
-  execute(request: Request): Promise<Result>
+export interface ChildService<S extends z.ZodType, Result, Code extends InstallerErrorCode> {
+  requestSchema: S
+  execute(request: z.output<S>): Promise<Result>
   classify(error: unknown): Failure<Code>
-  /** Reported as a rejection when the parent's first message is not an allowlisted request. */
   invalidRequest: Code
 }
 
@@ -14,8 +15,6 @@ function reply(message: ChildReply<unknown, InstallerErrorCode>): void {
     process.exit(1)
   }
   process.send(message, error => {
-    // The IPC callback runs after transmission. No credentials or provider
-    // context survive into another request.
     process.exit(error ? 1 : 0)
   })
 }
@@ -24,15 +23,16 @@ function reply(message: ChildReply<unknown, InstallerErrorCode>): void {
  * Serves exactly one request and exits. Call only from a child entry file;
  * importing this module has no side effects.
  */
-export function serveChild<Request, Result, Code extends InstallerErrorCode>(
-  service: ChildService<Request, Result, Code>,
+export function serveChild<S extends z.ZodType, Result, Code extends InstallerErrorCode>(
+  service: ChildService<S, Result, Code>,
 ): void {
   if (!process.send) {
     process.exitCode = 1
     return
   }
   const handle = async (message: unknown): Promise<void> => {
-    if (!service.isRequest(message)) {
+    const request = accept(service.requestSchema, message)
+    if (request === null) {
       reply({
         ok: false,
         code: service.invalidRequest,
@@ -43,7 +43,7 @@ export function serveChild<Request, Result, Code extends InstallerErrorCode>(
     try {
       reply({
         ok: true,
-        result: await service.execute(message),
+        result: await service.execute(request),
       })
     } catch (error: unknown) {
       reply({

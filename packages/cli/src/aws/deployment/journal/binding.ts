@@ -1,6 +1,6 @@
 import { z } from 'zod'
-import { isIdentity, validName, validRegion, type AwsIdentity } from '../../types'
 import { KIND_IDS } from '../graph'
+import { identitySchema, nameSchema, regionSchema } from '../../types'
 import { dataVolumeId, resourceId } from '../topology'
 import { operationId } from '../../../journal/step'
 import type { Deployment } from '../types'
@@ -13,9 +13,9 @@ export const volumeId = z.string().regex(KIND_IDS.volume)
  */
 export const bindingSchema = z.strictObject({
   deployment: operationId,
-  connection: z.string().refine(validName, 'Expected a connection name.'),
-  operator: z.custom<AwsIdentity>(isIdentity),
-  region: z.string().refine(validRegion, 'Expected a region.'),
+  connection: nameSchema,
+  operator: identitySchema,
+  region: regionSchema,
   instanceId: z.string().regex(KIND_IDS.instance),
   rootVolumeId: volumeId,
   dataVolumeId: volumeId,

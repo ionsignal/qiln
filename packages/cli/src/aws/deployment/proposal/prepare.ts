@@ -2,7 +2,7 @@ import { issueFacts } from './failure'
 import { AWS_SPEC } from '../../spec'
 import { InstallerError } from '../../../diagnostic/error'
 import { request } from '../../child/request'
-import { isReply, requestDeadlineMs, type Request } from '../../ec2/protocol'
+import { replySchema, requestDeadlineMs, type Request } from '../../ec2/protocol'
 import type { Discovery } from './types'
 import type { Session } from '../../auth/session'
 
@@ -13,7 +13,7 @@ import type { Session } from '../../auth/session'
  */
 export async function prepare(session: Session, signal: AbortSignal): Promise<Discovery> {
   const input: Request = { kind: 'prepare' }
-  const reply = await request(AWS_SPEC.children.ec2, session.credentialEnvironment(), input, isReply, signal, {
+  const reply = await request(AWS_SPEC.children.ec2, session.credentialEnvironment(), input, replySchema, signal, {
     timeoutMs: requestDeadlineMs(input),
   })
   if (!reply.ok) {

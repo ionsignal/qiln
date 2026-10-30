@@ -1,7 +1,7 @@
 import type { Step } from './types'
 
 /**
- * Derived from the ledger fields and never persisted. `isStep` already forbids
+ * Derived from the ledger fields and never persisted. The step schema already forbids
  * a response and a failure on the same step, so that is not rechecked here.
  *
  * - open: fenced with no outcome recorded. Only an open step may have a child

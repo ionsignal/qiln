@@ -1,80 +1,62 @@
+import { z } from 'zod'
 import { AWS_SPEC } from '../spec'
-import { hasKeys, isOperationId, isRecord, isTimestamp } from '../../guards'
-import { COMMON_CODES, replyGuard, type Certainty, type ChildReply } from '../child/protocol'
-import { isHealth, isObservation, type Health, type Observation } from '../deployment/types'
-import { isHostKey, type HostKey } from '../deployment/hostkey'
-import { isDiscovery } from '../deployment/proposal/schema'
-import { isIssue, type Issue } from '../deployment/proposal/failure'
-import type { Discovery } from '../deployment/proposal/types'
+import { certaintySchema, childReplySchema, COMMON_CODES } from '../child/protocol'
+import { operationId, timestamp } from '../../journal/step'
+import { hostKeySchema } from '../deployment/hostkey'
+import { discoverySchema } from '../deployment/proposal/validate'
+import { issueSchema } from '../deployment/proposal/failure'
+import { healthSchema, observationSchema, observationsSchema } from '../deployment/types'
 
-export type Request =
-  | {
-      kind: 'prepare'
-    }
-  | {
-      kind: 'mutate'
-      deploymentId: string
-      operationId: string
-    }
-  | {
-      kind: 'observe'
-      deploymentId: string
-      wait: boolean
-    }
-  | {
-      kind: 'candidates'
-      deploymentId: string
-    }
-  | {
-      kind: 'health'
-      deploymentId: string
-      wait: boolean
-    }
-  | {
-      kind: 'hostkey'
-      deploymentId: string
-    }
+export const requestSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('prepare') }),
+  z.strictObject({ kind: z.literal('mutate'), deploymentId: operationId, operationId }),
+  z.strictObject({ kind: z.literal('observe'), deploymentId: operationId, wait: z.boolean() }),
+  z.strictObject({ kind: z.literal('candidates'), deploymentId: operationId }),
+  z.strictObject({ kind: z.literal('health'), deploymentId: operationId, wait: z.boolean() }),
+  z.strictObject({ kind: z.literal('hostkey'), deploymentId: operationId }),
+])
+
+export type Request = z.infer<typeof requestSchema>
 
 export type DeploymentRequest = Exclude<Request, { kind: 'prepare' }>
 
-export type Result =
-  | {
-      kind: 'prepared'
-      discovery: Discovery
-    }
-  | {
-      kind: 'done'
-      resourceId: string | null
-    }
-  | {
-      kind: 'observation'
-      observation: Observation
-    }
-  | {
-      kind: 'candidates'
-      candidates: Observation[]
-    }
-  | {
-      kind: 'health'
-      health: Health | null
-    }
-  | {
-      kind: 'hostkey'
-      hostKey: HostKey
-    }
+const resultSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('prepared'), discovery: discoverySchema }),
+  z.strictObject({ kind: z.literal('done'), resourceId: z.string().nullable() }),
+  z.strictObject({ kind: z.literal('observation'), observation: observationSchema }),
+  z.strictObject({ kind: z.literal('candidates'), candidates: observationsSchema }),
+  z.strictObject({ kind: z.literal('health'), health: healthSchema.nullable() }),
+  z.strictObject({ kind: z.literal('hostkey'), hostKey: hostKeySchema }),
+])
 
-export interface Evidence {
-  kind: 'step-returned'
-  deploymentId: string
-  operationId: string
-  resourceId: string | null
-  returnedAt: string
-}
+export type Result = z.infer<typeof resultSchema>
 
-export interface Acknowledgment {
-  kind: 'evidence-retained'
-  deploymentId: string
-  operationId: string
+export const evidenceSchema = z.strictObject({
+  kind: z.literal('step-returned'),
+  deploymentId: operationId,
+  operationId,
+  resourceId: z.string().nullable(),
+  returnedAt: timestamp,
+})
+
+export type Evidence = z.infer<typeof evidenceSchema>
+
+const acknowledgmentSchema = z.strictObject({
+  kind: z.literal('evidence-retained'),
+  deploymentId: operationId,
+  operationId,
+})
+
+export type Acknowledgment = z.infer<typeof acknowledgmentSchema>
+
+/**
+ * The child continues only when the parent acknowledges this exact evidence.
+ */
+export function acknowledgmentFor(evidence: Evidence) {
+  return acknowledgmentSchema.refine(
+    acknowledgment =>
+      acknowledgment.deploymentId === evidence.deploymentId && acknowledgment.operationId === evidence.operationId,
+  )
 }
 
 export const FAILURES = [
@@ -91,12 +73,8 @@ export const FAILURES = [
   'AWS_DEPLOYMENT_IMAGE_UNAVAILABLE',
 ] as const
 
-const DISCOVERY_CODE = 'AWS_DEPLOYMENT_DISCOVERY_FAILED'
-
 export const CODES = [...COMMON_CODES, ...FAILURES] as const
 export type Code = (typeof CODES)[number]
-
-type DiscoveryCode = typeof DISCOVERY_CODE
 
 /**
  * The parent's supervision deadline for one request. Only a polling health
@@ -124,104 +102,13 @@ export function childDeadlineMs(request: Request): number {
  * validation. The shared envelope accepts the ordinary form of every code,
  * including this one, so this contextual shape is an addition, not a gate.
  */
-export interface DiscoveryFailureReply {
-  ok: false
-  code: DiscoveryCode
-  certainty: Certainty
-  context: Issue
-}
+const discoveryFailureSchema = z.strictObject({
+  ok: z.literal(false),
+  code: z.literal('AWS_DEPLOYMENT_DISCOVERY_FAILED'),
+  certainty: certaintySchema,
+  context: issueSchema,
+})
 
-export type Reply = ChildReply<Result, Code> | DiscoveryFailureReply
+export const replySchema = z.union([childReplySchema(resultSchema, CODES), discoveryFailureSchema])
 
-export function isRequest(value: unknown): value is Request {
-  if (!isRecord(value)) {
-    return false
-  }
-  switch (value.kind) {
-    case 'prepare':
-      return hasKeys(value, ['kind'])
-    case 'mutate':
-      return (
-        hasKeys(value, ['kind', 'deploymentId', 'operationId']) &&
-        isOperationId(value.deploymentId) &&
-        isOperationId(value.operationId)
-      )
-    case 'observe':
-    case 'health':
-      return (
-        hasKeys(value, ['kind', 'deploymentId', 'wait']) &&
-        isOperationId(value.deploymentId) &&
-        typeof value.wait === 'boolean'
-      )
-    case 'candidates':
-    case 'hostkey':
-      return hasKeys(value, ['kind', 'deploymentId']) && isOperationId(value.deploymentId)
-    default:
-      return false
-  }
-}
-
-export function isEvidence(value: unknown): value is Evidence {
-  return (
-    isRecord(value) &&
-    hasKeys(value, ['kind', 'deploymentId', 'operationId', 'resourceId', 'returnedAt']) &&
-    value.kind === 'step-returned' &&
-    isOperationId(value.deploymentId) &&
-    isOperationId(value.operationId) &&
-    (value.resourceId === null || typeof value.resourceId === 'string') &&
-    isTimestamp(value.returnedAt)
-  )
-}
-
-export function isAcknowledgment(value: unknown, evidence: Evidence): value is Acknowledgment {
-  return (
-    isRecord(value) &&
-    hasKeys(value, ['kind', 'deploymentId', 'operationId']) &&
-    value.kind === 'evidence-retained' &&
-    value.deploymentId === evidence.deploymentId &&
-    value.operationId === evidence.operationId
-  )
-}
-
-function isResult(value: unknown): value is Result {
-  if (!isRecord(value)) {
-    return false
-  }
-  switch (value.kind) {
-    case 'prepared':
-      return hasKeys(value, ['kind', 'discovery']) && isDiscovery(value.discovery)
-    case 'done':
-      return hasKeys(value, ['kind', 'resourceId']) && (value.resourceId === null || typeof value.resourceId === 'string')
-    case 'observation':
-      return hasKeys(value, ['kind', 'observation']) && isObservation(value.observation)
-    case 'candidates':
-      return (
-        hasKeys(value, ['kind', 'candidates']) &&
-        Array.isArray(value.candidates) &&
-        value.candidates.every(isObservation)
-      )
-    case 'health':
-      return hasKeys(value, ['kind', 'health']) && (value.health === null || isHealth(value.health))
-    case 'hostkey':
-      return hasKeys(value, ['kind', 'hostKey']) && isHostKey(value.hostKey)
-    default:
-      return false
-  }
-}
-
-const isPlainReply = replyGuard(isResult, CODES)
-
-function isDiscoveryFailure(value: unknown): value is DiscoveryFailureReply {
-  return (
-    isRecord(value) &&
-    hasKeys(value, ['ok', 'code', 'certainty', 'context']) &&
-    value.ok === false &&
-    value.code === DISCOVERY_CODE &&
-    (value.certainty === 'rejected' || value.certainty === 'uncertain') &&
-    isIssue(value.context)
-  )
-}
-
-export function isReply(value: unknown): value is Reply {
-  return isPlainReply(value) || isDiscoveryFailure(value)
-}
+export type Reply = z.infer<typeof replySchema>

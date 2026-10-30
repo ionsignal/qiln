@@ -1,5 +1,6 @@
+import { z } from 'zod'
 import { InstallerError, type DiagnosticFact } from '../../../diagnostic/error'
-import { hasKeys, isRecord } from '../../../guards'
+import { isRecord } from '../../../guards'
 
 /**
  * Bounded, authored context for discovery evidence that failed validation.
@@ -12,12 +13,13 @@ const EXPECTED = /^[A-Za-z0-9 ]{1,64}$/
 export const VALUE_KINDS = ['null', 'undefined', 'string', 'number', 'boolean', 'list', 'record', 'other'] as const
 
 export type ValueKind = (typeof VALUE_KINDS)[number]
+export type Issue = z.infer<typeof issueSchema>
 
-export interface Issue {
-  path: string
-  expected: string
-  received: ValueKind
-}
+export const issueSchema = z.strictObject({
+  path: z.string().regex(PATH),
+  expected: z.string().regex(EXPECTED),
+  received: z.enum(VALUE_KINDS),
+})
 
 export function kindOf(value: unknown): ValueKind {
   if (value === null) {
@@ -41,18 +43,6 @@ export function kindOf(value: unknown): ValueKind {
     default:
       return 'other'
   }
-}
-
-export function isIssue(value: unknown): value is Issue {
-  return (
-    isRecord(value) &&
-    hasKeys(value, ['path', 'expected', 'received']) &&
-    typeof value.path === 'string' &&
-    PATH.test(value.path) &&
-    typeof value.expected === 'string' &&
-    EXPECTED.test(value.expected) &&
-    VALUE_KINDS.some(kind => kind === value.received)
-  )
 }
 
 /**
