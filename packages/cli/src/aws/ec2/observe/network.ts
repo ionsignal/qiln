@@ -11,7 +11,7 @@ import {
   type Subnet,
   type Vpc,
 } from '@aws-sdk/client-ec2'
-import type { Expected } from '../../deployment/expect'
+import type { Expected } from '../../deployment/observe/expect'
 import { groupSpec, resourceId } from '../../deployment/topology'
 import type { Deployment, ObservedResource } from '../../deployment/types'
 import { collect } from '../../observe'

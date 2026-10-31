@@ -1,4 +1,4 @@
-import type { Step } from './types'
+import type { Step } from '../types'
 
 /**
  * Derived from the ledger fields and never persisted. The step schema already forbids

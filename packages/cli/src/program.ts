@@ -26,7 +26,7 @@ import type {
   InstallationInput,
 } from './input'
 import type { CommanderError } from 'commander'
-import type { DeploymentSelector } from './aws/deployment/alias'
+import type { DeploymentSelector } from './aws/deployment/volume/alias'
 import type { ConfigureOptions } from './commands/installation/configure'
 import type { InstallationSelector } from './installation/target/types'
 

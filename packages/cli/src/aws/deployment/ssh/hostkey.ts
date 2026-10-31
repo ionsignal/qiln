@@ -1,7 +1,7 @@
 import { z } from 'zod'
-import { KIND_IDS } from './graph'
-import { timestamp } from '../../journal/step'
-import { isFingerprint } from '../../transport/ssh/key'
+import { KIND_IDS } from '../graph'
+import { timestamp } from '../../../journal/step'
+import { isFingerprint } from '../../../transport/ssh/key'
 
 /**
  * A version-1 literal shape, like the other retained evidence. `source` names

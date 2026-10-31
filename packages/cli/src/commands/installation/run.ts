@@ -6,7 +6,7 @@ import { inspect as inspectTarget } from './inspect'
 import { configure as configureTarget, type ConfigureOptions } from './configure'
 import { reassign as reassignTarget } from './reassign'
 import type { Reporter } from '../../terminal/reporter'
-import type { DeploymentSelector } from '../../aws/deployment/alias'
+import type { DeploymentSelector } from '../../aws/deployment/volume/alias'
 import type { InstallationSelector, InstallationTarget } from '../../installation/target/types'
 
 /**

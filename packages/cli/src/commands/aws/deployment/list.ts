@@ -1,5 +1,5 @@
-import { deploymentName } from '../../../aws/deployment/alias'
-import { verification, type Verification } from '../../../aws/deployment/facts'
+import { deploymentName } from '../../../aws/deployment/volume/alias'
+import { verification, type Verification } from '../../../aws/deployment/observe/facts'
 import * as deployments from '../../../aws/deployment/records'
 import { requireAwsHost } from '../../../aws/host'
 import { openAwsRoot } from '../../../aws/root'

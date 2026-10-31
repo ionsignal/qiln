@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto'
 import { AWS_RECORD_VERSION, AWS_SPEC } from '../spec'
 import { validCidr, validSource } from './cidr'
-import { expectation, matches } from './expect'
-import { deploymentFacts, removable } from './facts'
-import { declined, stateOf } from './step'
+import { expectation, matches } from './observe/expect'
+import { deploymentFacts, removable } from './observe/facts'
+import { invalidDeployment } from './ledger/invalid'
+import { declined, stateOf } from './ledger/step'
 import { diagnostic } from '../errors'
 import { accept } from '../primitives'
 import { generateAdminKey } from '../ssh/generate'
@@ -12,7 +13,7 @@ import { request, type ChildEvidence } from '../child/request'
 import { creationPlan, removalPlan, type Planned } from './topology'
 import { deploymentRecovery, originalCode, terminationConfirmed } from '../recovery'
 import { InstallerError, type InstallerErrorCode } from '../../diagnostic/error'
-import { notify, withWaiting, type Place, type ProgressSink, type StepTask } from './progress'
+import { notify, withWaiting, type Place, type ProgressSink, type StepTask } from './observe/progress'
 import {
   hostKeyName,
   isReceipt,
@@ -37,9 +38,9 @@ import * as records from './records'
 import type { Dir } from '../../state/files'
 import type { Session } from '../auth/session'
 import type { Certainty } from '../child/protocol'
-import type { HostKey } from './hostkey'
+import type { HostKey } from './ssh/hostkey'
 import type { HostPlan } from './host/types'
-import type { Reuse } from './reuse'
+import type { Reuse } from './volume/reuse'
 import type { AwsConnection } from '../types'
 
 /**
@@ -54,12 +55,6 @@ class CallFailure extends InstallerError {
   ) {
     super({ code })
   }
-}
-
-function invalid(): never {
-  throw new InstallerError({
-    code: 'AWS_DEPLOYMENT_STATE_INVALID',
-  })
 }
 
 function withLast(steps: readonly Step[], change: Partial<Step>): Step[] {
@@ -115,7 +110,7 @@ export function propose(
   }
   const managed = connection.managed
   if (!managed || plan.region !== managed.deploymentRegion) {
-    return invalid()
+    return invalidDeployment()
   }
   const id = randomUUID()
   const now = new Date().toISOString()

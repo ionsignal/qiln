@@ -1,4 +1,4 @@
-import { InstallerError } from '../../diagnostic/error'
+import { InstallerError } from '../../../diagnostic/error'
 
 export interface DeploymentSelector {
   kind: 'id' | 'alias'

@@ -1,5 +1,5 @@
 import { InstallerError } from '../diagnostic/error'
-import { deploymentFacts } from './deployment/facts'
+import { deploymentFacts } from './deployment/observe/facts'
 import { deploymentRecovery } from './recovery'
 import { withAwsOperation, type AwsState } from './root'
 import * as deployments from './deployment/records'

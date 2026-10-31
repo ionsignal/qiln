@@ -4,7 +4,7 @@ import { InstallerError } from './diagnostic/error'
 import { isOperationId } from './guards'
 import { validName, validRegion } from './aws/types'
 import type { Retry } from './installation/retry' 
-import type { DeploymentSelector } from './aws/deployment/alias'
+import type { DeploymentSelector } from './aws/deployment/volume/alias'
 import type { ConfigureOptions } from './commands/installation/configure'
 import type { InstallationSelector } from './installation/target/types'
 

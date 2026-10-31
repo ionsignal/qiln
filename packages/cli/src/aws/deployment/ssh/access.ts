@@ -1,10 +1,10 @@
-import { InstallerError } from '../../diagnostic/error'
-import { AWS_SPEC } from '../spec'
-import { deploymentFacts } from './facts'
-import { sshReady } from './topology'
-import type { SshOptions } from '../../transport/ssh/options'
+import { InstallerError } from '../../../diagnostic/error'
+import { AWS_SPEC } from '../../spec'
+import { deploymentFacts } from '../observe/facts'
+import { sshReady } from '../topology'
+import type { SshOptions } from '../../../transport/ssh/options'
 import type { HostKey } from './hostkey'
-import type { Deployment } from './types'
+import type { Deployment } from '../types'
 
 /**
  * Refuses unless the recorded deployment may be connected to: creation fully

@@ -1,11 +1,11 @@
 import { AWS_SPEC } from '../../../aws/spec'
-import { deploymentName } from '../../../aws/deployment/alias'
+import { deploymentName } from '../../../aws/deployment/volume/alias'
 import type { ImagePin } from '../../../aws/ami'
 import type { AwsIdentity } from '../../../aws/types'
 import type { Reporter } from '../../../terminal/reporter'
 import type { DiagnosticFact } from '../../../diagnostic/error'
 import type { HostPlan } from '../../../aws/deployment/host/types'
-import type { Reuse } from '../../../aws/deployment/reuse'
+import type { Reuse } from '../../../aws/deployment/volume/reuse'
 import type { HostProposal, ImageDevice, ImageEvidence, InstanceTypeEvidence } from '../../../aws/deployment/proposal/types'
 
 const { compute } = AWS_SPEC

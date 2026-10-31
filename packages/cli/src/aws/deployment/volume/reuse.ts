@@ -1,8 +1,8 @@
-import { phase } from './facts'
-import type { Placement, Tag } from './layout'
-import { dataTags, dataVolumeId, hostSlotOf } from './topology'
-import type { DataVolume } from './host/types'
-import type { Deployment } from './types'
+import { phase } from '../observe/facts'
+import type { Placement, Tag } from '../layout'
+import { dataTags, dataVolumeId, hostSlotOf } from '../topology'
+import type { DataVolume } from '../host/types'
+import type { Deployment } from '../types'
 
 /**
  * What a later deployment would inherit from a previous one: the retained data
@@ -11,10 +11,10 @@ import type { Deployment } from './types'
  * tags or an operator-supplied volume ID.
  */
 export interface Reuse {
-  from: string
   volumeId: string
-  tags: Tag[]
+  from: string
   zone: Placement
+  tags: Tag[]
   data: DataVolume
 }
 

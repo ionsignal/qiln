@@ -1,18 +1,12 @@
-import { AWS_SPEC } from '../spec'
-import { InstallerError } from '../../diagnostic/error'
-import { sameJson } from '../../json'
-import { expectation, matches } from './expect'
+import { AWS_SPEC } from '../../spec'
+import { sameJson } from '../../../json'
+import { expectation, matches } from '../observe/expect'
+import { invalidDeployment } from './invalid'
 import { declined, refusals, settled, stateOf } from './step'
-import { creationPlan, creationsOf, creationVerified, hostKeyDue, removalPlan, resourceId } from './topology'
-import type { Deployment, Step } from './types'
+import { creationPlan, creationsOf, creationVerified, hostKeyDue, removalPlan, resourceId } from '../topology'
+import type { Deployment, Step } from '../types'
 
 const FIXED_FIELDS = ['version', 'id', 'alias', 'previous', 'connection', 'binding', 'approval', 'createdAt'] as const
-
-function invalid(): never {
-  throw new InstallerError({
-    code: 'AWS_DEPLOYMENT_STATE_INVALID',
-  })
-}
 
 function fenceOpens(current: Deployment, updated: Deployment): boolean {
   return current.termination === 'confirmed' && updated.termination === 'unconfirmed'
@@ -21,7 +15,7 @@ function fenceOpens(current: Deployment, updated: Deployment): boolean {
 function requireFixedFields(current: Deployment, updated: Deployment): void {
   for (const key of FIXED_FIELDS) {
     if (!sameJson(current[key], updated[key])) {
-      return invalid()
+      return invalidDeployment()
     }
   }
 }
@@ -33,12 +27,12 @@ function requireFixedFields(current: Deployment, updated: Deployment): void {
 function requireAdminKey(current: Deployment, updated: Deployment): void {
   if (current.adminKey !== null) {
     if (!sameJson(current.adminKey, updated.adminKey)) {
-      return invalid()
+      return invalidDeployment()
     }
     return
   }
   if (updated.adminKey !== null && (current.steps.length !== 0 || updated.steps.length !== 0)) {
-    return invalid()
+    return invalidDeployment()
   }
 }
 
@@ -58,7 +52,7 @@ function requireProgress(before: Step, after: Step, updated: Deployment): void {
     (before.verifiedAt !== null && before.verifiedAt !== after.verifiedAt) ||
     (before.failure === null && after.failure !== null && after.failure.termination !== updated.termination)
   ) {
-    return invalid()
+    return invalidDeployment()
   }
 }
 
@@ -77,7 +71,7 @@ function requireRemovalApproval(current: Deployment, updated: Deployment, previo
     !matches(expectation(current), approval.observation) ||
     (previous.failure !== null && approval.observation.observedAt <= previous.failure.recordedAt)
   ) {
-    return invalid()
+    return invalidDeployment()
   }
 }
 
@@ -91,7 +85,7 @@ function requireRemovalApproval(current: Deployment, updated: Deployment, previo
 function requireNewStep(current: Deployment, updated: Deployment, step: Step): void {
   const previous = current.steps.at(-1)
   if (!fenceOpens(current, updated) || stateOf(step) !== 'open') {
-    return invalid()
+    return invalidDeployment()
   }
   if (step.removal === null) {
     const planned = creationPlan(updated.approval).at(creationsOf(updated.steps).length - 1)
@@ -105,7 +99,7 @@ function requireNewStep(current: Deployment, updated: Deployment, step: Step): v
         stateOf(previous) !== 'verified' &&
         !(declined(previous) && previous.action === step.action))
     ) {
-      return invalid()
+      return invalidDeployment()
     }
     return
   }
@@ -116,12 +110,12 @@ function requireNewStep(current: Deployment, updated: Deployment, step: Step): v
     planned?.action !== step.action ||
     planned.slot !== step.slot
   ) {
-    return invalid()
+    return invalidDeployment()
   }
   if (updated.removals.length > current.removals.length) {
     requireRemovalApproval(current, updated, previous)
   } else if (previous.removal !== step.removal || stateOf(previous) !== 'verified') {
-    return invalid()
+    return invalidDeployment()
   }
 }
 
@@ -129,14 +123,14 @@ function requireSteps(current: Deployment, updated: Deployment): void {
   const before = current.steps
   const after = updated.steps
   if (after.length < before.length || after.length > before.length + 1) {
-    return invalid()
+    return invalidDeployment()
   }
   const added = after.length > before.length
   before.forEach((step, index) => {
     const next = after[index]
     if (added || index < before.length - 1) {
       if (!sameJson(step, next)) {
-        return invalid()
+        return invalidDeployment()
       }
       return
     }
@@ -151,27 +145,27 @@ function requireRemovals(current: Deployment, updated: Deployment): void {
   const before = current.removals
   const after = updated.removals
   if (after.length < before.length || after.length > before.length + 1) {
-    return invalid()
+    return invalidDeployment()
   }
   before.forEach((removal, index) => {
     if (!sameJson(removal, after[index])) {
-      return invalid()
+      return invalidDeployment()
     }
   })
   if (after.length > before.length && updated.steps.length !== current.steps.length + 1) {
-    return invalid()
+    return invalidDeployment()
   }
 }
 
 function requireObservations(current: Deployment, updated: Deployment): void {
   if (current.latest !== null && (updated.latest === null || updated.latest.observedAt < current.latest.observedAt)) {
-    return invalid()
+    return invalidDeployment()
   }
 }
 
 function requireImplicit(current: Deployment, updated: Deployment): void {
   if (current.implicit !== null && !sameJson(current.implicit, updated.implicit)) {
-    return invalid()
+    return invalidDeployment()
   }
 }
 
@@ -183,7 +177,7 @@ function requireImplicit(current: Deployment, updated: Deployment): void {
 function requireHealth(current: Deployment, updated: Deployment): void {
   if (current.health !== null) {
     if (!sameJson(current.health, updated.health)) {
-      return invalid()
+      return invalidDeployment()
     }
     return
   }
@@ -197,7 +191,7 @@ function requireHealth(current: Deployment, updated: Deployment): void {
     updated.health.instanceId !== resourceId(current, 'run-instances') ||
     !sameJson({ ...current, health: updated.health }, updated)
   ) {
-    return invalid()
+    return invalidDeployment()
   }
 }
 
@@ -210,7 +204,7 @@ function requireHealth(current: Deployment, updated: Deployment): void {
 function requireHostKey(current: Deployment, updated: Deployment): void {
   if (current.hostKey !== null) {
     if (!sameJson(current.hostKey, updated.hostKey)) {
-      return invalid()
+      return invalidDeployment()
     }
     return
   }
@@ -223,7 +217,7 @@ function requireHostKey(current: Deployment, updated: Deployment): void {
     updated.hostKey.instanceId !== resourceId(current, 'run-instances') ||
     !sameJson({ ...current, hostKey: updated.hostKey }, updated)
   ) {
-    return invalid()
+    return invalidDeployment()
   }
 }
 
@@ -235,12 +229,12 @@ function requireHostKey(current: Deployment, updated: Deployment): void {
 function requireHandoff(current: Deployment, updated: Deployment): void {
   if (current.handoff !== null) {
     if (!sameJson(current.handoff, updated.handoff)) {
-      return invalid()
+      return invalidDeployment()
     }
     return
   }
   if (updated.handoff !== null && !sameJson({ ...current, handoff: updated.handoff }, updated)) {
-    return invalid()
+    return invalidDeployment()
   }
 }
 

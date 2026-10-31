@@ -11,7 +11,7 @@ import {
   type Kind,
   type Shape,
 } from './graph'
-import { declined, stateOf } from './step'
+import { declined, stateOf } from './ledger/step'
 import type { Ingress, Placement, Tag, Zone } from './layout'
 import type { Approval, Deployment, Step } from './types'
 
@@ -29,7 +29,7 @@ export interface Resource {
   disposition: Disposition
 }
 
-function range(count: number): number[] {
+export function range(count: number): number[] {
   return Array.from({ length: count }, (_, index) => index)
 }
 

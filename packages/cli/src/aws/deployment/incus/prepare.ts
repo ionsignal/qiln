@@ -7,7 +7,6 @@ import { inspectHost } from '../../../host/incus/inspect'
 import { planOf, releasePlanOf, softwarePlanOf } from '../../../host/incus/plan'
 import { preseedOf, type Preseed } from '../../../host/incus/preseed'
 import { InstallerError, type DiagnosticFact } from '../../../diagnostic/error'
-import { type ProgressSink } from '../progress'
 import { incusFacts, opened, requireNotStuck, retainedPreseed, storageReleased } from './facts'
 import {
   actionsOf,
@@ -24,8 +23,10 @@ import {
   type SoftwareTarget,
 } from '../../../host/incus/types'
 import { StepJournal } from '../journal/steps'
+import { prepareRetry } from '../retry'
 import * as deployments from '../records'
 import * as records from './records'
+import type { ProgressSink } from '../observe/progress'
 import type { IncusAction } from '../../../host/incus/spec'
 import type { Remote } from '../../../transport/ssh/connections'
 import type { Dir } from '../../../state/files'
@@ -58,10 +59,6 @@ function refusal(reasons: readonly string[], retry: string): InstallerError {
     facts: reasons.map((reason): DiagnosticFact => ['Reason', reason]),
     retry,
   })
-}
-
-function retryOf(deployment: Deployment): string {
-  return `qiln aws deployment prepare --id ${deployment.id}`
 }
 
 /**
@@ -104,7 +101,7 @@ export class IncusPreparer {
       save: next => records.save(root, directory, deployment, next),
       recipe: RECIPE,
       failureCode: 'AWS_INCUS_STEP_FAILED',
-      retry: retryOf(deployment),
+      retry: prepareRetry(deployment.id),
       task: action => ({ kind: 'incus', action }),
       run: (plan, action) => apply(remote, plan, action),
       approve: plan => hooks.approve(plan),
@@ -114,7 +111,7 @@ export class IncusPreparer {
   }
 
   private get retry(): string {
-    return retryOf(this.context.deployment)
+    return prepareRetry(this.context.deployment.id)
   }
 
   private get progress(): Progress {

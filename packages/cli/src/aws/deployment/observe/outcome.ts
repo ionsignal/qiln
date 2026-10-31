@@ -1,8 +1,8 @@
 import { expectation, matches } from './expect'
 import { effects, keyDisclosure } from './facts'
-import type { Disposition, Kind } from './graph'
-import { released, resources, type Resource } from './topology'
-import type { Deployment } from './types'
+import { released, resources, type Resource } from '../topology'
+import type { Disposition, Kind } from '../graph'
+import type { Deployment } from '../types'
 
 /**
  * - done: removed and observed absent, absent without being established as removed by Qiln, or handed off to a later deployment.

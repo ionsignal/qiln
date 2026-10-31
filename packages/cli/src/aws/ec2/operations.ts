@@ -9,7 +9,7 @@ import { observeHealth } from './health'
 import { observeHostKey } from './hostkey/observe'
 import { mutate } from './mutate'
 import { candidates, observe } from './observe'
-import { expectation, matches } from '../deployment/expect'
+import { expectation, matches } from '../deployment/observe/expect'
 import { readPublicKey, type PublicKeyReader } from '../ssh/store'
 import { authorizeDeployment, authorizePreparation, notAttempted, type Credentials } from './context'
 import {

@@ -9,7 +9,7 @@ import { withAwsHost, type AwsHost } from './host'
 import { requireCapacity, requireCheckout, requireSupportedRelease } from '../../host'
 import { inspectHost } from './inspect'
 import { installationRetry, type Retry } from '../../retry'
-import type { DeploymentSelector } from '../../../aws/deployment/alias'
+import type { DeploymentSelector } from '../../../aws/deployment/volume/alias'
 import type { InstallationTarget } from '../types'
 
 const GIB = 1_073_741_824

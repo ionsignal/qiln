@@ -5,9 +5,9 @@ import { Deployer } from '../../../aws/deployment/deployer'
 import * as connections from '../../../aws/connection/records'
 import * as deployments from '../../../aws/deployment/records'
 import type { Dir } from '../../../state/files'
-import type { ProgressSink } from '../../../aws/deployment/progress'
+import type { ProgressSink } from '../../../aws/deployment/observe/progress'
 import type { Deployment } from '../../../aws/deployment/types'
-import type { DeploymentSelector } from '../../../aws/deployment/alias'
+import type { DeploymentSelector } from '../../../aws/deployment/volume/alias'
 
 /**
  * `record` is a snapshot from the moment the target was opened. An operation

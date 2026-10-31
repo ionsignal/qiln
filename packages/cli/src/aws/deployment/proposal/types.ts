@@ -1,7 +1,7 @@
 import type { ImagePin } from '../../ami'
 import type { HostPlan } from '../host/types'
 import type { Placement } from '../layout'
-import type { Reuse } from '../reuse'
+import type { Reuse } from '../volume/reuse'
 
 export interface ImageEbs {
   snapshotId: string | null

@@ -1,4 +1,4 @@
-import { expectation, matches, type Expected } from '../../deployment/expect'
+import { expectation, matches, type Expected } from '../../deployment/observe/expect'
 import { observationsSchema, type Deployment, type Observation } from '../../deployment/types'
 import { poll } from '../../observe'
 import { accept } from '../../primitives'

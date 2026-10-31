@@ -14,12 +14,13 @@ import {
   type ZfsTarget,
 } from '../../../host/zfs/types'
 import { verify } from '../../../host/zfs/verify'
+import { StepJournal } from '../journal/steps'
+import { prepareRetry } from '../retry'
 import { poolState, prepared, requireNotStuck, staged, zfsFacts } from './facts'
 import { actionsOf, establishesPool, type ZfsRecord } from './types'
-import { StepJournal } from '../journal/steps'
 import * as deployments from '../records'
 import * as records from './records'
-import type { ProgressSink } from '../progress'
+import type { ProgressSink } from '../observe/progress'
 import type { Remote } from '../../../transport/ssh/connections'
 import type { Dir } from '../../../state/files'
 import type { Deployment } from '../types'
@@ -51,10 +52,6 @@ export interface Context {
 
 type ZfsJournal = StepJournal<ZfsRecord, ApprovedPlan, StepAction>
 
-function retryOf(deployment: Deployment): string {
-  return `qiln aws deployment prepare --id ${deployment.id}`
-}
-
 /**
  * Coordinates ZFS preparation under the AWS-operation lock held by the command.
  * Per step: authorization is persisted, then the fence, then the script runs,
@@ -85,7 +82,7 @@ export class ZfsPreparer {
       save: next => records.save(root, directory, deployment, next),
       recipe: RECIPE,
       failureCode: 'ZFS_STEP_FAILED',
-      retry: retryOf(deployment),
+      retry: prepareRetry(deployment.id),
       task: action => ({ kind: 'zfs', action }),
       run: (plan, action) => apply(remote, plan, action),
       approve: plan => hooks.approve(plan),
@@ -95,7 +92,7 @@ export class ZfsPreparer {
   }
 
   private get retry(): string {
-    return retryOf(this.context.deployment)
+    return prepareRetry(this.context.deployment.id)
   }
 
   /**

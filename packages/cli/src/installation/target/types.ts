@@ -1,5 +1,5 @@
 import type { IncusClient } from '../../transport/incus/client'
-import type { DeploymentSelector } from '../../aws/deployment/alias'
+import type { DeploymentSelector } from '../../aws/deployment/volume/alias'
 import type { Architecture } from '../architecture'
 import type { Layout } from '../layout'
 import type { HostBinding } from '../records'

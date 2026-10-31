@@ -1,7 +1,7 @@
-import { AWS_SPEC } from '../spec'
-import { deploymentName } from './alias'
+import { AWS_SPEC } from '../../spec'
+import { deploymentName } from '../volume/alias'
 import { expectation, matches } from './expect'
-import { declined, refusals, settled, stateOf } from './step'
+import { declined, refusals, settled, stateOf } from '../ledger/step'
 import {
   creationPlan,
   creationsOf,
@@ -12,9 +12,9 @@ import {
   retained,
   unnamed,
   unreleased,
-} from './topology'
-import type { Deployment } from './types'
-import type { DiagnosticFact } from '../../diagnostic/error'
+} from '../topology'
+import type { Deployment } from '../types'
+import type { DiagnosticFact } from '../../../diagnostic/error'
 
 export type Phase =
   | 'approved'

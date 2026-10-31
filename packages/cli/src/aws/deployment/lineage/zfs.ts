@@ -1,11 +1,11 @@
-import { chain } from '../chain'
-import { prepared, staged } from './facts'
-import * as zfs from './records'
+import { chain } from './chain'
+import { prepared, staged } from '../zfs/facts'
+import * as zfs from '../zfs/records'
 import * as deployments from '../records'
 import type { RecordedPool } from '../../../host/zfs/types'
 import type { Dir } from '../../../state/files'
 import type { Deployment } from '../types'
-import type { ZfsRecord } from './types'
+import type { ZfsRecord } from '../zfs/types'
 
 export async function evidence(root: Dir, deployment: Deployment): Promise<ZfsRecord | null> {
   return await zfs.read(await deployments.directoryOf(root, deployment.id), deployment)

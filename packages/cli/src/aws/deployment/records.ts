@@ -1,11 +1,12 @@
 import { basename } from 'node:path'
 import { AWS_SPEC } from '../spec'
-import { isConsistent } from './audit'
-import { vacated } from './facts'
-import { reusable } from './reuse'
-import { requireTransition } from './transitions'
+import { isConsistent } from './ledger/audit'
+import { vacated } from './observe/facts'
+import { invalidDeployment } from './ledger/invalid'
+import { reusable } from './volume/reuse'
+import { requireTransition } from './ledger/transitions'
 import { deploymentSchema, type Deployment } from './types'
-import { notFound, type DeploymentSelector } from './alias'
+import { notFound, type DeploymentSelector } from './volume/alias'
 import { stateFailure } from '../errors'
 import { userId } from '../host'
 import { encodeRecord } from '../../json'
@@ -21,12 +22,6 @@ import * as incus from './incus/records'
 import * as zfs from './zfs/records'
 import type { AwsIdentity } from '../types'
 
-function invalid(): never {
-  throw new InstallerError({
-    code: 'AWS_DEPLOYMENT_STATE_INVALID',
-  })
-}
-
 function ownership() {
   return {
     owner: userId(),
@@ -37,7 +32,7 @@ function ownership() {
 export function parse(value: unknown): Deployment {
   const record = accept(deploymentSchema, value)
   if (record === null || !isConsistent(record)) {
-    return invalid()
+    return invalidDeployment()
   }
   return record
 }
@@ -59,7 +54,7 @@ async function openStore(root: Dir, create: boolean): Promise<Dir | null> {
 
 async function openDirectory(root: Dir, id: string, create = false): Promise<Dir | null> {
   if (!isOperationId(id)) {
-    return invalid()
+    return invalidDeployment()
   }
   const store = await openStore(root, create)
   if (!store) {
@@ -70,7 +65,7 @@ async function openDirectory(root: Dir, id: string, create = false): Promise<Dir
 
 export async function directoryOf(root: Dir, id: string): Promise<Dir> {
   const directory = await openDirectory(root, id)
-  return directory ?? invalid()
+  return directory ?? invalidDeployment()
 }
 
 async function load(directory: Dir): Promise<Deployment> {
@@ -83,14 +78,14 @@ async function load(directory: Dir): Promise<Deployment> {
     })
     const record = parse(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(snapshot.bytes)) as unknown)
     if (record.id !== basename(directory.path)) {
-      return invalid()
+      return invalidDeployment()
     }
     return record
   } catch (error: unknown) {
     if (error instanceof InstallerError) {
       throw error
     }
-    return invalid()
+    return invalidDeployment()
   }
 }
 
@@ -118,7 +113,7 @@ async function tipOf(root: Dir, alias: string): Promise<Deployment | null> {
   const tips = chain.filter(record => !chain.some(other => other.previous === record.id))
   const roots = chain.filter(record => record.previous === null || !ids.has(record.previous))
   if (tips.length !== 1 || roots.length !== 1 || roots[0].previous !== null) {
-    return invalid()
+    return invalidDeployment()
   }
   return tips[0]
 }
@@ -155,7 +150,7 @@ export async function create(root: Dir, record: Deployment): Promise<void> {
     initial.handoff !== null ||
     initial.termination !== 'confirmed'
   ) {
-    return invalid()
+    return invalidDeployment()
   }
   const previous = await predecessor(root, initial.alias)
   const { volume } = initial.approval.host
@@ -163,7 +158,7 @@ export async function create(root: Dir, record: Deployment): Promise<void> {
     (previous?.id ?? null) !== initial.previous ||
     (volume.kind === 'reuse' && (previous === null || reusable(previous)?.volumeId !== volume.volumeId))
   ) {
-    return invalid()
+    return invalidDeployment()
   }
   if (volume.kind === 'reuse' && previous !== null) {
     const previousDirectory = await directoryOf(root, previous.id)
@@ -172,7 +167,7 @@ export async function create(root: Dir, record: Deployment): Promise<void> {
   }
   const directory = await openDirectory(root, initial.id, true)
   if (!directory || (await directory.list()).length !== 0) {
-    return invalid()
+    return invalidDeployment()
   }
   await write(directory, initial)
   if (volume.kind === 'reuse' && previous !== null) {
@@ -221,7 +216,7 @@ export async function save(root: Dir, updated: Deployment): Promise<void> {
   const next = parse(updated)
   const directory = await openDirectory(root, next.id)
   if (!directory) {
-    return invalid()
+    return invalidDeployment()
   }
   requireTransition(await load(directory), next)
   await write(directory, next)

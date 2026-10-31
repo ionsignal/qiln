@@ -1,5 +1,5 @@
 import { InstallerError } from '../diagnostic/error'
-import { phase } from '../aws/deployment/facts'
+import { phase } from '../aws/deployment/observe/facts'
 import { requireStorageReleased, retainedPreseedBytes } from '../aws/deployment/incus/facts'
 import { requirePoolReleased } from '../aws/deployment/zfs/facts'
 import { sameJson } from '../json'

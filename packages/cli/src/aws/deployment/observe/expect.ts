@@ -1,7 +1,7 @@
-import { dataVolumeId, resourceId, resources, stepOf } from './topology'
-import type { Action } from './graph'
-import type { Ingress } from './layout'
-import type { Deployment, Implicit, Observation, ObservedResource } from './types'
+import { dataVolumeId, range, resourceId, resources, stepOf } from '../topology'
+import type { Action } from '../graph'
+import type { Ingress } from '../layout'
+import type { Deployment, Implicit, Observation, ObservedResource } from '../types'
 
 export interface Association {
   subnetId: string
@@ -44,10 +44,6 @@ export type Expected =
   | { kind: 'volume'; id: string; present: boolean; role: 'root' | 'data'; attached: boolean }
   | { kind: 'interface'; id: string; present: boolean }
   | { kind: 'address'; id: string; present: boolean; association: AddressAssociation | null }
-
-function range(count: number): number[] {
-  return Array.from({ length: count }, (_, index) => index)
-}
 
 export function expectation(record: Deployment): Expected[] {
   const { zones, ingress } = record.approval

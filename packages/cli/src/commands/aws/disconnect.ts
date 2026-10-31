@@ -1,6 +1,6 @@
 import { InstallerError } from '../../diagnostic/error'
 import * as connections from '../../aws/connection/records'
-import { describe } from '../../aws/deployment/facts'
+import { describe } from '../../aws/deployment/observe/facts'
 import { retained } from '../../aws/deployment/topology'
 import { diagnostic } from '../../aws/errors'
 import { pendingFacts } from '../../aws/iam/facts'

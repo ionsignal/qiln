@@ -1,6 +1,6 @@
 import { requireAwsHost } from '../../../aws/host'
 import { openAwsRoot } from '../../../aws/root'
-import { notFound } from '../../../aws/deployment/alias'
+import { notFound } from '../../../aws/deployment/volume/alias'
 import {
   recordedState,
   reportDeployment,
@@ -11,7 +11,7 @@ import {
 } from './report'
 import * as deployments from '../../../aws/deployment/records'
 import * as incus from '../../../aws/deployment/incus/evidence'
-import * as lineage from '../../../aws/deployment/zfs/lineage'
+import * as lineage from '../../../aws/deployment/lineage/zfs'
 import type { Deployment } from '../../../aws/deployment/types'
 import type { AwsDeploymentOptions } from '../../../input'
 import type { Dir } from '../../../state/files'

@@ -1,14 +1,8 @@
-import { InstallerError } from '../../diagnostic/error'
-import { dataVolumeId } from './topology'
-import * as deployments from './records'
-import type { Dir } from '../../state/files'
-import type { Deployment } from './types'
-
-function invalid(): never {
-  throw new InstallerError({
-    code: 'AWS_DEPLOYMENT_STATE_INVALID',
-  })
-}
+import { invalidDeployment } from '../ledger/invalid'
+import { dataVolumeId } from '../topology'
+import * as deployments from '../records'
+import type { Deployment } from '../types'
+import type { Dir } from '../../../state/files'
 
 /**
  * Walks the explicit volume-reuse chain from a deployment back to the one that
@@ -22,7 +16,7 @@ export async function* chain(root: Dir, start: Deployment): AsyncGenerator<Deplo
   let current = start
   while (true) {
     if (visited.has(current.id)) {
-      return invalid()
+      return invalidDeployment()
     }
     visited.add(current.id)
     yield current
@@ -32,7 +26,7 @@ export async function* chain(root: Dir, start: Deployment): AsyncGenerator<Deplo
     }
     const previous = await deployments.read(root, volume.from)
     if (previous === null || dataVolumeId(previous) !== volume.volumeId) {
-      return invalid()
+      return invalidDeployment()
     }
     current = previous
   }

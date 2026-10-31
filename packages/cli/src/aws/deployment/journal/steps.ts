@@ -4,7 +4,7 @@ import { checkCancellation } from '../../../terminal/prompts'
 import { returned, type JournalStep } from '../../../journal/step'
 import type { JournalAuthorization } from '../../../journal/history'
 import type { StepOutcome } from '../../../host/step'
-import { notify, withWaiting, type ProgressSink, type ProgressTask } from '../progress'
+import { notify, withWaiting, type ProgressSink, type ProgressTask } from '../observe/progress'
 import { userId } from '../../host'
 
 export interface Evidence<Plan, Action extends string> {

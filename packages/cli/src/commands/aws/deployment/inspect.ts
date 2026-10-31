@@ -1,6 +1,6 @@
 import { reportDeployment } from './report'
 import { authenticateDeployer, openTarget } from './shared'
-import { expectation, matches } from '../../../aws/deployment/expect'
+import { expectation, matches } from '../../../aws/deployment/observe/expect'
 import { healthDue, resources, unnamed } from '../../../aws/deployment/topology'
 import { requireAwsHost } from '../../../aws/host'
 import { withCancellation } from '../../../terminal/prompts'

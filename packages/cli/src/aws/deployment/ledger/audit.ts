@@ -1,4 +1,4 @@
-import { IMPLICIT, undoes } from './graph'
+import { IMPLICIT, undoes } from '../graph'
 import { declined, settled, stateOf } from './step'
 import {
   creationPlan,
@@ -11,8 +11,8 @@ import {
   stepOf,
   unnamed,
   unreleased,
-} from './topology'
-import type { Deployment, ObservedResource, Step } from './types'
+} from '../topology'
+import type { Deployment, ObservedResource, Step } from '../types'
 
 /**
  * Cross-field consistency of a record whose shape is already valid. These are

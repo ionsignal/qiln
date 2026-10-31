@@ -1,6 +1,6 @@
 import type { Tag as ProviderTag } from '@aws-sdk/client-ec2'
 import { InstallerError } from '../../../diagnostic/error'
-import type { Expected } from '../../deployment/expect'
+import type { Expected } from '../../deployment/observe/expect'
 import type { Kind } from '../../deployment/graph'
 import type { Tag } from '../../deployment/layout'
 import {

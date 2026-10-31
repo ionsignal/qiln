@@ -15,7 +15,7 @@ import { sameFingerprint } from '../../../transport/ssh/key'
 import { byId, judge, listed, PAGES, tagFilters, tagged, unverified } from './shared'
 import type { Ec2 } from '../client'
 import type { Candidate, Of } from './shared'
-import type { Expected, Mapping } from '../../deployment/expect'
+import type { Expected, Mapping } from '../../deployment/observe/expect'
 import type { Deployment, Implicit, ObservedResource } from '../../deployment/types'
 
 interface Launched {

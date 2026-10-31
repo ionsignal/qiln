@@ -28,7 +28,7 @@ import {
   type Kind,
 } from './graph'
 import { shapeOf } from './topology'
-import { hostKeySchema } from './hostkey'
+import { hostKeySchema } from './ssh/hostkey'
 import { hostPlanSchema } from './host/types'
 import { ingressSchema, tagsSchema, zoneSchema, type Zone } from './layout'
 

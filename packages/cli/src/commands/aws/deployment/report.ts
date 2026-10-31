@@ -1,4 +1,4 @@
-import { deploymentName } from '../../../aws/deployment/alias'
+import { deploymentName } from '../../../aws/deployment/volume/alias'
 import {
   cleanup,
   healthDisclosure,
@@ -8,15 +8,15 @@ import {
   phase,
   volumeDisclosure,
   type Phase,
-} from '../../../aws/deployment/facts'
+} from '../../../aws/deployment/observe/facts'
 import {
   incusFacts,
   retainedPreseed,
   storageReleased,
   unsettled as incusUnsettled,
 } from '../../../aws/deployment/incus/facts'
-import { removalOutcome } from '../../../aws/deployment/outcome'
-import { refusals } from '../../../aws/deployment/step'
+import { removalOutcome } from '../../../aws/deployment/observe/outcome'
+import { refusals } from '../../../aws/deployment/ledger/step'
 import { prepared, unsettled, zfsFacts } from '../../../aws/deployment/zfs/facts'
 import { released, resourceId, resources, retained, unreleased, type Resource } from '../../../aws/deployment/topology'
 import type { IncusRecord } from '../../../aws/deployment/incus/types'
