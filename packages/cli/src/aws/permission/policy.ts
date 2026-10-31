@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto'
 import { InstallerError } from '../../diagnostic/error'
 import { hasKeys, isRecord } from '../../guards'
 import { document } from './document'
+import { invalidPermission } from './invalid'
 import { operatorName } from '../operator'
 import { POLICY_KEYS, POLICY_PATH, type PolicyKey, type PolicyMap } from './keys'
 
@@ -32,12 +33,6 @@ export interface PolicySnapshot {
   attached: boolean
 }
 
-function invalid(): never {
-  throw new InstallerError({
-    code: 'AWS_PERMISSION_STATE_INVALID',
-  })
-}
-
 export function digest(value: string): string {
   return createHash('sha256').update(value).digest('hex')
 }
@@ -48,7 +43,7 @@ export function policyName(connection: string, key: PolicyKey): string {
 
 export function policyArn(accountId: string, connection: string, key: PolicyKey): string {
   if (!/^[0-9]{12}$/.test(accountId)) {
-    return invalid()
+    return invalidPermission()
   }
   return `arn:aws:iam::${accountId}:policy${POLICY_PATH}${policyName(connection, key)}`
 }
@@ -133,4 +128,3 @@ export function isSnapshot(value: unknown): value is PolicySnapshot {
 export function isSnapshots(value: unknown): value is PolicyMap<PolicySnapshot> {
   return isRecord(value) && hasKeys(value, POLICY_KEYS) && POLICY_KEYS.every(key => isSnapshot(value[key]))
 }
-

@@ -1,8 +1,8 @@
 import { basename, dirname } from 'node:path'
-import { InstallerError } from '../../diagnostic/error'
 import { openChildDir, openDir, writeChild, type Dir } from '../../state/files'
 import * as connections from '../connection/records'
 import { userId } from '../host'
+import { invalidPermission } from '../permission/invalid'
 import { encodeRecord } from '../../json'
 import { requireOperationLock } from '../root'
 import { AWS_SPEC } from '../spec'
@@ -10,15 +10,9 @@ import type { AwsConnection } from '../types'
 import { requireTransition } from './transitions'
 import { isPending, type Pending } from './types'
 
-function invalid(): never {
-  throw new InstallerError({
-    code: 'AWS_PERMISSION_STATE_INVALID',
-  })
-}
-
 export function parse(value: unknown): Pending {
   if (!isPending(value)) {
-    return invalid()
+    return invalidPermission()
   }
   return value
 }
@@ -37,7 +31,7 @@ export async function requireLock(directory: Dir, expectedPid = process.pid): Pr
     expectedPid <= 0 ||
     basename(dirname(directory.path)) !== AWS_SPEC.state.connections
   ) {
-    return invalid()
+    return invalidPermission()
   }
   const root = await openDir(dirname(dirname(directory.path)), {
     owner: userId(),
@@ -64,7 +58,7 @@ export async function save(directory: Dir, record: Pending): Promise<void> {
   const current = await read(directory)
   const updated = parse(record)
   if (!current) {
-    return invalid()
+    return invalidPermission()
   }
   requireTransition(current, updated)
   await write(directory, updated)
@@ -80,7 +74,7 @@ export async function childContext(): Promise<{
 }> {
   const home = process.env.HOME
   if (!home || basename(home) !== AWS_SPEC.state.auth || basename(dirname(home)) !== AWS_SPEC.state.root) {
-    return invalid()
+    return invalidPermission()
   }
   const directory = await openDir(dirname(dirname(home)), {
     owner: userId(),
@@ -90,7 +84,7 @@ export async function childContext(): Promise<{
   await connections.inspect(directory)
   const record = await read(directory)
   if (!record || record.cleanup !== 'pending') {
-    return invalid()
+    return invalidPermission()
   }
   const root = await openChildDir(directory, AWS_SPEC.state.root, {
     owner: userId(),

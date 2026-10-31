@@ -1,25 +1,20 @@
 import { randomUUID } from 'node:crypto'
 import { rm, unlink } from 'node:fs/promises'
 import { basename } from 'node:path'
+import { read, requireLock, write } from './journal'
+import { AWS_RECORD_VERSION, AWS_SPEC } from '../spec'
 import { InstallerError } from '../../diagnostic/error'
 import { openChildDir, type Dir } from '../../state/files'
 import { sameIdentity } from '../auth/identity'
 import { removeAuth } from '../auth/session'
 import { userId } from '../host'
 import { sameJson } from '../../json'
-import { read, requireLock, write } from './journal'
-import { AWS_RECORD_VERSION, AWS_SPEC } from '../spec'
+import { invalidPermission } from '../permission/invalid'
 import { POLICY_KEYS, bindingEntries, policyMap, type PolicyBindings, type PolicyMap } from '../permission/keys'
 import * as connections from '../connection/records'
 import type { Pending } from './types'
 import type { AwsConnection, PolicyBinding } from '../types'
 import type { PolicyIdentity } from '../permission/policy'
-
-function invalid(): never {
-  throw new InstallerError({
-    code: 'AWS_PERMISSION_STATE_INVALID',
-  })
-}
 
 async function begin(directory: Dir, name: string, region: string, saved: AwsConnection | null): Promise<Pending> {
   await requireLock(directory)
@@ -29,11 +24,11 @@ async function begin(directory: Dir, name: string, region: string, saved: AwsCon
     (await read(directory)) !== null ||
     (await directory.list()).includes(AWS_SPEC.state.root)
   ) {
-    return invalid()
+    return invalidPermission()
   }
   const current = await connections.read(directory, name)
   if (!sameJson(current, saved)) {
-    return invalid()
+    return invalidPermission()
   }
   if (saved === null && (await directory.list()).length !== 0) {
     throw new InstallerError({
@@ -41,7 +36,7 @@ async function begin(directory: Dir, name: string, region: string, saved: AwsCon
     })
   }
   if (saved !== null && saved.managed === null) {
-    return invalid()
+    return invalidPermission()
   }
   const id = randomUUID()
   const record: Pending = {
@@ -73,7 +68,7 @@ export async function onboard(directory: Dir, name: string, region: string): Pro
 
 export async function maintain(directory: Dir, saved: AwsConnection): Promise<Pending> {
   if (!saved.managed) {
-    return invalid()
+    return invalidPermission()
   }
   return await begin(directory, saved.name, saved.managed.deploymentRegion, saved)
 }
@@ -82,7 +77,7 @@ export async function cleanRoot(directory: Dir, operationId: string): Promise<vo
   await requireLock(directory)
   const record = await read(directory)
   if (!record || record.id !== operationId || record.termination !== 'confirmed') {
-    return invalid()
+    return invalidPermission()
   }
   if (!(await directory.list()).includes(AWS_SPEC.state.root)) {
     await directory.sync()
@@ -93,11 +88,11 @@ export async function cleanRoot(directory: Dir, operationId: string): Promise<vo
     mode: 0o700,
   })
   if ((await root.list()).some(name => name !== AWS_SPEC.state.auth)) {
-    return invalid()
+    return invalidPermission()
   }
   await removeAuth(root)
   if ((await root.list()).length !== 0) {
-    return invalid()
+    return invalidPermission()
   }
   await rm(root.path, {
     recursive: true,
@@ -113,7 +108,7 @@ export async function cleanRoot(directory: Dir, operationId: string): Promise<vo
 function bindings(policies: PolicyMap<PolicyIdentity | null>): PolicyMap<PolicyBinding> {
   return policyMap(key => {
     const policy = policies[key]
-    return policy === null ? invalid() : { arn: policy.arn, id: policy.id }
+    return policy === null ? invalidPermission() : { arn: policy.arn, id: policy.id }
   })
 }
 
@@ -138,7 +133,7 @@ export async function publish(directory: Dir, record: Pending): Promise<AwsConne
     record.cleanup !== 'completed' ||
     (await directory.list()).includes(AWS_SPEC.state.root)
   ) {
-    return invalid()
+    return invalidPermission()
   }
   const saved = await connections.read(directory, record.name)
   if (
@@ -149,7 +144,7 @@ export async function publish(directory: Dir, record: Pending): Promise<AwsConne
       saved.managed.deploymentRegion !== record.region ||
       !keepsBindings(saved.managed.policies, record.policies))
   ) {
-    return invalid()
+    return invalidPermission()
   }
   const connection: AwsConnection = {
     version: AWS_RECORD_VERSION.connection,
@@ -167,7 +162,7 @@ export async function publish(directory: Dir, record: Pending): Promise<AwsConne
   await connections.save(directory, connection)
   const persisted = await connections.read(directory, record.name)
   if (!sameJson(persisted, connection)) {
-    return invalid()
+    return invalidPermission()
   }
   return connection
 }
@@ -182,7 +177,7 @@ export async function removePending(directory: Dir, record: Pending): Promise<vo
     record.cleanup !== 'completed' ||
     (await directory.list()).includes(AWS_SPEC.state.root)
   ) {
-    return invalid()
+    return invalidPermission()
   }
   if (record.approval !== null) {
     const saved = await connections.read(directory, record.name)
@@ -197,14 +192,14 @@ export async function removePending(directory: Dir, record: Pending): Promise<vo
       !sameJson(saved.managed.policies, bindings(record.policies)) ||
       !sameJson(saved.managed.verified, record.verified)
     ) {
-      return invalid()
+      return invalidPermission()
     }
   } else if (
     record.mutation !== null ||
     record.password !== null ||
     POLICY_KEYS.some(key => record.policies[key] !== null)
   ) {
-    return invalid()
+    return invalidPermission()
   }
   await unlink(directory.child(AWS_SPEC.state.pending))
   await directory.sync()

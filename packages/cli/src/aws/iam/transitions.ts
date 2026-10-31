@@ -1,9 +1,10 @@
-import { InstallerError } from '../../diagnostic/error'
+import { pendingFacts } from './facts'
 import { sameJson } from '../../json'
+import { invalidPermission } from '../permission/invalid'
+import { isSpec, reconciliation } from '../permission/spec'
+import { InstallerError } from '../../diagnostic/error'
 import { POLICY_KEYS, policyMap, type PolicyKey, type PolicyMap } from '../permission/keys'
 import { emptySnapshot, type PolicyIdentity, type PolicySnapshot } from '../permission/policy'
-import { isSpec, reconciliation } from '../permission/spec'
-import { pendingFacts } from './facts'
 import type { Request } from './protocol'
 import type { Mutation, MutationAction, PermissionInspection, Pending } from './types'
 
@@ -13,12 +14,6 @@ const FIXED_MUTATION_FIELDS = ['id', 'action', 'key', 'approvedAt'] as const
 export interface Step {
   action: MutationAction
   key: PolicyKey | null
-}
-
-function invalid(): never {
-  throw new InstallerError({
-    code: 'AWS_PERMISSION_STATE_INVALID',
-  })
 }
 
 function baseline(record: Pending): PolicyMap<PolicySnapshot> {
@@ -32,7 +27,7 @@ function baseline(record: Pending): PolicyMap<PolicySnapshot> {
 export function plan(record: Pending): Step[] {
   const approval = record.approval
   if (!approval) {
-    return invalid()
+    return invalidPermission()
   }
   const modes = reconciliation(approval.inspection.before?.policies ?? null, approval.permission)
   const policySteps = POLICY_KEYS.flatMap((key): Step[] => {
@@ -64,11 +59,11 @@ export function plan(record: Pending): Step[] {
 export function position(record: Pending): number {
   const mutation = record.mutation
   if (!mutation) {
-    return invalid()
+    return invalidPermission()
   }
   const index = plan(record).findIndex(step => step.action === mutation.action && step.key === mutation.key)
   if (index < 0) {
-    return invalid()
+    return invalidPermission()
   }
   return index
 }
@@ -82,7 +77,7 @@ function apply(snapshot: PolicySnapshot, action: MutationAction, policy: PolicyI
     case 'replace-policy':
       return { policy, versions: [...snapshot.versions, policy.versionId].sort(), attached: true }
     default:
-      return invalid()
+      return invalidPermission()
   }
 }
 
@@ -94,12 +89,12 @@ function apply(snapshot: PolicySnapshot, action: MutationAction, policy: PolicyI
 export function expectation(record: Pending, completed: number): PermissionInspection {
   const approval = record.approval
   if (!approval) {
-    return invalid()
+    return invalidPermission()
   }
   const policies = structuredClone(baseline(record))
   for (const { action, key } of plan(record).slice(0, completed)) {
     if (key !== null) {
-      policies[key] = apply(policies[key], action, record.policies[key] ?? invalid())
+      policies[key] = apply(policies[key], action, record.policies[key] ?? invalidPermission())
     }
   }
   return {
@@ -131,7 +126,7 @@ function requireMutation(record: Pending): void {
   const mutation = record.mutation
   const approval = record.approval
   if (!mutation || !approval) {
-    return invalid()
+    return invalidPermission()
   }
   // Only a step of the approved plan may execute.
   position(record)
@@ -139,7 +134,7 @@ function requireMutation(record: Pending): void {
   switch (mutation.action) {
     case 'create-user':
       if (record.kind !== 'onboard' || record.operator !== null || POLICY_KEYS.some(name => record.policies[name] !== null)) {
-        return invalid()
+        return invalidPermission()
       }
       break
     case 'attach-signin':
@@ -150,12 +145,12 @@ function requireMutation(record: Pending): void {
         record.password !== null ||
         POLICY_KEYS.some(name => record.policies[name] !== null)
       ) {
-        return invalid()
+        return invalidPermission()
       }
       break
     case 'create-policy':
       if (!record.operator || key === null || record.policies[key] !== null) {
-        return invalid()
+        return invalidPermission()
       }
       break
     case 'attach-policy':
@@ -164,7 +159,7 @@ function requireMutation(record: Pending): void {
         key === null ||
         record.policies[key]?.sha256 !== approval.permission.policies[key].sha256
       ) {
-        return invalid()
+        return invalidPermission()
       }
       break
     case 'replace-policy':
@@ -174,12 +169,12 @@ function requireMutation(record: Pending): void {
         key === null ||
         !sameJson(record.policies[key], baseline(record)[key].policy)
       ) {
-        return invalid()
+        return invalidPermission()
       }
       break
     case 'password':
       if (record.kind !== 'onboard' || !record.operator || record.password !== null) {
-        return invalid()
+        return invalidPermission()
       }
       break
   }
@@ -197,11 +192,11 @@ export function authorize(record: Pending, request: Request): void {
     record.termination !== 'unconfirmed' ||
     record.cleanup !== 'pending'
   ) {
-    return invalid()
+    return invalidPermission()
   }
   if (request.kind === 'inspect') {
     if (record.approval !== null || record.mutation !== null) {
-      return invalid()
+      return invalidPermission()
     }
     return
   }
@@ -212,19 +207,19 @@ export function authorize(record: Pending, request: Request): void {
     !isSpec(approval.permission, record.accountId, record.name) ||
     record.verified !== null
   ) {
-    return invalid()
+    return invalidPermission()
   }
   const mutation = record.mutation
   if (request.kind === 'mutate') {
     if (!mutation || mutation.returned !== null || mutation.verifiedAt !== null) {
-      return invalid()
+      return invalidPermission()
     }
     requireMutation(record)
     return
   }
   if (request.kind === 'verify-mutation') {
     if (!mutation?.returned || mutation.verifiedAt !== null) {
-      return invalid()
+      return invalidPermission()
     }
     return
   }
@@ -236,14 +231,14 @@ export function authorize(record: Pending, request: Request): void {
     (record.kind === 'onboard' && (mutation?.action !== 'password' || record.password?.delivered !== true)) ||
     (request.kind === 'readiness' && record.kind !== 'onboard')
   ) {
-    return invalid()
+    return invalidPermission()
   }
 }
 
 function requireFixedFields(current: Pending, updated: Pending): void {
   for (const key of FIXED_FIELDS) {
     if (!sameJson(current[key], updated[key])) {
-      return invalid()
+      return invalidPermission()
     }
   }
 }
@@ -267,7 +262,7 @@ function requireRetainedEvidence(current: Pending, updated: Pending): void {
     (current.failureCode !== null && current.failureCode !== updated.failureCode) ||
     (current.cleanup === 'completed' && updated.cleanup !== 'completed')
   ) {
-    return invalid()
+    return invalidPermission()
   }
 }
 
@@ -278,7 +273,7 @@ function requireRetainedPassword(current: Pending, updated: Pending): void {
       current.password.createdAt !== updated.password.createdAt ||
       (current.password.delivered && !updated.password.delivered))
   ) {
-    return invalid()
+    return invalidPermission()
   }
 }
 
@@ -296,7 +291,7 @@ function sameReceipt(
 function requireSameMutation(previous: Mutation, updated: Mutation): void {
   for (const key of FIXED_MUTATION_FIELDS) {
     if (!sameJson(previous[key], updated[key])) {
-      return invalid()
+      return invalidPermission()
     }
   }
   const returnedChanged =
@@ -305,7 +300,7 @@ function requireSameMutation(previous: Mutation, updated: Mutation): void {
       ? !sameReceipt(previous.returned, updated.returned)
       : !sameJson(previous.returned, updated.returned))
   if (returnedChanged || (previous.verifiedAt !== null && !sameJson(previous, updated))) {
-    return invalid()
+    return invalidPermission()
   }
 }
 
@@ -328,7 +323,7 @@ function requireNewMutation(current: Pending, updated: Pending): void {
     !sameJson(updated.password, current.password) ||
     updated.termination !== 'unconfirmed'
   ) {
-    return invalid()
+    return invalidPermission()
   }
 }
 
@@ -358,7 +353,7 @@ function requireFirstApproval(current: Pending, updated: Pending): void {
       policyMap(key => approval.inspection.before?.policies[key].policy ?? null),
     )
   ) {
-    return invalid()
+    return invalidPermission()
   }
 }
 

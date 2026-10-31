@@ -1,15 +1,14 @@
 import { IAMClient } from '@aws-sdk/client-iam'
 import { GetCallerIdentityCommand, STSClient } from '@aws-sdk/client-sts'
-import { InstallerError } from '../../diagnostic/error'
-import { configuration, credentials, expiresAt } from '../auth/credentials'
-import { POLICY_KEYS, policyMap, type PolicyKey } from '../permission/keys'
-import { isSpec } from '../permission/spec'
 import { AWS_SPEC } from '../spec'
-import type { AwsConnection } from '../types'
 import { Iam } from './client'
 import { childContext } from './journal'
 import { retainPassword } from './password'
-import type { Request, Result } from './protocol'
+import { isSpec } from '../permission/spec'
+import { InstallerError } from '../../diagnostic/error'
+import { invalidPermission } from '../permission/invalid'
+import { configuration, credentials, expiresAt } from '../auth/credentials'
+import { POLICY_KEYS, policyMap, type PolicyKey } from '../permission/keys'
 import { authorize, expectation, plan, position } from './transitions'
 import {
   isRootIdentity,
@@ -20,12 +19,8 @@ import {
   type RootIdentity,
   type Target,
 } from './types'
-
-function invalid(): never {
-  throw new InstallerError({
-    code: 'AWS_PERMISSION_STATE_INVALID',
-  })
-}
+import type { AwsConnection } from '../types'
+import type { Request, Result } from './protocol'
 
 function rootIdentity(value: { accountId: unknown; arn: unknown; userId: unknown }): RootIdentity {
   const identity = {
@@ -50,7 +45,7 @@ function target(record: Pending, accountId: string): Target {
 
 function operatorBinding(record: Pending): Binding {
   if (!record.operator || record.accountId === null) {
-    return invalid()
+    return invalidPermission()
   }
   return {
     ...target(record, record.accountId),
@@ -59,7 +54,7 @@ function operatorBinding(record: Pending): Binding {
 }
 
 function policyKey(mutation: Mutation): PolicyKey {
-  return mutation.key ?? invalid()
+  return mutation.key ?? invalidPermission()
 }
 
 async function inspect(
@@ -88,7 +83,7 @@ async function inspect(
     }
   }
   if (!connection?.managed) {
-    return invalid()
+    return invalidPermission()
   }
   const bound = connection.managed.policies
   const before = await iam.inspect(operatorBinding(record), bound)
@@ -123,7 +118,7 @@ async function mutate(iam: Iam, record: Pending, signal: AbortSignal): Promise<M
     record.accountId === null ||
     !isSpec(approval.permission, record.accountId, record.name)
   ) {
-    return invalid()
+    return invalidPermission()
   }
   const signIn = approval.inspection.signIn
   if (mutation.action === 'create-user') {
@@ -189,26 +184,26 @@ async function verifyMutation(iam: Iam, record: Pending): Promise<MutationResult
   const returned = mutation?.returned
   const signIn = record.approval?.inspection.signIn
   if (!mutation || !returned || !signIn) {
-    return invalid()
+    return invalidPermission()
   }
   const operator = operatorBinding(record)
   const index = position(record)
   switch (mutation.action) {
     case 'create-user':
       if (returned.kind !== 'operator') {
-        return invalid()
+        return invalidPermission()
       }
       await iam.verifyUser(operator, signIn)
       break
     case 'attach-signin':
       if (returned.kind !== 'done' || returned.action !== 'attach-signin') {
-        return invalid()
+        return invalidPermission()
       }
       await iam.verifyStage(operator, signIn, 'signin')
       break
     case 'grant-self':
       if (returned.kind !== 'done' || returned.action !== 'grant-self') {
-        return invalid()
+        return invalidPermission()
       }
       await iam.verifyStage(operator, signIn, 'self')
       break
@@ -224,7 +219,7 @@ async function verifyMutation(iam: Iam, record: Pending): Promise<MutationResult
     }
     case 'password':
       if (returned.kind !== 'password') {
-        return invalid()
+        return invalidPermission()
       }
       await iam.verifyPolicies(operator, signIn, expectation(record, index).policies)
       await iam.verifyPassword(operator, returned.receipt)
@@ -235,13 +230,13 @@ async function verifyMutation(iam: Iam, record: Pending): Promise<MutationResult
 
 async function verify(iam: Iam, record: Pending): Promise<Result> {
   if (!record.approval) {
-    return invalid()
+    return invalidPermission()
   }
   const operator = operatorBinding(record)
   const expected = expectation(record, plan(record).length)
   if (record.kind === 'onboard') {
     if (!record.password) {
-      return invalid()
+      return invalidPermission()
     }
     await iam.verifyOnboarding(operator, expected.signIn, expected.policies, record.password)
   } else {
@@ -249,7 +244,7 @@ async function verify(iam: Iam, record: Pending): Promise<Result> {
   }
   return {
     kind: 'verified',
-    policies: policyMap(key => expected.policies[key].policy ?? invalid()),
+    policies: policyMap(key => expected.policies[key].policy ?? invalidPermission()),
   }
 }
 
@@ -300,7 +295,7 @@ export async function execute(request: Request): Promise<Result> {
       case 'readiness': {
         const approval = record.approval
         if (!approval || !record.password) {
-          return invalid()
+          return invalidPermission()
         }
         return {
           kind: 'readiness',
