@@ -123,9 +123,11 @@ export const installationDiagnostics = Object.freeze({
     'Select the canonical Qiln Git checkout root with --source.',
   ),
   INSTALLATION_HOST_REGISTERED: entry(
-    '',
-    '',
-    '',
+    'Host is already bound to another installation',
+    'Each host can back only one registered installation. Protected local state already records this host for a different installation name, so Qiln refused to register a second one. Nothing was created or changed, and the existing installation was not rebound. The diagnostic facts name both installations.',
+    'Run qiln installation list to see every registered installation and its host.',
+    'Use the installation already bound to this host, or review the other installation record manually before retrying.',
+    'Do not edit or delete installation records to bypass this state.',
   ),
   INSTALLATION_HOST_INSPECTION_FAILED: entry(
     'Target host inspection did not complete reliably',
