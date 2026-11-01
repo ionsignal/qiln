@@ -1,17 +1,20 @@
 import { expectation, matches, type Expected } from '../../deployment/observe/expect'
 import { observationsSchema, type Deployment, type Observation } from '../../deployment/types'
-import { poll } from '../../observe'
+import { poll, type PollOptions } from '../../observe'
 import { accept } from '../../primitives'
 import { AWS_SPEC } from '../../spec'
 import { hostCandidates, observeHost } from './host'
 import { networkCandidates, observeNetwork } from './network'
 import { unverified } from './shared'
 import type { Ec2 } from '../client'
+import type { Polling } from '../protocol'
 
-const OBSERVATION = {
-  ...AWS_SPEC.deployment.observation,
-  code: 'AWS_DEPLOYMENT_VERIFICATION_FAILED',
-} as const
+const { standard, termination } = AWS_SPEC.deployment.observation
+
+const POLICIES: Record<Exclude<Polling, 'none'>, PollOptions> = {
+  standard: { ...standard, code: 'AWS_DEPLOYMENT_VERIFICATION_FAILED' },
+  termination: { ...termination, code: 'AWS_DEPLOYMENT_VERIFICATION_FAILED' },
+}
 
 /**
  * One graph observation comprises several provider reads, not one atomic read.
@@ -29,13 +32,13 @@ async function snapshot(
 }
 
 /**
- * Judges every recorded resource against the ledger. With `wait` it polls
- * until the whole graph matches, through missing, transitional, and not yet
- * propagated states; without it, one read is returned as observed.
+ * Judges every recorded resource against the ledger. With a polling policy it
+ * polls until the whole graph matches, through missing, transitional, and not
+ * yet propagated states; with `none`, one read is returned as observed.
  */
-export async function observe(ec2: Ec2, record: Deployment, wait: boolean): Promise<Observation> {
+export async function observe(ec2: Ec2, record: Deployment, polling: Polling): Promise<Observation> {
   const expected = expectation(record)
-  if (!wait) {
+  if (polling === 'none') {
     return await snapshot(ec2, record, expected)
   }
   const seen: { latest: Observation | undefined } = {
@@ -45,7 +48,7 @@ export async function observe(ec2: Ec2, record: Deployment, wait: boolean): Prom
     const observation = await snapshot(ec2, record, expected, signal)
     seen.latest = observation
     return matches(expected, observation)
-  }, OBSERVATION)
+  }, POLICIES[polling])
   return seen.latest ?? unverified()
 }
 

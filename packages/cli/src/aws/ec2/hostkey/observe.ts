@@ -79,8 +79,7 @@ async function readConsole(ec2: Ec2, instanceId: string, signal: AbortSignal): P
  */
 export async function observeHostKey(ec2: Ec2, record: Deployment): Promise<HostKey> {
   const instanceId = resourceId(record, 'run-instances') ?? unverified()
-  // One non-polled read must agree with the ledger before any evidence is read.
-  if (!matches(expectation(record), await observe(ec2, record, false))) {
+  if (!matches(expectation(record), await observe(ec2, record, 'none'))) {
     return unverified()
   }
   const { allocationId, address } = await resolveAddress(ec2, record)

@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto'
 import { AWS_RECORD_VERSION, AWS_SPEC } from '../spec'
+import { IMPLICIT } from './graph'
 import { validCidr, validSource } from './cidr'
 import { expectation, matches } from './observe/expect'
 import { deploymentFacts, removable } from './observe/facts'
 import { invalidDeployment } from './ledger/invalid'
 import { declined, stateOf } from './ledger/step'
+import { settleOrPending } from './handoff/settle'
 import { diagnostic } from '../errors'
 import { accept } from '../primitives'
 import { generateAdminKey } from '../ssh/generate'
@@ -31,6 +33,7 @@ import {
   requestDeadlineMs,
   type Acknowledgment,
   type Evidence,
+  type Polling,
   type Request,
   type Result,
 } from '../ec2/protocol'
@@ -154,7 +157,8 @@ export function propose(
     implicit: null,
     latest: null,
     health: null,
-    handoff: null,
+    successor: null,
+    abandonment: null,
     createdAt: now,
   }
 }
@@ -334,12 +338,12 @@ export class Deployer {
     return reply.result
   }
 
-  private async observation(wait: boolean, signal: AbortSignal): Promise<Observation> {
+  private async observation(polling: Polling, signal: AbortSignal): Promise<Observation> {
     const result = await this.call(
       {
         kind: 'observe',
         deploymentId: this.current.id,
-        wait,
+        polling,
       },
       signal,
     )
@@ -372,8 +376,8 @@ export class Deployer {
     return agrees
   }
 
-  private async verify(signal: AbortSignal): Promise<void> {
-    if (!(await this.reconcile(await this.observation(true, signal)))) {
+  private async verify(polling: Polling, signal: AbortSignal): Promise<void> {
+    if (!(await this.reconcile(await this.observation(polling, signal)))) {
       throw new InstallerError({
         code: 'AWS_DEPLOYMENT_VERIFICATION_FAILED',
       })
@@ -429,9 +433,11 @@ export class Deployer {
   }
 
   /**
-   * One fenced provider call, then its bounded verification. `removalApproval`
-   * carries a new removal approval together with the first deletion step.
-   * `verified` is announced only after the verifying observation is persisted.
+   * One fenced provider call, then its bounded verification. Terminating the
+   * instance waits longer, because the whole expected state, including the
+   * released volumes and interface, must agree. `removalApproval` carries a new
+   * removal approval together with the first deletion step. `verified` is
+   * announced only after the verifying observation is persisted.
    */
   private async runStep(
     planned: Planned,
@@ -475,7 +481,7 @@ export class Deployer {
           code: 'AWS_DEPLOYMENT_EVIDENCE_UNAVAILABLE',
         })
       }
-      await this.verify(signal)
+      await this.verify(planned.action === IMPLICIT.removal ? 'termination' : 'standard', signal)
     })
     notify(this.progress, { phase: 'verified', task })
   }
@@ -532,6 +538,23 @@ export class Deployer {
   }
 
   /**
+   * A verified attach is the transfer of a reused volume, so the predecessor's
+   * reservation is completed here. Settlement reads local evidence only, never
+   * calls AWS, and never replays the attach; a failure leaves the hand-off
+   * pending for the explicit command that writes the missing record.
+   */
+  private async completeHandoff(): Promise<void> {
+    if (this.current.approval.host.volume.kind !== 'reuse') {
+      return
+    }
+    await settleOrPending(
+      this.root,
+      this.current,
+      'The volume attach was verified, but the previous deployment could not record the completed hand-off.',
+    )
+  }
+
+  /**
    * One read-only AWS health read, not a ledger step: it has no fence, receipt,
    * or removal. Only a passing read is retained, in a write that changes
    * nothing else. With `wait` an exhausted budget is an error; without it a
@@ -578,6 +601,9 @@ export class Deployer {
           await this.launch(planned, signal, place)
         } else {
           await this.runStep(planned, null, signal, place)
+        }
+        if (planned.action === 'attach-volume') {
+          await this.completeHandoff()
         }
       }
       await this.recordHealth(true, signal)
@@ -639,7 +665,7 @@ export class Deployer {
   public async observe(signal: AbortSignal): Promise<Observation> {
     this.requireReady()
     try {
-      const observation = await this.observation(false, signal)
+      const observation = await this.observation('none', signal)
       await this.reconcile(observation)
       return observation
     } catch (error: unknown) {

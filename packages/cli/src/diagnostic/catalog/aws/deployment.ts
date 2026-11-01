@@ -21,9 +21,10 @@ export const awsDeploymentDiagnostics = Object.freeze({
   ),
   AWS_DEPLOYMENT_ALIAS_TAKEN: entry(
     'Deployment alias is already in use',
-    'An alias can be taken over only when the newest deployment using it has verified removal and nothing remains unresolved, or never provisioned anything: every recorded step was refused or not attempted, no resource identity was retained, and child termination was confirmed. Deployment records are never deleted, so a taken-over alias selects the newest deployment while older records stay reachable by ID. The alias is checked before the proposal and again when the approval is saved. No deployment record was created for this alias and no AWS resource was created.',
+    'An alias can be taken over only when the newest deployment using it has verified removal and nothing remains unresolved, has abandoned its reservation of a retained data volume, or never provisioned anything: every recorded step was refused or not attempted, no resource identity was retained, and child termination was confirmed. A reuse replacement that never verified the attach of its retained data volume only reserved it and does not hold it, so it must abandon its reservation before its alias can be taken over, even after its network was removed. Deployment records are never deleted, so a taken-over alias selects the newest deployment while older records stay reachable by ID. The alias is checked before the proposal and again when the approval is saved. No deployment record was created for this alias and no AWS resource was created.',
     'Run qiln aws deployment list to see the aliases in use and the recorded state of each deployment.',
     'Remove the deployment that uses the alias with qiln aws deployment remove, or choose another alias with --alias.',
+    'If the newest deployment reserved a retained data volume that it never attached, run qiln aws deployment abandon for it.',
   ),
   AWS_DEPLOYMENT_PERMISSION_REQUIRED: entry(
     'AWS deployment requires current verified permissions',
@@ -65,6 +66,21 @@ export const awsDeploymentDiagnostics = Object.freeze({
     'Inspect the displayed observation with qiln aws deployment inspect against the previous deployment’s ID.',
     'If the volume or another recorded resource was changed outside Qiln, resolve that through an explicitly reviewed procedure.',
     'Alternatively, create with a new data volume. That leaves the retained volume untouched, and it keeps incurring charges until it is deleted outside Qiln.',
+  ),
+  AWS_DEPLOYMENT_HANDOFF_PENDING: entry(
+    'Retained data volume hand-off is not settled',
+    'A replacement deployment reserves a retained data volume when its approval is saved, and the previous deployment records the hand-off as complete only after the replacement’s attach of that volume was verified, or the replacement abandoned its reservation. The local records currently contradict each other: the reservation and the replacement do not name each other, or the replacement holds the volume while the previous deployment has not recorded the completed hand-off. This is local accounting only. Nothing was attached, detached, replayed, or deleted, and the volume remains retained and billable. Qiln never reoffers or releases storage automatically from uncertain evidence.',
+    'Review the displayed deployments with qiln aws deployment status.',
+    'Run qiln aws deployment handoff for the replacement, which writes only the missing record from matching local evidence and makes no AWS call.',
+    'Do not edit or delete deployment evidence to bypass this state.',
+  ),
+  AWS_DEPLOYMENT_ABANDON_REFUSED: entry(
+    'Retained data volume reservation cannot be abandoned',
+    'Abandonment releases the reservation of a retained data volume by a replacement that never attached it. It needs a reuse replacement whose volume attach never returned, confirmed child termination, no unresolved or uncertain step, no created resource left to remove, and a fresh AWS observation that agrees with the record and shows the volume available and unattached. One of these did not hold, so nothing was released. A volume whose attach is open or uncertain is never released automatically, and a verified attach is completed with handoff and is never abandoned. No mutating AWS call was made, and the volume remains retained and billable.',
+    'Review the displayed reason and the recorded deployment evidence.',
+    'Remove the resources that the replacement created with qiln aws deployment remove, then run abandon again.',
+    'If the attach outcome is unresolved or the observation differs from the record, inspect the volume outside Qiln through an explicitly reviewed procedure. Qiln never reoffers the volume from uncertain evidence.',
+    'Do not edit or delete deployment evidence to bypass this state.',
   ),
   AWS_DEPLOYMENT_CREATE_REFUSED: entry(
     'Deployment creation was refused locally',

@@ -1,6 +1,7 @@
 import { phase } from '../observe/facts'
-import type { Placement, Tag } from '../layout'
+import { claimed, holdsVolume } from '../handoff/stage'
 import { dataTags, dataVolumeId, hostSlotOf } from '../topology'
+import type { Placement, Tag } from '../layout'
 import type { DataVolume } from '../host/types'
 import type { Deployment } from '../types'
 
@@ -19,13 +20,22 @@ export interface Reuse {
 }
 
 /**
- * Local eligibility only: removal was verified, the data volume is recorded and
- * still retained, and no later deployment has taken it over. A fresh AWS read
- * must still agree before reuse is offered for approval.
+ * Local eligibility only: the volume is recorded and held by this record,
+ * either created by it or attached by it, then retained after a verified
+ * removal, or kept after an abandoned reservation, and no later deployment has
+ * reserved or taken it. A reuse replacement that never attached the volume
+ * only reserved it, so it is not offered until it abandons the reservation. A
+ * fresh AWS read must still agree before reuse is offered for approval.
  */
 export function reusable(record: Deployment): Reuse | null {
   const volumeId = dataVolumeId(record)
-  if (volumeId === null || record.handoff !== null || phase(record) !== 'retained') {
+  const current = phase(record)
+  if (
+    volumeId === null ||
+    claimed(record) ||
+    !holdsVolume(record) ||
+    (current !== 'retained' && current !== 'abandoned')
+  ) {
     return null
   }
   const { plan } = record.approval.host

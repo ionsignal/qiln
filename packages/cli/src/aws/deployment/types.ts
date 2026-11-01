@@ -181,12 +181,31 @@ const removalSchema = z.strictObject({
 })
 
 /**
- * The retained data volume of this deployment now belongs to a later
- * deployment, which answers for it. Historical removal evidence is untouched.
+ * A later deployment reserved the retained data volume of this deployment when
+ * its approval was saved. `completedAt` stays null until that deployment's
+ * attach of the volume is verified, or it abandons the reservation, and only
+ * then does the later deployment answer for the volume. Historical removal
+ * evidence is untouched.
  */
-const handoffSchema = z.strictObject({
-  to: operationId,
-  at: timestamp,
+const successorSchema = z
+  .strictObject({
+    to: operationId,
+    reservedAt: timestamp,
+    completedAt: timestamp.nullable(),
+  })
+  .refine(
+    ({ reservedAt, completedAt }) => completedAt === null || completedAt >= reservedAt,
+    'Expected a chronological successor.',
+  )
+
+/**
+ * This replacement released its reservation: a fresh observation found the
+ * retained data volume available and unattached, so this deployment keeps
+ * answering for the volume and no provider step may follow.
+ */
+const abandonmentSchema = z.strictObject({
+  approvedAt: timestamp,
+  observation: observationSchema,
 })
 
 /**
@@ -275,9 +294,12 @@ const deploymentBindingSchema = z.strictObject({
  * step is verified and before any removal, in a write that changes nothing
  * else. `hostKey` is set once in the same way, as the server's pinned SSH host
  * key. It is AWS-reported console evidence, not guest attestation, and it is
- * distinct from `adminKey`. `handoff` is set once, in a write that changes
- * nothing else, after removal left the data volume retained and a later
- * deployment took it over.
+ * distinct from `adminKey`. `successor` is set once, in a write that changes
+ * nothing else, when a later deployment's approval reserves the retained data
+ * volume, and is completed once, in the same way, when that deployment's attach
+ * of the volume is verified or it abandons the reservation. `abandonment` is
+ * set once on a replacement, in a write that changes nothing else, after a
+ * fresh observation found the reserved volume available and unattached.
  *
  * The `version` covers every constant, format rule, and graph declaration
  * order that the schemas and the audit consult, such as the zone limit, tag and
@@ -307,7 +329,8 @@ export const deploymentSchema = z
     implicit: implicitEvidenceSchema.nullable(),
     latest: observationSchema.nullable(),
     health: healthSchema.nullable(),
-    handoff: handoffSchema.nullable(),
+    successor: successorSchema.nullable(),
+    abandonment: abandonmentSchema.nullable(),
     createdAt: timestamp,
   })
   .refine(({ id, previous, connection, binding, approval }) => {
@@ -342,7 +365,8 @@ export type Implicit = z.infer<typeof implicitSchema>
 export type ImplicitEvidence = z.infer<typeof implicitEvidenceSchema>
 export type Observation = z.infer<typeof observationSchema>
 export type Health = z.infer<typeof healthSchema>
-export type Handoff = z.infer<typeof handoffSchema>
+export type Successor = z.infer<typeof successorSchema>
+export type Abandonment = z.infer<typeof abandonmentSchema>
 export type VolumeSource = z.infer<typeof volumeSourceSchema>
 export type HostIntent = z.infer<typeof hostIntentSchema>
 export type Approval = z.infer<typeof approvalSchema>

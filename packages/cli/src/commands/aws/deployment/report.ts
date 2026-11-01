@@ -19,6 +19,7 @@ import { removalOutcome } from '../../../aws/deployment/observe/outcome'
 import { refusals } from '../../../aws/deployment/ledger/step'
 import { prepared, unsettled, zfsFacts } from '../../../aws/deployment/zfs/facts'
 import { released, resourceId, resources, retained, unreleased, type Resource } from '../../../aws/deployment/topology'
+import type { Stage } from '../../../aws/deployment/handoff/stage'
 import type { IncusRecord } from '../../../aws/deployment/incus/types'
 import type { ZfsRecord } from '../../../aws/deployment/zfs/types'
 import type { Disposition } from '../../../aws/deployment/graph'
@@ -95,7 +96,36 @@ const STATES: Record<Phase, RecordedState> = {
     tone: 'neutral',
     text: 'Removal was verified. The retained data volume was handed off to a later deployment, which now answers for it. This record no longer observes that volume.',
   },
+  abandoned: {
+    label: 'Reservation abandoned',
+    tone: 'warning',
+    text: 'The reservation of a retained data volume was abandoned after a fresh observation found it available and unattached. This deployment holds the volume, which is not removed by Qiln and keeps incurring charges until it is deleted outside Qiln.',
+  },
   absent: { label: 'Absent', tone: 'neutral', text: 'All recorded resources were observed absent.' },
+}
+
+const HANDOFF_STAGES: Record<Stage, { label: string; text: string }> = {
+  none: { label: 'none', text: 'No hand-off is recorded.' },
+  reserved: {
+    label: 'reserved',
+    text: 'The replacement reserved the retained data volume and has not attached it. The previous deployment still holds the volume. Nothing is blocked.',
+  },
+  attaching: {
+    label: 'attach unresolved',
+    text: 'The volume attach of the replacement is open or uncertain. Nothing is completed or released, and the attach is never repeated.',
+  },
+  unfinalized: {
+    label: 'completion not recorded',
+    text: 'The replacement holds the volume, but the previous deployment has not recorded the completed hand-off.',
+  },
+  unmatched: {
+    label: 'records do not match',
+    text: 'The reservation and the replacement do not name each other.',
+  },
+  completed: {
+    label: 'completed',
+    text: 'The previous deployment recorded the hand-off as complete.',
+  },
 }
 
 export function recordedState(record: Deployment): RecordedState {
@@ -221,6 +251,49 @@ export function reportDeployment(reporter: Reporter, record: Deployment): void {
   if (record.removals.length > 0) {
     reporter.section('Removal outcome')
     reporter.facts(removalOutcome(record).map((row): DiagnosticFact => [row.label, `${row.state} · ${row.detail}`]))
+  }
+}
+
+/**
+ * The command that moves a hand-off forward from its stage, or null when
+ * nothing is to be done or the operator can only inspect.
+ */
+function handoffCommand(stage: Stage, previous: Deployment, replacement: Deployment | null): string | null {
+  if (replacement === null) {
+    return stage === 'unmatched' ? `qiln aws deployment status --id ${previous.id}` : null
+  }
+  switch (stage) {
+    case 'reserved':
+      return `qiln aws deployment abandon --id ${replacement.id}`
+    case 'unfinalized':
+    case 'unmatched':
+      return `qiln aws deployment handoff --id ${replacement.id}`
+    default:
+      return null
+  }
+}
+
+/**
+ * Retained local evidence of one retained-volume hand-off. `replacement` is
+ * null when the previous deployment names one that is not recorded.
+ */
+export function reportHandoff(
+  reporter: Reporter,
+  previous: Deployment,
+  replacement: Deployment | null,
+  stage: Stage,
+): void {
+  const { label, text } = HANDOFF_STAGES[stage]
+  const next = handoffCommand(stage, previous, replacement)
+  reporter.section('Retained volume hand-off')
+  reporter.facts([
+    ['Previous deployment', previous.id],
+    ['Replacement deployment', replacement?.id ?? previous.successor?.to ?? 'none recorded'],
+    ['Hand-off', label],
+  ])
+  reporter.info(text)
+  if (next !== null) {
+    reporter.info(`Next: ${next}`)
   }
 }
 

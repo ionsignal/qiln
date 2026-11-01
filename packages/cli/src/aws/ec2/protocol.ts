@@ -7,18 +7,17 @@ import { discoverySchema } from '../deployment/proposal/validate'
 import { issueSchema } from '../deployment/proposal/failure'
 import { healthSchema, observationSchema, observationsSchema } from '../deployment/types'
 
+
+export const pollingSchema = z.enum(['none', 'standard', 'termination'])
+
 export const requestSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('prepare') }),
   z.strictObject({ kind: z.literal('mutate'), deploymentId: operationId, operationId }),
-  z.strictObject({ kind: z.literal('observe'), deploymentId: operationId, wait: z.boolean() }),
+  z.strictObject({ kind: z.literal('observe'), deploymentId: operationId, polling: pollingSchema }),
   z.strictObject({ kind: z.literal('candidates'), deploymentId: operationId }),
   z.strictObject({ kind: z.literal('health'), deploymentId: operationId, wait: z.boolean() }),
   z.strictObject({ kind: z.literal('hostkey'), deploymentId: operationId }),
 ])
-
-export type Request = z.infer<typeof requestSchema>
-
-export type DeploymentRequest = Exclude<Request, { kind: 'prepare' }>
 
 const resultSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('prepared'), discovery: discoverySchema }),
@@ -29,7 +28,6 @@ const resultSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('hostkey'), hostKey: hostKeySchema }),
 ])
 
-export type Result = z.infer<typeof resultSchema>
 
 export const evidenceSchema = z.strictObject({
   kind: z.literal('step-returned'),
@@ -39,15 +37,12 @@ export const evidenceSchema = z.strictObject({
   returnedAt: timestamp,
 })
 
-export type Evidence = z.infer<typeof evidenceSchema>
 
 const acknowledgmentSchema = z.strictObject({
   kind: z.literal('evidence-retained'),
   deploymentId: operationId,
   operationId,
 })
-
-export type Acknowledgment = z.infer<typeof acknowledgmentSchema>
 
 /**
  * The child continues only when the parent acknowledges this exact evidence.
@@ -58,6 +53,13 @@ export function acknowledgmentFor(evidence: Evidence) {
       acknowledgment.deploymentId === evidence.deploymentId && acknowledgment.operationId === evidence.operationId,
   )
 }
+
+export type Polling = z.infer<typeof pollingSchema>
+export type Request = z.infer<typeof requestSchema>
+export type DeploymentRequest = Exclude<Request, { kind: 'prepare' }>
+export type Result = z.infer<typeof resultSchema>
+export type Evidence = z.infer<typeof evidenceSchema>
+export type Acknowledgment = z.infer<typeof acknowledgmentSchema>
 
 export const FAILURES = [
   'AWS_DEPLOYMENT_NOT_ATTEMPTED',
@@ -78,11 +80,15 @@ export type Code = (typeof CODES)[number]
 
 /**
  * The parent's supervision deadline for one request. Only a polling health
- * wait and a host-key read need more than the ordinary budget.
+ * wait, a host-key read, and a termination verification need more than the
+ * ordinary budget.
  */
 export function requestDeadlineMs(request: Request): number {
   if (request.kind === 'hostkey') {
     return AWS_SPEC.deployment.hostKey.requestTimeoutMs
+  }
+  if (request.kind === 'observe' && request.polling === 'termination') {
+    return AWS_SPEC.deployment.observation.termination.requestTimeoutMs
   }
   return request.kind === 'health' && request.wait
     ? AWS_SPEC.deployment.health.requestTimeoutMs

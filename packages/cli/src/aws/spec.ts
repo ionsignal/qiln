@@ -38,11 +38,20 @@ export const AWS_SPEC = Object.freeze({
     maximumRefusals: 3,
     reserveMs: 5_000,
     maximumPages: 20,
+    readTimeoutMs: 10_000,
     requestTimeoutMs: 300_000,
     observation: Object.freeze({
-      timeoutMs: 240_000,
-      delayMs: 3_000,
-      attempts: 80,
+      standard: Object.freeze({
+        timeoutMs: 240_000,
+        delayMs: 3_000,
+        attempts: 80,
+      }),
+      termination: Object.freeze({
+        requestTimeoutMs: 660_000,
+        timeoutMs: 600_000,
+        delayMs: 10_000,
+        attempts: 61,
+      }),
     }),
     health: Object.freeze({
       requestTimeoutMs: 660_000,

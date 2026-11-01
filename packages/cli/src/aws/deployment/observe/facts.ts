@@ -1,5 +1,6 @@
 import { AWS_SPEC } from '../../spec'
 import { deploymentName } from '../volume/alias'
+import { abandoned, attachOf, handedOff, holdsVolume } from '../handoff/stage'
 import { expectation, matches } from './expect'
 import { declined, refusals, settled, stateOf } from '../ledger/step'
 import {
@@ -31,6 +32,7 @@ export type Phase =
   | 'removed'
   | 'retained'
   | 'handed-off'
+  | 'abandoned'
   | 'absent'
 
 /**
@@ -60,10 +62,19 @@ const DESCRIPTIONS: Record<Phase, string> = {
   removed: 'all recorded resources removed and observed absent',
   retained: 'removal verified; resources retained by design remain and were not removed',
   'handed-off': 'removal verified; the retained data volume was handed off to a later deployment',
+  abandoned: 'reservation abandoned; the retained data volume was observed available and unattached, and this deployment holds it',
   absent: 'recorded resources observed absent',
 }
 
+/**
+ * An abandoned reservation is decided first, because it needs no step. A volume
+ * that was then handed on again is `handed-off`: that transfer is the more
+ * recent fact.
+ */
 export function phase(record: Deployment): Phase {
+  if (abandoned(record)) {
+    return handedOff(record) ? 'handed-off' : 'abandoned'
+  }
   const last = record.steps.at(-1)
   if (last === undefined) {
     return 'approved'
@@ -78,7 +89,7 @@ export function phase(record: Deployment): Phase {
     if (retained(record).length > 0) {
       return 'retained'
     }
-    if (record.handoff !== null) {
+    if (handedOff(record)) {
       return 'handed-off'
     }
     return record.removals.length > 0 ? 'removed' : 'absent'
@@ -118,18 +129,29 @@ export function hostKeyDisclosure(record: Deployment): string {
 }
 
 /**
- * The single wording for the data volume's origin and, once it happened, its
+ * The single wording for the data volume's origin and, once they happened, its
+ * abandoned reservation, its reservation by a later deployment, and its
  * handoff. A reused volume keeps the tags of the deployment that created it.
  */
 export function volumeDisclosure(record: Deployment): string {
   const { volume } = record.approval.host
-  const source =
+  const { successor, abandonment } = record
+  const parts = [
     volume.kind === 'reuse'
       ? `reuses ${volume.volumeId} from deployment ${volume.from}; its original tags are kept`
-      : 'created by this deployment'
-  return record.handoff === null
-    ? source
-    : `${source}; handed off to deployment ${record.handoff.to} at ${record.handoff.at}`
+      : 'created by this deployment',
+  ]
+  if (abandonment !== null) {
+    parts.push(`reservation abandoned at ${abandonment.approvedAt}; the volume was observed available and unattached`)
+  }
+  if (successor !== null) {
+    parts.push(
+      successor.completedAt === null
+        ? `reserved by deployment ${successor.to} at ${successor.reservedAt}; not yet attached there`
+        : `handed off to deployment ${successor.to} at ${successor.completedAt}`,
+    )
+  }
+  return parts.join('; ')
 }
 
 /**
@@ -177,7 +199,8 @@ export function verification(record: Deployment): Verification {
     recordedPhase === 'healthy' ||
     recordedPhase === 'removed' ||
     recordedPhase === 'retained' ||
-    recordedPhase === 'handed-off') &&
+    recordedPhase === 'handed-off' ||
+    recordedPhase === 'abandoned') &&
     record.latest !== null &&
     matches(expectation(record), record.latest)
     ? 'verified'
@@ -216,15 +239,21 @@ function unprovisioned(record: Deployment): boolean {
 }
 
 /**
- * Whether a later deployment may take over the record's alias: its removal was
- * verified and nothing remains unresolved, or it never provisioned anything.
- * Resources kept by design, or already handed off, do not prevent it.
+ * Whether a later deployment may take over the record's alias: it never
+ * provisioned anything, or its removal was verified, nothing remains
+ * unresolved, and it holds its data volume (or has none to hold). A reuse
+ * replacement that only reserved the volume must abandon the reservation
+ * first. Resources kept by design, or already handed off, do not prevent it.
  */
 export function vacated(record: Deployment): boolean {
   const recordedPhase = phase(record)
   return (
     unprovisioned(record) ||
-    ((recordedPhase === 'removed' || recordedPhase === 'retained' || recordedPhase === 'handed-off') &&
+    (holdsVolume(record) &&
+      (recordedPhase === 'removed' ||
+        recordedPhase === 'retained' ||
+        recordedPhase === 'handed-off' ||
+        recordedPhase === 'abandoned') &&
       effects(record) !== 'outstanding')
   )
 }
@@ -247,6 +276,23 @@ function unresolvedReason(record: Deployment): string | null {
  */
 export function canSettle(record: Deployment): boolean {
   return unresolvedReason(record) === null
+}
+
+/**
+ * Whether a reuse replacement may release its reservation: nothing is
+ * unresolved or left to remove, its attach was never returned, and it is not
+ * abandoned already. A fresh observation that the volume is available and
+ * unattached is judged separately by the write that records the abandonment.
+ */
+export function abandonable(record: Deployment): boolean {
+  return (
+    record.approval.host.volume.kind === 'reuse' &&
+    !abandoned(record) &&
+    attachOf(record)?.returned == null &&
+    canSettle(record) &&
+    unnamed(record).length === 0 &&
+    unreleased(record).length === 0
+  )
 }
 
 /**

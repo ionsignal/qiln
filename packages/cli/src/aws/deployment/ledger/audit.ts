@@ -1,5 +1,6 @@
 import { IMPLICIT, undoes } from '../graph'
 import { declined, settled, stateOf } from './step'
+import { attachOf, holdsVolume } from '../handoff/stage'
 import {
   creationPlan,
   creationsOf,
@@ -165,16 +166,41 @@ function hostKeyRecorded(record: Deployment): boolean {
 }
 
 /**
- * A handoff lets go of the identified data volume to another deployment, so
- * nothing else of this record may still be outstanding.
+ * A successor link, reserved or completed, lets go of the identified data
+ * volume to another deployment, so the record must hold that volume (a
+ * reservation alone never makes a reuse replacement a holder) and nothing
+ * else of it may still be outstanding. Child termination is deliberately not
+ * judged here: `Deployer.call()` marks it unconfirmed around every later call,
+ * so it is not a permanent property of a reserved record. The write that sets
+ * or completes the link requires confirmed termination instead.
  */
-function handedOff(record: Deployment): boolean {
-  const { handoff } = record
+function successorRecorded(record: Deployment): boolean {
+  const { successor } = record
   return (
-    handoff === null ||
-    (handoff.to !== record.id &&
+    successor === null ||
+    (successor.to !== record.id &&
+      holdsVolume(record) &&
       dataVolumeId(record) !== null &&
-      record.termination === 'confirmed' &&
+      unnamed(record).length === 0 &&
+      unreleased(record).length === 0)
+  )
+}
+
+/**
+ * An abandonment exists only for a reuse replacement whose attach never
+ * returned, with nothing left outstanding, and it follows every step. A later
+ * observation may replace the latest one, so it is only required to be no older.
+ */
+function abandonmentRecorded(record: Deployment): boolean {
+  const { abandonment, latest, steps } = record
+  return (
+    abandonment === null ||
+    (record.approval.host.volume.kind === 'reuse' &&
+      attachOf(record)?.returned == null &&
+      latest !== null &&
+      latest.observedAt >= abandonment.observation.observedAt &&
+      abandonment.approvedAt >= abandonment.observation.observedAt &&
+      steps.every(step => settled(step) && step.fencedAt <= abandonment.approvedAt) &&
       unnamed(record).length === 0 &&
       unreleased(record).length === 0)
   )
@@ -218,7 +244,8 @@ export function isConsistent(record: Deployment): boolean {
     discovered(record) &&
     healthRecorded(record) &&
     hostKeyRecorded(record) &&
-    handedOff(record) &&
+    successorRecorded(record) &&
+    abandonmentRecorded(record) &&
     observedKnown(record)
   )
 }

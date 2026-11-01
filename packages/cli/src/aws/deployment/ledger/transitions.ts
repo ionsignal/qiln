@@ -1,6 +1,7 @@
 import { AWS_SPEC } from '../../spec'
 import { sameJson } from '../../../json'
 import { expectation, matches } from '../observe/expect'
+import { abandonable } from '../observe/facts'
 import { invalidDeployment } from './invalid'
 import { declined, refusals, settled, stateOf } from './step'
 import { creationPlan, creationsOf, creationVerified, hostKeyDue, removalPlan, resourceId } from '../topology'
@@ -81,10 +82,11 @@ function requireRemovalApproval(current: Deployment, updated: Deployment, previo
  * declined for capacity. Creation never resumes once any removal exists, and
  * never starts without the administrative key binding. The plan position
  * counts creations without the declined attempts that a later attempt replaced.
+ * An abandoned reservation accepts no further provider step.
  */
 function requireNewStep(current: Deployment, updated: Deployment, step: Step): void {
   const previous = current.steps.at(-1)
-  if (!fenceOpens(current, updated) || stateOf(step) !== 'open') {
+  if (!fenceOpens(current, updated) || stateOf(step) !== 'open' || current.abandonment !== null) {
     return invalidDeployment()
   }
   if (step.removal === null) {
@@ -222,18 +224,60 @@ function requireHostKey(current: Deployment, updated: Deployment): void {
 }
 
 /**
- * A handoff is set once and never rewritten or dropped. The write that sets it
- * changes nothing else. Whether the record is settled enough to let go of its
- * volume is judged by the record audit.
+ * The successor link moves only from none to reserved, and from reserved to
+ * completed with the same successor. Each write changes nothing else and
+ * requires confirmed child termination, because the record audit deliberately
+ * does not judge termination: it is transient state around every later call.
+ * Whether the record is settled enough to let go of its volume is judged by the
+ * record audit, and whether the successor really holds the volume is judged by
+ * the settlement that writes the completion.
  */
-function requireHandoff(current: Deployment, updated: Deployment): void {
-  if (current.handoff !== null) {
-    if (!sameJson(current.handoff, updated.handoff)) {
+function requireSuccessor(current: Deployment, updated: Deployment): void {
+  const before = current.successor
+  const after = updated.successor
+  if (sameJson(before, after)) {
+    return
+  }
+  const reserves = before === null && after !== null && after.completedAt === null
+  const completes =
+    before !== null &&
+    after !== null &&
+    before.completedAt === null &&
+    after.completedAt !== null &&
+    before.to === after.to &&
+    before.reservedAt === after.reservedAt
+  if (
+    !(reserves || completes) ||
+    current.termination !== 'confirmed' ||
+    !sameJson({ ...current, successor: after }, updated)
+  ) {
+    return invalidDeployment()
+  }
+}
+
+/**
+ * An abandonment is set once and never rewritten or dropped. The write that
+ * sets it changes nothing else, and happens only while the record may abandon,
+ * with the fresh observation that is also the latest one and still agrees with
+ * the ledger.
+ */
+function requireAbandonment(current: Deployment, updated: Deployment): void {
+  if (current.abandonment !== null) {
+    if (!sameJson(current.abandonment, updated.abandonment)) {
       return invalidDeployment()
     }
     return
   }
-  if (updated.handoff !== null && !sameJson({ ...current, handoff: updated.handoff }, updated)) {
+  const { abandonment } = updated
+  if (abandonment === null) {
+    return
+  }
+  if (
+    !abandonable(current) ||
+    !sameJson(abandonment.observation, current.latest) ||
+    !matches(expectation(current), abandonment.observation) ||
+    !sameJson({ ...current, abandonment }, updated)
+  ) {
     return invalidDeployment()
   }
 }
@@ -251,5 +295,6 @@ export function requireTransition(current: Deployment, updated: Deployment): voi
   requireImplicit(current, updated)
   requireHealth(current, updated)
   requireHostKey(current, updated)
-  requireHandoff(current, updated)
+  requireSuccessor(current, updated)
+  requireAbandonment(current, updated)
 }

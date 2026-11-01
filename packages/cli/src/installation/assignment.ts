@@ -1,5 +1,6 @@
 import { InstallerError } from '../diagnostic/error'
 import { phase } from '../aws/deployment/observe/facts'
+import { handedOff } from '../aws/deployment/handoff/stage'
 import { requireStorageReleased, retainedPreseedBytes } from '../aws/deployment/incus/facts'
 import { requirePoolReleased } from '../aws/deployment/zfs/facts'
 import { sameJson } from '../json'
@@ -42,7 +43,11 @@ export function refusal(installation: string, reason: string, retry: string): In
 function requireHandoffs(links: readonly Link[], assigned: number, installation: string, retry: string): void {
   for (let age = 1; age <= assigned; age++) {
     const { deployment, zfs, incus } = links[age]
-    if (phase(deployment) !== 'handed-off' || deployment.handoff?.to !== links[age - 1].deployment.id) {
+    if (
+      !handedOff(deployment) ||
+      phase(deployment) !== 'handed-off' ||
+      deployment.successor.to !== links[age - 1].deployment.id
+    ) {
       throw refusal(
         installation,
         `Deployment ${deployment.id} did not verifiably hand its retained volume to the next deployment of the chain.`,

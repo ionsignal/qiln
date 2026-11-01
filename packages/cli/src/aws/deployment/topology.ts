@@ -12,6 +12,7 @@ import {
   type Shape,
 } from './graph'
 import { declined, stateOf } from './ledger/step'
+import { handedOff } from './handoff/stage'
 import type { Ingress, Placement, Tag, Zone } from './layout'
 import type { Approval, Deployment, Step } from './types'
 
@@ -199,7 +200,7 @@ export function unnamed(record: Deployment): Step[] {
 export function resources(record: Deployment): Resource[] {
   const shape = shapeOf(record.approval)
   const { volume } = record.approval.host
-  const retention: Disposition = record.handoff === null ? 'retained' : 'handed-off'
+  const retention: Disposition = handedOff(record) ? 'handed-off' : 'retained'
   const explicit = RESOURCES.flatMap(({ kind, create, remove }) =>
     range(slotCount(create, shape)).flatMap((slot): Resource[] => {
       if (create === 'create-volume' && volume.kind === 'reuse') {

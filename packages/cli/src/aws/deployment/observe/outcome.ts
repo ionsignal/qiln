@@ -1,5 +1,6 @@
 import { expectation, matches } from './expect'
 import { effects, keyDisclosure } from './facts'
+import { abandoned, handedOff } from '../handoff/stage'
 import { released, resources, type Resource } from '../topology'
 import type { Disposition, Kind } from '../graph'
 import type { Deployment } from '../types'
@@ -51,15 +52,22 @@ function dataVolume(record: Deployment): Outcome {
   if (volume === undefined) {
     return { label, state: 'none', detail: 'no identity recorded' }
   }
-  if (record.handoff !== null) {
+  if (handedOff(record)) {
     return {
       label,
       state: 'done',
-      detail: `${volume.id} handed off to deployment ${record.handoff.to}; no longer observed by this record`,
+      detail: `${volume.id} handed off to deployment ${record.successor.to}; no longer observed by this record`,
     }
   }
   if (released(record, volume)) {
     return { label, state: 'done', detail: `${volume.id} observed absent; Qiln holds no authority to delete it` }
+  }
+  if (abandoned(record)) {
+    return {
+      label,
+      state: 'retained',
+      detail: `${volume.id} held after an abandoned reservation and observed available and unattached. Qiln cannot delete it, and it keeps incurring charges until it is deleted outside Qiln.`,
+    }
   }
   const instance = find(record, 'instance')
   const unattached =

@@ -65,7 +65,7 @@ async function run(
       if (step === undefined) {
         return notAttempted()
       }
-      if (!matches(expectation(record), await observe(ec2, record, false))) {
+      if (!matches(expectation(record), await observe(ec2, record, 'none'))) {
         return notAttempted()
       }
       const resourceId = await mutate(ec2, record, step, readKey)
@@ -87,7 +87,7 @@ async function run(
     case 'observe':
       return {
         kind: 'observation',
-        observation: await observe(ec2, record, request.wait),
+        observation: await observe(ec2, record, request.polling),
       }
     case 'candidates':
       return {

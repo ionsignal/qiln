@@ -8,8 +8,10 @@ export interface Call {
 
 /**
  * Thin EC2 boundary. Every call is a single attempt; mutations are never
- * polled or retried, and only reads are observed. Callers build their command
- * first, so `write` marks dispatch only once everything local is prepared.
+ * polled or retried, and only reads are observed. Reads use a short bound so a
+ * slow response surfaces as an error instead of consuming a polling budget.
+ * Callers build their command first, so `write` marks dispatch only once
+ * everything local is prepared.
  */
 export class Ec2 {
   constructor(
@@ -17,23 +19,22 @@ export class Ec2 {
     private readonly signal: AbortSignal,
   ) {}
 
-  private call(signal?: AbortSignal): Call {
+  private call(timeoutMs: number, signal?: AbortSignal): Call {
     return {
       abortSignal: AbortSignal.any([
         this.signal,
-        AbortSignal.timeout(AWS_SPEC.requestTimeoutMs),
+        AbortSignal.timeout(timeoutMs),
         ...(signal === undefined ? [] : [signal]),
       ]),
     }
   }
 
   public read<T>(send: (client: EC2Client, call: Call) => Promise<T>, signal?: AbortSignal): Promise<T> {
-    return send(this.client, this.call(signal))
+    return send(this.client, this.call(AWS_SPEC.deployment.readTimeoutMs, signal))
   }
 
-  /** Only earlier failures are definite refusals, so dispatch is marked immediately before the send. */
   public async write<T>(send: (client: EC2Client, call: Call) => Promise<T>): Promise<T> {
-    const call = this.call()
+    const call = this.call(AWS_SPEC.requestTimeoutMs)
     markDispatched()
     return await send(this.client, call)
   }

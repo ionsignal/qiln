@@ -1,4 +1,5 @@
 import { invalidDeployment } from '../ledger/invalid'
+import { requireIntact } from '../handoff/stage'
 import { dataVolumeId } from '../topology'
 import * as deployments from '../records'
 import type { Deployment } from '../types'
@@ -9,7 +10,9 @@ import type { Dir } from '../../../state/files'
  * created its data volume, newest first. Never searched by tag, name, or time.
  * A cycle, a missing predecessor, or a hop whose previous deployment does not
  * hold the volume it was handed fails closed rather than reading as a blank
- * history.
+ * history. A hop whose reservation and replacement contradict each other fails
+ * closed with the pending hand-off diagnostic, while a reservation that is
+ * merely in progress is a valid link.
  */
 export async function* chain(root: Dir, start: Deployment): AsyncGenerator<Deployment> {
   const visited = new Set<string>()
@@ -28,6 +31,7 @@ export async function* chain(root: Dir, start: Deployment): AsyncGenerator<Deplo
     if (previous === null || dataVolumeId(previous) !== volume.volumeId) {
       return invalidDeployment()
     }
+    requireIntact(previous, current)
     current = previous
   }
 }

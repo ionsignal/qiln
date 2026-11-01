@@ -5,6 +5,7 @@ import { vacated } from './observe/facts'
 import { invalidDeployment } from './ledger/invalid'
 import { reusable } from './volume/reuse'
 import { requireTransition } from './ledger/transitions'
+import { requireIntact, reserve } from './handoff/stage'
 import { deploymentSchema, type Deployment } from './types'
 import { notFound, type DeploymentSelector } from './volume/alias'
 import { stateFailure } from '../errors'
@@ -120,9 +121,10 @@ async function tipOf(root: Dir, alias: string): Promise<Deployment | null> {
 
 /**
  * An alias can be taken over only when its newest deployment has verified
- * removal and nothing remains unresolved. Returns that deployment, or null when
- * the alias is unused. The authoritative check runs again inside `create` under
- * the operation lock.
+ * removal and nothing remains unresolved, has abandoned its reservation, or
+ * never provisioned anything. Returns that deployment, or null when the alias
+ * is unused. The authoritative check runs again inside `create` under the
+ * operation lock.
  */
 export async function predecessor(root: Dir, alias: string): Promise<Deployment | null> {
   const tip = await tipOf(root, alias)
@@ -136,6 +138,17 @@ export async function predecessor(root: Dir, alias: string): Promise<Deployment 
   return tip
 }
 
+/**
+ * Refuses unless the hand-off of the predecessor's volume is not contradicted
+ * by its replacement: the reservation and the replacement name each other, and
+ * a replacement that holds the volume has its completion recorded. Reported
+ * states, such as a reservation whose replacement has not started, pass.
+ */
+export async function requireFinalized(root: Dir, previous: Deployment): Promise<void> {
+  const replacement = previous.successor === null ? null : await read(root, previous.successor.to)
+  requireIntact(previous, replacement)
+}
+
 export async function create(root: Dir, record: Deployment): Promise<void> {
   await requireOperationLock(root)
   const initial = parse(record)
@@ -147,20 +160,25 @@ export async function create(root: Dir, record: Deployment): Promise<void> {
     initial.implicit !== null ||
     initial.latest !== null ||
     initial.health !== null ||
-    initial.handoff !== null ||
+    initial.successor !== null ||
+    initial.abandonment !== null ||
     initial.termination !== 'confirmed'
   ) {
     return invalidDeployment()
   }
   const previous = await predecessor(root, initial.alias)
-  const { volume } = initial.approval.host
-  if (
-    (previous?.id ?? null) !== initial.previous ||
-    (volume.kind === 'reuse' && (previous === null || reusable(previous)?.volumeId !== volume.volumeId))
-  ) {
+  if ((previous?.id ?? null) !== initial.previous) {
     return invalidDeployment()
   }
-  if (volume.kind === 'reuse' && previous !== null) {
+  const { volume } = initial.approval.host
+  if (volume.kind === 'reuse') {
+    if (previous === null) {
+      return invalidDeployment()
+    }
+    await requireFinalized(root, previous)
+    if (reusable(previous)?.volumeId !== volume.volumeId) {
+      return invalidDeployment()
+    }
     const previousDirectory = await directoryOf(root, previous.id)
     requirePoolReleased(await zfs.read(previousDirectory, previous), previous.id)
     requireStorageReleased(await incus.read(previousDirectory, previous), previous.id)
@@ -170,8 +188,9 @@ export async function create(root: Dir, record: Deployment): Promise<void> {
     return invalidDeployment()
   }
   await write(directory, initial)
+  // Only a reservation: the volume has not been attached to the replacement yet.
   if (volume.kind === 'reuse' && previous !== null) {
-    await save(root, { ...previous, handoff: { to: initial.id, at: new Date().toISOString() } })
+    await save(root, reserve(previous, initial.id))
   }
 }
 
