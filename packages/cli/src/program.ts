@@ -54,6 +54,8 @@ export interface ProgramHandlers {
       verify(options: AwsDeploymentOptions, color: ColorMode): void | Promise<void>
       prepare(options: AwsDeploymentOptions, color: ColorMode): void | Promise<void>
       ssh(options: AwsDeploymentOptions, color: ColorMode): void | Promise<void>
+      handoff(options: AwsDeploymentOptions, color: ColorMode): void | Promise<void>
+      abandon(options: AwsDeploymentOptions, color: ColorMode): void | Promise<void>
       remove(options: AwsDeploymentOptions, color: ColorMode): void | Promise<void>
     }
   }
@@ -344,6 +346,30 @@ export function createProgram(handlers: ProgramHandlers, output: ProgramOutput):
     ssh.action(() =>
       awsHandlers.deployment.ssh(
         convertAwsDeploymentOptions(ssh.opts<AwsDeploymentInput>()),
+        program.opts<GlobalOptions>().color,
+      ),
+    )
+    const handoff = deployment
+      .command('handoff')
+      .description('Record the missing local hand-off evidence of a replacement deployment that reuses a retained data volume, from matching retained records, without authenticating or calling AWS.')
+      .summary('Settle the retained-volume hand-off.')
+    addSelectorOptions(handoff)
+    describeHelp(handoff, deploymentHelp.handoff)
+    handoff.action(() =>
+      awsHandlers.deployment.handoff(
+        convertAwsDeploymentOptions(handoff.opts<AwsDeploymentInput>()),
+        program.opts<GlobalOptions>().color,
+      ),
+    )
+    const abandon = deployment
+      .command('abandon')
+      .description('Authenticate as the recorded operator, freshly observe that the retained data volume is available and unattached, and after approval release the replacement’s reservation of it.')
+      .summary('Abandon a retained-volume reservation.')
+    addSelectorOptions(abandon)
+    describeHelp(abandon, deploymentHelp.abandon)
+    abandon.action(() =>
+      awsHandlers.deployment.abandon(
+        convertAwsDeploymentOptions(abandon.opts<AwsDeploymentInput>()),
         program.opts<GlobalOptions>().color,
       ),
     )

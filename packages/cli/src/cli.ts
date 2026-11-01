@@ -151,6 +151,18 @@ export async function run(argumentsList: readonly string[]): Promise<number> {
             begin('aws', color, 'aws deployment ssh', 'interactive session (unavailable)')
             aws.deployment.ssh()
           },
+          async handoff(options, color) {
+            await aws.deployment.handoff(
+              options,
+              begin('aws', color, 'aws deployment handoff', 'local retained-volume hand-off evidence'),
+            )
+          },
+          async abandon(options, color) {
+            await aws.deployment.abandon(
+              options,
+              begin('aws', color, 'aws deployment abandon', 'approved reservation release'),
+            )
+          },
           async remove(options, color) {
             await aws.deployment.remove(
               options,

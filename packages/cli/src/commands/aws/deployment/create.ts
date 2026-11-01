@@ -87,12 +87,13 @@ async function requireVolumeAvailable(
  * nothing is saved, reserved, generated, or created until the single approval.
  * When the alias takes over a removed deployment that retained its data volume,
  * the operator explicitly chooses between a new volume and reusing that one;
- * the choice is part of the same approval. A reused volume that preserves an
- * Incus installation also fixes the image architecture, which is judged before
- * approval. After approval, the immutable approval is retained and the fenced
- * creation steps and the AWS health read run under the operation lock. Success
- * establishes AWS provisioning and health only; create makes no SSH connection
- * to the instance.
+ * the choice is part of the same approval, and a hand-off that local evidence
+ * contradicts refuses the offer before the choice is asked. A reused volume
+ * that preserves an Incus installation also fixes the image architecture, which
+ * is judged before approval. After approval, the immutable approval is retained
+ * and the fenced creation steps and the AWS health read run under the operation
+ * lock. Success establishes AWS provisioning and health only; create makes no
+ * SSH connection to the instance.
  */
 export async function create(options: AwsDeploymentCreateOptions, reporter: Reporter): Promise<void> {
   requireAwsHost()
@@ -138,7 +139,8 @@ export async function create(options: AwsDeploymentCreateOptions, reporter: Repo
       }
       const offer = previous === null ? null : reusable(previous)
       let reuse: Reuse | null = null
-      if (offer !== null) {
+      if (previous !== null && offer !== null) {
+        await deployments.requireFinalized(root, previous)
         reporter.notice(
           'Attaching a retained data volume does not reopen Incus. When an earlier deployment initialized and released Incus on it, a later prepare reopens that preserved installation only after verifying its recorded software and retained metadata, and never initializes over it. Only the Incus state and storage on the data volume are preserved: the host root volume and its files are not.',
         )

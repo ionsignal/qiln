@@ -1,9 +1,11 @@
 import { requireAwsHost } from '../../../aws/host'
 import { openAwsRoot } from '../../../aws/root'
 import { notFound } from '../../../aws/deployment/volume/alias'
+import { stageOf } from '../../../aws/deployment/handoff/stage'
 import {
   recordedState,
   reportDeployment,
+  reportHandoff,
   reportIncus,
   reportIncusUnreadable,
   reportZfs,
@@ -16,6 +18,24 @@ import type { Deployment } from '../../../aws/deployment/types'
 import type { AwsDeploymentOptions } from '../../../input'
 import type { Dir } from '../../../state/files'
 import type { Reporter } from '../../../terminal/reporter'
+
+/**
+ * Both directions of the retained-volume hand-off: the deployment this one
+ * took its volume from, and the one that reserved or took the volume from it.
+ */
+async function reportHandoffs(reporter: Reporter, root: Dir, record: Deployment): Promise<void> {
+  const { volume } = record.approval.host
+  if (volume.kind === 'reuse') {
+    const previous = await deployments.read(root, volume.from)
+    if (previous !== null) {
+      reportHandoff(reporter, previous, record, stageOf(previous, record))
+    }
+  }
+  if (record.successor !== null) {
+    const replacement = await deployments.read(root, record.successor.to)
+    reportHandoff(reporter, record, replacement, stageOf(record, replacement))
+  }
+}
 
 /**
  * Unreadable preparation evidence degrades to a notice, independently for ZFS
@@ -42,6 +62,7 @@ export async function status(options: AwsDeploymentOptions, reporter: Reporter):
   }
   const record = await deployments.select(root, options.selector)
   reportDeployment(reporter, record)
+  await reportHandoffs(reporter, root, record)
   await reportPreparation(reporter, root, record)
   reporter.info('This status reads local evidence only. It did not authenticate, call AWS, or freshly observe any AWS resource.')
   if (record.steps.length > 0) {
