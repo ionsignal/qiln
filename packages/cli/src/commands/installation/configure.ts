@@ -40,9 +40,6 @@ function reportResult(reporter: Reporter, inputs: InstallationInputs, { plan, ob
     'Image pin',
     `persisted full fingerprint in ${INSTALLER_SPEC.state.installationFileName} of installation '${INSTALLER_SPEC.state.localName}'`,
   )
-  reporter.notice(
-    'The operator-selected image is trusted guest code. Qiln has not established provenance, authenticity, guest compatibility, or bootstrap readiness.',
-  )
   if (replaced) {
     reporter.notice(
       'The approved plan deleted the previous managed alias target after the replacement was imported and checked. Other aliases attached to that image may also have been removed, and no automatic rollback was attempted.',
