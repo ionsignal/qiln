@@ -327,7 +327,7 @@ export function createProgram(handlers: ProgramHandlers, output: ProgramOutput):
     )
     const prepare = deployment
       .command('prepare')
-      .description('Retain the server host-key pin if needed, then read the host over the pinned SSH connection, display each preparation plan, and, after separate approval of each, apply it: first ZFS (the prerequisites, then one single-disk pool, created or imported by its recorded GUID, with its monthly scrub timer), then Incus (the repository, the exact packages, and one initialization on that pool).')
+      .description('Retain the server host-key pin if needed, then inspect the host over the pinned SSH connection and apply each displayed plan only after its separate approval: Incus closing, ZFS prerequisites, Incus software, ZFS storage with its state mount, then Incus activation. A fresh installation is initialized; a preserved installation is reopened without initialization.')
       .summary('Prepare ZFS and Incus after approval.')
     addSelectorOptions(prepare)
     describeHelp(prepare, deploymentHelp.prepare)

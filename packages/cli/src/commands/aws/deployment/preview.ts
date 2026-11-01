@@ -379,7 +379,7 @@ export function reportCreationEffects(reporter: Reporter, plan: HostPlan, reuse:
   )
   if (reuse !== null) {
     reporter.notice(
-      `Approval also records that deployment ${reuse.from} hands ${reuse.volumeId} off to this one: its removal evidence is unchanged, but it stops reporting the volume. Qiln does not inspect or verify the volume's contents.`,
+      `Approval reserves ${reuse.volumeId} for this deployment. Deployment ${reuse.from} keeps reporting the volume until hand-off completion is recorded from verified attachment or abandonment evidence; its removal evidence is unchanged. Qiln does not inspect or verify the volume's contents.`,
     )
   }
   reporter.notice(

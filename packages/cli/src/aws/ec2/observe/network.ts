@@ -55,10 +55,6 @@ function subnetMatches(record: Deployment, expected: Of<'subnet'>, subnet: Subne
   )
 }
 
-/**
- * The pinned enum names the attached state 'attached', while AWS documents
- * 'available' for internet gateways. Accept either until the walkthrough settles it.
- */
 function isAttachedState(state: unknown): boolean {
   return state === 'available' || state === 'attached'
 }

@@ -20,12 +20,13 @@ export interface Reuse {
 }
 
 /**
- * Local eligibility only: the volume is recorded and held by this record,
- * either created by it or attached by it, then retained after a verified
- * removal, or kept after an abandoned reservation, and no later deployment has
- * reserved or taken it. A reuse replacement that never attached the volume
- * only reserved it, so it is not offered until it abandons the reservation. A
- * fresh AWS read must still agree before reuse is offered for approval.
+ * Local eligibility only: the volume is recorded and held by this record through
+ * creation, verified attachment evidence, or abandonment, then retained after
+ * verified removal or held after an abandoned reservation, and no later
+ * deployment has reserved or taken it. A reuse replacement without verified
+ * attachment evidence is not offered until it abandons its reservation; missing
+ * evidence does not prove an attachment never occurred. A fresh AWS read must
+ * still agree before reuse is offered for approval.
  */
 export function reusable(record: Deployment): Reuse | null {
   const volumeId = dataVolumeId(record)

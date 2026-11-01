@@ -5,7 +5,6 @@ const MAXIMUM_ENCODED_CHARACTERS = 262_144
 const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/
 const BEGIN = '-----BEGIN SSH HOST KEY FINGERPRINTS-----'
 const END = '-----END SSH HOST KEY FINGERPRINTS-----'
-// The line may carry a log prefix. The format is unverified for this AMI until the walkthrough.
 const ENTRY = /\b256 SHA256:([A-Za-z0-9+/]{43}) .*\(ED25519\)\s*$/
 
 function unverified(): never {

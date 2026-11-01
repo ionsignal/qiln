@@ -33,16 +33,17 @@ const authorizationSchema = authorizationSchemaOf(
 
 /**
  * Accounting and recovery evidence for Incus preparation, not a resumable
- * checkpoint. Status is derived from these facts and never stored. The
- * initialize plan keeps the exact approved preseed bytes, which later
+ * checkpoint. Status is derived from these facts and never stored. Initialize
+ * and preserved-open plans keep the exact approved preseed bytes, which later
  * verification and `ready` read back. `baseline` is the installed software and
- * the root subordinate-ID ranges that the initialization was verified against,
- * and `identity` is the standalone server it was verified on. Both are set once,
- * together, in the write that verifies that step. Whether Incus was released is
- * derived from the steps: a verified `release` step after the last open or
- * initialization that was not refused. Before the first release, changing any
- * literal or format rule resets local development state. After it, a change
- * needs a version bump and a versioned reader.
+ * the root subordinate-ID ranges that the establishing initialization or
+ * preserved open was verified against, and `identity` is the standalone server
+ * it was verified on. Both are set once, together, in the write that verifies
+ * that establishing step. Whether Incus was released is derived from the
+ * steps: a verified `release` after the last open or initialization that was not
+ * refused. Before the first release, changing any literal or format rule resets
+ * local development state. After it, a change needs a version bump and a
+ * versioned reader.
  */
 export const incusSchema = z.strictObject({
   version: z.literal(AWS_RECORD_VERSION.incus),

@@ -204,9 +204,9 @@ const PINNED = ['incus*'] as const
  *   only: `incus` is the VM-capable meta-package, and VM support is out of
  *   scope.
  * - `packageVersions` selects the full version of both required packages for
- *   each native architecture. These are selected pins, not evidence that the
- *   artifacts were exercised. APT metadata and simulation must confirm the
- *   exact names, versions, architecture, and availability before installation.
+ *   each native architecture. APT metadata and simulation must confirm the
+ *   exact names, versions, architecture, and availability before installation;
+ *   the selected pins alone do not establish successful host execution.
  * - The `stable` channel is moving, not a version pin. The preferences file
  *   selects these exact builds and excludes other versions from normal APT
  *   selection. Future Incus updates require deliberate repinning.
@@ -246,19 +246,20 @@ const PINNED = ['incus*'] as const
  *   `stopTimeoutSeconds` to shut down cleanly, and `maximumRunning` of them
  *   fit the SSH command ceiling together with the autostart updates.
  *   `maximumInstances` bounds the frozen inventory that the evidence retains.
- * - `floors` are the upstream Incus v7.0.0 prerequisites, compared by their
- *   leading dotted number only. The kernel floor is judged on the host. The LXC
- *   floor is judged on the version the running daemon reports, because an
- *   offline probe does not describe the bundled runtime. They are provisional
- *   until the audit of the selected packages confirms them.
+ * - `floors` are the configured minimum versions, compared by their leading
+ *   dotted number only. The kernel floor is judged on the host. The LXC floor
+ *   is judged on the version the running daemon reports, because an offline
+ *   probe does not describe the bundled runtime. A missing version never
+ *   meets its floor.
  * - `software.patterns` are the `dpkg-query` globs of the packages that make up
  *   the recorded software baseline: Incus and ZFS. `software.pinned` is the
  *   Incus subset that a preserved open requires at exactly the recorded
- *   version, and ZFS is judged by the floors. Both are provisional until that
- *   same audit.
+ *   version; its builds identify the bundled runtime, while ZFS is judged by
+ *   the configured floors.
  * - `retained.metadata` are the entries, relative to the state directory, that
- *   a preserved open requires to be present before the daemon may start. They
- *   are provisional until the audit of the selected packages confirms them.
+ *   a preserved open requires to be present before the daemon may start. Each
+ *   final entry must not be a symbolic link; metadata contents are not
+ *   validated.
  * - `maximumInstalls` bounds the resolved transaction, not an expected count.
  */
 export const INCUS_SPEC = Object.freeze({

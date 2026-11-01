@@ -159,8 +159,8 @@ export async function prepare(options: AwsDeploymentOptions, reporter: Reporter)
           ? 'the preserved Incus installation reopened without initialization and left with its instances stopped'
           : 'the opened daemon with its local Unix-socket access'
         const limits = reopened
-          ? 'Qiln is not installed; the preserved instances were not started, and installation handoff and runtime readiness are not established.'
-          : 'Qiln is not installed; restoration and runtime readiness are not established.'
+          ? 'Preparation does not install or configure Qiln or reassign an existing installation. The preserved instances were not started, and workload correctness and runtime readiness are not established. For an existing installation, use qiln installation reassign under its separate approval.'
+          : 'Preparation does not install or configure Qiln or reassign an existing installation. Restoration and runtime readiness are not established.'
         return `Incus baseline prepared: the persistent masks established before any package effect, the ${reopened ? 'recorded' : 'approved'} packages installed before the state dataset was mounted, the startup guard, ${daemon}, the recorded ZFS pool with its incus storage dataset, the bridge, and ${username}'s membership in the Incus administration group were verified as observed. The default profile was left untouched, and instances and images were not part of this check. ${changed} Group membership applies to new SSH connections only, and SSH forwarding to the Incus socket was not tested. The pool is a single disk with no redundancy or backup. ${limits}`
       })
     })

@@ -291,9 +291,10 @@ export type Api = NonNullable<Observation['api']>
 export type PackageChange = z.infer<typeof packageChangeSchema>
 
 /**
- * The identity of the Incus server that an initialization was verified against.
- * The certificate fingerprint is not the SSH host-key fingerprint, and it is
- * evidence of which installation this is, not authorization to use it.
+ * The identity of the Incus server that a verified initialization or preserved
+ * open established for this deployment. The certificate fingerprint is not the
+ * SSH host-key fingerprint, and it is evidence of which installation this is,
+ * not authorization to use it.
  */
 export const identitySchema = z.strictObject({
   certificateFingerprint: sha256,

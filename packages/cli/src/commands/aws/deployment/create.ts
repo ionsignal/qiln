@@ -142,7 +142,7 @@ export async function create(options: AwsDeploymentCreateOptions, reporter: Repo
       if (previous !== null && offer !== null) {
         await deployments.requireFinalized(root, previous)
         reporter.notice(
-          'Attaching a retained data volume does not reopen Incus. When an earlier deployment initialized and released Incus on it, a later prepare reopens that preserved installation only after verifying its recorded software and retained metadata, and never initializes over it. Only the Incus state and storage on the data volume are preserved: the host root volume and its files are not.',
+          'Attaching a retained data volume does not reopen Incus. When an earlier deployment established an Incus baseline through verified initialization or preserved open and then released Incus, a later prepare reopens that preserved installation only after checking its recorded software and the presence of retained metadata entries, with each final entry required not to be a symbolic link. Metadata contents are not validated, and retained state is never initialized over. Only the Incus state and storage on the data volume are preserved: the host root volume and its files are not.',
         )
         const choice = await prompts.select('Data storage', [
           'Create a new data volume',

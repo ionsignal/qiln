@@ -23,10 +23,11 @@ export type Comparison =
   | { kind: 'differs'; reasons: string[] }
 
 /**
- * The packages that must come back at exactly their recorded version: Incus,
- * LXC, and the user-namespace mapping helpers. The rest of the recorded
- * baseline, such as ZFS, is judged by version floors, because other
- * preparation steps install it.
+ * The Incus packages that must return at exactly their recorded version. Their
+ * configured builds identify the bundled LXC runtime, liblxc, and mapping
+ * helpers, so distribution LXC and uidmap packages are not additional pins.
+ * Other recorded packages, such as ZFS, are judged by version floors, because
+ * other preparation steps install them.
  */
 const PINNED = INCUS_SPEC.software.pinned.map(glob => new RegExp(`^${glob.replace('*', '.*')}$`))
 

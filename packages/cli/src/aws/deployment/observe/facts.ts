@@ -147,7 +147,7 @@ export function volumeDisclosure(record: Deployment): string {
   if (successor !== null) {
     parts.push(
       successor.completedAt === null
-        ? `reserved by deployment ${successor.to} at ${successor.reservedAt}; not yet attached there`
+        ? `reserved by deployment ${successor.to} at ${successor.reservedAt}; hand-off completion not recorded`
         : `handed off to deployment ${successor.to} at ${successor.completedAt}`,
     )
   }

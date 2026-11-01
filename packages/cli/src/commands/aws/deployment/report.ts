@@ -108,7 +108,7 @@ const HANDOFF_STAGES: Record<Stage, { label: string; text: string }> = {
   none: { label: 'none', text: 'No hand-off is recorded.' },
   reserved: {
     label: 'reserved',
-    text: 'The replacement reserved the retained data volume and has not attached it. The previous deployment still holds the volume. Nothing is blocked.',
+    text: 'The replacement reserved the retained data volume, but hand-off completion is not recorded. The previous deployment still answers for the volume.',
   },
   attaching: {
     label: 'attach unresolved',
@@ -335,8 +335,8 @@ export function reportZfsUnreadable(reporter: Reporter): void {
 /**
  * Retained Incus preparation evidence only. Absence is not a statement about
  * the host or the Incus daemon. The server identity is the certificate
- * fingerprint of the initialized installation, which is not an SSH host-key
- * fingerprint.
+ * fingerprint recorded with verified initialization or preserved open, not
+ * an SSH host-key fingerprint.
  */
 export function reportIncus(reporter: Reporter, preparation: IncusRecord | null): void {
   reporter.section('Incus preparation')
@@ -350,12 +350,12 @@ export function reportIncus(reporter: Reporter, preparation: IncusRecord | null)
       'Incus server identity',
       preparation.identity === null
         ? 'not recorded'
-        : `certificate SHA-256 ${preparation.identity.certificateFingerprint} · standalone · recorded with the verified initialization`,
+        : `certificate SHA-256 ${preparation.identity.certificateFingerprint} · standalone · recorded with verified initialization or preserved open`,
     ],
     [
       'Baseline preparation',
       retainedPreseed(preparation) !== null && !storageReleased(preparation)
-        ? 'initialization verified when last recorded; not freshly observed'
+        ? 'baseline established by verified initialization or preserved open; not freshly observed'
         : 'not recorded as complete',
     ],
     ['Recorded steps', String(preparation.steps.length)],

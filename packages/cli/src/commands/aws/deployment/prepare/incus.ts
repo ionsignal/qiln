@@ -192,7 +192,7 @@ function reportClose(reporter: Reporter, plan: ClosePlan): void {
     ],
     [
       'Not masked',
-      'incus-lxcfs.service · the packaged daemon unit requires it, and it mounts its own filesystem at /var/lib/incus-lxcfs and not the Incus state directory (read from the packaged unit file). The package scripts therefore enable and start it when they install, so the host is not entirely quiet while the packages install, and containers need it running',
+      'incus-lxcfs.service · the packaged daemon unit requires it, and it mounts its own filesystem at /var/lib/incus-lxcfs and not the Incus state directory (read from the extracted package unit file). The package scripts therefore enable and start it when they install, so the host is not entirely quiet while the packages install, and containers need it running',
     ],
     [
       'Sysctl override',
@@ -200,7 +200,7 @@ function reportClose(reporter: Reporter, plan: ClosePlan): void {
     ],
     [
       'Package sysctls',
-      'the Incus packages ship /usr/lib/sysctl.d/50-incus.conf (read from the extracted 1:7.5.1 incus-base package, not yet confirmed on this host), and their postinst restarts systemd-sysctl, so its limits for inotify, AIO, kernel keys, neighbor tables, and vm.max_map_count apply host-wide once the packages install. They are accepted, disclosed here, and not undone. Its AppArmor line is overridden by the file above',
+      'the Incus packages ship /usr/lib/sysctl.d/50-incus.conf (read from the extracted 1:7.5.1 incus-base package), and their postinst restarts systemd-sysctl, so its limits for inotify, AIO, kernel keys, neighbor tables, and vm.max_map_count apply host-wide once the packages install. They are accepted, disclosed here, and not undone. Its AppArmor line is overridden by the file above',
     ],
     [
       'Scope',
@@ -361,7 +361,7 @@ function reportOpen(reporter: Reporter, plan: OpenPlan): void {
     ],
     [
       'State directory',
-      'must hold the retained Incus metadata entries (checked by presence only, not contents): a missing one refuses, and Qiln never falls back to a fresh installation',
+      'must hold the retained Incus metadata entries (presence and final-entry symlink checks only, not content validation): a missing entry or one that is itself a symbolic link refuses, and Qiln never falls back to a fresh installation',
     ],
     [
       'Daemon',
@@ -440,7 +440,7 @@ const NOTICES: Record<ApprovedPlan['kind'], string> = {
     'A unit that is not positively inactive is refused, because a mask does not stop it and a state that cannot be read is not evidence of inactivity. The masks keep package scripts that honor them from starting the daemon; they do not stop an administrator who runs the daemon directly, and they do not prevent ZFS import units from running. ' +
     'The override file is written only when absent, an existing file must hold exactly the approved bytes, and Qiln never removes it. It pins one AppArmor setting that the package would weaken; the other package sysctls are accepted. Whether containers start with the restriction enabled is not established by preparation. ' +
     'incus-lxcfs.service is deliberately not masked, and the package scripts start it when they install. ' +
-    'This runs first, before the ZFS prerequisites, the Incus repository and packages, and before the state dataset is mounted. Installing packages can still start other units, such as ZFS import units, so an unmounted state dataset is not an inaccessible one, and this ordering has not been qualified against the selected packages. ' +
+    'This runs first, before the ZFS prerequisites, the Incus repository and packages, and before the state dataset is mounted. Installing packages can still start other units, such as ZFS import units, so an unmounted state dataset is not an inaccessible one. ' +
     'incus-startup.service stays masked, so the host does not stop Incus instances when it halts; the release performed by remove is the designed way to stop them. ' +
     'No package is installed, no pool is touched, and no daemon is started by this plan. A failed or cancelled step is not replayed, resumed, or rolled back, and interrupted work may already have completed.',
   guard:
@@ -456,7 +456,7 @@ const NOTICES: Record<ApprovedPlan['kind'], string> = {
     'A failed or cancelled step is not replayed, resumed, or rolled back, and interrupted work may already have completed.',
   packages:
     'Approval authorizes only the listed package versions, re-simulated just before the install, with no upgrades or removals. ' +
-    'The host is closed while they install, so package scripts cannot start the masked Incus units, although they do start incus-lxcfs.service. In a normal preparation this runs before the state dataset is mounted, so no package is installed against mounted Incus state. Whether the selected packages install cleanly while the units are masked is observed here and not assumed. ' +
+    'The host is closed while they install, so package scripts cannot start the masked Incus units, although they do start incus-lxcfs.service. In a normal preparation this runs before the state dataset is mounted, so no package is installed against mounted Incus state. ' +
     'Full installed package versions and architectures are checked afterwards, together with the closed host: a package script that unmasks a unit, starts the daemon, or sets the AppArmor restriction to 0 leaves the step unverified, because the daemon’s upstream version label alone is insufficient. ' +
     'Nothing is opened or initialized by this plan, and each needs its own approval after a fresh inspection. ' +
     'A failed or cancelled step is not replayed, resumed, or rolled back, and interrupted work may already have completed.',
@@ -484,7 +484,7 @@ const NOTICES: Record<ApprovedPlan['kind'], string> = {
 
 const PRESERVED_OPEN_NOTICE =
   'Approval authorizes only unmasking and starting the listed units, one fenced remote script followed by a fresh inspection that must agree. ' +
-  'The startup check, the retained metadata entries, and every recorded subordinate-ID root range are verified on the host just before the units start, and the open is refused rather than falling back to a fresh installation. Neither ID file is ever edited. ' +
+  'The startup check runs on the host just before the units start; the retained metadata entries must be present and not themselves symbolic links, and every recorded subordinate-ID root range must be listed. Metadata contents are not validated, and the open is refused rather than falling back to a fresh installation. Neither ID file is ever edited. ' +
   'Starting the daemon opens the retained database and may write to the state directory, so the open is treated as touching Incus storage. ' +
   'The step is verified only when the exact package pins, retained software baseline, server certificate fingerprint, daemon-reported LXC version, standalone server, pool registration, and bridge match, and every instance is stopped. ' +
   'The root-range check does not establish that every retained instance mapping is correct. ' +
