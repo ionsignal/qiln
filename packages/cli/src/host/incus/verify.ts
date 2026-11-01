@@ -79,7 +79,7 @@ export function poolImported(observation: Observation, pool: string, guid: strin
 
 /**
  * Every Incus unit is positively reported inactive, so nothing can answer on
- * the Incus sockets. An empty or incomplete service list is not evidence.
+ * the Incus sockets. An empty, incomplete, or unknown state is not evidence.
  */
 export function quiescent(observation: Observation): boolean {
   return INCUS_SPEC.units.every(unit =>
@@ -89,32 +89,28 @@ export function quiescent(observation: Observation): boolean {
 
 /**
  * The Incus units that are masked, and whether the mask is runtime-only, which
- * does not survive a reboot.
+ * does not survive a reboot. Persistence is judged from the unit-file state
+ * alone, never from the load state.
  */
 export function maskedUnits(observation: Observation): { unit: string; runtime: boolean }[] {
-  return observation.services.flatMap(({ unit, load, enablement }) =>
-    load === 'masked' || enablement === 'masked' || enablement === 'masked-runtime'
+  return observation.services.flatMap(({ unit, enablement }) =>
+    enablement === 'masked' || enablement === 'masked-runtime'
       ? [{ unit, runtime: enablement === 'masked-runtime' }]
       : [],
   )
 }
 
 /**
- * Every Incus unit is persistently masked, so nothing can start it until it is
- * unmasked. A runtime mask does not survive a reboot and does not count.
+ * Every Incus unit is persistently masked and positively inactive, so nothing
+ * can start it until it is unmasked and nothing is answering now. A runtime
+ * mask does not survive a reboot and does not count.
  */
 export function closed(observation: Observation): boolean {
   const masked = maskedUnits(observation)
-  return INCUS_SPEC.units.every(unit => masked.some(item => item.unit === unit && !item.runtime))
-}
-
-/**
- * The Incus units that are running or starting, which a mask would not stop.
- */
-export function activeUnits(observation: Observation): string[] {
-  return observation.services
-    .filter(({ activation }) => activation === 'active' || activation === 'activating' || activation === 'reloading')
-    .map(({ unit }) => unit)
+  return (
+    INCUS_SPEC.units.every(unit => masked.some(item => item.unit === unit && !item.runtime)) &&
+    quiescent(observation)
+  )
 }
 
 /**
@@ -125,7 +121,7 @@ export function activeUnits(observation: Observation): string[] {
  * judged, because the key is absent without AppArmor.
  */
 function stillClosed(observation: Observation): boolean {
-  return closed(observation) && quiescent(observation) && observation.sysctl.apparmor !== '0'
+  return closed(observation) && observation.sysctl.apparmor !== '0'
 }
 
 /**
@@ -342,18 +338,18 @@ function reopened(observation: Observation, target: PoolTarget, retained: Retain
 /**
  * Pure check of one step's approved result against a fresh observation. A step
  * is verified only when the host agrees, never because its script exited zero.
- * Closing is verified by the persistent masks and the approved sysctl override
- * bytes. The guard is verified by the approved file bytes alone, because it may
- * legitimately run once the host is open. The package install is verified only
- * if the host is still closed, because a package script can undo the masks or
- * weaken the AppArmor restriction. An open is verified by the startup check,
- * the recorded state mount, the exact package pins, and the running daemon
- * units, and, for a preserved installation, by the retained identity and
- * configuration. An initialization is judged against the preseed bytes retained
- * in its plan. An access grant is judged by the account database, which does not
- * show that SSH forwarding works. The workload stop is judged while the daemon
- * still answers, and the release only once every unit is inactive and
- * persistently masked.
+ * Closing is verified by the persistent masks, positive inactivity, and the
+ * approved sysctl override bytes. The guard is verified by the approved file
+ * bytes alone, because it may legitimately run once the host is open. The
+ * package install is verified only if the host is still closed, because a
+ * package script can undo the masks or weaken the AppArmor restriction. An open
+ * is verified by the startup check, the recorded state mount, the exact package
+ * pins, and the running daemon units, and, for a preserved installation, by the
+ * retained identity and configuration. An initialization is judged against the
+ * preseed bytes retained in its plan. An access grant is judged by the account
+ * database, which does not show that SSH forwarding works. The workload stop is
+ * judged while the daemon still answers, and the release only once every unit
+ * is inactive and persistently masked.
  */
 export function verify(action: IncusAction, plan: ApprovedPlan, observation: Observation): boolean {
   const { guard } = observation
@@ -424,7 +420,6 @@ export function verify(action: IncusAction, plan: ApprovedPlan, observation: Obs
     case 'release':
       return (
         plan.kind === 'release' &&
-        quiescent(observation) &&
         closed(observation) &&
         poolImported(observation, plan.pool, plan.guid) &&
         observation.zfs.datasets.every(dataset => !dataset.mounted || dataset.name === datasetNamesOf(plan.pool).state)

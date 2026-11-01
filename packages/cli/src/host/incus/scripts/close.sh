@@ -6,8 +6,9 @@
 # override arrives as base64 with its expected SHA-256 and is verified after
 # decoding. An existing file must be a regular file holding exactly the approved
 # bytes and is left alone, and nothing is ever overwritten. It needs neither the
-# pool nor the state mount. A unit that is already active is refused, because a
-# mask does not stop it. Exit codes 20 to 99 mean nothing was changed. A failed
+# pool nor the state mount. A unit that is not positively inactive is refused,
+# because a mask does not stop it and a state that cannot be read is not
+# evidence of inactivity. Exit codes 20 to 99 mean nothing was changed. A failed
 # effect is reported as 100, because it may have changed the host.
 LC_ALL=C
 export LC_ALL
@@ -27,9 +28,7 @@ for unit in "$@"; do
   case $unit in '' | *[!a-z0-9@._-]*) exit 20 ;; esac
 done
 for unit in "$@"; do
-  case $(systemctl is-active "$unit") in
-  active | activating | reloading) exit 21 ;;
-  esac
+  test "$(systemctl is-active "$unit")" = inactive || exit 21
 done
 
 staged=

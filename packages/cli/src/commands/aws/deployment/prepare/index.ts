@@ -6,12 +6,12 @@ import { InstallerError } from '../../../../diagnostic/error'
 import { requireAwsHost } from '../../../../aws/host'
 import { targetOf } from '../../../../aws/deployment/zfs/target'
 import { requireNotStuck } from '../../../../aws/deployment/zfs/facts'
-import { requireNotStuck as requireIncusNotStuck } from '../../../../aws/deployment/incus/facts'
-import { evidence as incusEvidence } from '../../../../aws/deployment/incus/evidence'
+import { Prompts, withCancellation } from '../../../../terminal/prompts'
 import { IncusPreparer } from '../../../../aws/deployment/incus/prepare'
 import { ZfsPreparer } from '../../../../aws/deployment/zfs/prepare'
-import { Prompts, withCancellation } from '../../../../terminal/prompts'
 import { withConfirmedOperation } from '../../../../aws/operation'
+import { evidence as incusEvidence } from '../../../../aws/deployment/incus/evidence'
+import { opened, requireNotStuck as requireIncusNotStuck } from '../../../../aws/deployment/incus/facts'
 import { approvalLabel as incusApproval, reportPlan as reportIncusPlan } from './incus'
 import { approvalLabel as zfsApproval, reportPlan as reportZfsPlan } from './zfs'
 import * as incusLineage from '../../../../aws/deployment/lineage/incus'
@@ -21,23 +21,28 @@ import type { Reporter } from '../../../../terminal/reporter'
 
 /**
  * Plans preparation of the recorded data volume and the Incus installation on
- * it, in four phases, and applies each plan only after a default-no approval of
- * each displayed plan. First the ZFS prerequisites. Then the Incus software,
- * while no pool is mounted and the host is closed: persistent masks, the
- * repository, and the exact packages, so no package is ever installed against
- * mounted Incus state. Then the ZFS storage: one single-disk pool, created on a
- * blank volume or imported by its recorded GUID, together with its packaged
- * monthly scrub timer, and the mount of its state dataset. Last, the Incus
- * activation, each stage from a fresh inspection: the storage-identity guard, an
- * explicit open of the daemon on the mounted state dataset, and finally the
- * administrator account's membership in the Incus administration group. A fresh
- * installation opens an empty state directory and is followed by one
- * initialization from a retained preseed that registers the pool's `incus`
- * dataset and the bridge. A volume whose earlier deployment established and
- * released an installation instead installs the recorded package versions and
- * reopens that preserved installation, and never initializes. The local writes
- * are the host-key pin, retained before connecting exactly as for verify, and
- * the retained ZFS and Incus preparation evidence.
+ * it, in five phases, and applies each plan only after a default-no approval of
+ * each displayed plan. First the Incus closing: persistent masks that are
+ * verified before any package effect, so neither ZFS nor Incus package
+ * configuration runs against an open daemon; a host that is already closed asks
+ * nothing, and once Qiln opened Incus it is never closed again here. Then the
+ * ZFS prerequisites, which are refused once Qiln has opened Incus, because a
+ * package script could disturb the running daemon. Then the Incus software,
+ * while no pool is mounted and the host is closed: the repository and the exact
+ * packages, so no package is ever installed against mounted Incus state. Then
+ * the ZFS storage: one single-disk pool, created on a blank volume or imported
+ * by its recorded GUID, together with its packaged monthly scrub timer, and the
+ * mount of its state dataset. Last, the Incus activation, each stage from a
+ * fresh inspection: the storage-identity guard, an explicit open of the daemon
+ * on the mounted state dataset, and finally the administrator account's
+ * membership in the Incus administration group. A fresh installation opens an
+ * empty state directory and is followed by one initialization from a retained
+ * preseed that registers the pool's `incus` dataset and the bridge. A volume
+ * whose earlier deployment established and released an installation instead
+ * installs the recorded package versions and reopens that preserved
+ * installation, and never initializes. The local writes are the host-key pin,
+ * retained before connecting exactly as for verify, and the retained ZFS and
+ * Incus preparation evidence.
  */
 export async function prepare(options: AwsDeploymentOptions, reporter: Reporter): Promise<void> {
   requireAwsHost()
@@ -48,8 +53,9 @@ export async function prepare(options: AwsDeploymentOptions, reporter: Reporter)
       const deployment = await openTarget(root, store, selector)
       const { record } = deployment
       const retry = `qiln aws deployment prepare --id ${record.id}`
+      const incusRecord = await incusEvidence(root, record)
       requireNotStuck(await lineage.evidence(root, record), record.id)
-      requireIncusNotStuck(await incusEvidence(root, record), record.id)
+      requireIncusNotStuck(incusRecord, record.id)
       const preserved = await incusLineage.retained(root, record)
       const access = await resolveAccess(root, deployment, retry, reporter, signal)
       const target = targetOf(record)
@@ -68,8 +74,6 @@ export async function prepare(options: AwsDeploymentOptions, reporter: Reporter)
           'Preparation',
           'no ZFS or Incus inspection was performed',
         ])
-        reporter.section('ZFS inspection')
-        reporter.row('working', 'Inspecting', 'fixed read-only host and storage inspection')
         const zfsPreparer = await ZfsPreparer.open({
           root,
           deployment: record,
@@ -78,7 +82,21 @@ export async function prepare(options: AwsDeploymentOptions, reporter: Reporter)
           remote,
           hooks: {
             show: (observation, plan) => reportZfsPlan(reporter, { observation, plan, target }),
-            approve: plan => prompts.approve(zfsApproval(plan)),
+            approve: async plan => {
+              if (plan.kind === 'prerequisites' && plan.install.length > 0 && opened(await incusEvidence(root, record))) {
+                throw new InstallerError({
+                  code: 'ZFS_PLAN_REFUSED',
+                  facts: [
+                    [
+                      'Reason',
+                      'Qiln already opened Incus on this deployment, and installing ZFS packages could disturb the running daemon through package scripts, so Qiln never installs them under it.',
+                    ],
+                  ],
+                  retry,
+                })
+              }
+              await prompts.approve(zfsApproval(plan))
+            },
             progress: progressSink(reporter),
           },
         })
@@ -92,10 +110,23 @@ export async function prepare(options: AwsDeploymentOptions, reporter: Reporter)
             progress: progressSink(reporter),
           },
         })
+        reporter.section('Incus closing inspection')
+        reporter.row('working', 'Inspecting', 'fixed host and unit inspection; no pool is mounted and no daemon is started')
+        const incusClosing = await incusPreparer.prepareSoftware(
+          { account: username, retained: preserved },
+          signal,
+          'close',
+        )
+        reporter.section('ZFS inspection')
+        reporter.row('working', 'Inspecting', 'fixed read-only host and storage inspection')
         const zfsSoftware = await zfsPreparer.run(signal, 'software')
         reporter.section('Incus software inspection')
         reporter.row('working', 'Inspecting', 'fixed host and package inspection; no pool is mounted and no daemon is started')
-        const incusSoftware = await incusPreparer.prepareSoftware({ account: username, retained: preserved }, signal)
+        const incusSoftware = await incusPreparer.prepareSoftware(
+          { account: username, retained: preserved },
+          signal,
+          'packages',
+        )
         reporter.section('ZFS storage inspection')
         reporter.row('working', 'Inspecting', 'fixed read-only host and storage inspection')
         const zfsStorage = await zfsPreparer.run(signal, 'storage')
@@ -118,7 +149,7 @@ export async function prepare(options: AwsDeploymentOptions, reporter: Reporter)
           { pool: pool.name, guid: pool.guid, datasets: pool.datasets, account: username, retained: preserved },
           signal,
         )
-        const applied = zfsSoftware + incusSoftware + zfsStorage + incusActivation
+        const applied = incusClosing + zfsSoftware + incusSoftware + zfsStorage + incusActivation
         const changed =
           applied === 0
             ? 'Nothing was changed.'
@@ -130,7 +161,7 @@ export async function prepare(options: AwsDeploymentOptions, reporter: Reporter)
         const limits = reopened
           ? 'Qiln is not installed; the preserved instances were not started, and installation handoff and runtime readiness are not established.'
           : 'Qiln is not installed; restoration and runtime readiness are not established.'
-        return `Incus baseline prepared: the persistent masks, the ${reopened ? 'recorded' : 'approved'} packages installed before the state dataset was mounted, the startup guard, ${daemon}, the recorded ZFS pool with its incus storage dataset, the bridge, and ${username}'s membership in the Incus administration group were verified as observed. The default profile was left untouched, and instances and images were not part of this check. ${changed} Group membership applies to new SSH connections only, and SSH forwarding to the Incus socket was not tested. The pool is a single disk with no redundancy or backup. ${limits}`
+        return `Incus baseline prepared: the persistent masks established before any package effect, the ${reopened ? 'recorded' : 'approved'} packages installed before the state dataset was mounted, the startup guard, ${daemon}, the recorded ZFS pool with its incus storage dataset, the bridge, and ${username}'s membership in the Incus administration group were verified as observed. The default profile was left untouched, and instances and images were not part of this check. ${changed} Group membership applies to new SSH connections only, and SSH forwarding to the Incus socket was not tested. The pool is a single disk with no redundancy or backup. ${limits}`
       })
     })
   })

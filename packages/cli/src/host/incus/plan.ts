@@ -12,7 +12,6 @@ import {
   sysctlOverride,
 } from './spec'
 import {
-  activeUnits,
   baselineDrift,
   closed,
   daemonReasons,
@@ -139,19 +138,22 @@ function accessPlan(observation: Observation, target: IncusTarget): AccessPlan |
 }
 
 /**
- * Pure decision over the software stage: close the host, then the repository and
- * exact-package preferences, then the packages, installed while the host is
- * closed. Closing masks the units and installs the sysctl override that keeps
- * the AppArmor restriction enabled. It needs no pool and no state mount, so it
- * runs before either exists, and nothing it plans touches the state directory.
- * Each stage needs its own approval and a fresh inspection before the next.
- * Installed Incus packages must match the selected native pins; differences
- * refuse before further preparation, never offering an upgrade or downgrade. A
- * retained baseline that conflicts with the selected pins is refused rather
- * than replaced. The kernel floor is judged from the first stage on.
- * `progress.opened` says that a verified open or initialization already let the
- * daemon run, so the closed host is no longer expected, and no package is
- * planned, because a package script restarts a running daemon.
+ * Pure decision over the software stage. Closing is decided first and from
+ * closing concerns alone: the sysctl override must fit and, until a verified
+ * open or initialization exists, every unit must be positively inactive. It
+ * masks the units and installs the sysctl override that keeps the AppArmor
+ * restriction enabled. It needs no pool, no state mount, and no repository, so
+ * it can precede every package effect, and nothing it plans touches the state
+ * directory. Then the repository and exact-package preferences, then the
+ * packages, installed while the host is closed. Each stage needs its own
+ * approval and a fresh inspection before the next. Installed Incus packages
+ * must match the selected native pins; differences refuse before further
+ * preparation, never offering an upgrade or downgrade. A retained baseline that
+ * conflicts with the selected pins is refused rather than replaced. The kernel
+ * floor is judged once closing is settled. `progress.opened` says that a
+ * verified open or initialization already let the daemon run, so the closed
+ * host is no longer expected and closing is never planned again, and no package
+ * is planned, because a package script restarts a running daemon.
  */
 export function softwarePlanOf(observation: Observation, target: SoftwareTarget, progress: Progress): SoftwareStagePlan {
   const { system, repository, sysctl, transaction } = observation
@@ -163,10 +165,24 @@ export function softwarePlanOf(observation: Observation, target: SoftwareTarget,
     }
   }
   const refused = (reasons: string[] = refusals): RefusedPlan => ({ kind: 'refused', reasons })
+  const sysctlDigest = sha256Of(sysctlOverride())
+  expect(
+    fits(sysctl.override, sysctlDigest),
+    'The Qiln Incus sysctl override file exists but does not hold the approved bytes, and Qiln never overwrites it.',
+  )
+  expect(
+    progress.opened || quiescent(observation),
+    'Incus units are not positively inactive before Qiln closed the host, and Qiln does not adopt or stop a running daemon.',
+  )
+  if (refusals.length > 0) {
+    return refused()
+  }
+  if (!progress.opened && (!closed(observation) || sysctl.override.kind === 'absent')) {
+    return { kind: 'close', sysctl: { sha256: sysctlDigest } }
+  }
   const architecture = ARCHITECTURES.find(name => name === system.packageArchitecture)
   const sourceDigest = architecture === undefined ? null : sha256Of(repositorySource(architecture))
   const preferencesDigest = architecture === undefined ? null : sha256Of(repositoryPreferences(architecture))
-  const sysctlDigest = sha256Of(sysctlOverride())
   expect(architecture !== undefined, 'The host package architecture is neither amd64 nor arm64.')
   refusals.push(...kernelReasons(observation))
   const excluded = excludedInstalled(observation)
@@ -189,14 +205,6 @@ export function softwarePlanOf(observation: Observation, target: SoftwareTarget,
   expect(
     preferencesDigest === null || fits(repository.preferences, preferencesDigest),
     'The Qiln Incus preferences file exists but does not hold the selected exact package pins, and Qiln never overwrites it.',
-  )
-  expect(
-    fits(sysctl.override, sysctlDigest),
-    'The Qiln Incus sysctl override file exists but does not hold the approved bytes, and Qiln never overwrites it.',
-  )
-  expect(
-    progress.opened || activeUnits(observation).length === 0,
-    `Incus units are already active (${activeUnits(observation).join(', ')}) before Qiln closed the host, and Qiln does not adopt or stop a running daemon.`,
   )
   if (refusals.length > 0 || architecture === undefined || sourceDigest === null || preferencesDigest === null) {
     return refused()
@@ -226,9 +234,6 @@ export function softwarePlanOf(observation: Observation, target: SoftwareTarget,
   const comparison = preserved === null ? selectedComparison : compareSoftware(preserved.baseline, observation)
   if (comparison.kind === 'differs') {
     return refused(comparison.reasons)
-  }
-  if (!progress.opened && (!closed(observation) || sysctl.override.kind === 'absent')) {
-    return { kind: 'close', sysctl: { sha256: sysctlDigest } }
   }
   const add =
     repository.key.kind === 'absent' ||
@@ -318,11 +323,15 @@ export function softwarePlanOf(observation: Observation, target: SoftwareTarget,
  * own approval and a fresh inspection before the next. The toolchain floors, the
  * state directory, and the subordinate-ID allocations are judged before the
  * guard, so a host that cannot be opened is refused before anything more is
- * installed. A preserved installation (`target.retained`) also requires its
- * recorded software and root ranges. A preserved open requires retained
- * metadata and never reaches initialization. `progress.retained` is the preseed
- * document of an earlier verified initialization or preserved open, in which
- * case a matching baseline proceeds to access and any drift is refused.
+ * installed. The open is planned whenever the daemon service is not running
+ * (`observation.api` is null), whether it was never opened or was stopped since
+ * by a reboot or a release. A recorded installation (`target.retained`), the
+ * deployment's own or a predecessor's, is reopened with its recorded software,
+ * root ranges, and retained metadata, and is never initialized or opened as a
+ * fresh one. `progress.opened` is history and only gates the closed-host logic
+ * of the software stage. `progress.retained` is the preseed document of an
+ * earlier verified initialization or preserved open, in which case a running
+ * daemon with a matching baseline proceeds to access and any drift is refused.
  */
 export function planOf(
   observation: Observation,
@@ -336,7 +345,6 @@ export function planOf(
   }
   const { api, guard } = observation
   const { expectation, check, dropIn } = guardOf(target)
-  const preserved = progress.opened ? null : target.retained
   const refusals: string[] = []
   const expect = (passed: boolean, reason: string) => {
     if (!passed) {
@@ -360,11 +368,11 @@ export function planOf(
     'The Qiln Incus service drop-in exists but does not hold the approved bytes, and Qiln never overwrites it.',
   )
   refusals.push(...toolchainReasons(observation))
-  if (!progress.opened) {
+  if (api === null) {
     refusals.push(
       ...stateMountReasons(observation, target),
-      ...stateReasons(observation, preserved !== null),
-      ...allocationReasons(observation, preserved?.baseline.allocations ?? null),
+      ...stateReasons(observation, target.retained !== null),
+      ...allocationReasons(observation, target.retained?.baseline.allocations ?? null),
     )
   }
   if (refusals.length > 0) {
@@ -383,18 +391,15 @@ export function planOf(
       dropIn: { sha256: dropIn.sha256 },
     }
   }
-  if (!progress.opened) {
+  if (api === null) {
     return {
       kind: 'open',
       pool: target.pool,
       guid: target.guid,
       datasets: target.datasets,
       check: { sha256: check.sha256 },
-      retained: preserved,
+      retained: target.retained,
     }
-  }
-  if (api === null) {
-    return { kind: 'refused', reasons: ['The Incus daemon service is not running, so its state cannot be read. Qiln does not start units outside the approved open step, it does not read through a socket that would start the daemon, and it has no step that reopens a released Incus on the same deployment.'] }
   }
   if (progress.retained !== null) {
     const drift = baselineDrift(observation, target, progress.retained)
@@ -423,11 +428,12 @@ function byKey(left: InstanceRef, right: InstanceRef): number {
  * Decides what Incus needs before the ZFS export that precedes AWS removal.
  * Units that are all positively inactive need nothing only when a verified
  * release is already recorded after the last opening. Inactive units without
- * that evidence are refused, because Qiln never starts Incus to produce it.
- * Otherwise the instance inventory is frozen, so the workload step can refuse
- * any difference, and the daemon is released after it. Ephemeral instances are
- * refused, because stopping them deletes them. The pool must stay imported,
- * because the separate ZFS export owns exporting.
+ * that evidence are refused, because removal never starts Incus; prepare
+ * reopens the recorded installation first. Otherwise the instance inventory is
+ * frozen, so the workload step can refuse any difference, and the daemon is
+ * released after it. Ephemeral instances are refused, because stopping them
+ * deletes them. The pool must stay imported, because the separate ZFS export
+ * owns exporting.
  */
 export function releasePlanOf(
   observation: Observation,
@@ -440,7 +446,7 @@ export function releasePlanOf(
       : {
           kind: 'refused',
           reasons: [
-            'Every Incus unit is inactive, but no verified release is recorded after the last opening. Qiln never starts Incus to produce release evidence.',
+            'Every Incus unit is inactive, but no verified release is recorded after the last opening. Removal never starts Incus; run prepare to reopen the recorded installation, then remove to release it.',
           ],
         }
   }

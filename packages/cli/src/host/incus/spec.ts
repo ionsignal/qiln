@@ -34,7 +34,7 @@ const STEPS = {
       timeoutMs: 60_000,
       refusals: {
         20: 'The sysctl override path, contents, or digest, or an Incus unit name, was not given or is malformed.',
-        21: 'An Incus unit is already active, and Qiln does not stop or adopt a running daemon.',
+        21: 'An Incus unit is not positively inactive, and Qiln does not stop or adopt a running daemon.',
         22: 'An existing sysctl override is not a regular file holding exactly the approved bytes.',
         23: 'The sysctl override could not be staged beside its destination.',
         24: 'The sysctl override does not match its approved SHA-256 digest.',
@@ -217,12 +217,13 @@ const PINNED = ['incus*'] as const
  *   OpenPGP fingerprint.
  * - `units` are the Incus activation paths. Closing and release mask all of
  *   them persistently, and their positive inactivity establishes quiescence.
- *   They must match the units reported by the inspection script.
- *   `incus-lxcfs.service` is deliberately absent: the packaged daemon unit
- *   requires it, and it mounts only its own FUSE filesystem and does not use the
- *   state directory. The package scripts therefore enable and start it when they
- *   install. `incus-startup.service` stays masked, so the host does not
- *   stop instances at shutdown, and release is the designed stop path.
+ *   Closing, which precedes every package effect, refuses any unit that is not
+ *   positively inactive. They must match the units reported by the inspection
+ *   script. `incus-lxcfs.service` is deliberately absent: the packaged daemon
+ *   unit requires it, and it mounts only its own FUSE filesystem and does not
+ *   use the state directory. The package scripts therefore enable and start it
+ *   when they install. `incus-startup.service` stays masked, so the host does
+ *   not stop instances at shutdown, and release is the designed stop path.
  *   `open.units` are the only ones that the open step unmasks and starts, so the
  *   user and startup units stay masked.
  * - `sysctl` is the Qiln-owned override that the close step installs. The

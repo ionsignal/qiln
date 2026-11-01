@@ -66,19 +66,23 @@ function refusal(reasons: readonly string[], retry: string): InstallerError {
  * command. Per step: authorization is persisted, then the fence, then the
  * script runs, then its completion or refusal is persisted, then a fresh
  * inspection must agree before `verifiedAt` is persisted. Preparation runs in
- * two stages around the ZFS storage: the software stage closes the host and
- * installs the packages while no pool is mounted, and the activation stage
- * installs the storage-identity guard and opens the daemon on the mounted state
- * dataset. The verified initialization, or the verified open of a preserved
- * installation, is persisted together with the software baseline, the
- * subordinate-ID ranges, and the server identity it was verified against. An
- * open or initialization is also planned again from a fresh inspection after
- * approval, before anything is persisted. Nothing is replayed, resumed, or
- * rolled back, and an interrupted step stays open as evidence. A release is one
- * approval of two fenced steps, the workload stop and then the daemon release,
- * and it runs nothing when a verified release is already recorded and every unit
- * is inactive. It runs parallel to the ZFS preparer and shares only the journal
- * rules.
+ * stages around the ZFS preparation. Closing comes first, before any ZFS or
+ * Incus package effect, and masks the units while no pool is mounted. The
+ * software stage then installs the repository and packages while the host is
+ * closed. The activation stage installs the storage-identity guard and opens
+ * the daemon on the mounted state dataset. An open is planned whenever the
+ * daemon is not running, including after a host reboot or a release, and
+ * reopens the recorded installation without initializing it. The first verified
+ * initialization, or the first verified open of a preserved installation, is
+ * persisted together with the software baseline, the subordinate-ID ranges, and
+ * the server identity it was verified against; later reopens verify against
+ * them and never rewrite them. An open or initialization is also planned again
+ * from a fresh inspection after approval, before anything is persisted. Nothing
+ * is replayed, resumed, or rolled back, and an interrupted step stays open as
+ * evidence. A release is one approval of two fenced steps, the workload stop and
+ * then the daemon release, and it runs nothing when a verified release is
+ * already recorded and every unit is inactive. It runs parallel to the ZFS
+ * preparer and shares only the journal rules.
  */
 export class IncusPreparer {
   private constructor(
@@ -124,16 +128,23 @@ export class IncusPreparer {
    * mounted. Verifies a step left returned by an earlier run, then plans from
    * fresh evidence. Each approval covers only the plan displayed with it, so the
    * masks, the repository, and the packages each ask again. Returns how many
-   * steps were applied, and stops once the host is closed and the approved
+   * steps were applied. The `close` scope stops as soon as the next plan is
+   * neither the closing nor a refusal, without displaying it, so the host is
+   * closed before any package effect and an already closed host asks nothing.
+   * The `packages` scope continues until the host is closed and the approved
    * packages are installed.
    */
-  public async prepareSoftware(target: SoftwareTarget, signal: AbortSignal): Promise<number> {
+  public async prepareSoftware(
+    target: SoftwareTarget,
+    signal: AbortSignal,
+    through: 'close' | 'packages',
+  ): Promise<number> {
     const inspected: InspectTarget = { ...target, pool: null }
     let observation = (await this.settleReturned(inspected)) ?? (await this.inspect(inspected))
     let applied = 0
     while (true) {
       const plan = softwarePlanOf(observation, target, this.progress)
-      if (plan.kind === 'software') {
+      if (plan.kind === 'software' || (through === 'close' && plan.kind !== 'close' && plan.kind !== 'refused')) {
         return applied
       }
       this.context.hooks.show(observation, plan)
@@ -152,8 +163,10 @@ export class IncusPreparer {
    * The activation stage, which needs the recorded pool imported with its state
    * dataset mounted. Plans from fresh evidence, and each approval covers only
    * the plan displayed with it, so the guard, the open, the initialization, and
-   * the socket access grant each ask again. Returns how many steps were applied,
-   * and stops once the approved configuration holds.
+   * the socket access grant each ask again. The open is planned whenever the
+   * daemon is not running, so a host that rebooted reopens its recorded
+   * installation here. Returns how many steps were applied, and stops once the
+   * approved configuration holds.
    */
   public async activate(target: IncusTarget, signal: AbortSignal): Promise<number> {
     const { hooks } = this.context
@@ -270,15 +283,21 @@ export class IncusPreparer {
   }
 
   /**
-   * An initialization, or the open of a preserved installation, establishes the
-   * software baseline and the standalone server identity, so neither exists
-   * without its step. A preserved open records what is installed and observed
-   * now, which verification already required to match the retained pinned
-   * packages and the retained certificate fingerprint. It keeps the retained
-   * subordinate-ID ranges unchanged, so extra ranges never ratchet into the
-   * record.
+   * The first initialization, or the first open of a preserved installation,
+   * establishes the software baseline and the standalone server identity, so
+   * neither exists without its step. A preserved open records what is installed
+   * and observed now, which verification already required to match the retained
+   * pinned packages and the retained certificate fingerprint. It keeps the
+   * retained subordinate-ID ranges unchanged, so extra ranges never ratchet into
+   * the record. Once a baseline is recorded, a later open of the same
+   * deployment, such as the reopen after a reboot, writes nothing: it verifies
+   * against the recorded baseline and identity, and benign drift in unpinned
+   * packages never rewrites them.
    */
   private established(plan: ApprovedPlan, action: IncusAction, observation: Observation): Partial<IncusRecord> {
+    if (this.journal.record.baseline !== null) {
+      return {}
+    }
     const retained = plan.kind === 'open' ? plan.retained : null
     const establishes = action === 'initialize' || (action === 'open' && retained !== null)
     if (!establishes) {

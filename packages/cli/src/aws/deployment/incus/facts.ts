@@ -54,7 +54,9 @@ export function storageTouched(record: IncusRecord | null): boolean {
 
 /**
  * A verified open or initialization let the daemon run, so closed-host
- * protection no longer keeps it closed.
+ * protection no longer keeps it closed. This is history, not current state: it
+ * stays true after a reboot or a release stops the daemon, and whether the
+ * daemon runs now is read from a fresh inspection.
  */
 export function opened(record: IncusRecord | null): boolean {
   return (record?.steps ?? []).some(step => opens(step.action) && journal.stateOf(step) === 'verified')

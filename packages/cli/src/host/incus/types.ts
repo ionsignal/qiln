@@ -58,10 +58,11 @@ export interface InspectTarget {
 export type ReleaseTarget = Pick<IncusTarget, 'pool' | 'guid' | 'account'>
 
 /**
- * What retained evidence says about earlier preparation. `opened` means a
- * verified open or initialization let the daemon run, so the closed host is no
- * longer expected. `retained` is the preseed document of a verified
- * initialization, or of a verified open of a preserved installation.
+ * What retained evidence says about earlier preparation. `opened` is history: a
+ * verified open or initialization exists, so the closed host is no longer
+ * expected. It says nothing about whether the daemon is running now, which the
+ * planner reads from the observation. `retained` is the preseed document of a
+ * verified initialization, or of a verified open of a preserved installation.
  */
 export interface Progress {
   opened: boolean

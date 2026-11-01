@@ -188,7 +188,7 @@ function reportClose(reporter: Reporter, plan: ClosePlan): void {
   reporter.facts([
     [
       'Units',
-      `${units.join(', ')} · masked persistently, so package scripts that honor masks neither enable nor start them · a mask does not stop a unit that is already active, which is refused`,
+      `${units.join(', ')} · masked persistently, so package scripts that honor masks neither enable nor start them · a mask does not stop a unit that is running, so a unit that is not positively inactive is refused, and a state that cannot be read is not evidence of inactivity`,
     ],
     [
       'Not masked',
@@ -210,7 +210,14 @@ function reportClose(reporter: Reporter, plan: ClosePlan): void {
       'Consequence',
       'incus-startup.service stays masked, so the host does not stop Incus instances when it halts. The release performed by remove is the designed way to stop them',
     ],
-    ['Order', 'this runs before the packages and before the state dataset is mounted, so no package is installed against mounted Incus state'],
+    [
+      'Order',
+      'this runs first, before the ZFS prerequisites, the Incus repository and packages, and before the state dataset is mounted, so no package is installed against an open daemon or mounted Incus state',
+    ],
+    [
+      'Limits',
+      'the masks do not prevent ZFS import units from running, and they do not stop an administrator who runs the daemon directly',
+    ],
     ['Unchanged', 'packages, pools, mounts, every other unit, and every file except the sysctl override'],
   ])
 }
@@ -430,10 +437,10 @@ function reportRelease(reporter: Reporter, observation: Observation, plan: Relea
 const NOTICES: Record<ApprovedPlan['kind'], string> = {
   close:
     'Approval authorizes only the listed masks and the listed sysctl override file, one fenced remote script followed by a fresh inspection that must agree. ' +
-    'A unit that is already active is refused, because a mask does not stop it. The masks keep package scripts that honor them from starting the daemon; they do not stop an administrator who runs the daemon directly. ' +
+    'A unit that is not positively inactive is refused, because a mask does not stop it and a state that cannot be read is not evidence of inactivity. The masks keep package scripts that honor them from starting the daemon; they do not stop an administrator who runs the daemon directly, and they do not prevent ZFS import units from running. ' +
     'The override file is written only when absent, an existing file must hold exactly the approved bytes, and Qiln never removes it. It pins one AppArmor setting that the package would weaken; the other package sysctls are accepted. Whether containers start with the restriction enabled is not established by preparation. ' +
     'incus-lxcfs.service is deliberately not masked, and the package scripts start it when they install. ' +
-    'This runs before the packages and before the state dataset is mounted. Installing packages can still start other units, such as ZFS import units, so an unmounted state dataset is not an inaccessible one, and this ordering has not been qualified against the selected packages. ' +
+    'This runs first, before the ZFS prerequisites, the Incus repository and packages, and before the state dataset is mounted. Installing packages can still start other units, such as ZFS import units, so an unmounted state dataset is not an inaccessible one, and this ordering has not been qualified against the selected packages. ' +
     'incus-startup.service stays masked, so the host does not stop Incus instances when it halts; the release performed by remove is the designed way to stop them. ' +
     'No package is installed, no pool is touched, and no daemon is started by this plan. A failed or cancelled step is not replayed, resumed, or rolled back, and interrupted work may already have completed.',
   guard:
@@ -460,8 +467,8 @@ const NOTICES: Record<ApprovedPlan['kind'], string> = {
     'A failed or cancelled step is not replayed, resumed, or rolled back, and interrupted work may already have completed.',
   initialize:
     'Initialization is not an atomic transaction, and Qiln never relies on a rollback. It runs only against a pristine daemon and a pool holding exactly its root, its state dataset, and an empty storage dataset, ' +
-    'planned again after approval and checked again just before it runs, and nothing is forced, wiped, or converged. A failed or cancelled step is not replayed, resumed, or rolled back, and interrupted work may already have ' +
-    'changed the daemon and the pool. Retained Incus state is never initialized over: a preserved installation is reopened by its own plan. Approval does not establish runtime readiness.',
+    'planned again after approval and checked again just before it runs, and nothing is forced, wiped, or converged. A failed or cancelled step is not replayed, resumed, or rolled back, and ' +
+    'interrupted work may already have changed the daemon and the pool. Retained Incus state is never initialized over: a preserved installation is reopened by its own plan. Approval does not establish runtime readiness.',
   access:
     'Approval authorizes only adding the displayed account to the displayed group, one fenced remote script followed by a fresh inspection that must agree. ' +
     'Membership is read from the account database, so it shows that the grant was recorded and not that SSH forwarding works: only the first new connection that uses it proves that. ' +
@@ -471,7 +478,7 @@ const NOTICES: Record<ApprovedPlan['kind'], string> = {
     'Approval authorizes two fenced remote scripts, each followed by a fresh inspection that must agree. First every instance of the displayed inventory is set not to start automatically and stopped gracefully, ' +
     'never forced and never stateful, and the step refuses before changing anything if the inventory differs or an instance is ephemeral, because stopping an ephemeral instance deletes it. ' +
     'Then every Incus unit is masked persistently and the sockets and services are stopped, while the pool stays imported. Qiln starts Incus only in the approved open step, ' +
-    'so Incus stays stopped and masked on this deployment; a separately prepared successor may reopen the retained installation after its own checks and approval. A failed or cancelled step is not replayed, resumed, or rolled back, ' +
+    'so Incus stays stopped and masked until a later prepare reopens it, on this deployment or on a separately prepared successor, after its own checks and approval. A failed or cancelled step is not replayed, resumed, or rolled back, ' +
     'and interrupted work may already have completed.',
 }
 
