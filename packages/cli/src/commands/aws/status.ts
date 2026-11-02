@@ -12,7 +12,7 @@ import {
   reportPermissionMetadata,
 } from './shared'
 import { withConfirmedOperation } from '../../aws/operation'
-import * as connections from '../../aws/connection/records'
+import * as connections from '../../aws/connections'
 import type { Reporter } from '../../terminal/reporter'
 import type { AwsAuthentication } from '../../aws/types'
 import type { AwsCommandOptions } from '../../input'

@@ -1,5 +1,5 @@
 import { runProcess } from '../../transport/process'
-import { runSetup } from '../child/setup'
+import { runSetup } from '../../transport/subprocess/setup'
 import { runInteractive } from './interactive'
 import { AWS_SPEC } from '../spec'
 import type { Session } from './session'

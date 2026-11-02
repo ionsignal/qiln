@@ -1,7 +1,7 @@
 import { InstallerError } from '../diagnostic/error'
 import { ProcessExecutionError } from '../transport/process'
 import { FileValidationError } from '../state/files'
-import { SupervisedProcessError } from './child/supervise'
+import { SupervisedProcessError } from '../transport/subprocess/supervise'
 import { isRecord } from '../guards'
 import { originalCode } from './recovery'
 

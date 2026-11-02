@@ -4,8 +4,8 @@ import { findExecutable } from '../../transport/process'
 import { InstallerError, type DiagnosticFact } from '../../diagnostic/error'
 import { inspectChild, openChildDir, readChild, syncChild, type Dir } from '../../state/files'
 import { parsePublicKey } from '../../transport/ssh/key'
-import { runSetup } from '../child/setup'
-import { SupervisedProcessError } from '../child/supervise'
+import { runSetup } from '../../transport/subprocess/setup'
+import { SupervisedProcessError } from '../../transport/subprocess/supervise'
 import type { AdminKey } from '../deployment/types'
 
 const GENERATION_TIMEOUT_MS = 30_000

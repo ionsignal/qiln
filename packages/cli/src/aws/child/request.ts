@@ -4,7 +4,7 @@ import { checkCancellation } from '../../terminal/prompts'
 import { executionFailure } from '../errors'
 import { accept } from '../primitives'
 import { AWS_SPEC } from '../spec'
-import { interruptedBySignal, SupervisedProcessError, supervise } from './supervise'
+import { interruptedBySignal, SupervisedProcessError, supervise } from '../../transport/subprocess/supervise'
 
 export interface ChildEvidence {
   accept(message: unknown): boolean

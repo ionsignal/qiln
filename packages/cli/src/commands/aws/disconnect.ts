@@ -1,5 +1,5 @@
 import { InstallerError } from '../../diagnostic/error'
-import * as connections from '../../aws/connection/records'
+import * as connections from '../../aws/connections'
 import { describe } from '../../aws/deployment/observe/facts'
 import { retained } from '../../aws/deployment/topology'
 import { diagnostic } from '../../aws/errors'

@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { basename, isAbsolute } from 'node:path'
 import { InstallerError } from '../../diagnostic/error'
-import { interruptedBySignal, SupervisedProcessError, supervise } from '../child/supervise'
+import { interruptedBySignal, SupervisedProcessError, supervise } from '../../transport/subprocess/supervise'
 import { executionFailure } from '../errors'
 
 export interface InteractiveOptions {

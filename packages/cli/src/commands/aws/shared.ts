@@ -11,7 +11,7 @@ import { authRecovery, iamRecovery, terminationConfirmed } from '../../aws/recov
 import { requireAuthentication } from '../../aws/auth/identity'
 import { removeAuth, Session } from '../../aws/auth/session'
 import { evidence as incusEvidence } from '../../aws/deployment/incus/evidence'
-import * as connections from '../../aws/connection/records'
+import * as connections from '../../aws/connections'
 import * as deployments from '../../aws/deployment/records'
 import * as lineage from '../../aws/deployment/lineage/zfs'
 import type { Pending } from '../../aws/iam/types'

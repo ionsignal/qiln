@@ -1,6 +1,6 @@
 import { basename, dirname } from 'node:path'
 import { openChildDir, openDir, writeChild, type Dir } from '../../state/files'
-import * as connections from '../connection/records'
+import * as connections from '../connections'
 import { userId } from '../host'
 import { invalidPermission } from '../permission/invalid'
 import { encodeRecord } from '../../json'
