@@ -14,7 +14,7 @@ import {
   type ZfsTarget,
 } from '../../../host/zfs/types'
 import { verify } from '../../../host/zfs/verify'
-import { StepJournal } from '../journal/steps'
+import { StepJournal } from '../journal/runner'
 import { prepareRetry } from '../retry'
 import { poolState, prepared, requireNotStuck, staged, zfsFacts } from './facts'
 import { actionsOf, establishesPool, type ZfsRecord } from './types'

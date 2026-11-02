@@ -22,7 +22,7 @@ import {
   type ReleaseTarget,
   type SoftwareTarget,
 } from '../../../host/incus/types'
-import { StepJournal } from '../journal/steps'
+import { StepJournal } from '../journal/runner'
 import { prepareRetry } from '../retry'
 import * as deployments from '../records'
 import * as records from './records'
