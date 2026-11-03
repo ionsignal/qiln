@@ -23,7 +23,7 @@ function invalid(): never {
 }
 
 /**
- * The record of a deployment with no Incus preparation history. Null means the
+ * The record of a deployment with no preparation history. Null means the
  * deployment record lacks an identity, which callers treat as a defect.
  */
 export function blank(deployment: Deployment): IncusRecord | null {
@@ -36,8 +36,8 @@ export function blank(deployment: Deployment): IncusRecord | null {
 /**
  * Every retained preseed, whether approved for an initialization or carried by
  * the open of a preserved installation, must still hash to its approved digest
- * and read back as a preseed that Qiln would have produced, because
- * verification trusts it.
+ * and read back as one that Qiln would have produced, because verification
+ * trusts it.
  */
 function hasValidPreseeds({ authorizations }: IncusRecord): boolean {
   return authorizations.every(({ plan }) => {
@@ -52,16 +52,13 @@ function hasValidPreseeds({ authorizations }: IncusRecord): boolean {
  */
 function hasOnePool({ authorizations }: IncusRecord): boolean {
   const pools = authorizations.flatMap(({ plan }) =>
-    plan.kind === 'guard' || plan.kind === 'open' || plan.kind === 'initialize' || plan.kind === 'release'
-      ? [`${plan.pool}:${plan.guid}`]
-      : [],
+    plan.kind === 'open' || plan.kind === 'initialize' || plan.kind === 'release' ? [`${plan.pool}:${plan.guid}`] : [],
   )
   return new Set(pools).size <= 1
 }
 
 /**
- * A release step only makes sense after an open or initialization that was not
- * refused.
+ * A release step only follows an open or initialization that was not refused.
  */
 function releasesFollowOpening({ steps }: IncusRecord): boolean {
   return steps.every(
@@ -72,8 +69,8 @@ function releasesFollowOpening({ steps }: IncusRecord): boolean {
 }
 
 /**
- * The baseline and the server identity exist if and only if an establishing
- * step was verified, because both are recorded in the write that verifies it.
+ * The baseline and the server identity exist if and only if an establishing step
+ * was verified, because both are written with it.
  */
 function isEstablishedWithStep(record: IncusRecord): boolean {
   const established = record.steps.some(step => establishes(record, step))
@@ -81,10 +78,9 @@ function isEstablishedWithStep(record: IncusRecord): boolean {
 }
 
 /**
- * Cross-field consistency of a record whose shape is already valid: it belongs
- * to this deployment, every step follows an existing authorization that allows
- * its action, only the last step may be unsettled, and the retained plans agree
- * with each other.
+ * Cross-field consistency of a shape-valid record: it belongs to this
+ * deployment, the retained plans agree with each other, and every step follows
+ * an authorization that allows its action with only the last step unsettled.
  */
 function isConsistent(record: IncusRecord, deployment: Deployment): boolean {
   const bound = bindingOf(deployment)
@@ -108,10 +104,9 @@ function parse(value: unknown, deployment: Deployment): IncusRecord {
 }
 
 /**
- * Lock-free so status can show evidence while an operation is running. An
- * absent file means no local preparation evidence, never a pristine host. Any
- * other failure fails closed, because it does not establish that no host
- * effects occurred.
+ * Lock-free so status can show evidence while an operation runs. An absent file
+ * means no local evidence, never a pristine host. Any other failure fails
+ * closed, because it does not establish that no host effects occurred.
  */
 export async function read(directory: Dir, deployment: Deployment): Promise<IncusRecord | null> {
   try {
@@ -131,9 +126,9 @@ export async function read(directory: Dir, deployment: Deployment): Promise<Incu
 }
 
 /**
- * The baseline and the identity are set once, together, and only in the write
- * that verifies the newest step, which must be the establishing step they
- * describe. Neither is ever rewritten or dropped.
+ * The baseline and the identity are set once, together, only in the write that
+ * verifies the newest step, which must be the establishing step they describe.
+ * Neither is ever rewritten or dropped.
  */
 function requireEstablished(before: IncusRecord, after: IncusRecord): void {
   if (before.baseline !== null) {
@@ -159,9 +154,9 @@ function requireEstablished(before: IncusRecord, after: IncusRecord): void {
 }
 
 /**
- * The journal's write rule: the binding is fixed and the history only grows by
- * the shared append-only rule, while the baseline and the identity follow their
- * own. Both records are already validated.
+ * The journal's write rule: the binding is fixed, the history only grows by the
+ * shared append-only rule, and the baseline and identity follow their own rule.
+ * Both records are already validated.
  */
 function requireTransition(before: IncusRecord, after: IncusRecord): void {
   if (!sameJson(before.binding, after.binding) || !isAppendOnly(before, after)) {

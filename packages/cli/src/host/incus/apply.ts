@@ -1,4 +1,4 @@
-import { guardOf } from './activation'
+import { guardOf, type Guard } from './activation'
 import { rangeWords } from './idmap'
 import { SCRIPTS, sha256Of } from './recipe'
 import { INCUS_SPEC, repositoryPreferences, repositorySource, sysctlOverride, type IncusAction } from './spec'
@@ -8,12 +8,12 @@ import { ZFS_SPEC } from '../zfs/spec'
 import { runStep, type StepOutcome } from '../step'
 import { shellCommand } from '../shell'
 import { InstallerError } from '../../diagnostic/error'
-import { accessPlanSchema, instanceKey, repositoryOf, type ApprovedPlan } from './types'
+import { accessPlanSchema, instanceKey, repositoryOf, type ApprovedPlan, type OpenPlan } from './types'
 import type { Remote } from '../../transport/ssh/connections'
 
 /**
- * An action that does not belong to its approved plan, or bytes that no longer
- * match their approved digest, are defects of the caller or the recipe, never
+ * An action outside its approved plan, or bytes that no longer match their
+ * approved digest, are defects of the caller or the recipe, never
  * operator-correctable input.
  */
 function defect(): never {
@@ -30,6 +30,22 @@ function base64(text: string): string {
   return Buffer.from(text, 'utf8').toString('base64')
 }
 
+/**
+ * The guard files regenerated from the open plan. All three must still hash to
+ * their approved digests, which the guard and open steps share.
+ */
+function approvedGuard(plan: OpenPlan): Guard {
+  const files = guardOf(plan)
+  if (
+    files.expectation.sha256 !== plan.guard.expectation.sha256 ||
+    files.check.sha256 !== plan.guard.check.sha256 ||
+    files.dropIn.sha256 !== plan.guard.dropIn.sha256
+  ) {
+    return defect()
+  }
+  return files
+}
+
 function argumentsOf(action: IncusAction, plan: ApprovedPlan): string[] {
   const { keyFile, keyUrl, keySha256, sourceFile, preferencesFile } = INCUS_SPEC.repository
   switch (action) {
@@ -44,17 +60,10 @@ function argumentsOf(action: IncusAction, plan: ApprovedPlan): string[] {
       return [INCUS_SPEC.sysctl.file, base64(override), plan.sysctl.sha256, ...INCUS_SPEC.units]
     }
     case 'guard': {
-      if (plan.kind !== 'guard') {
+      if (plan.kind !== 'open' || !plan.install) {
         return defect()
       }
-      const { expectation, check, dropIn } = guardOf(plan)
-      if (
-        expectation.sha256 !== plan.expectation.sha256 ||
-        check.sha256 !== plan.check.sha256 ||
-        dropIn.sha256 !== plan.dropIn.sha256
-      ) {
-        return defect()
-      }
+      const { expectation, check, dropIn } = approvedGuard(plan)
       return [
         expectation.path,
         base64(expectation.text),
@@ -107,20 +116,21 @@ function argumentsOf(action: IncusAction, plan: ApprovedPlan): string[] {
       return packages
     }
     case 'open': {
-      if (plan.kind !== 'open' || sha256Of(SCRIPTS.startup) !== plan.check.sha256) {
+      if (plan.kind !== 'open') {
         return defect()
       }
+      const { expectation, check } = approvedGuard(plan)
       if (plan.retained !== null && sha256Of(plan.retained.preseed.yaml) !== plan.retained.preseed.sha256) {
         return defect()
       }
-      const { guard, open, retained, idmap } = INCUS_SPEC
+      const { open, retained, idmap } = INCUS_SPEC
       const mode = plan.retained === null ? 'fresh' : 'preserved'
       const ranges = plan.retained === null ? [] : rangeWords(plan.retained.baseline.allocations)
       return [
         mode,
-        guard.checkFile,
-        plan.check.sha256,
-        guard.expectationFile,
+        check.path,
+        check.sha256,
+        expectation.path,
         STATE_MOUNTPOINT,
         String(idmap.minimum),
         ...retained.metadata,
@@ -166,9 +176,9 @@ function argumentsOf(action: IncusAction, plan: ApprovedPlan): string[] {
 
 /**
  * Runs one approved step as one privileged script. The script and its limits
- * come from the allowlist and the arguments from the approved plan, so no
- * caller supplies a command. A failed SSH channel ends the connection, so
- * nothing is retried here.
+ * come from the allowlist and the arguments from the approved plan, so no caller
+ * supplies a command. A failed SSH channel ends the connection, so nothing is
+ * retried here.
  */
 export async function apply(remote: Remote, plan: ApprovedPlan, action: IncusAction): Promise<StepOutcome> {
   const { run } = INCUS_SPEC.steps[action]

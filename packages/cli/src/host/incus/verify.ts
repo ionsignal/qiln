@@ -11,6 +11,7 @@ import {
   type ApprovedPlan,
   type InstanceRef,
   type Observation,
+  type OpenPlan,
   type PoolTarget,
   type RepositoryPlan,
   type Retained,
@@ -29,6 +30,17 @@ function holds(file: File, sha256: string): boolean {
 }
 
 /**
+ * All three guard files hold exactly the approved bytes.
+ */
+function guardInPlace({ guard }: Observation, plan: OpenPlan): boolean {
+  return (
+    holds(guard.expectation, plan.guard.expectation.sha256) &&
+    holds(guard.check, plan.guard.check.sha256) &&
+    holds(guard.dropIn, plan.guard.dropIn.sha256)
+  )
+}
+
+/**
  * Whether a candidate's source row names the approved repository.
  */
 export function fromRepository(source: string): boolean {
@@ -36,9 +48,9 @@ export function fromRepository(source: string): boolean {
 }
 
 /**
- * Every required package is listed from the approved repository, which is what
- * a refreshed package list looks like. This does not establish that the exact
- * pins are available; the package planner checks those separately.
+ * Every required package is listed from the approved repository, as after a
+ * refreshed package list. This does not establish that the exact pins are
+ * available; the package planner checks those separately.
  */
 export function listed(observation: Observation): boolean {
   const { candidates } = observation.repository
@@ -90,8 +102,8 @@ export function poolImported(observation: Observation, pool: string, guid: strin
 }
 
 /**
- * Every Incus unit is positively reported inactive, so nothing can answer on
- * the Incus sockets. An empty, incomplete, or unknown state is not evidence.
+ * Every Incus unit is positively reported inactive, so nothing can answer on the
+ * Incus sockets. An empty, incomplete, or unknown state is not evidence.
  */
 export function quiescent(observation: Observation): boolean {
   return INCUS_SPEC.units.every(unit =>
@@ -100,9 +112,9 @@ export function quiescent(observation: Observation): boolean {
 }
 
 /**
- * The Incus units that are masked, and whether the mask is runtime-only, which
- * does not survive a reboot. Persistence is judged from the unit-file state
- * alone, never from the load state.
+ * The masked Incus units, and whether each mask is runtime-only, which does not
+ * survive a reboot. Persistence is judged from the unit-file state alone, never
+ * from the load state.
  */
 export function maskedUnits(observation: Observation): { unit: string; runtime: boolean }[] {
   return observation.services.flatMap(({ unit, enablement }) =>
@@ -114,8 +126,8 @@ export function maskedUnits(observation: Observation): { unit: string; runtime: 
 
 /**
  * Every Incus unit is persistently masked and positively inactive, so nothing
- * can start it until it is unmasked and nothing is answering now. A runtime
- * mask does not survive a reboot and does not count.
+ * can start it until it is unmasked and nothing is answering now. A runtime mask
+ * does not count.
  */
 export function closed(observation: Observation): boolean {
   const masked = maskedUnits(observation)
@@ -126,11 +138,11 @@ export function closed(observation: Observation): boolean {
 }
 
 /**
- * A package script must leave the host as it found it: every Incus unit still
+ * A package script must leave the host as it found it: every unit still
  * persistently masked and inactive, and the AppArmor restriction not weakened.
- * The package maintainer scripts run as root and can undo a mask, so this is
- * detected here and never assumed. A restriction that could not be read is not
- * judged, because the key is absent without AppArmor.
+ * Maintainer scripts run as root and can undo a mask, so this is detected and
+ * never assumed. An unreadable restriction is not judged, because the key is
+ * absent without AppArmor.
  */
 function stillClosed(observation: Observation): boolean {
   return closed(observation) && observation.sysctl.apparmor !== '0'
@@ -188,7 +200,7 @@ export function kernelReasons(observation: Observation): string[] {
 }
 
 /**
- * ZFS must meet the upstream floors. A version that could not be determined
+ * ZFS must meet the upstream floors, and a version that could not be determined
  * never passes. The LXC version is judged from the running daemon instead.
  */
 export function toolchainReasons(observation: Observation): string[] {
@@ -221,9 +233,9 @@ function lxcReasons(api: Api): string[] {
 }
 
 /**
- * Daemon-level conditions that hold both for a fresh and an initialized
- * baseline: the Qiln-required API capability, a standalone server, a supported
- * LXC version, and no remote listener.
+ * Daemon-level conditions that hold for both a fresh and an initialized
+ * baseline: the required API capability, a standalone server, a supported LXC
+ * version, and no remote listener.
  */
 export function daemonReasons(observation: Observation, api: Api): string[] {
   const reasons: string[] = []
@@ -244,14 +256,10 @@ export function daemonReasons(observation: Observation, api: Api): string[] {
 }
 
 /**
- * Every way an observation departs from the approved prepared configuration.
- * Empty means the configuration holds. This one function backs both `ready` and
- * the verification of `initialize`, so they cannot disagree. Instances and
- * images are deliberately not part of it: workloads are expected after
- * initialization, and only the first initialization requires an empty
- * inventory. The default profile is not part of it either, because preparation
- * neither populates nor modifies it. Socket access is deliberately not part of
- * it: it is a later stage with its own plan and verification.
+ * Every way an observation departs from the approved prepared configuration;
+ * empty means it holds. It backs both `ready` and the verification of
+ * `initialize`, so they cannot disagree. Instances, images, the default profile,
+ * and socket access are deliberately not part of it.
  */
 export function baselineDrift(observation: Observation, target: PoolTarget, document: PreseedDocument): string[] {
   const { api } = observation
@@ -305,10 +313,10 @@ export function baselineDrift(observation: Observation, target: PoolTarget, docu
 }
 
 /**
- * The instances are exactly the approved inventory, and each one is stopped,
- * not ephemeral, and has its local `boot.autostart` set to false, so the
- * setting is the effective one whatever the profiles say. A daemon that cannot
- * be read proves none of it.
+ * The instances are exactly the approved inventory, and each is stopped, not
+ * ephemeral, and has its local `boot.autostart` set to false, so the setting is
+ * the effective one whatever the profiles say. A daemon that cannot be read
+ * proves none of it.
  */
 function workloadsStopped(observation: Observation, approved: readonly InstanceRef[]): boolean {
   const { api } = observation
@@ -350,33 +358,28 @@ function reopened(observation: Observation, target: PoolTarget, retained: Retain
 /**
  * Pure check of one step's approved result against a fresh observation. A step
  * is verified only when the host agrees, never because its script exited zero.
- * Closing is verified by the persistent masks, positive inactivity, and the
- * approved sysctl override bytes. The repository steps are judged against the
- * repository plan that their approved plan carries, whether it stands alone or
- * follows a closing. The guard is verified by the approved file bytes alone,
- * because it may legitimately run once the host is open. The package install is
- * verified only if the host is still closed, because a package script can undo
- * the masks or weaken the AppArmor restriction. An open is verified by the
- * startup check, the recorded state mount, the exact package pins, and the
- * running daemon units, and, for a preserved installation, by the retained
- * identity and configuration. An initialization is judged against the preseed
- * bytes retained in its plan. An access grant is judged by the account
- * database, which does not show that SSH forwarding works. The workload stop is
- * judged while the daemon still answers, and the release only once every unit
- * is inactive and persistently masked.
+ * - Closing: persistent masks, positive inactivity, and the approved override.
+ * - Repository steps: judged against the repository plan that the approved plan
+ *   carries, whether it stands alone or follows a closing.
+ * - Guard: the approved file bytes alone, because it runs under the open
+ *   approval before the daemon starts.
+ * - Package install: only if the host is still closed, because a package script
+ *   can undo the masks or weaken the AppArmor restriction.
+ * - Open: the guard files, the recorded state mount, the exact package pins, and
+ *   the running daemon units, plus the retained identity and configuration for a
+ *   preserved installation.
+ * - Initialization: the preseed bytes retained in its plan.
+ * - Access grant: the account database, which does not show that SSH forwarding
+ *   works.
+ * - Workload stop: while the daemon still answers. Release: once every unit is
+ *   inactive and persistently masked.
  */
 export function verify(action: IncusAction, plan: ApprovedPlan, observation: Observation): boolean {
-  const { guard } = observation
   switch (action) {
     case 'close':
       return plan.kind === 'close' && closed(observation) && holds(observation.sysctl.override, plan.sysctl.sha256)
     case 'guard':
-      return (
-        plan.kind === 'guard' &&
-        holds(guard.expectation, plan.expectation.sha256) &&
-        holds(guard.check, plan.check.sha256) &&
-        holds(guard.dropIn, plan.dropIn.sha256)
-      )
+      return plan.kind === 'open' && guardInPlace(observation, plan)
     case 'add-repository': {
       const approved = repositoryOf(plan)
       return approved !== null && repositoryInPlace(observation, approved)
@@ -402,7 +405,7 @@ export function verify(action: IncusAction, plan: ApprovedPlan, observation: Obs
     case 'open':
       return (
         plan.kind === 'open' &&
-        holds(guard.check, plan.check.sha256) &&
+        guardInPlace(observation, plan) &&
         stateMountReasons(observation, plan).length === 0 &&
         packagesPinned(observation) &&
         running(observation) &&

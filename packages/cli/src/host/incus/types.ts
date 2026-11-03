@@ -13,11 +13,10 @@ const settings = z.record(z.string(), z.string())
 const account = z.string().regex(/^[a-z_][a-z0-9_-]{0,31}$/)
 
 /**
- * What an installation of software needs to know about the target: the
- * administrator account that needs Incus socket access, and the Incus
- * installation of an earlier deployment that this host may reopen, or null for a
- * fresh installation. No pool is needed, because software is prepared while no
- * pool is mounted.
+ * What software preparation needs: the administrator account that gets Incus
+ * socket access, and the installation of an earlier deployment that this host
+ * may reopen (null for a fresh one). No pool is needed, because software is
+ * prepared while no pool is mounted.
  */
 export interface SoftwareTarget {
   account: string
@@ -25,9 +24,9 @@ export interface SoftwareTarget {
 }
 
 /**
- * Software plus the pool that earlier ZFS preparation evidence expects on the
- * data volume and its two datasets. All are derived from the protected
- * deployment record and its retained evidence, never from the host.
+ * Software plus the recorded pool and its two dataset GUIDs. All of it comes
+ * from the protected deployment record and its retained evidence, never from
+ * the host.
  */
 export interface IncusTarget extends SoftwareTarget {
   pool: string
@@ -42,9 +41,8 @@ export interface IncusTarget extends SoftwareTarget {
 export type PoolTarget = Pick<IncusTarget, 'pool' | 'guid' | 'datasets'>
 
 /**
- * What an inspection needs to know about the target. A null pool reports no ZFS
- * pool. The retained software is only needed to simulate its exact packages
- * before a preserved open.
+ * What an inspection needs. A null pool reports no ZFS pool. `retained` is only
+ * needed to simulate its exact packages before a preserved open.
  */
 export interface InspectTarget {
   pool: string | null
@@ -53,16 +51,15 @@ export interface InspectTarget {
 }
 
 /**
- * What the release before the ZFS export needs to know about the target.
+ * What the release before the ZFS export needs.
  */
 export type ReleaseTarget = Pick<IncusTarget, 'pool' | 'guid' | 'account'>
 
 /**
  * What retained evidence says about earlier preparation. `opened` is history: a
  * verified open or initialization exists, so the closed host is no longer
- * expected. It says nothing about whether the daemon is running now, which the
- * planner reads from the observation. `retained` is the preseed document of a
- * verified initialization, or of a verified open of a preserved installation.
+ * expected; it says nothing about whether the daemon runs now. `retained` is the
+ * preseed of a verified initialization or preserved open.
  */
 export interface Progress {
   opened: boolean
@@ -75,9 +72,6 @@ export const packageChangeSchema = z.strictObject({
   architecture: text,
 })
 
-/**
- * One root range of a subordinate-ID file.
- */
 const idRangeSchema = z.strictObject({
   start: count,
   count: z.int().positive(),
@@ -85,8 +79,7 @@ const idRangeSchema = z.strictObject({
 
 /**
  * The root ranges of `/etc/subuid` and `/etc/subgid`. Retained instance
- * ownership depends on them, and Qiln never edits either file. A baseline always
- * holds at least one range in each.
+ * ownership depends on them, and Qiln never edits either file.
  */
 export const allocationsSchema = z.strictObject({
   uid: z.array(idRangeSchema).min(1).max(64),
@@ -97,11 +90,9 @@ export type IdRange = z.infer<typeof idRangeSchema>
 export type Allocations = z.infer<typeof allocationsSchema>
 
 /**
- * The installed Incus packages and relevant runtime dependencies with their full
- * versions, the native package architecture, and the root subordinate-ID ranges.
- * It is not the original APT transaction: a dependency that already matched is
- * part of the baseline all the same. It is evidence of what was running, and it
- * grants no authority.
+ * Evidence of what was running, not the original APT transaction: the installed
+ * Incus packages and runtime dependencies at their full versions, the package
+ * architecture, and the root subordinate-ID ranges. It grants no authority.
  */
 export const baselineSchema = z
   .strictObject({
@@ -116,51 +107,32 @@ export const baselineSchema = z
 
 export type Baseline = z.infer<typeof baselineSchema>
 
-const fileSchema = z.strictObject({
+const observedFileSchema = z.strictObject({
   kind: z.enum(['absent', 'file', 'other']),
   sha256: sha256.nullable(),
 })
 
 /**
  * Normalized, bounded evidence from one inspection. A missing capability is a
- * value here (`null` or `false`), never an empty result. `api` is null unless
- * the daemon service itself is already running, because a query through an
- * active socket alone would start the daemon by socket activation, and Qiln
- * never reads the API in a way that could do that. Everything else is offline
- * evidence that never touches an Incus socket: `system` also holds the running
- * kernel and the machine architecture, `runtime` the ZFS versions where they
- * could be read, and `software` every installed package that matches the
- * recorded software patterns, with its full version. `packages` lists installed
- * packages only, and its bound exceeds the largest approved transaction.
- * `repository` reports the key, source, and exact-package preferences by digest,
- * and `repository.candidates` holds the `apt-cache madison` rows. `transaction`
- * simulates exact selected or retained versions and never changes the host.
- * `sysctl` reports the Qiln override file by digest and the running value of the
- * AppArmor restriction key that it pins, which is null when it could not be read.
- * `guard` reports the three files that protect the state directory by digest.
- * `network` holds host routes that overlap the bridge subnet, ignoring the
- * default route, and every link name.
- * `access` is read from the account database, so it shows a recorded group
- * membership and not whether an open SSH connection already has it.
- * `idmap` holds the root ranges of each subordinate-ID file. A null list means
- * the file could not be read, which is not the same as an empty list, a file
- * that was read and holds no root range.
- * `zfs.datasets` are every dataset of the inspected pool, when it is imported,
- * and `zfs.topLevel` describes the pool dataset and its direct children with
- * their GUIDs and mount properties. `stateMount` is the kernel mount-table entry
- * at the Incus state directory, and null when none was reported, which is a
- * missing observation and not proof that nothing is mounted. `state` reports
- * whether the state directory holds nothing, and whether every retained
- * metadata entry is present; a directory that could not be listed reports
- * neither.
- * Each service reports its load state, so an absent unit (`not-found`) is told
- * apart from a loaded one, and its enablement reports a persistent (`masked`)
- * or runtime (`masked-runtime`) mask.
- * The API server reports its certificate fingerprint, which is not the SSH host
- * key fingerprint, whether it is clustered, and the LXC version that the daemon
- * itself reports, which is null when it reports none. Every instance of every
- * project reports whether it is ephemeral and its local `boot.autostart` value,
- * which is null when it is unset.
+ * value (`null` or `false`), never an empty result.
+ * - `api` is null unless the daemon service itself is running, because a query
+ *   through an active socket alone would start the daemon. Everything else is
+ *   offline evidence that never touches an Incus socket.
+ * - `repository` and `guard` report files by digest, `candidates` are the
+ *   `apt-cache madison` rows, and `transaction` simulates exact selected or
+ *   retained versions without changing the host.
+ * - `sysctl.apparmor` is null when the key could not be read.
+ * - `access` comes from the account database, not from a live SSH session.
+ * - A null `idmap` list means the file was unreadable, which is not the same as
+ *   a readable file without a root range.
+ * - `stateMount` is null when nothing was reported, which is a missing
+ *   observation and not proof of absence. `state` reports whether the state
+ *   directory is empty and whether every retained metadata entry is present.
+ * - A service reports its load state, so an absent unit (`not-found`) differs
+ *   from a loaded one, and its enablement shows a persistent (`masked`) or
+ *   runtime (`masked-runtime`) mask.
+ * - The server certificate fingerprint is not the SSH host-key fingerprint.
+ *   `lxc` and an instance's `autostart` are null when unreported or unset.
  */
 export const observationSchema = z.strictObject({
   observedAt: z.iso.datetime(),
@@ -175,9 +147,9 @@ export const observationSchema = z.strictObject({
     zfsModule: text.nullable(),
   }),
   repository: z.strictObject({
-    key: fileSchema,
-    source: fileSchema,
-    preferences: fileSchema,
+    key: observedFileSchema,
+    source: observedFileSchema,
+    preferences: observedFileSchema,
     conflicts: z.array(text).max(16),
     candidates: z
       .array(
@@ -190,13 +162,13 @@ export const observationSchema = z.strictObject({
       .max(256),
   }),
   sysctl: z.strictObject({
-    override: fileSchema,
+    override: observedFileSchema,
     apparmor: text.nullable(),
   }),
   guard: z.strictObject({
-    expectation: fileSchema,
-    check: fileSchema,
-    dropIn: fileSchema,
+    expectation: observedFileSchema,
+    check: observedFileSchema,
+    dropIn: observedFileSchema,
   }),
   packages: z.array(packageChangeSchema).max(128),
   software: z.array(packageChangeSchema).max(256),
@@ -291,10 +263,9 @@ export type Api = NonNullable<Observation['api']>
 export type PackageChange = z.infer<typeof packageChangeSchema>
 
 /**
- * The identity of the Incus server that a verified initialization or preserved
- * open established for this deployment. The certificate fingerprint is not the
- * SSH host-key fingerprint, and it is evidence of which installation this is,
- * not authorization to use it.
+ * The server that a verified initialization or preserved open established. The
+ * certificate fingerprint is evidence of which installation this is, not
+ * authorization to use it.
  */
 export const identitySchema = z.strictObject({
   certificateFingerprint: sha256,
@@ -304,8 +275,7 @@ export const identitySchema = z.strictObject({
 export type Identity = z.infer<typeof identitySchema>
 
 /**
- * Null means the observation holds no standalone server identity, so there is
- * nothing to record.
+ * Null means the observation holds no standalone server identity to record.
  */
 export function identityOf(observation: Observation): Identity | null {
   const server = observation.api?.server
@@ -333,9 +303,8 @@ export interface RefusedPlan {
 }
 
 /**
- * The initialized baseline matches the approved preseed and the administrator
- * account has Incus socket access, so nothing is left to apply. This plan is
- * never persisted.
+ * The baseline matches the approved preseed and the administrator account has
+ * Incus socket access, so nothing is left to apply. Never persisted.
  */
 export interface ReadyPlan {
   kind: 'ready'
@@ -344,67 +313,58 @@ export interface ReadyPlan {
 }
 
 /**
- * The host is closed and the approved Incus packages are installed, so the
- * software stage has nothing left to apply. This plan is never persisted.
+ * The host is closed and the approved packages are installed, so the software
+ * stage has nothing left to apply. Never persisted.
  */
 export interface SoftwarePlan {
   kind: 'software'
 }
 
 /**
- * Every Incus unit is positively inactive and a verified release is already
- * recorded, so there is nothing to release. Nothing is run or recorded for it.
- * This plan is never persisted.
+ * Every unit is positively inactive and a verified release is already recorded,
+ * so there is nothing to release. Never persisted.
  */
 export interface StoppedPlan {
   kind: 'stopped'
 }
 
-const file = z.strictObject({ sha256 })
+const digestSchema = z.strictObject({ sha256 })
 
 /**
  * Writes the approved signing key, source, and exact-package preferences when
  * absent, then refreshes the package lists. Existing files are never
- * overwritten. The digests identify the exact approved bytes.
+ * overwritten, and the digests identify the exact approved bytes.
  */
 export const repositoryPlanSchema = z.strictObject({
   kind: z.literal('repository'),
   architecture: z.enum(ARCHITECTURES),
   add: z.boolean(),
   key: z.strictObject({ url: text, sha256 }),
-  source: file,
-  preferences: file,
+  source: digestSchema,
+  preferences: digestSchema,
 })
 
 /**
  * Masks every Incus unit persistently, so no package can start the daemon, and
- * installs the sysctl override that keeps the AppArmor restriction enabled. The
- * digest identifies the exact approved override bytes. It names no pool,
- * because it runs before any storage exists. `repository` is the repository
- * plan that follows the closing under the same approval, and is null when the
- * repository files are already in place and the package lists are refreshed.
+ * installs the sysctl override that keeps the AppArmor restriction enabled. It
+ * names no pool, because it runs before any storage exists. `repository` follows
+ * the closing under the same approval, and is null when the repository files and
+ * refreshed lists are already in place.
  */
 export const closePlanSchema = z.strictObject({
   kind: z.literal('close'),
-  sysctl: file,
+  sysctl: digestSchema,
   repository: repositoryPlanSchema.nullable(),
 })
 
 /**
- * Installs the storage-identity guard: the expectation file of the recorded
- * identities, the startup check, and the service drop-in. The digests identify
- * the exact approved bytes. The layout revision is a literal of the record
- * version, not a read of today's spec.
+ * The three root-owned files that keep the daemon from starting unless the
+ * recorded state dataset is mounted, by approved digest.
  */
-export const guardPlanSchema = z.strictObject({
-  kind: z.literal('guard'),
-  pool: poolNameSchema,
-  guid,
-  datasets: poolDatasetsSchema,
-  layout: z.literal(1),
-  expectation: file,
-  check: file,
-  dropIn: file,
+const guardFilesSchema = z.strictObject({
+  expectation: digestSchema,
+  check: digestSchema,
+  dropIn: digestSchema,
 })
 
 export const packagesPlanSchema = z.strictObject({
@@ -413,11 +373,10 @@ export const packagesPlanSchema = z.strictObject({
 })
 
 /**
- * The Incus installation of an earlier deployment that a preserved open
- * reopens: the retained preseed bytes, the recorded software and subordinate-ID
- * ranges, and the server identity that the reopened daemon must present.
- * `origin` is the deployment whose evidence established them. Evidence of what
- * was running, which grants no authority.
+ * The installation of an earlier deployment that a preserved open reopens: the
+ * retained preseed bytes, the recorded software and subordinate-ID ranges, and
+ * the server identity that the reopened daemon must present. `origin` is the
+ * deployment whose evidence established them. It grants no authority.
  */
 export const retainedSchema = z.strictObject({
   origin: operationId,
@@ -432,29 +391,28 @@ export const retainedSchema = z.strictObject({
 export type Retained = z.infer<typeof retainedSchema>
 
 /**
- * Lets the daemon run. With `retained` null it opens a fresh installation: the
- * state directory must be empty, each subordinate-ID file must list a large
- * enough root range, and an initialization follows. With `retained` it reopens
- * the preserved installation: the state directory must hold its retained
- * metadata, every recorded root range must be listed, nothing is initialized,
- * and a missing state never falls back to a fresh installation. The startup
- * check must confirm the recorded state dataset first. Installing packages
- * never does this.
+ * Lets the daemon run. `install` is set when any guard file is absent, and the
+ * same approval then also writes the guard before the daemon starts.
+ * - A fresh open (`retained` null) needs an empty state directory and a large
+ *   enough root range in each subordinate-ID file, and an initialization follows.
+ * - A preserved open needs the retained metadata and every recorded root range,
+ *   initializes nothing, and never falls back to a fresh installation.
+ * Installing packages never opens the daemon.
  */
 export const openPlanSchema = z.strictObject({
   kind: z.literal('open'),
   pool: poolNameSchema,
   guid,
   datasets: poolDatasetsSchema,
-  check: file,
+  guard: guardFilesSchema,
+  install: z.boolean(),
   retained: retainedSchema.nullable(),
 })
 
 /**
- * The preseed is retained as the exact approved bytes. Verification reads the
- * expected state back from those bytes, so they stay the single source. The
- * dataset identities are retained too, because the mounted state is verified
- * against them.
+ * The preseed is retained as the exact approved bytes, which verification reads
+ * back, so they stay the single source. The dataset identities are retained too,
+ * because the mounted state is verified against them.
  */
 export const initializePlanSchema = z.strictObject({
   kind: z.literal('initialize'),
@@ -479,9 +437,8 @@ export const accessPlanSchema = z.strictObject({
 })
 
 /**
- * Stops the frozen instance inventory, then releases the daemon: units are
- * masked and stopped. The inventory is what was observed when the plan was
- * made, and the workload step refuses if the host no longer matches it.
+ * Stops the frozen instance inventory, then releases the daemon. The workload
+ * step refuses if the host no longer matches the inventory observed at planning.
  */
 export const releasePlanSchema = z.strictObject({
   kind: z.literal('release'),
@@ -491,7 +448,6 @@ export const releasePlanSchema = z.strictObject({
 })
 
 export type ClosePlan = z.infer<typeof closePlanSchema>
-export type GuardPlan = z.infer<typeof guardPlanSchema>
 export type RepositoryPlan = z.infer<typeof repositoryPlanSchema>
 export type PackagesPlan = z.infer<typeof packagesPlanSchema>
 export type OpenPlan = z.infer<typeof openPlanSchema>
@@ -504,7 +460,6 @@ export type ReleasePlan = z.infer<typeof releasePlanSchema>
  */
 export type ApprovedPlan =
   | ClosePlan
-  | GuardPlan
   | RepositoryPlan
   | PackagesPlan
   | OpenPlan
@@ -526,7 +481,6 @@ export type PreparationPlan =
   | ClosePlan
   | RepositoryPlan
   | PackagesPlan
-  | GuardPlan
   | OpenPlan
   | InitializePlan
   | AccessPlan
@@ -541,8 +495,8 @@ function repositoryActions(plan: RepositoryPlan): readonly IncusAction[] {
 }
 
 /**
- * The repository plan an approved plan carries: the plan itself, or the one that
- * follows a closing under the same approval. Null means it carries none.
+ * The repository plan an approved plan carries: itself, or the one that follows
+ * a closing under the same approval. Null means it carries none.
  */
 export function repositoryOf(plan: ApprovedPlan): RepositoryPlan | null {
   if (plan.kind === 'repository') {
@@ -559,14 +513,12 @@ export function actionsOf(plan: ApprovedPlan): readonly IncusAction[] {
   switch (plan.kind) {
     case 'close':
       return plan.repository === null ? ['close'] : ['close', ...repositoryActions(plan.repository)]
-    case 'guard':
-      return ['guard']
     case 'repository':
       return repositoryActions(plan)
     case 'packages':
       return ['install-packages']
     case 'open':
-      return ['open']
+      return plan.install ? ['guard', 'open'] : ['open']
     case 'initialize':
       return ['initialize']
     case 'access':

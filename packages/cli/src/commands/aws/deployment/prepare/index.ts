@@ -21,32 +21,21 @@ import type { AwsDeploymentOptions } from '../../../../input'
 import type { Reporter } from '../../../../terminal/reporter'
 
 /**
- * Plans preparation of the recorded data volume and the Incus installation on
- * it, in five phases, and applies each plan only after a default-no approval of
- * each displayed plan. First the Incus closing together with its repository:
- * persistent masks that are verified before any package effect, so neither ZFS
- * nor Incus package configuration runs against an open daemon, followed under
- * the same approval by the Zabbly repository files and a package-list refresh;
- * every refusal that offline evidence can decide is reached before the first
- * mask, a host that is already closed with its repository in place asks
- * nothing, and once Qiln opened Incus it is never closed again here. Then the
- * ZFS prerequisites, which are refused once Qiln has opened Incus, because a
- * package script could disturb the running daemon. Then the Incus packages,
- * while no pool is mounted and the host is closed: the exact packages, so no
- * package is ever installed against mounted Incus state. Then the ZFS storage:
- * one single-disk pool, created on a blank volume or imported by its recorded
- * GUID, together with its packaged monthly scrub timer, and the mount of its
- * state dataset. Last, the Incus activation, each stage from a fresh
- * inspection: the storage-identity guard, an explicit open of the daemon on the
- * mounted state dataset, and finally the administrator account's membership in
- * the Incus administration group. A fresh installation opens an empty state
- * directory and is followed by one initialization from a retained preseed that
- * registers the pool's `incus` dataset and the bridge. A volume whose earlier
- * deployment established and released an installation instead installs the
- * recorded package versions and reopens that preserved installation, and never
- * initializes. The local writes are the host-key pin, retained before
- * connecting exactly as for verify, and the retained ZFS and Incus preparation
- * evidence.
+ * Prepares the recorded data volume and the Incus installation on it, in five
+ * phases. Each plans from a fresh inspection and is applied only after its own
+ * default-no approval.
+ * 1. Incus close and repository: persistent masks, then the Zabbly repository
+ *    and a package-list refresh, before any package effect.
+ * 2. ZFS prerequisites, refused once Qiln opened Incus, because a package
+ *    script could disturb the running daemon.
+ * 3. Incus packages: the exact pins, installed while the host is closed.
+ * 4. ZFS storage: create the pool on a blank volume, or import it by its
+ *    recorded GUID, then enable its scrub timer and mount its state dataset.
+ * 5. Incus activation: the guard and open, then initialization of a fresh
+ *    installation or the reopen of a preserved one, never initializing over
+ *    retained state, then administrator socket access.
+ * The local writes are the host-key pin, retained before connecting exactly as
+ * for verify, and the retained ZFS and Incus preparation evidence.
  */
 export async function prepare(options: AwsDeploymentOptions, reporter: Reporter): Promise<void> {
   requireAwsHost()

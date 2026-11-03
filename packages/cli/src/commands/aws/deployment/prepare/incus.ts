@@ -10,7 +10,6 @@ import type {
   AccessPlan,
   ApprovedPlan,
   ClosePlan,
-  GuardPlan,
   IdRange,
   InitializePlan,
   Observation,
@@ -31,6 +30,8 @@ type Details = Partial<Record<IncusAction, string>>
 
 const REPOSITORY_LASTING =
   'The exact-package pins exclude other Incus builds, including security updates, until they are repinned. apt-get update refreshes every configured APT source.'
+const GUARD_LASTING = 'The guard makes the daemon service refuse to start unless the recorded state dataset is mounted.'
+const GUARD_NOT_ESTABLISHED = 'Protection against an administrator who runs the daemon directly.'
 
 function repositoryLabel(plan: RepositoryPlan): string {
   return plan.add
@@ -49,16 +50,16 @@ export function approvalLabel(plan: ApprovedPlan): string {
         ? close
         : `${close}, then ${repositoryLabel(plan.repository).replace(/^[A-Z]/, letter => letter.toLowerCase())}`
     }
-    case 'guard':
-      return 'Install the displayed storage-identity startup guard on the deployment host'
     case 'repository':
       return repositoryLabel(plan)
     case 'packages':
       return 'Install the displayed exact Incus package versions and dependencies on the deployment host'
-    case 'open':
+    case 'open': {
+      const guard = plan.install ? ' after installing the displayed storage-identity startup guard' : ''
       return plan.retained === null
-        ? 'Open the deployment host to Incus: unmask and start the daemon on the recorded state dataset'
-        : 'Reopen the preserved Incus installation on the recorded state dataset, without initializing'
+        ? `Open the deployment host to Incus${guard}: unmask and start the daemon on the recorded state dataset`
+        : `Reopen the preserved Incus installation on the recorded state dataset${guard}, without initializing`
+    }
     case 'initialize':
       return 'Initialize Incus from the approved preseed on the deployment host'
     case 'access':
@@ -233,20 +234,6 @@ function closeScreen(plan: ClosePlan): ApprovalScreen {
   }
 }
 
-function guardScreen(plan: GuardPlan): ApprovalScreen {
-  const { expectationFile, checkFile, dropInFile } = INCUS_SPEC.guard
-  const details: Details = {
-    guard: `${expectationFile}, ${checkFile}, and ${dropInFile} for pool ${plan.pool} (GUID ${plan.guid})`,
-  }
-  return {
-    title: 'Proposed storage-identity guard (applied only after approval)',
-    steps: stepsOf(actionsOf(plan), INCUS_LABELS, details),
-    stays: 'Unit masks, packages, pools, mounts, and every other file.',
-    lasting: 'The daemon service refuses to start unless the recorded state dataset is mounted.',
-    notEstablished: 'Protection against an administrator who runs the daemon directly.',
-  }
-}
-
 function repositoryScreen(plan: RepositoryPlan): ApprovalScreen {
   return {
     title: 'Proposed repository and package pins (applied only after approval)',
@@ -272,29 +259,39 @@ function packagesScreen(plan: PackagesPlan): ApprovalScreen {
   }
 }
 
+/**
+ * The open and, when it is not installed yet, the storage-identity guard that
+ * precedes it under the same approval.
+ */
 function openScreen(plan: OpenPlan): ApprovalScreen {
   const { retained } = plan
-  const units = INCUS_SPEC.open.units.join(', ')
+  const { guard, idmap, open } = INCUS_SPEC
+  const units = open.units.join(', ')
   const writes = 'The daemon writes its metadata to the state dataset when it opens.'
+  const guardDetail = `${guard.expectationFile}, ${guard.checkFile}, and ${guard.dropInFile} for pool ${plan.pool} (GUID ${plan.guid})`
   if (retained === null) {
     return {
       title: 'Proposed open (applied only after approval)',
       steps: stepsOf(actionsOf(plan), INCUS_LABELS, {
-        open: `unmask and start ${units}; the state directory (${datasetNamesOf(plan.pool).state} at ${STATE_MOUNTPOINT}) must be empty and each subordinate-ID file must list a root range of at least ${INCUS_SPEC.idmap.minimum} IDs`,
+        guard: guardDetail,
+        open: `unmask and start ${units}; the state directory (${datasetNamesOf(plan.pool).state} at ${STATE_MOUNTPOINT}) must be empty and each subordinate-ID file must list a root range of at least ${idmap.minimum} IDs`,
       }),
-      stays: 'Packages, pools, and instances. Nothing is initialized, and the other Incus units stay masked.',
-      lasting: writes,
-      notEstablished: 'Initialization, which needs its own approval.',
+      stays:
+        'Packages, pools, and instances. Nothing is initialized, the other Incus units stay masked, and Qiln writes no file but the guard files.',
+      lasting: `${GUARD_LASTING} ${writes}`,
+      notEstablished: `Initialization, which needs its own approval. ${GUARD_NOT_ESTABLISHED}`,
     }
   }
   return {
     title: 'Proposed reopen of the preserved installation (applied only after approval)',
     steps: stepsOf(actionsOf(plan), INCUS_LABELS, {
+      guard: guardDetail,
       open: `reopen the installation preserved by deployment ${retained.origin} (server certificate SHA-256 ${retained.identity.certificateFingerprint.slice(0, 12)}); its retained metadata and every recorded subordinate-ID root range must be present`,
     }),
-    stays: 'Packages, pools, and instances. Nothing is initialized, and no instance is started.',
-    lasting: `${writes} A daemon of a different version could migrate the retained database, which is why the recorded package versions are required first.`,
-    notEstablished: 'That the preserved workloads work.',
+    stays:
+      'Packages, pools, and instances. Nothing is initialized, no instance is started, and Qiln writes no file but the guard files.',
+    lasting: `${GUARD_LASTING} ${writes} A daemon of a different version could migrate the retained database, which is why the recorded package versions are required first.`,
+    notEstablished: `That the preserved workloads work. ${GUARD_NOT_ESTABLISHED}`,
   }
 }
 
@@ -340,8 +337,6 @@ function screenOf(plan: ApprovedPlan): ApprovalScreen {
   switch (plan.kind) {
     case 'close':
       return closeScreen(plan)
-    case 'guard':
-      return guardScreen(plan)
     case 'repository':
       return repositoryScreen(plan)
     case 'packages':
