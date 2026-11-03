@@ -31,10 +31,10 @@ function configured(plan: CreatePlan, { pool, dataset, ashifts, topLevel }: Deta
  * A created pool takes whatever GUID ZFS assigned, so only the create step
  * checks the pool without one, and its datasets take GUIDs that the dataset
  * step discovers. `recorded` is the identity that the journal recorded for this
- * deployment's pool, which the dataset and scrub steps of a created pool must
- * still find. A mount counts only when ZFS and the kernel mount table agree,
- * and an export only when the pool listing could run, because an unavailable
- * listing looks the same as an empty one.
+ * deployment's pool, which the dataset, scrub, and mount steps of a created
+ * pool must still find. A mount counts only when ZFS and the kernel mount table
+ * agree, and an export only when the pool listing could run, because an
+ * unavailable listing looks the same as an empty one.
  */
 export function verify(
   action: StepAction,
@@ -85,9 +85,10 @@ export function verify(
       )
     case 'mount-state':
       return (
-        plan.kind === 'mount' &&
-        isLivePool(observation, { name: plan.pool, guid: plan.guid, volumeId: plan.disk.volumeId }) &&
-        sameDatasets(readLayout(observation, plan.pool), plan.datasets) &&
+        (plan.kind === 'create' || plan.kind === 'import') &&
+        recorded !== null &&
+        isLivePool(observation, { name: plan.pool, guid: recorded.guid, volumeId: plan.disk.volumeId }) &&
+        sameDatasets(readLayout(observation, plan.pool), recorded.datasets) &&
         stateMountOf(observation, plan.pool) === 'mounted'
       )
     case 'unmount-state':

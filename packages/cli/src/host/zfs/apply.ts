@@ -6,11 +6,11 @@ import { runStep, type StepOutcome } from '../step'
 import { shellCommand } from '../shell'
 import { InstallerError } from '../../diagnostic/error'
 import type { Remote } from '../../transport/ssh/connections'
-import type { ApprovedPlan } from './types'
+import type { ApprovedPlan, PoolIdentity } from './types'
 
 /**
- * An action that does not belong to its approved plan is a defect of the
- * caller, never an operator-correctable input.
+ * An action outside its approved plan is a defect of the caller, never an
+ * operator-correctable input.
  */
 function defect(): never {
   throw new InstallerError({
@@ -18,7 +18,7 @@ function defect(): never {
   })
 }
 
-function argumentsOf(action: StepAction, plan: ApprovedPlan): string[] {
+function argumentsOf(action: StepAction, plan: ApprovedPlan, pool: PoolIdentity | null): string[] {
   const { layout } = ZFS_SPEC
   switch (action) {
     case 'install-packages': {
@@ -41,7 +41,7 @@ function argumentsOf(action: StepAction, plan: ApprovedPlan): string[] {
       if (plan.kind !== 'create') {
         return defect()
       }
-      const { pool } = ZFS_SPEC
+      const { pool: settings } = ZFS_SPEC
       return [
         plan.pool,
         plan.disk.path,
@@ -50,10 +50,10 @@ function argumentsOf(action: StepAction, plan: ApprovedPlan): string[] {
         plan.autotrim,
         plan.dataset.compression,
         plan.dataset.atime,
-        pool.acltype,
-        pool.xattr,
-        pool.mountpoint,
-        pool.cachefile,
+        settings.acltype,
+        settings.xattr,
+        settings.mountpoint,
+        settings.cachefile,
       ]
     }
     case 'create-datasets':
@@ -62,10 +62,13 @@ function argumentsOf(action: StepAction, plan: ApprovedPlan): string[] {
       return plan.kind === 'import'
         ? [plan.pool, plan.guid, plan.disk.path, plan.disk.volumeId, plan.disk.member]
         : defect()
-    case 'mount-state':
-      return plan.kind === 'mount'
-        ? ['mount', plan.pool, plan.guid, layout.state, plan.datasets.state, STATE_MOUNTPOINT]
-        : defect()
+    case 'mount-state': {
+      const datasets = pool?.datasets
+      if ((plan.kind !== 'create' && plan.kind !== 'import') || pool === null || datasets == null) {
+        return defect()
+      }
+      return ['mount', plan.pool, pool.guid, layout.state, datasets.state, STATE_MOUNTPOINT]
+    }
     case 'unmount-state':
       return plan.kind === 'export' && plan.unmount
         ? ['unmount', plan.pool, plan.guid, layout.state, plan.datasets.state, STATE_MOUNTPOINT]
@@ -80,12 +83,19 @@ function argumentsOf(action: StepAction, plan: ApprovedPlan): string[] {
 /**
  * Runs one approved step as one privileged script. The script and its limits
  * come from the allowlist and the arguments from the approved plan, so no
- * caller supplies a command. A failed SSH channel ends the connection, so
- * nothing is retried here.
+ * caller supplies a command. `pool` is the identity the journal recorded: a
+ * created pool's GUIDs are not in its plan, so the state mount takes them from
+ * the record. A failed SSH channel ends the connection, so nothing is retried
+ * here.
  */
-export async function apply(remote: Remote, plan: ApprovedPlan, action: StepAction): Promise<StepOutcome> {
+export async function apply(
+  remote: Remote,
+  plan: ApprovedPlan,
+  action: StepAction,
+  pool: PoolIdentity | null,
+): Promise<StepOutcome> {
   const { run } = ZFS_SPEC.steps[action]
-  const command = shellCommand(SCRIPTS[run.script], argumentsOf(action, plan), { privileged: true })
+  const command = shellCommand(SCRIPTS[run.script], argumentsOf(action, plan, pool), { privileged: true })
   return await runStep(remote, command, {
     timeoutMs: run.timeoutMs,
     maxOutputBytes: ZFS_SPEC.apply.maxOutputBytes,

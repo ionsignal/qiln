@@ -81,8 +81,9 @@ function targetDisk(disk: BlockDevice, target: ZfsTarget) {
  * no recorded pool the volume must be blank and no pool of the policy name may
  * be imported, and with a recorded pool only one that matches both its name and
  * GUID, and holds exactly its recorded datasets, is accepted. Mounting the
- * state dataset is a plan of its own, decided only once the pool is imported
- * and its scrub timer is verified.
+ * state dataset is the last step of a create or import plan. Once the pool is
+ * imported and its scrub timer is verified, only that mount remains
+ * (`mountOnly`).
  */
 export function planOf(
   observation: Observation,
@@ -246,6 +247,7 @@ export function planOf(
   }
   const names = datasetNamesOf(recorded.name)
   const imported = pools.imported.some(pool => pool.name === recorded.name && pool.guid === recorded.guid)
+  let mountOnly = false
   if (imported) {
     const live = isLivePool(observation, { name: recorded.name, guid: recorded.guid, volumeId: target.dataVolumeId })
     if (!live) {
@@ -277,14 +279,7 @@ export function planOf(
       if (state === 'mounted' && recorded.ready) {
         return { kind: 'ready', pool: recorded.name, guid: recorded.guid }
       }
-      return {
-        kind: 'mount',
-        pool: recorded.name,
-        guid: recorded.guid,
-        datasets,
-        disk: targetDisk(data, target),
-        mounted: state === 'mounted',
-      }
+      mountOnly = true
     }
   }
   const member = memberOf(data)
@@ -295,12 +290,13 @@ export function planOf(
     }
   }
   return {
-    imported,
     kind: 'import',
     pool: recorded.name,
     guid: recorded.guid,
     datasets,
     disk: { ...targetDisk(data, target), member: member.path },
+    imported,
+    mountOnly,
     scrubTimer: scrubTimerOf(recorded.name),
   }
 }
@@ -341,11 +337,10 @@ function releaseLayout(observation: Observation, recorded: RecordedPool): Releas
 /**
  * Decides what the recorded pool needs before the first AWS removal step. A pool
  * observed imported with its recorded name and GUID gets an export plan, which
- * unmounts the state dataset first when it is mounted. Any other mounted
- * dataset refuses it here rather than at the script. A pool observed absent is
+ * unmounts the state dataset first when it is mounted. A pool observed absent is
  * accepted only when the pool listing could run and retained evidence already
- * records its verified clean export (`exported`), because Qiln never records
- * an export that did nothing and a missing pool without that evidence is
+ * records its verified clean export (`exported`), because Qiln never records an
+ * export that did nothing and a missing pool without that evidence is
  * unexplained. A pool that matches only the name or only the GUID is never
  * adopted.
  */

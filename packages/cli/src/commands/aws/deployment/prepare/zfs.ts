@@ -9,7 +9,6 @@ import type {
   CreatePlan,
   ExportPlan,
   ImportPlan,
-  MountPlan,
   Observation,
   Plan,
   PrerequisitePlan,
@@ -20,6 +19,8 @@ import type { Reporter } from '../../../../terminal/reporter'
 const GIB = 1_073_741_824
 const NO_BOOT_IMPORT = 'Whether packaged ZFS units import the pool after a reboot; Qiln configures none.'
 const NO_REDUNDANCY = 'A single-disk pool has no redundancy or backup.'
+const AFTER_REBOOT = 'The state dataset stays unmounted after a reboot until a later prepare mounts it.'
+const ACTIVATION = 'Incus activation, which needs its own approvals.'
 
 type Details = Partial<Record<StepAction, string>>
 
@@ -41,11 +42,11 @@ export function approvalLabel(plan: ApprovedPlan): string {
     case 'prerequisites':
       return 'Apply the displayed prerequisite plan to the deployment host'
     case 'create':
-      return 'Create the displayed ZFS pool and its datasets on the recorded data volume and enable its scrub timer'
+      return `Create the displayed ZFS pool and its datasets on the recorded data volume, enable its scrub timer, and mount its state dataset at ${STATE_MOUNTPOINT}`
     case 'import':
-      return 'Import the displayed ZFS pool and enable its scrub timer'
-    case 'mount':
-      return `Mount the displayed state dataset at ${STATE_MOUNTPOINT} on the deployment host`
+      return plan.mountOnly
+        ? `Mount the displayed state dataset at ${STATE_MOUNTPOINT} on the deployment host`
+        : `Import the displayed ZFS pool, enable its scrub timer, and mount its state dataset at ${STATE_MOUNTPOINT}`
     case 'export':
       return plan.unmount
         ? 'Unmount the displayed state dataset and export the displayed ZFS pool from the deployment host'
@@ -170,13 +171,14 @@ function createScreen(plan: CreatePlan): ApprovalScreen {
     'create-pool': `${plan.pool} on ${plan.disk.path} (${plan.disk.volumeId}, ${gib(plan.disk.sizeBytes)}) · one whole-disk vdev, ashift ${plan.ashift}`,
     'create-datasets': `${names.state} (mountpoint ${STATE_MOUNTPOINT}, canmount=noauto) and ${names.incus} (left for Incus to manage)`,
     'enable-scrub': `${plan.scrubTimer}, the packaged monthly timer`,
+    'mount-state': `${names.state} at ${STATE_MOUNTPOINT}`,
   }
   return {
     title: 'Proposed storage (applied only after approval)',
     steps: stepsOf(actionsOf(plan), ZFS_LABELS, details),
-    stays: 'The state dataset stays unmounted; a separate plan mounts it. Nothing is forced, wiped, or repaired.',
-    lasting: NO_REDUNDANCY,
-    notEstablished: NO_BOOT_IMPORT,
+    stays: 'Nothing else is mounted, and nothing is forced, wiped, or repaired.',
+    lasting: `${NO_REDUNDANCY} ${AFTER_REBOOT}`,
+    notEstablished: `${NO_BOOT_IMPORT} ${ACTIVATION}`,
   }
 }
 
@@ -185,26 +187,16 @@ function importScreen(plan: ImportPlan): ApprovalScreen {
   const details: Details = {
     'import-pool': `${plan.pool} (GUID ${plan.guid}) from ${plan.disk.member}; it must hold exactly ${names.state} and ${names.incus} with their recorded GUIDs${plan.imported ? '. Already imported, so this step records and verifies it' : ''}`,
     'enable-scrub': `${plan.scrubTimer}, the packaged monthly timer`,
+    'mount-state': `${names.state} at ${STATE_MOUNTPOINT}`,
   }
   return {
-    title: 'Proposed storage (applied only after approval)',
+    title: plan.mountOnly
+      ? 'Proposed mount (applied only after approval)'
+      : 'Proposed storage (applied only after approval)',
     steps: stepsOf(actionsOf(plan), ZFS_LABELS, details),
-    stays: 'The state dataset stays unmounted. Nothing is forced, renamed, or mounted.',
-    lasting: NO_REDUNDANCY,
-    notEstablished: NO_BOOT_IMPORT,
-  }
-}
-
-function mountScreen(plan: MountPlan): ApprovalScreen {
-  const details: Details = {
-    'mount-state': `${datasetNamesOf(plan.pool).state} at ${STATE_MOUNTPOINT}${plan.mounted ? ' (already mounted; this step records and verifies it)' : ''}`,
-  }
-  return {
-    title: 'Proposed mount (applied only after approval)',
-    steps: stepsOf(actionsOf(plan), ZFS_LABELS, details),
-    stays: 'Nothing else is mounted, and the mount is never forced.',
-    lasting: 'The dataset stays unmounted after a reboot until a later prepare mounts it.',
-    notEstablished: 'Incus activation, which needs its own approvals.',
+    stays: 'Nothing else is mounted, and nothing is forced or renamed.',
+    lasting: plan.mountOnly ? AFTER_REBOOT : `${NO_REDUNDANCY} ${AFTER_REBOOT}`,
+    notEstablished: plan.mountOnly ? ACTIVATION : `${NO_BOOT_IMPORT} ${ACTIVATION}`,
   }
 }
 
@@ -229,8 +221,6 @@ function screenOf(plan: ApprovedPlan): ApprovalScreen {
       return createScreen(plan)
     case 'import':
       return importScreen(plan)
-    case 'mount':
-      return mountScreen(plan)
     case 'export':
       return exportScreen(plan)
   }

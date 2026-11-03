@@ -29,7 +29,7 @@ import type { Deployment } from '../types'
 /**
  * The plans that concern the pool itself. The software scope stops before them.
  */
-const STORAGE_PLANS: readonly Plan['kind'][] = ['create', 'import', 'mount', 'ready']
+const STORAGE_PLANS: readonly Plan['kind'][] = ['create', 'import', 'ready']
 
 /**
  * The command owns presentation and consent. `show` renders every plan the
@@ -68,14 +68,21 @@ interface Continuation {
   action: StepAction
 }
 
+function refusal(reasons: readonly string[], retry: string): InstallerError {
+  return new InstallerError({
+    code: 'ZFS_PLAN_REFUSED',
+    facts: reasons.map((reason): DiagnosticFact => ['Reason', reason]),
+    retry,
+  })
+}
+
 /**
  * Coordinates ZFS preparation under the AWS-operation lock held by the command.
- * Per step: authorization is persisted, then the fence, then the script runs,
- * then its completion or refusal is persisted, then a fresh inspection must
- * agree before `verifiedAt` is persisted. Nothing is replayed, resumed, or
- * rolled back, and an interrupted step stays open as evidence. SSH uncertainty
- * never affects the AWS child termination, because the durable ZFS guards keep
- * blocking instead.
+ * Per step: authorization persisted, fence persisted, script run, outcome
+ * persisted, then a fresh inspection must agree before `verifiedAt` is
+ * persisted. Nothing is replayed, resumed, or rolled back, and an interrupted
+ * step stays open as evidence. SSH uncertainty never affects the AWS child
+ * termination, because the durable ZFS guards keep blocking instead.
  */
 export class ZfsPreparer {
   private constructor(
@@ -100,7 +107,7 @@ export class ZfsPreparer {
       failureCode: 'ZFS_STEP_FAILED',
       retry: prepareRetry(deployment.id),
       task: action => ({ kind: 'zfs', action }),
-      run: (plan, action) => apply(remote, plan, action),
+      run: (plan, action, current) => apply(remote, plan, action, current.pool),
       approve: plan => hooks.approve(plan),
       progress: hooks.progress,
     })
@@ -115,7 +122,7 @@ export class ZfsPreparer {
    * This record's own pool evidence is newer than what the lineage found at
    * open time, so it wins once a create or import step has been verified.
    */
-  private recorded(): RecordedPool | null {
+  private recordedPool(): RecordedPool | null {
     const record = this.journal.record
     const { pool } = record
     const { deployment, recorded } = this.context
@@ -134,13 +141,11 @@ export class ZfsPreparer {
   /**
    * Verifies a step left returned by an earlier run, then plans from fresh
    * evidence. Each approval covers only the plan displayed with it. A
-   * prerequisite approval is planned again after every verified step, and it
-   * continues without a new prompt only while the fresh plan is a prerequisite
-   * plan that installs no further packages, keeps the approved ARC limit, and
-   * needs only listed actions that have not run yet. Anything else is shown and
-   * approved again, so the storage plan and the mount of the state dataset
-   * always ask for their own approval. The `software` scope stops as soon as
-   * the next plan concerns the pool itself, without displaying it, so Incus
+   * prerequisite approval is planned again after every verified step and
+   * continues without a new prompt only while the fresh plan installs no
+   * further packages, keeps the approved ARC limit, and needs only listed
+   * actions that have not run yet. The `software` scope stops as soon as the
+   * next plan concerns the pool itself, without displaying it, so Incus
    * software can be prepared while no pool is mounted. The `storage` scope
    * continues until the pool is imported with its scrub timer enabled and its
    * state dataset mounted. Returns how many steps were applied.
@@ -151,7 +156,7 @@ export class ZfsPreparer {
     let applied = 0
     let approval: PrerequisiteApproval | null = null
     while (true) {
-      const plan = planOf(observation, target, DEFAULT_POLICY, this.recorded())
+      const plan = planOf(observation, target, DEFAULT_POLICY, this.recordedPool())
       if (scope === 'software' && STORAGE_PLANS.includes(plan.kind)) {
         return applied
       }
@@ -168,11 +173,7 @@ export class ZfsPreparer {
       hooks.show(observation, plan)
       switch (plan.kind) {
         case 'refused':
-          throw new InstallerError({
-            code: 'ZFS_PLAN_REFUSED',
-            facts: plan.reasons.map((reason): DiagnosticFact => ['Reason', reason]),
-            retry: this.retry,
-          })
+          throw refusal(plan.reasons, this.retry)
         case 'reboot':
           throw new InstallerError({
             code: 'ZFS_REBOOT_REQUIRED',
@@ -191,13 +192,8 @@ export class ZfsPreparer {
         }
         case 'create':
         case 'import':
-        case 'mount': {
-          const authorization = await this.journal.authorize(plan)
-          for (const action of actionsOf(plan)) {
-            observation = await this.step(authorization, plan, action, signal)
-            applied += 1
-          }
-        }
+          observation = await this.execute(plan, observation, signal)
+          applied += actionsOf(plan).length
       }
     }
   }
@@ -216,37 +212,42 @@ export class ZfsPreparer {
    * imported is cleanly exported under its own approval, after its state
    * dataset is unmounted when that is mounted. A pool observed absent is
    * accepted only when the evidence already records its verified export, and
-   * records nothing itself, so no no-op export is ever recorded. Only called
-   * when a pool is recorded as imported or exported.
+   * records nothing itself. Only called when a pool is recorded as imported or
+   * exported.
    */
   public async release(signal: AbortSignal): Promise<void> {
     const { target, hooks } = this.context
     const observation = (await this.settleReturned()) ?? (await this.inspect())
-    const recorded = this.recorded()
-    if (recorded === null) {
+    const pool = this.recordedPool()
+    if (pool === null) {
       throw new InstallerError({
         code: 'INTERNAL_ERROR',
         retry: this.retry,
       })
     }
-    const plan = releasePlanOf(observation, target, recorded, poolState(this.journal.record) === 'exported')
+    const plan = releasePlanOf(observation, target, pool, poolState(this.journal.record) === 'exported')
     hooks.show(observation, plan)
     switch (plan.kind) {
       case 'refused':
-        throw new InstallerError({
-          code: 'ZFS_PLAN_REFUSED',
-          facts: plan.reasons.map((reason): DiagnosticFact => ['Reason', reason]),
-          retry: this.retry,
-        })
+        throw refusal(plan.reasons, this.retry)
       case 'absent':
         return
-      case 'export': {
-        const authorization = await this.journal.authorize(plan)
-        for (const action of actionsOf(plan)) {
-          await this.step(authorization, plan, action, signal)
-        }
-      }
+      case 'export':
+        await this.execute(plan, observation, signal)
     }
+  }
+
+  /**
+   * One approval and every step it covers, in order. Returns the observation
+   * that verified the last step.
+   */
+  private async execute(plan: ApprovedPlan, from: Observation, signal: AbortSignal): Promise<Observation> {
+    const authorization = await this.journal.authorize(plan)
+    let latest = from
+    for (const action of actionsOf(plan)) {
+      latest = await this.step(authorization, plan, action, signal)
+    }
+    return latest
   }
 
   /**
@@ -272,7 +273,7 @@ export class ZfsPreparer {
   private async inspect(plan?: ApprovedPlan): Promise<Observation> {
     const pool =
       plan === undefined || plan.kind === 'prerequisites'
-        ? (this.recorded()?.name ?? DEFAULT_POLICY.poolName)
+        ? (this.recordedPool()?.name ?? DEFAULT_POLICY.poolName)
         : plan.pool
     const packages = plan?.kind === 'prerequisites' ? plan.install.map(change => change.name) : []
     return await inspectHost(this.context.remote, pool, packages)
@@ -286,7 +287,7 @@ export class ZfsPreparer {
    * A verified create, import, or dataset step is persisted together with the
    * pool evidence it establishes, so the evidence never exists without its
    * verified step. The identity recorded by an earlier verified create is what
-   * the dataset and scrub steps of that pool must still find.
+   * the dataset, scrub, and mount steps of that pool must still find.
    */
   private async verified(plan: ApprovedPlan, action: StepAction): Promise<Observation> {
     const record = this.journal.record

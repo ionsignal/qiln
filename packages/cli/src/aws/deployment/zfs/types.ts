@@ -5,7 +5,6 @@ import {
   createPlanSchema,
   exportPlanSchema,
   importPlanSchema,
-  mountPlanSchema,
   poolDatasetsSchema,
   poolNameSchema,
   prerequisitePlanSchema,
@@ -17,13 +16,7 @@ import { authorizationSchemaOf } from '../../../journal/history'
 import { stepSchemaOf, timestamp } from '../../../journal/step'
 
 const authorizationSchema = authorizationSchemaOf(
-  z.discriminatedUnion('kind', [
-    prerequisitePlanSchema,
-    createPlanSchema,
-    importPlanSchema,
-    mountPlanSchema,
-    exportPlanSchema,
-  ]),
+  z.discriminatedUnion('kind', [prerequisitePlanSchema, createPlanSchema, importPlanSchema, exportPlanSchema]),
 )
 
 const stepSchema = stepSchemaOf(z.enum(STEP_ACTIONS))
@@ -73,8 +66,8 @@ export function establishesPool(action: StepAction): boolean {
 }
 
 /**
- * The steps one approved plan allows. A step whose action is not listed here
- * was never authorized, however plausible it looks.
+ * The steps one approved plan allows, in the order they run. A step whose
+ * action is not listed here was never authorized.
  */
 export function actionsOf(plan: ZfsAuthorization['plan']): readonly StepAction[] {
   switch (plan.kind) {
@@ -95,11 +88,9 @@ export function actionsOf(plan: ZfsAuthorization['plan']): readonly StepAction[]
       return actions
     }
     case 'create':
-      return ['create-pool', 'create-datasets', 'enable-scrub']
+      return ['create-pool', 'create-datasets', 'enable-scrub', 'mount-state']
     case 'import':
-      return ['import-pool', 'enable-scrub']
-    case 'mount':
-      return ['mount-state']
+      return plan.mountOnly ? ['mount-state'] : ['import-pool', 'enable-scrub', 'mount-state']
     case 'export':
       return plan.unmount ? ['unmount-state', 'export-pool'] : ['export-pool']
   }

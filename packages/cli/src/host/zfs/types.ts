@@ -46,11 +46,10 @@ export interface ZfsTarget {
  * The pool that retained evidence expects on the target volume, found through
  * the deployment's own record or its explicit volume-reuse chain. A plan must
  * never contradict it, and `deployment` names the record that holds it.
- * `datasets` are the GUIDs of its two datasets, and null while none was
- * verified. `staged` means this deployment's own evidence shows the pool
- * created or imported, its datasets verified, and its scrub timer enabled, with
- * no later unmount or export. `ready` additionally means the state dataset was
- * mounted.
+ * `datasets` are the GUIDs of its two datasets, null while none was verified.
+ * `staged` means this deployment's own evidence shows the pool created or
+ * imported, its datasets verified, and its scrub timer enabled, with no later
+ * unmount or export. `ready` additionally means the state dataset was mounted.
  */
 export interface RecordedPool {
   name: string
@@ -62,8 +61,8 @@ export interface RecordedPool {
 }
 
 /**
- * What a journal records about the pool of one deployment, as far as
- * verification needs it.
+ * What the journal records about the pool of one deployment, as far as
+ * verification and the state mount need it.
  */
 export interface PoolIdentity {
   guid: string
@@ -131,10 +130,10 @@ const propertySchema = z.strictObject({
 })
 
 /**
- * Identity and mount properties of one dataset. The GUID stays a decimal
- * string. `source` is the first word of the property source (`local`,
- * `default`, `inherited`, ...), which matters because `canmount=noauto` is not
- * inherited. Names, paths, and properties alone do not establish ownership.
+ * Identity and mount properties of one dataset. `source` is the first word of
+ * the property source (`local`, `default`, `inherited`, ...), which matters
+ * because `canmount=noauto` is not inherited. Names, paths, and properties
+ * alone do not establish ownership.
  */
 export const datasetSchema = z.strictObject({
   name: text,
@@ -149,21 +148,18 @@ export type Dataset = z.infer<typeof datasetSchema>
 
 /**
  * Normalized, bounded evidence from one read-only inspection. A missing
- * prerequisite is a value here (`null` or `false`), never an empty storage
- * result. Pool GUIDs stay decimal strings. `configures` lists packages that
- * APT would configure, which only a half-configured package state produces
- * beyond the new installations. `packages` holds the direct prerequisites plus
- * any approved transaction members that a verification asked about.
- * `pools.detail` describes the one pool the inspection was asked about, and is
- * null when that pool is not imported. Its `data` lists the top-level data
- * vdevs with their type and child count, so a mirror or stripe stays
- * distinguishable from a single disk, `auxiliary` names any log, cache,
- * spare, special, or dedup class that is present, `mounted` names the
- * datasets that ZFS reports as mounted, and `topLevel` describes the pool
- * dataset and its direct children. `timer` holds the enablement and
- * activation states of that pool's packaged scrub timer, which are reported
- * as observed and are not judged here. `stateMount` is the kernel mount-table
- * entry at the Incus state directory, or null when none was reported.
+ * prerequisite is a value (`null` or `false`), never an empty storage result,
+ * and pool GUIDs stay decimal strings. `configures` lists packages that APT
+ * would configure beyond the new installations, which only a half-configured
+ * package state produces. `pools.detail` describes the one pool the inspection
+ * was asked about, or null when it is not imported: `data` lists the top-level
+ * data vdevs so a mirror or stripe stays distinguishable from a single disk,
+ * `auxiliary` names any log, cache, spare, special, or dedup class, `mounted`
+ * names the datasets ZFS reports mounted, and `topLevel` describes the pool
+ * dataset and its direct children. `timer` reports the scrub timer's
+ * enablement and activation as observed. `stateMount` is the kernel
+ * mount-table entry at the Incus state directory, or null when none was
+ * reported.
  */
 export const observationSchema = z.strictObject({
   observedAt: z.iso.datetime(),
@@ -270,8 +266,7 @@ export interface RebootPlan {
 
 /**
  * The pool is imported with its scrub timer enabled and active and its state
- * dataset mounted, and the evidence says so. Nothing is left to apply. This
- * plan is never persisted.
+ * dataset mounted, and the evidence says so. Never persisted.
  */
 export interface ReadyPlan {
   kind: 'ready'
@@ -282,8 +277,8 @@ export interface ReadyPlan {
 /**
  * Before AWS removal, the recorded pool was freshly observed not imported, and
  * retained evidence already records its verified clean export. The observation
- * only corroborates that evidence, so nothing is applied and no step or
- * evidence is recorded. This plan is never persisted.
+ * only corroborates that evidence, so nothing is applied or recorded. Never
+ * persisted.
  */
 export interface AbsentPlan {
   kind: 'absent'
@@ -293,10 +288,10 @@ export interface AbsentPlan {
 
 /**
  * The ARC percentage and total memory are kept beside the computed limit, so
- * an approval shows exactly how the limit was derived. `expectedPool` is the
- * GUID of a pool that lineage evidence expects on the data volume. Package
- * installation can import pools through package-started units, so the record
- * must be able to tell that an install happened where a pool may exist.
+ * an approval shows how the limit was derived. `expectedPool` is the GUID of a
+ * pool that lineage evidence expects on the data volume: package installation
+ * can import pools through package-started units, so the record must be able
+ * to tell that an install happened where a pool may exist.
  */
 export const prerequisitePlanSchema = z.strictObject({
   kind: z.literal('prerequisites'),
@@ -313,8 +308,9 @@ export const prerequisitePlanSchema = z.strictObject({
 })
 
 /**
- * Creates the pool and then its two datasets, whose GUIDs ZFS assigns, so they
- * are learned from the verification of the dataset step.
+ * Creates the pool and its two datasets, enables the scrub timer, and mounts
+ * the state dataset. ZFS assigns the GUIDs, so they are learned from the
+ * verified dataset step, and the mount takes them from the journal record.
  */
 export const createPlanSchema = z.strictObject({
   kind: z.literal('create'),
@@ -342,12 +338,13 @@ const targetDiskSchema = z.strictObject({
 })
 
 /**
- * Imports the pool recorded for the volume, by GUID and original name, and
- * requires it to hold exactly the recorded datasets. `imported` records that
- * the pool was already imported when planned, in which case the step is an
- * idempotent confirmation. The parent disk stays the identity authority, while
- * `member` is the one ZFS member partition derived from its inspected
- * children, where whole-disk creation put the pool labels.
+ * Imports the pool recorded for the volume, by GUID and original name, requires
+ * it to hold exactly the recorded datasets, enables its scrub timer, and mounts
+ * its state dataset. `imported` records that the pool was already imported when
+ * planned, so the import step is an idempotent confirmation. `mountOnly`
+ * records that the pool was already staged, so only the mount remains. The
+ * parent disk stays the identity authority, while `member` is the one ZFS
+ * member partition where whole-disk creation put the pool labels.
  */
 export const importPlanSchema = z.strictObject({
   kind: z.literal('import'),
@@ -358,21 +355,8 @@ export const importPlanSchema = z.strictObject({
     member: text,
   }),
   imported: z.boolean(),
+  mountOnly: z.boolean(),
   scrubTimer: text,
-})
-
-/**
- * Mounts the state dataset of an imported, scrubbed pool. `mounted` records
- * that it was already mounted when planned, in which case the step is an
- * idempotent confirmation.
- */
-export const mountPlanSchema = z.strictObject({
-  kind: z.literal('mount'),
-  pool: poolNameSchema,
-  guid,
-  datasets: poolDatasetsSchema,
-  disk: targetDiskSchema,
-  mounted: z.boolean(),
 })
 
 /**
@@ -392,25 +376,17 @@ export const exportPlanSchema = z.strictObject({
 export type PrerequisitePlan = z.infer<typeof prerequisitePlanSchema>
 export type CreatePlan = z.infer<typeof createPlanSchema>
 export type ImportPlan = z.infer<typeof importPlanSchema>
-export type MountPlan = z.infer<typeof mountPlanSchema>
 export type ExportPlan = z.infer<typeof exportPlanSchema>
 
 /**
  * The plans that ask for approval and are persisted with it.
  */
-export type ApprovedPlan = PrerequisitePlan | CreatePlan | ImportPlan | MountPlan | ExportPlan
+export type ApprovedPlan = PrerequisitePlan | CreatePlan | ImportPlan | ExportPlan
 
 /**
  * What `planOf` can decide.
  */
-export type PreparationPlan =
-  | RefusedPlan
-  | RebootPlan
-  | ReadyPlan
-  | PrerequisitePlan
-  | CreatePlan
-  | ImportPlan
-  | MountPlan
+export type PreparationPlan = RefusedPlan | RebootPlan | ReadyPlan | PrerequisitePlan | CreatePlan | ImportPlan
 
 /**
  * Preparation plans plus what `releasePlanOf` decides, only before AWS removal.
