@@ -53,7 +53,7 @@ export const commandDiagnostics = Object.freeze({
   ),
   INTERNAL_ERROR: entry(
     'Unexpected installer failure',
-    'Continuing after an unclassified failure could produce an unsafe or misleading installation result. No successful installation should be inferred.',
+    'Continuing after an unclassified failure could produce an unsafe or misleading installation result, so no successful installation should be inferred.',
     'Review the installed CLI version and run qiln installation inspect --local.',
     'Inspect actual installation state before retrying a mutation.',
   ),

@@ -3,7 +3,7 @@ import { entry } from '../define'
 export const awsConnectionDiagnostics = Object.freeze({
   AWS_PLATFORM_UNSUPPORTED: entry(
     'AWS operator platform is unsupported',
-    'AWS commands require Linux or macOS with Unix ownership and permission checks. They do not require the development installer’s Ubuntu, Incus, or ZFS setup.',
+    'AWS commands require Linux or macOS with Unix ownership and permission checks, and not the development installer’s Ubuntu, Incus, or ZFS setup.',
     'Run Qiln as an unprivileged Linux or macOS operator. On Windows, use WSL with state stored on its Linux filesystem.',
   ),
   AWS_LOGIN_FAILED: entry(
@@ -13,17 +13,16 @@ export const awsConnectionDiagnostics = Object.freeze({
   ),
   AWS_LOGIN_TIMEOUT: entry(
     'AWS login exceeded its local deadline',
-    'Bounded termination of the interactive authentication process was attempted. Its local authentication context is not accepted as a completed connection; use the displayed termination and recovery outcomes.',
+    'Bounded termination of the interactive authentication process was attempted, and its local authentication context is not accepted as a completed connection.',
     'Complete a fresh login when ready to finish the browser flow.',
   ),
   AWS_CONNECTION_NAME_INVALID: entry(
     'AWS connection name is invalid',
     'Names must be 1–48 lowercase ASCII letters, digits, underscores, or hyphens, beginning with a letter or digit.',
-    'Choose a normal connection name without path separators or whitespace.',
   ),
   AWS_REGION_INVALID: entry(
     'AWS region is unsupported or malformed',
-    'This batch accepts ordinary commercial AWS region names. Non-commercial partitions are not supported.',
+    'This batch accepts ordinary commercial AWS region names, and non-commercial partitions are not supported.',
     'Enter a commercial region such as us-east-1.',
   ),
   AWS_CONNECTION_NOT_FOUND: entry(
@@ -38,7 +37,7 @@ export const awsConnectionDiagnostics = Object.freeze({
   ),
   AWS_DISCONNECT_INCOMPLETE: entry(
     'Local AWS disconnect is incomplete',
-    'The journal records approved local removal. Qiln will not reinterpret it as a connection attempt.',
+    'The journal records approved local removal, which Qiln will not reinterpret as a connection attempt.',
     'Re-run disconnect for the same connection after inspecting local state.',
   ),
   AWS_STATE_INVALID: entry(
@@ -59,22 +58,22 @@ export const awsConnectionDiagnostics = Object.freeze({
   ),
   AWS_LOCK_FAILED: entry(
     'AWS operation lock could not be established',
-    'AWS operations require a validated exclusive lock. A lock created before validation failed may remain.',
+    'AWS operations require a validated exclusive lock, and a lock created before validation failed may remain.',
     'Inspect directory ownership, permissions, and lock state before retrying.',
   ),
   AWS_PROFILE_INVALID: entry(
     'Qiln-owned AWS authentication profile is invalid',
-    'Only the dedicated login profile, empty shared-credentials file, and protected login cache are accepted. Other credential styles cannot take precedence.',
+    'Only the dedicated login profile, empty shared-credentials file, and protected login cache are accepted, so no other credential style can take precedence.',
     'Inspect the Qiln-owned authentication files. Reconnect to replace only this connection’s local authentication context.',
   ),
   AWS_SSO_UNSUPPORTED: entry(
     'AWS SSO profiles are not supported',
-    'Qiln detects SSO configuration before resolving credentials. This release supports direct IAM-user browser login only.',
+    'Qiln detects SSO configuration before resolving credentials, and this release supports direct IAM-user browser login only.',
     'Use an existing IAM-user operator connection. SSO onboarding is deferred.',
   ),
   AWS_ROOT_REFUSED: entry(
     'Root AWS authentication is refused',
-    'Normal connections must resolve to a non-root IAM user. Root authority is accepted only in the separate explicitly approved bootstrap context.',
+    'Normal connections must resolve to a non-root IAM user, and root authority is accepted only in the separate explicitly approved bootstrap context.',
     'Select the intended IAM operator in the browser and complete a fresh login.',
   ),
   AWS_PRINCIPAL_UNSUPPORTED: entry(
@@ -89,7 +88,7 @@ export const awsConnectionDiagnostics = Object.freeze({
   ),
   AWS_IDENTITY_MISMATCH: entry(
     'Authenticated operator differs from the recorded identity',
-    'Connection reuse requires the same account ID, user ARN, and immutable user ID. Matching a profile or user name is insufficient.',
+    'Connection reuse requires the same account ID, user ARN, and immutable user ID, and matching a profile or user name is insufficient.',
     'Authenticate as the recorded operator, or choose a new connection name for another identity.',
   ),
   AWS_AUTH_FAILED: entry(
@@ -103,23 +102,23 @@ export const awsConnectionDiagnostics = Object.freeze({
   ),
   AWS_ACCESS_DENIED: entry(
     'AWS denied the requested operation',
-    'Browser login, credential refresh, bootstrap IAM actions, and infrastructure deployment have separate permission boundaries. No successful mutation or automatic rollback should be inferred.',
+    'Browser login, credential refresh, bootstrap IAM actions, and infrastructure deployment have separate permission boundaries, and no successful mutation or automatic rollback should be inferred.',
     'Review the selected identity and required permissions with the account owner. Inspect any recorded bootstrap phase before recovery.',
   ),
   AWS_REQUEST_FAILED: entry(
     'AWS request did not complete reliably',
-    'A failed or incomplete request does not establish a verified connection or a failed IAM mutation. A recorded mutation may already have completed, and Qiln does not replay it automatically.',
+    'A failed or incomplete request does not establish a verified connection or a failed IAM mutation, and a recorded mutation may already have completed without being replayed.',
     'Inspect network access, AWS availability, and any recorded operation against actual IAM state.',
     'For a password-creation intent, use an explicitly reviewed administrator recovery procedure rather than recovering or reissuing the password through Qiln.',
   ),
   AWS_CONTEXT_FAILED: entry(
     'Isolated AWS credential process failed',
-    'Qiln accepts only a validated response after its private credential process has exited. Raw provider output is not exposed.',
+    'Qiln accepts only a validated response after its private credential process has exited, and raw provider output is not exposed.',
     'Build the CLI and inspect its installation before retrying.',
   ),
   AWS_CONTEXT_TIMEOUT: entry(
     'AWS credential verification exceeded its deadline',
-    'Bounded termination of the isolated credential process was attempted. Use the displayed termination and recovery outcomes; no successful authentication is inferred.',
+    'Bounded termination of the isolated credential process was attempted, and no successful authentication is inferred.',
     'Inspect connectivity and retry authentication.',
   ),
   AWS_CLEANUP_FAILED: entry(
@@ -130,7 +129,7 @@ export const awsConnectionDiagnostics = Object.freeze({
   ),
   AWS_RECOVERY_REQUIRED: entry(
     'AWS authentication recovery is incomplete',
-    'The original operation failed, and authentication termination, cleanup, failure-journal persistence, or connection-lock release was not confirmed. The displayed outcomes are authoritative; a connection record may already have been saved, and no rollback should be inferred.',
+    'The original operation failed, and the displayed outcomes show which of authentication termination, cleanup, failure-journal persistence, or connection-lock release is not confirmed, so a connection record may already have been saved and no rollback should be inferred.',
     'If authentication termination is unconfirmed, retain its inputs and the protective connection lock until activity has been checked.',
     'If authentication cleanup is not confirmed, verify that no Qiln authentication subprocess is active, then inspect and recover the remaining Qiln-owned authentication state.',
     'If failure-journal persistence is not confirmed, inspect the connection and operation records before reconnecting or disconnecting.',
