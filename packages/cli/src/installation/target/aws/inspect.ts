@@ -30,6 +30,7 @@ const systemSchema = z.object({
   machine: z.string().min(1),
   packageArchitecture: z.string().min(1),
   memTotalKiB: z.coerce.number().int().positive(),
+  git: z.enum(['yes', 'no']),
 })
 
 function checkoutOf(section: Section): CheckoutObservation | null {
@@ -49,6 +50,7 @@ function checkoutOf(section: Section): CheckoutObservation | null {
     path,
     gitRoot: values.get('toplevel') || null,
     commit,
+    origin: values.get('origin') || null,
     packageName: values.get('packageName') || null,
   }
 }
@@ -79,6 +81,7 @@ export async function inspectHost(remote: Remote, checkoutPath: string | null): 
     packageArchitecture: system.data.packageArchitecture,
     machine: system.data.machine,
     memoryBytes: system.data.memTotalKiB * 1_024,
+    git: system.data.git === 'yes',
     checkout: checkoutPath === null ? null : checkoutOf(succeeded(found, 'checkout')),
   }
 }

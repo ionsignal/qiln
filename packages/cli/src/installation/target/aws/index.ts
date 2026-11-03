@@ -1,12 +1,11 @@
-import { isAbsolute } from 'node:path'
-import { InstallerError } from '../../../diagnostic/error'
 import { requireTool } from '../../preflight/host'
 import { createIncusClient, readIncusServer, validateIncusServer } from '../../preflight/incus'
 import { validateIncusNetwork } from '../../preflight/network'
 import { validateIncusStorage } from '../../preflight/storage'
 import { architectureOf } from '../../architecture'
 import { withAwsHost, type AwsHost } from './host'
-import { requireCapacity, requireCheckout, requireSupportedRelease } from '../../host'
+import { managedCheckout } from './checkout'
+import { requireCapacity, requireGit, requireSupportedRelease } from '../../host'
 import { inspectHost } from './inspect'
 import { installationRetry, type Retry } from '../../retry'
 import type { DeploymentSelector } from '../../../aws/deployment/volume/alias'
@@ -17,22 +16,23 @@ const GIB = 1_073_741_824
 /**
  * An AWS deployment as an installation target. Every observation travels over
  * the pinned SSH connection of the retained deployment: one session for each
- * host inspection and a new one for the Incus socket relay. Nothing is
- * observed about the operator's machine except `ssh-keygen`. The AWS lock held
- * by `withAwsHost` outlives the target, so it is only valid inside that scope.
- * The signal bounds the inspection sessions, while the relay session ignores it
- * and the Incus client observes it instead.
+ * host inspection and checkout request, and a new one for the Incus socket
+ * relay. Nothing is observed about the operator's machine except `ssh-keygen`.
+ * The source checkout is the managed one at a derived path on the target. The
+ * AWS lock held by `withAwsHost` outlives the target, so it is only valid inside
+ * that scope. The signal bounds the inspection sessions, while the relay session
+ * ignores it and the Incus client observes it instead.
  */
 function awsTarget(aws: AwsHost, signal: AbortSignal, commands: Retry): InstallationTarget {
-  const observe = (checkout: string | null) => aws.shell(signal, remote => inspectHost(remote, checkout))
   return {
     name: aws.name,
     retry: commands,
     signal,
     async withHost(reporter, retry, use) {
       const sshKeygen = await requireTool('ssh-keygen', retry)
-      const observation = await observe(null)
+      const observation = await aws.shell(signal, remote => inspectHost(remote, null))
       requireSupportedRelease(observation, retry)
+      requireGit(observation.git, retry)
       const architecture = architectureOf(observation, retry)
       requireCapacity(aws.layout, observation.memoryBytes, retry)
       reporter.row(
@@ -45,16 +45,7 @@ function awsTarget(aws: AwsHost, signal: AbortSignal, commands: Retry): Installa
         architecture,
         layout: aws.layout,
         sshKeygen,
-        checkout: async path => {
-          if (!isAbsolute(path)) {
-            throw new InstallerError({
-              code: 'INVALID_SOURCE_ROOT',
-              facts: [['Observed', 'The checkout path on an AWS target must be absolute.']],
-              retry,
-            })
-          }
-          return requireCheckout((await observe(path)).checkout, retry).path
-        },
+        checkout: managedCheckout(aws.record, retry, run => aws.shell(signal, run)),
         withIncus: useIncus =>
           aws.relay(async connection => {
             const client = createIncusClient(connection, signal)

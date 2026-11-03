@@ -1,5 +1,6 @@
 import type { IncusClient } from '../../transport/incus/client'
 import type { DeploymentSelector } from '../../aws/deployment/volume/alias'
+import type { StepOutcome } from '../../host/step'
 import type { Architecture } from '../architecture'
 import type { Layout } from '../layout'
 import type { HostBinding } from '../records'
@@ -25,16 +26,37 @@ export interface IncusAccess {
 }
 
 /**
+ * The source checkout of a target.
+ *
+ * - operator: the operator's own checkout on this machine. `root` validates a
+ *   named path and returns its canonical root.
+ * - managed: the checkout that Qiln owns at a derived path on the target.
+ *   `head` is the HEAD of the checkout, or null when it is absent, and it
+ *   refuses a directory that is not a conforming checkout. `resolve` asks the
+ *   approved repository for the current commit of its approved branch.
+ *   `materialize` runs the one fenced clone script and reports how it ended, so
+ *   the caller can journal it.
+ */
+export type CheckoutAccess =
+  | { kind: 'operator'; root(path: string): Promise<string> }
+  | {
+      kind: 'managed'
+      path: string
+      head(): Promise<string | null>
+      resolve(): Promise<string>
+      materialize(commit: string): Promise<StepOutcome>
+    }
+
+/**
  * A validated target host. It is reachable only while the callback of
- * `InstallationTarget.withHost` runs. `checkout` validates a checkout path on
- * the target itself and returns its canonical root.
+ * `InstallationTarget.withHost` runs.
  */
 export interface HostAccess {
   binding: HostBinding
   architecture: Architecture
   layout: Layout
   sshKeygen: string
-  checkout(path: string): Promise<string>
+  checkout: CheckoutAccess
   withIncus<T>(use: (incus: IncusAccess) => Promise<T>): Promise<T>
 }
 

@@ -3,7 +3,6 @@ import { AWS_SPEC } from './aws/spec'
 import { InstallerError } from './diagnostic/error'
 import { isOperationId } from './guards'
 import { validName, validRegion } from './aws/types'
-import type { Retry } from './installation/retry' 
 import type { DeploymentSelector } from './aws/deployment/volume/alias'
 import type { ConfigureOptions } from './commands/installation/configure'
 import type { InstallationSelector } from './installation/target/types'
@@ -129,24 +128,43 @@ function validateValue(value: string | undefined, option: string): void {
 }
 
 /**
- * Converts parsed options without accessing installer state or performing any
- * local or provider work. `retry` names the commands that diagnostics show for
- * the selected target's workflow.
+ * Only a local target names its checkout, because an AWS target manages its
+ * own. Null means that the target owns the checkout.
  */
-export function convertConfigureOptions(input: ConfigureInput, retry: Retry): ConfigureOptions {
+function sourceOf(source: string | undefined, selector: InstallationSelector, retry: string): string | null {
+  if (selector.kind === 'local') {
+    if (source === undefined) {
+      throw new InstallerError({
+        code: 'SOURCE_REQUIRED',
+        facts: [['Observed', 'No host Qiln checkout was selected.']],
+        retry,
+      })
+    }
+    return source
+  }
+  if (source !== undefined) {
+    throw new InstallerError({
+      code: 'SOURCE_OPTION_NOT_SUPPORTED',
+      facts: [['Option', '--source']],
+      retry,
+    })
+  }
+  return null
+}
+
+/**
+ * Converts parsed options without accessing installer state or performing any
+ * local or provider work. The selected target decides whether a checkout is
+ * named, and its workflow supplies the commands that diagnostics show.
+ */
+export function convertConfigureOptions(input: ConfigureInput, selector: InstallationSelector): ConfigureOptions {
+  const retry = installationRetry(selector)
   validateValue(input.source, '--source')
   validateValue(input.image, '--image')
   validateValue(input.imageMeta, '--image-meta')
   validateValue(input.imageRootfs, '--image-rootfs')
   validateValue(input.authorizedKeys, '--authorized-keys')
-  const sourcePath = input.source
-  if (sourcePath === undefined) {
-    throw new InstallerError({
-      code: 'SOURCE_REQUIRED',
-      facts: [['Observed', 'No host Qiln checkout was selected.']],
-      retry: retry.configure,
-    })
-  }
+  const sourcePath = sourceOf(input.source, selector, retry.configure)
   const hasMetadata = input.imageMeta !== undefined
   const hasRootfs = input.imageRootfs !== undefined
   if (hasMetadata !== hasRootfs) {
@@ -250,6 +268,6 @@ export function convertInstallationConfigureOptions(input: InstallationConfigure
   const selector = convertInstallationSelector(input)
   return {
     selector,
-    options: convertConfigureOptions(input, installationRetry(selector)),
+    options: convertConfigureOptions(input, selector),
   }
 }

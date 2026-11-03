@@ -1,14 +1,16 @@
 import { z } from 'zod'
 import { authorizationSchemaOf } from '../../journal/history'
 import { operationId, stepSchemaOf } from '../../journal/step'
-import { hostSchema } from '../records'
+import { commitSchema, hostSchema } from '../records'
 import { INSTALLER_SPEC } from '../spec'
 
 /**
- * Incus-side effects only. Pin and credential writes are not journaled: each is
- * an atomic record or file transition, covered by the approval that shows it.
+ * Incus-side effects, and the one remote clone of the managed checkout. Pin and
+ * credential writes are not journaled: each is an atomic record or file
+ * transition, covered by the approval that shows it.
  */
 export const INSTALL_ACTIONS = [
+  'materialize-checkout',
   'delete-image',
   'import-image',
   'create-alias',
@@ -20,20 +22,33 @@ export const INSTALL_ACTIONS = [
 
 export type InstallAction = (typeof INSTALL_ACTIONS)[number]
 
+/**
+ * The actions that are exactly one Incus request, as opposed to the remote
+ * checkout script.
+ */
+export type IncusAction = Exclude<InstallAction, 'materialize-checkout'>
+
+export function isIncusAction(action: InstallAction): action is IncusAction {
+  return action !== 'materialize-checkout'
+}
+
 const sha256 = z.string().regex(/^[0-9a-f]{64}$/)
 const text = z.string().min(1).max(256)
 
 /**
  * The complete configuration change as the operator approved it. Each flag is a
  * decision made from one observation, so an empty plan shows that nothing is
- * left to apply. `image.import` uploads the staged content without an alias,
- * and `image.alias` points the managed alias at the selected image.
- * `image.replace` names the previous managed target and every alias attached to
- * it, which is the only destructive step.
+ * left to apply. `checkout` clones the managed checkout of an AWS target at
+ * `commit`, which is the recorded restore point, or origin's current main when
+ * `pin` says that none is recorded yet. `image.import` uploads the staged
+ * content without an alias, and `image.alias` points the managed alias at the
+ * selected image. `image.replace` names the previous managed target and every
+ * alias attached to it, which is the only destructive step.
  */
 export const planSchema = z.strictObject({
   kind: z.literal('configure'),
   fingerprint: sha256,
+  checkout: z.strictObject({ commit: commitSchema, pin: z.boolean() }).nullable(),
   image: z.strictObject({
     replace: z.strictObject({ fingerprint: sha256, aliases: z.array(text).max(16) }).nullable(),
     import: z.boolean(),
@@ -86,13 +101,17 @@ export type ConfigureStep = ConfigureEvidence['steps'][number]
 export type ConfigureOperation = ConfigureEvidence['operations'][number]
 
 /**
- * The Incus-side steps one approved plan allows, in the order they run. A step
- * whose action is not listed here was never authorized. The import comes first
- * so the destructive deletion waits until the new image has been checked, and
+ * The steps one approved plan allows, in the order they run. A step whose
+ * action is not listed here was never authorized. The checkout comes first, so
+ * a clone failure never follows a long image upload. The import comes before the
+ * destructive deletion, which waits until the new image has been checked, and
  * the alias is created last because deleting the old image removes its aliases.
  */
 export function actionsOf(plan: ConfigurePlan): readonly InstallAction[] {
   const actions: InstallAction[] = []
+  if (plan.checkout !== null) {
+    actions.push('materialize-checkout')
+  }
   if (plan.image.import) {
     actions.push('import-image')
   }

@@ -1,4 +1,4 @@
-import { InstallerError, type InstallerErrorCode } from '../diagnostic/error'
+import { InstallerError } from '../diagnostic/error'
 import { INSTALLER_SPEC } from './spec'
 import type { Layout } from './layout'
 
@@ -11,15 +11,16 @@ export interface HostRelease {
 }
 
 /**
- * The checkout as observed on the target. Working-tree state is not inspected,
- * because a Git status can run repository-configured hooks, and a modified
- * working tree is accepted anyway. `commit` only identifies the committed
- * baseline.
+ * The managed checkout as observed on the target. Working-tree state is not
+ * inspected, because a Git status can run repository-configured hooks, and a
+ * modified working tree is accepted anyway. `commit` is the HEAD that the
+ * checkout currently has, and `origin` is its configured origin URL.
  */
 export interface CheckoutObservation {
   path: string
   gitRoot: string | null
   commit: string | null
+  origin: string | null
   packageName: string | null
 }
 
@@ -27,6 +28,7 @@ export interface HostObservation extends HostRelease {
   packageArchitecture: string
   machine: string
   memoryBytes: number
+  git: boolean
   checkout: CheckoutObservation | null
 }
 
@@ -123,34 +125,20 @@ export function requireCapacity(layout: Layout, memoryBytes: number, retry: stri
 }
 
 /**
- * The checkout must be the Git root of the Qiln package with a committed
- * baseline. Nothing else about its contents is judged.
+ * The managed checkout is cloned and read on the target with git, and Qiln
+ * installs no packages, so a target without it is refused before any state is
+ * written.
  */
-export function requireCheckout(checkout: CheckoutObservation | null, retry: string): CheckoutObservation {
-  const refuse = (code: InstallerErrorCode, observed: string) =>
-    new InstallerError({
-      code,
-      facts: [['Observed', observed]],
-      retry,
-    })
-  if (checkout === null) {
-    throw refuse('INVALID_SOURCE_CHECKOUT', 'The checkout directory does not exist on the target.')
+export function requireGit(git: boolean, retry: string): void {
+  if (git) {
+    return
   }
-  if (checkout.gitRoot === null || checkout.commit === null) {
-    throw refuse('SOURCE_NOT_GIT_CHECKOUT', `${checkout.path} is not a Git work tree with a committed baseline.`)
-  }
-  if (checkout.gitRoot !== checkout.path) {
-    throw new InstallerError({
-      code: 'SOURCE_NOT_CHECKOUT_ROOT',
-      facts: [
-        ['Selected source', checkout.path],
-        ['Checkout root', checkout.gitRoot],
-      ],
-      retry,
-    })
-  }
-  if (checkout.packageName !== 'qiln') {
-    throw refuse('SOURCE_NOT_QILN_PACKAGE', "package.json must have name='qiln'.")
-  }
-  return checkout
+  throw new InstallerError({
+    code: 'SOURCE_GIT_MISSING',
+    facts: [
+      ['Tool', 'git'],
+      ['Package', 'git'],
+    ],
+    retry,
+  })
 }

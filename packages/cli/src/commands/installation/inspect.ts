@@ -51,7 +51,10 @@ export async function withInspection<T>(
 /**
  * Checks a retained installation against the live target: its binding, its
  * checkout, and, when an image is pinned and the orchestrator exists, the
- * instance with the same checks that planning uses. Nothing is changed.
+ * instance with the same checks that planning uses. An operator checkout must be
+ * the Qiln Git root. A managed checkout is only reported, with its HEAD beside
+ * the restore point as information, and no network call is made. Nothing is
+ * changed.
  */
 async function verifyRecord(
   record: InstallationRecord,
@@ -65,12 +68,28 @@ async function verifyRecord(
     sourceRoot: record.checkoutPath,
   }
   requireBound(record, host.binding, inputs, retry)
-  await host.checkout(record.checkoutPath)
+  const { checkout } = host
+  if (checkout.kind === 'operator') {
+    await checkout.root(record.checkoutPath)
+  }
   reporter.row(
     'verified',
     'Installation',
-    `host, architecture and layout match the retained record · checkout ${record.checkoutPath} is the Qiln Git root`,
+    checkout.kind === 'operator'
+      ? `host, architecture and layout match the retained record · checkout ${record.checkoutPath} is the Qiln Git root`
+      : 'host, architecture and layout match the retained record',
   )
+  if (checkout.kind === 'managed') {
+    const head = await checkout.head()
+    const restore = record.checkoutCommit ?? 'origin’s current main when none is recorded yet'
+    reporter.row(
+      head === null ? 'working' : 'verified',
+      'Source checkout',
+      head === null
+        ? `${checkout.path} is absent and nothing was created · configure restores it from ${restore}`
+        : `${checkout.path} · HEAD ${head} · restore point ${record.checkoutCommit ?? 'none'} (information only; HEAD and the working tree are not judged)`,
+    )
+  }
   const { name } = INSTALLER_SPEC.orchestrator
   if (record.imageFingerprint === null) {
     reporter.row('working', 'Orchestrator', 'no image is pinned yet, so the instance was not checked')

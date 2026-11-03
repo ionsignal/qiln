@@ -36,7 +36,10 @@ export const localTarget = (commands: Retry, signal: AbortSignal): InstallationT
       architecture: preflight.architecture,
       layout,
       sshKeygen: preflight.commandPaths['ssh-keygen'],
-      checkout: async path => (await validateSourcePreflight(path, preflight.commandPaths.git, retry)).sourceRoot,
+      checkout: {
+        kind: 'operator',
+        root: async path => (await validateSourcePreflight(path, preflight.commandPaths.git, retry)).sourceRoot,
+      },
       withIncus: async useIncus => {
         const incus = await validateLocalIncus(preflight.architecture, retry, signal)
         reporter.row(

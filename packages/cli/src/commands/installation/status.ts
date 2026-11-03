@@ -37,6 +37,12 @@ export async function status(selector: InstallationSelector, reporter: Reporter)
     ],
     ['Architecture', record.architecture],
     ['Checkout', record.checkoutPath],
+    [
+      'Restore point',
+      record.host.kind === 'aws'
+        ? `${record.checkoutCommit ?? 'none yet'} · the commit that configure restores when the managed checkout is absent; not a statement about the running tree`
+        : 'not managed; the checkout is the operator’s own',
+    ],
     ['Image pin', record.imageFingerprint ?? 'none'],
     ['Authorizations', String(evidence?.authorizations.length ?? 0)],
     ['Recorded steps', String(evidence?.steps.length ?? 0)],
@@ -48,6 +54,7 @@ export async function status(selector: InstallationSelector, reporter: Reporter)
       'An unresolved step blocks configuration. Interrupted work may already have completed, and nothing was replayed, resumed, or rolled back.',
     )
   }
+  reporter.space()
   reporter.info('This status reads local evidence only. It did not contact the target, authenticate to AWS, or take a lock.')
   reporter.summary(`Installation '${name}' is recorded. Its live state was not observed.`)
 }

@@ -8,7 +8,7 @@ import type { IncusClient } from '../transport/incus/client'
 import type { IncusOperationRef } from '../transport/incus/types'
 import type { Retry } from './retry'
 import type { ImageSource } from './image'
-import type { ConfigurePlan, InstallAction } from './journal/types'
+import type { ConfigurePlan, IncusAction } from './journal/types'
 import type { Observation } from './observe'
 import type { InstallationInputs } from './types'
 
@@ -47,7 +47,7 @@ async function wait(context: ApplyContext, operation: IncusOperationRef): Promis
  * instance and its ETag for the guarded update, and the local credential set.
  */
 export async function apply(
-  action: InstallAction,
+  action: IncusAction,
   plan: ConfigurePlan,
   observation: Observation,
   context: ApplyContext,

@@ -22,8 +22,10 @@ function compatible(
  * Pure check of one step's approved result against a fresh observation. A step
  * is verified only when the target agrees, never because its request was
  * accepted. An imported image is only present here: its type and architecture
- * are judged by the configurer before anything is deleted. Compatibility of
- * the whole installation is judged by planning again after the last step.
+ * are judged by the configurer before anything is deleted. A materialized
+ * checkout is only present here: its identity was judged by the observation
+ * itself, and its HEAD is never compared with anything. Compatibility of the
+ * whole installation is judged by planning again after the last step.
  */
 export function verify(
   action: InstallAction,
@@ -32,8 +34,10 @@ export function verify(
   inputs: InstallationInputs,
   retry: string,
 ): boolean {
-  const { image, alias, network, volume, instance, credentials } = observation
+  const { image, alias, network, volume, instance, credentials, checkout } = observation
   switch (action) {
+    case 'materialize-checkout':
+      return checkout.kind === 'present'
     case 'delete-image':
       return plan.image.replace !== null && (alias === null || alias.target !== plan.image.replace.fingerprint)
     case 'import-image':

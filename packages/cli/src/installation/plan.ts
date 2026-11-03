@@ -1,5 +1,6 @@
 import { isImageFingerprint, validateContainerImage } from './preflight/image'
 import { InstallerError } from '../diagnostic/error'
+import { checkoutPlanOf } from './checkout/judge'
 import { hasManagedCredentials, matchesCredentials, requireNoCollision } from './credentials'
 import { assertInstance } from './instance'
 import { assertNetwork } from './network'
@@ -122,6 +123,7 @@ export function planOf(observation: Observation, request: PlanRequest): Configur
   return {
     kind: 'configure',
     fingerprint,
+    checkout: checkoutPlanOf(observation.checkout, retry.configure),
     image: imagePlan(observation, inputs, retry.configure),
     pin: pin !== fingerprint,
     network: network === null,

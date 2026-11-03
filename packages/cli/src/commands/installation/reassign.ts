@@ -1,5 +1,6 @@
 import { observe } from '../../installation/observe'
 import { refusal, requireAssignable, requireMatching } from '../../installation/assignment'
+import { rootOf } from '../../installation/checkout/judge'
 import { requireIncusExtensions } from '../../installation/preflight/incus'
 import { invalidRecord, requireInputs, sameHost, type AwsBinding, type InstallationRecord } from '../../installation/records'
 import {
@@ -21,6 +22,7 @@ const NOTICE =
   'Approval authorizes only recording the displayed deployment as the current host of the installation, as one atomic local record write that keeps the superseded host in the history. ' +
   'The retained handoff, release, export, and identity evidence and one fresh observation through the pinned connection were checked, and both are checked again after approval. ' +
   'Reassignment changes no Incus resource, replaces no image, rotates no credential, and starts no workload, and it never repairs or completes a configuration. ' +
+  'It does not clone the managed source checkout either: a missing checkout on the replacement is restored from the recorded restore point by the next configure, which is the only restorer. ' +
   'It does not establish that the retained workloads work, and retention is not a backup. ' +
   'If the write is uncertain the command stops: read installation status before trying again.'
 
@@ -32,11 +34,11 @@ function reportProposal(reporter: Reporter, installation: InstallationState, hos
     ['Proposed host', describeHost(host)],
     [
       'Unchanged',
-      `image pin ${installation.imageFingerprint} · ${installation.architecture} · checkout ${installation.checkoutPath} · retained credentials and configuration evidence`,
+      `image pin ${installation.imageFingerprint} · ${installation.architecture} · checkout ${installation.checkoutPath} · restore point ${installation.checkoutCommit ?? 'none'} · retained credentials and configuration evidence`,
     ],
     [
       'Validated',
-      'volume handoff, Incus release, ZFS export, and removal of every earlier deployment · the same Incus server identity, retained preseed, and ZFS pool · the checkout at the recorded path · a live installation that needs no change',
+      'volume handoff, Incus release, ZFS export, and removal of every earlier deployment · the same Incus server identity, retained preseed, and ZFS pool · a live installation that needs no change, where the managed checkout may be absent and is restored by the next configure',
     ],
     ['Effect', 'one atomic write of the installation record; no Incus change and no workload start'],
   ])
@@ -77,7 +79,7 @@ export async function reassign(target: InstallationTarget, aws: AwsHost, reporte
       const inputs: InstallationInputs = {
         architecture: host.architecture,
         layout: host.layout,
-        sourceRoot: await host.checkout(record.checkoutPath),
+        sourceRoot: await rootOf(host.checkout, record.checkoutPath, retry.reassign),
       }
       requireInputs(record, inputs, retry.reassign)
       await host.withIncus(async incus => {
@@ -89,6 +91,8 @@ export async function reassign(target: InstallationTarget, aws: AwsHost, reporte
           sshKeygen: host.sshKeygen,
           source: { kind: 'reference', selector: installation.imageFingerprint },
           installation,
+          checkoutCommit: installation.checkoutCommit,
+          checkout: host.checkout,
           inputs,
           retry,
         })

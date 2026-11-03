@@ -289,6 +289,24 @@ export async function pinImage(
 }
 
 /**
+ * Persists the checkout restore point of a bound AWS record, under the
+ * installation lock. The first write pins the commit that the first
+ * materialization clones, and a later host retirement moves it to the HEAD of
+ * the checkout. One atomic record write, so the record never names a
+ * half-written restore point.
+ */
+export async function pinCheckout(
+  directory: Dir,
+  record: InstallationRecord,
+  checkoutCommit: string,
+  retry: string,
+): Promise<InstallationRecord> {
+  const next = { ...record, checkoutCommit }
+  await saveRecord(directory, next, retry)
+  return next
+}
+
+/**
  * Persists a new host assignment under the installation lock. The superseded
  * host and the approval move to the history in the same atomic record write.
  */

@@ -11,6 +11,13 @@ import type { Layout } from './layout'
 import type { InstallationInputs } from './types'
 
 const sha256 = z.string().regex(/^[0-9a-f]{64}$/)
+
+/**
+ * A full Git commit ID. Only a commit that the approved repository served can
+ * be a restore point, and that repository uses 40-character IDs.
+ */
+export const commitSchema = z.string().regex(/^[0-9a-f]{40}$/)
+
 const localHost = z.strictObject({ kind: z.literal('local'), machine: sha256 })
 const awsHost = z.strictObject({ kind: z.literal('aws'), ...bindingSchema.shape })
 
@@ -58,12 +65,16 @@ function isLineage(host: HostBinding, history: readonly Reassignment[]): boolean
 
 /**
  * One installation per volume lineage, because the instance name is fixed.
- * Everything but the image pin and the host assignment is fixed at
- * registration, and the layout is kept as a digest. The pin is null until an
- * image has converged. `host` is the one current assignment, and `history`
- * holds the earlier ones. Git provenance is deliberately not part of the
- * record. Before the first release, changing any literal or format rule resets
- * local development state.
+ * Everything but the image pin, the checkout restore point, and the host
+ * assignment is fixed at registration, and the layout is kept as a digest. The
+ * pin is null until an image has converged. `checkoutCommit` is the restore
+ * point of the managed checkout of an AWS installation: the commit that the next
+ * materialization clones. It is null until the first materialization is planned
+ * and always null for a local host, whose checkout is the operator's own. It is
+ * not a statement about the running tree. `host` is the one current assignment,
+ * and `history` holds the earlier ones. Git provenance is deliberately not part
+ * of the record. Before the first release, changing any literal or format rule
+ * resets local development state.
  */
 export const installationSchema = z
   .strictObject({
@@ -76,9 +87,14 @@ export const installationSchema = z
     architecture: z.enum(['amd64', 'arm64']),
     layout: sha256,
     checkoutPath: z.string().startsWith('/').max(4_096),
+    checkoutCommit: commitSchema.nullable(),
     imageFingerprint: sha256.nullable(),
   })
   .refine(({ host, history }) => isLineage(host, history), 'Expected earlier hosts of one retained volume.')
+  .refine(
+    ({ host, checkoutCommit }) => host.kind === 'aws' || checkoutCommit === null,
+    'Expected a checkout restore point only for an AWS host.',
+  )
 
 export type InstallationRecord = z.infer<typeof installationSchema>
 
@@ -137,6 +153,7 @@ export function newRecord(name: string, host: HostBinding, inputs: InstallationI
     architecture: inputs.architecture.package,
     layout: layoutDigest(inputs.layout),
     checkoutPath: inputs.sourceRoot,
+    checkoutCommit: null,
     imageFingerprint: null,
   }
 }
@@ -190,19 +207,28 @@ export function requireBound(
 }
 
 /**
- * The write rule: a write changes either the image pin or the host assignment,
- * never both. A reassignment appends exactly one history entry, which is the
- * host it replaces. Both records are already validated.
+ * The write rule: a write changes either the image pin, the checkout restore
+ * point, or the host assignment, never two of them. The restore point is never
+ * dropped. A reassignment appends exactly one history entry, which is the host
+ * it replaces, and changes nothing else. Both records are already validated.
  */
 export function requireTransition(before: InstallationRecord, after: InstallationRecord, retry: string): void {
   const reassigned = after.history.length > before.history.length
+  const withoutPins = (record: InstallationRecord) => ({ ...record, imageFingerprint: null, checkoutCommit: null })
+  const imageChanged = before.imageFingerprint !== after.imageFingerprint
+  const checkoutChanged = before.checkoutCommit !== after.checkoutCommit
   const valid = reassigned
     ? after.history.length === before.history.length + 1 &&
       sameJson(after.history.slice(0, -1), before.history) &&
       sameJson(after.history.at(-1)?.host, before.host) &&
       sameJson({ ...before, host: null, history: [] }, { ...after, host: null, history: [] })
-    : sameJson({ ...before, imageFingerprint: null }, { ...after, imageFingerprint: null })
+    : !(imageChanged && checkoutChanged) &&
+      (!checkoutChanged || after.checkoutCommit !== null) &&
+      sameJson(withoutPins(before), withoutPins(after))
   if (!valid) {
-    throw invalidRecord('A write may change only the image pin or append one host reassignment.', retry)
+    throw invalidRecord(
+      'A write may change only the image pin, the checkout restore point, or append one host reassignment.',
+      retry,
+    )
   }
 }

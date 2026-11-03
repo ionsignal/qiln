@@ -122,6 +122,43 @@ export const installationDiagnostics = Object.freeze({
     'The source device requires a canonical absolute non-root path without unsupported characters.',
     'Select the canonical Qiln Git checkout root with --source.',
   ),
+  SOURCE_OPTION_NOT_SUPPORTED: entry(
+    '--source is not supported for an AWS target',
+    'An AWS target manages its own source checkout at a path derived from the deployment, so the checkout is never named. --source belongs to the local target, where the operator’s own checkout is validated and attached. Nothing was observed or changed.',
+    'Remove --source from the command.',
+    'Use --local with --source to configure the installation on this machine.',
+  ),
+  SOURCE_GIT_MISSING: entry(
+    'Git is missing on the target',
+    'An AWS target keeps a Qiln-managed source checkout that is cloned, read, and proven restorable on the target with git. Qiln installs no packages, so a target without git is refused before any installation state is written. Nothing was changed.',
+    'Install git on the deployment host through an explicitly reviewed procedure outside Qiln, then run the command again.',
+  ),
+  SOURCE_REF_UNRESOLVED: entry(
+    'Source repository could not be resolved',
+    'From the target, Qiln reads the approved branch of the approved repository over HTTPS when no restore point is recorded, and fetches a commit into a throwaway repository to prove that it is restorable. The repository was unreachable, did not list exactly the approved branch once, or reported something that is not a full commit ID. This does not show that a commit does not exist. Nothing was cloned or recorded by this attempt, and Qiln stores and forwards no git credentials.',
+    'Review the displayed reason, and confirm that the target can reach the approved repository over HTTPS.',
+    'Run the command again when the repository is reachable. Qiln never substitutes another repository, branch, or remote.',
+  ),
+  SOURCE_CHECKOUT_CONFLICT: entry(
+    'Managed source checkout conflicts with the installation',
+    'The managed checkout must be the Git work tree that Qiln would have cloned: at the derived path, with the approved repository as its origin, a committed HEAD, and the Qiln package, and a present checkout must have a recorded restore point. HEAD and the working tree are never judged, and Qiln never repairs, replaces, or deletes an existing checkout. The displayed reason names what did not hold.',
+    'Review the displayed reason and inspect the checkout on the target.',
+    'Correct the checkout, or move it away deliberately, which discards its unpushed work. When it is absent, configure restores the recorded restore point, or origin’s current main when none is recorded.',
+    'Qiln never overwrites an existing path.',
+  ),
+  SOURCE_CHECKOUT_UNPUSHED: entry(
+    'Source checkout HEAD is not available from the approved repository',
+    'The working tree of a managed checkout lives on the root volume of the host, which is discarded with it, so only a commit that the approved repository still serves can be restored on a replacement host. Qiln proves this by fetching the HEAD commit from the approved repository into a throwaway repository, the same operation that restores it, and that fetch did not succeed. Nothing was changed on the host, in the installation record, or in AWS. Qiln never pushes, stores no git credentials, and offers no override.',
+    'Push the HEAD commit to the approved repository from your own session on the target, with your own credentials, then run qiln aws deployment remove again.',
+    'Or delete the managed checkout deliberately to discard its work. The replacement then restores the previously recorded restore point.',
+    'Other branches, stashes, uncommitted changes, and ignored files are not preserved either way.',
+  ),
+  SOURCE_CHECKOUT_CHANGED: entry(
+    'Source checkout changed after it was approved',
+    'The HEAD that was displayed and approved as the restore point no longer matches the checkout. Qiln re-reads it after the Incus workloads are stopped and records nothing that differs from what was approved, so the restore point of the installation was not changed. The Incus release that preceded this check was verified and is not repeated. Something other than the stopped workloads changed HEAD, such as an administrator session on the target.',
+    'Run qiln aws deployment remove again to review and approve the current HEAD.',
+    'Inspect the checkout on the target before approving it.',
+  ),
   INSTALLATION_HOST_REGISTERED: entry(
     'Host is already bound to another installation',
     'Each host can back only one registered installation. Protected local state already records this host for a different installation name, so Qiln refused to register a second one. Nothing was created or changed, and the existing installation was not rebound. The diagnostic facts name both installations.',
@@ -166,7 +203,7 @@ export const installationDiagnostics = Object.freeze({
   ),
   INSTALLATION_REASSIGNMENT_REFUSED: entry(
     'Installation cannot be reassigned to this host',
-    'Reassignment needs a configured, settled AWS installation whose assigned host is an earlier deployment of the selected deployment’s volume chain. Every earlier deployment must have verifiably released Incus, exported the pool, been removed, and handed the volume on, and the selected deployment must hold the same Incus server identity, retained preseed, and ZFS pool. The recorded checkout must exist at the same path, and the live installation must already match, with the stopped orchestrator, the network, the PostgreSQL volume, and the instance credentials unchanged. Nothing was changed: no Incus resource, credential, image, or workload, and the installation record was not written. Reassignment never repairs or completes a configuration.',
+    'Reassignment needs a configured, settled AWS installation whose assigned host is an earlier deployment of the selected deployment’s volume chain. Every earlier deployment must have verifiably released Incus, exported the pool, been removed, and handed the volume on, and the selected deployment must hold the same Incus server identity, retained preseed, and ZFS pool. The live installation must already match, with the stopped orchestrator, the network, the PostgreSQL volume, and the instance credentials unchanged. The managed source checkout may be absent on the replacement, because it lived on the discarded root volume of an earlier host: the next configure restores it from the recorded restore point, and reassignment never clones it. Nothing was changed: no Incus resource, credential, image, or workload, and the installation record was not written. Reassignment never repairs or completes a configuration.',
     'Review the displayed reason.',
     'Resolve the cause through the preparation, removal, or configuration workflow of the deployment that owns it, then run reassign again.',
     preservePostgresStep,
@@ -207,7 +244,7 @@ export const installationDiagnostics = Object.freeze({
   ),
   INVALID_INSTALLATION_STATE: entry(
     'Installation state is invalid or incompatible',
-    'The record must match the supported schema exactly: version, name, project, instance name, current host, the history of earlier hosts of one retained volume, architecture, layout digest, checkout path, and an image fingerprint that is absent or a full lowercase SHA-256. A permitted write changes only the image pin or appends one host reassignment.',
+    'The record must match the supported schema exactly: version, name, project, instance name, current host, the history of earlier hosts of one retained volume, architecture, layout digest, checkout path, a checkout restore point that is absent or a full commit ID and is never set for a local host, and an image fingerprint that is absent or a full lowercase SHA-256. A permitted write changes only the image pin, the checkout restore point, or appends one host reassignment.',
     'Review the CLI version and inspect the installation record manually before recovery.',
     'Do not discard retained credentials or persistent data.',
   ),
@@ -223,14 +260,14 @@ export const installationDiagnostics = Object.freeze({
   ),
   INSTALLATION_STEP_FAILED: entry(
     'Installation step did not complete',
-    'An Incus request was refused or its outcome is uncertain. A refused request had no effect. An uncertain one may have changed the host in part or in full, and Qiln never replays it.',
-    'Inspect the images, network, volume, and instance named in the diagnostic facts before retrying.',
+    'An Incus request or the remote source checkout clone was refused or its outcome is uncertain. A refused step had no effect. An uncertain one may have changed the host in part or in full, and Qiln never replays it.',
+    'Inspect the images, network, volume, instance, and source checkout named in the diagnostic facts before retrying.',
     preservePostgresStep,
   ),
   INSTALLATION_UNRESOLVED: entry(
     'Installation has an unresolved step',
     'A previous configuration step has an effect that is unknown or not yet verified. Qiln never replays, resumes, or clears it.',
-    'Inspect the Incus daemon, images, and network named in the diagnostic facts manually.',
+    'Inspect the Incus daemon, images, network, and source checkout named in the diagnostic facts manually.',
     preservePostgresStep,
   ),
   INSTALLATION_EVIDENCE_INVALID: entry(
@@ -242,7 +279,7 @@ export const installationDiagnostics = Object.freeze({
   INSTALLATION_NOT_VERIFIED: entry(
     'Installation was not verified after configuration',
     'Qiln reports success only after a fresh observation agrees with the approved plan.',
-    'Inspect the image, network, volume, instance, and credentials, then re-run the command.',
+    'Inspect the image, network, volume, instance, source checkout, and credentials, then re-run the command.',
     preservePostgresStep,
   ),
 })

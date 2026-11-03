@@ -15,6 +15,7 @@ const NOTICE =
   'Approval authorizes only the listed changes. Each Incus change is one fenced request followed by a fresh observation that must agree, ' +
   'and the whole installation is observed again afterwards. The plan is derived again from the host after approval and must be unchanged before anything is recorded. ' +
   'A failed or cancelled step is not replayed, resumed, or rolled back, and interrupted work may already have completed. ' +
+  'A source checkout is cloned by one fenced remote step that builds beside its destination and renames into place last, so it never overwrites an existing path, and Qiln never pulls or pushes it afterwards. ' +
   'A staged split image is imported without an alias and checked as a container image for the target architecture before any previous image is deleted. ' +
   'If it does not fit, it remains in the image store without an alias, Qiln never deletes it, and you must remove it manually. ' +
   'The selected image is trusted guest code: Qiln has not established its provenance, authenticity, guest compatibility, or bootstrap readiness. ' +
@@ -24,9 +25,21 @@ const NOTICE =
  * The wording of the default-no approval that goes with the displayed plan.
  */
 export function approvalLabel(plan: ConfigurePlan): string {
-  return plan.image.replace === null
+  const including = [
+    plan.checkout === null ? null : 'cloning the displayed source checkout',
+    plan.image.replace === null ? null : 'deleting the displayed image',
+  ].filter(item => item !== null)
+  return including.length === 0
     ? 'Apply the displayed installation plan to the Incus daemon'
-    : 'Apply the displayed installation plan, including deleting the displayed image, on the Incus daemon'
+    : `Apply the displayed installation plan, including ${including.join(' and ')}, on the target`
+}
+
+function checkoutFact({ commit, pin }: NonNullable<ConfigurePlan['checkout']>, path: string): DiagnosticFact {
+  const { repository } = INSTALLER_SPEC.checkout
+  return [
+    'Source checkout',
+    `clone ${repository} at commit ${commit} to ${path} on the target · ${pin ? 'origin’s current main, recorded as the restore point before the clone' : 'the recorded restore point'} · fetched over HTTPS, which establishes the transport and not publisher authenticity · the orchestrator mounts it writable and runs this code with its own credentials`,
+  ]
 }
 
 /**
@@ -41,12 +54,14 @@ export function reportPlan(reporter: Reporter, { plan, inputs, source }: PlanPre
   const { layout } = inputs
   const { image } = plan
   const { name, imageAlias, sourceMountPath } = INSTALLER_SPEC.orchestrator
-  const facts: DiagnosticFact[] = [
-    [
-      'Image',
-      `${plan.fingerprint} · ${source.kind === 'split' ? 'staged split artifacts' : 'existing local image; never pulled or replaced'}`,
-    ],
-  ]
+  const facts: DiagnosticFact[] = []
+  if (plan.checkout !== null) {
+    facts.push(checkoutFact(plan.checkout, inputs.sourceRoot))
+  }
+  facts.push([
+    'Image',
+    `${plan.fingerprint} · ${source.kind === 'split' ? 'staged split artifacts' : 'existing local image; never pulled or replaced'}`,
+  ])
   if (image.import) {
     facts.push([
       'Image import',

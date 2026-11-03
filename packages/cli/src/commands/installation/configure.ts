@@ -1,6 +1,7 @@
 import { INSTALLER_SPEC } from '../../installation/spec'
 import { withInspection } from './inspect'
 import { approvalLabel, reportPlan } from './plan'
+import { rootOf } from '../../installation/checkout/judge'
 import { requireIncusExtensions } from '../../installation/preflight/incus'
 import { withImageSource, type InstallerImageSelection } from '../../installation/image'
 import { isEmpty } from '../../installation/journal/types'
@@ -14,20 +15,42 @@ import type { InstallerLock } from '../../state/lock'
 import type { Reporter } from '../../terminal/reporter'
 import type { InstallationTarget } from '../../installation/target/types'
 
+/**
+ * `sourcePath` is the operator's checkout of a local target. It is null for an
+ * AWS target, whose checkout is managed by Qiln.
+ */
 export interface ConfigureOptions {
-  sourcePath: string
-  image: InstallerImageSelection
+  sourcePath: string | null
   authorizedKeysPath?: string
+  image: InstallerImageSelection
 }
 
 /**
  * Rows are derived from the plan that was applied, or from the empty plan of an
  * installation that already matched.
  */
-function reportResult(reporter: Reporter, inputs: InstallationInputs, { plan, observation }: ConfigureResult): void {
+function reportResult(
+  reporter: Reporter,
+  inputs: InstallationInputs,
+  managed: boolean,
+  { plan, observation }: ConfigureResult,
+): void {
   const { layout, architecture } = inputs
   const { name, sourceMountPath } = INSTALLER_SPEC.orchestrator
   const replaced = plan.image.replace !== null
+  if (plan.checkout !== null) {
+    reporter.row(
+      'created',
+      'Source checkout',
+      `${inputs.sourceRoot} · commit ${plan.checkout.commit} · ${plan.checkout.pin ? 'origin main, recorded as the restore point' : 'recorded restore point restored'}`,
+    )
+  } else if (managed) {
+    reporter.row(
+      'reused',
+      'Source checkout',
+      `${inputs.sourceRoot} · managed checkout present · HEAD and the working tree are not judged`,
+    )
+  }
   reporter.row(
     plan.image.import ? 'imported' : 'verified',
     'Image',
@@ -98,8 +121,7 @@ export async function configure(
   const { retry, signal } = target
   await withInspection(target, reporter, retry.configure, async ({ host, incus }) => {
     requireIncusExtensions(incus.extensions, retry.inspect)
-
-    const sourceRoot = await host.checkout(options.sourcePath)
+    const sourceRoot = await rootOf(host.checkout, options.sourcePath, retry.configure)
     const inputs: InstallationInputs = {
       architecture: host.architecture,
       layout: host.layout,
@@ -113,11 +135,18 @@ export async function configure(
         retry.configure,
       )
     }
-    reporter.row('verified', 'Source', `validated Git checkout '${sourceRoot}'`)
+    if (host.checkout.kind === 'operator') {
+      reporter.row('verified', 'Source', `validated Git checkout '${sourceRoot}'`)
+    } else {
+      reporter.row(
+        'working',
+        'Source',
+        `managed checkout path '${sourceRoot}' on the target · its state is observed with the plan`,
+      )
+    }
     if (roster !== null) {
       reporter.row('verified', 'Authorized keys', `validated stable roster · ${roster.size} bytes`)
     }
-
     const directory = await registerInstallation(target.name, host.binding, inputs, retry.inspect)
     let lock: InstallerLock | undefined
     try {
@@ -130,6 +159,7 @@ export async function configure(
           installation,
           client: incus.client,
           inputs,
+          checkout: host.checkout,
           source: imageSource,
           sshKeygen: host.sshKeygen,
           roster,
@@ -141,7 +171,7 @@ export async function configure(
         })
         return await configurer.run(signal)
       })
-      reportResult(reporter, inputs, result)
+      reportResult(reporter, inputs, host.checkout.kind === 'managed', result)
     } finally {
       await lock?.release()
     }

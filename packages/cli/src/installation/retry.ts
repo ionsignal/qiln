@@ -17,11 +17,13 @@ export function selectorFlags(selector: InstallationSelector): string {
 }
 
 /**
- * The commands of the named installation workflow for one selected target.
+ * The commands of the named installation workflow for one selected target. Only
+ * a local target names its checkout, because an AWS target manages its own.
  */
 export function installationRetry(selector: InstallationSelector): Retry {
   const flags = selectorFlags(selector)
-  const configure = `qiln installation configure ${flags} --source <checkout>`
+  const source = selector.kind === 'local' ? ' --source <checkout>' : ''
+  const configure = `qiln installation configure ${flags}${source}`
   return Object.freeze({
     inspect: `qiln installation inspect ${flags}`,
     reassign: `qiln installation reassign ${flags}`,

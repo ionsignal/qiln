@@ -1,11 +1,16 @@
 # Fixed read-only inspection of the target host and, when a path is given, of
-# its development checkout. Every section reports its own status. Nothing here
-# installs, loads, or writes anything, and no privilege is used. The one
-# argument is the checkout path, or an empty string for none.
+# its managed development checkout. Every section reports its own status.
+# Nothing here installs, loads, or writes anything, and no privilege is used.
+# The one argument is the checkout path, or an empty string for none.
 LC_ALL=C
 export LC_ALL
 PATH=/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
+GIT_TERMINAL_PROMPT=0
+GIT_CONFIG_NOSYSTEM=1
+GIT_CONFIG_GLOBAL=/dev/null
+GIT_OPTIONAL_LOCKS=0
+export GIT_TERMINAL_PROMPT GIT_CONFIG_NOSYSTEM GIT_CONFIG_GLOBAL GIT_OPTIONAL_LOCKS
 exec 2>/dev/null
 
 CHECKOUT=$1
@@ -22,6 +27,11 @@ system_info() {
   printf 'machine %s\n' "$(uname -m)"
   printf 'packageArchitecture %s\n' "$(dpkg --print-architecture)"
   awk '$1 == "MemTotal:" { print "memTotalKiB " $2 }' /proc/meminfo
+  if command -v git >/dev/null; then
+    echo 'git yes'
+  else
+    echo 'git no'
+  fi
 }
 
 # Parsed as data by the caller, never evaluated.
@@ -40,6 +50,7 @@ checkout_info() {
   if top=$(git -C "$path" rev-parse --show-toplevel); then
     printf 'toplevel %s\n' "$top"
     printf 'commit %s\n' "$(git -C "$path" rev-parse --verify -q HEAD)"
+    printf 'origin %s\n' "$(git -C "$path" config --get remote.origin.url)"
   fi
   if test -f "$path/package.json" && ! test -L "$path/package.json"; then
     printf 'packageName %s\n' "$(sed -n 's/^[[:space:]]*"name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$path/package.json" | head -n 1)"

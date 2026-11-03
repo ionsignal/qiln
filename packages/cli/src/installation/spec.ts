@@ -161,6 +161,47 @@ export const INSTALLER_SPEC = Object.freeze({
       port: 4222,
     },
   },
+  checkout: {
+    repository: 'https://github.com/ionsignal/qiln.git',
+    ref: 'refs/heads/main',
+    directory: 'qiln',
+    refusalCodes: {
+      first: 20,
+      last: 99,
+    },
+    resolve: {
+      timeoutMs: 30_000,
+      maxOutputBytes: 4_096,
+      refusals: {
+        20: 'The repository or branch reference was not given or is malformed.',
+        21: 'git was not found on the target.',
+        22: 'The approved repository could not be reached or did not list the approved branch.',
+        23: 'The approved repository did not report exactly one commit for the approved branch.',
+      },
+    },
+    capture: {
+      timeoutMs: 120_000,
+      maxOutputBytes: 4_096,
+      refusals: {
+        20: 'The checkout path or repository was not given or is malformed.',
+        21: 'git was not found on the target.',
+        22: 'The checkout is not a Git work tree with a committed HEAD.',
+        23: 'The private probe directory could not be created.',
+      },
+    },
+    materialize: {
+      timeoutMs: 300_000,
+      maxOutputBytes: 4_096,
+      refusals: {
+        20: 'The repository, commit, or checkout path was not given or is malformed.',
+        21: 'git was not found on the target.',
+        22: 'The parent directory of the checkout is missing or not writable, or no staging directory could be created.',
+        23: 'The checkout path already exists, and Qiln never overwrites it.',
+        24: 'The staging repository could not be prepared.',
+        25: 'The approved commit could not be fetched from the approved repository, or the fetched commit differs.',
+      },
+    },
+  },
   image: {
     metadataMaximumBytes: 1 * 1_024 * 1_024 * 1_024,
     rootfsMaximumBytes: 20 * 1_024 * 1_024 * 1_024,

@@ -100,7 +100,13 @@ function addTargetOptions(command: Command): void {
 }
 
 function addInstallOptions(command: Command): void {
-  addSingleOption(command, new Option('--source <checkout>', 'Select the canonical Qiln Git checkout root on the target.'))
+  addSingleOption(
+    command,
+    new Option(
+      '--source <checkout>',
+      'Select the canonical Qiln Git checkout root on this machine. Required with --local, and refused for an AWS target, which manages its own checkout.',
+    ),
+  )
   addSingleOption(
     command,
     new Option('--image <alias-or-fingerprint>', 'Select an existing local image alias or full lowercase fingerprint.'),

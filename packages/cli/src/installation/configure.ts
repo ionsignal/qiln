@@ -5,7 +5,8 @@ import { verify } from './verify'
 import { planOf, type PlanRequest } from './plan'
 import { observe, type Observation } from './observe'
 import { createCredentials, replaceRoster } from './credentials'
-import { pinImage, pinned } from './state'
+import { pinCheckout, pinImage, pinned } from './state'
+import { CHECKOUT_DIGEST } from './checkout/manifest'
 import { requireNotStuck, returned } from './journal/facts'
 import { validateContainerImage } from './preflight/image'
 import { canonical, sameJson } from '../json'
@@ -23,39 +24,44 @@ import {
 import {
   actionsOf,
   isEmpty,
+  isIncusAction,
   type ConfigureAuthorization,
   type ConfigureEvidence,
   type ConfigurePlan,
   type ConfigureStep,
+  type IncusAction,
   type InstallAction,
 } from './journal/types'
 import * as records from './journal/records'
+import type { StepOutcome } from '../host/step'
 import type { Retry } from './retry'
 import type { Dir, FileSnapshot } from '../state/files'
 import type { ImageSource } from './image'
 import type { InstallationRecord } from './records'
+import type { CheckoutAccess } from './target/types'
 import type { InstallationInputs } from './types'
 
 /**
- * No scripts are approved here, so the recipe identifies the installer
- * specification that was in force when the plan was approved.
+ * No scripts are approved here for Incus, so the recipe identifies the installer
+ * specification that was in force when the plan was approved, together with the
+ * embedded checkout scripts.
  */
 const RECIPE = Object.freeze({
   revision: INSTALLER_SPEC.evidenceVersion,
-  digest: createHash('sha256').update(canonical(INSTALLER_SPEC)).digest('hex'),
+  digest: createHash('sha256').update(canonical(INSTALLER_SPEC)).update(CHECKOUT_DIGEST).digest('hex'),
 })
 
 /**
  * The installation pin is written once these have run, so a failed image step
  * never leaves a pin for content that is not in the store.
  */
-const IMAGE_ACTIONS: readonly InstallAction[] = ['import-image', 'delete-image', 'create-alias']
+const IMAGE_ACTIONS: readonly IncusAction[] = ['import-image', 'delete-image', 'create-alias']
 
-function isImageAction(action: InstallAction): boolean {
+function isImageAction(action: IncusAction): boolean {
   return IMAGE_ACTIONS.includes(action)
 }
 
-const OPERATIONS: Record<InstallAction, string> = {
+const OPERATIONS: Record<IncusAction, string> = {
   'delete-image': 'delete the previous image targeted by the managed orchestrator alias',
   'import-image': 'upload and import the staged split Incus image',
   'create-alias': 'create the managed orchestrator image alias',
@@ -91,6 +97,7 @@ export interface ConfigureContext {
   installation: InstallationRecord
   client: IncusClient
   inputs: InstallationInputs
+  checkout: CheckoutAccess
   source: ImageSource
   sshKeygen: string
   roster: FileSnapshot | null
@@ -108,7 +115,7 @@ export interface ConfigureResult {
 }
 
 function failure(
-  action: InstallAction,
+  action: IncusAction,
   outcome: 'refused' | 'uncertain',
   error: unknown,
   retry: string,
@@ -135,6 +142,35 @@ function failure(
   })
 }
 
+/**
+ * A cancellation is reported as such, so the caller can describe what it left
+ * behind. Anything else carries the authored outcome of the remote script.
+ */
+function remoteFailure(
+  action: InstallAction,
+  outcome: Exclude<StepOutcome, { kind: 'returned' }>,
+  retry: string,
+): InstallerError {
+  if (outcome.cause?.kind === 'cancelled') {
+    return outcome.cause
+  }
+  return new InstallerError({
+    code: 'INSTALLATION_STEP_FAILED',
+    facts: [
+      ['Step', action],
+      [
+        'Outcome',
+        outcome.kind === 'refused'
+          ? 'refused; the step had no effect'
+          : 'uncertain; the step may have run partly or fully',
+      ],
+      ['Reason', outcome.reason],
+      ...(outcome.cause?.facts ?? []),
+    ],
+    retry,
+  })
+}
+
 function unverified(installation: string, subject: string, retry: string): InstallerError {
   return new InstallerError({
     code: 'INSTALLATION_NOT_VERIFIED',
@@ -149,16 +185,17 @@ function unverified(installation: string, subject: string, retry: string): Insta
 /**
  * Coordinates one installation configuration under the installation lock held
  * by the command. Per step: the authorization is persisted, then the fence, then
- * the single Incus request runs, then its outcome is persisted, then a fresh
- * observation must agree before `verifiedAt` is persisted. The plan is derived
- * again after approval and must be unchanged before anything is persisted.
- * A split image is imported without an alias and must be a container image for
- * the target architecture before it is verified and before the previous image
- * is deleted. Nothing is replayed, resumed, or rolled back, and an interrupted
- * step stays open as evidence. The pin and the local credential files are
- * atomic local writes covered by the approval, and they are not journaled
- * steps. Cancellation stops before the next step, and the diagnostic states
- * what it left behind for the newest one.
+ * the single Incus request or remote script runs, then its outcome is persisted,
+ * then a fresh observation must agree before `verifiedAt` is persisted. The plan
+ * is derived again after approval and must be unchanged before anything is
+ * persisted. The managed checkout is cloned first, so a clone failure never
+ * follows an image upload. A split image is imported without an alias and must
+ * be a container image for the target architecture before it is verified and
+ * before the previous image is deleted. Nothing is replayed, resumed, or rolled
+ * back, and an interrupted step stays open as evidence. The pins and the local
+ * credential files are atomic local writes covered by the approval, and they are
+ * not journaled steps. Cancellation stops before the next step, and the
+ * diagnostic states what it left behind for the newest one.
  */
 export class Configurer {
   private constructor(
@@ -195,13 +232,15 @@ export class Configurer {
   }
 
   private async fresh(): Promise<Observation> {
-    const { client, directory, sshKeygen, source, inputs, retry } = this.context
+    const { client, directory, sshKeygen, source, inputs, checkout, retry } = this.context
     return await observe({
       client,
       directory,
       sshKeygen,
       source,
       installation: pinned(this.installation),
+      checkoutCommit: this.installation.checkoutCommit,
+      checkout,
       inputs,
       retry,
     })
@@ -237,9 +276,9 @@ export class Configurer {
   }
 
   /**
-   * Runs the approved actions: the image actions first, then the pin, then the
-   * rest. The whole installation is observed once more at the end, and it must
-   * need nothing further.
+   * Runs the approved actions: the checkout first, then the image actions, then
+   * the pin, then the rest. The whole installation is observed once more at the
+   * end, and it must need nothing further.
    */
   private async applyActions(
     plan: ConfigurePlan,
@@ -247,8 +286,11 @@ export class Configurer {
     signal: AbortSignal,
   ): Promise<ConfigureResult> {
     const authorization = await this.authorize(plan)
-    const actions = actionsOf(plan)
     let latest = observation
+    if (plan.checkout !== null) {
+      latest = await this.materialize(authorization, plan, plan.checkout, signal)
+    }
+    const actions = actionsOf(plan).filter(isIncusAction)
     for (const action of actions.filter(isImageAction)) {
       latest = await this.perform(authorization, plan, action, latest, signal)
     }
@@ -349,7 +391,7 @@ export class Configurer {
   }
 
   /**
-   * One approved action. Credentials are written locally just before the
+   * One approved Incus action. Credentials are written locally just before the
    * guarded instance update and observed again, so the update is built from a
    * snapshot that includes them. Cancellation is checked before each action,
    * so none starts after it.
@@ -357,7 +399,7 @@ export class Configurer {
   private async perform(
     authorization: string,
     plan: ConfigurePlan,
-    action: InstallAction,
+    action: IncusAction,
     observation: Observation,
     signal: AbortSignal,
   ): Promise<Observation> {
@@ -368,6 +410,33 @@ export class Configurer {
       current = await this.fresh()
     }
     return await this.step(authorization, plan, action, current)
+  }
+
+  /**
+   * The source phase. The restore point is pinned first, so an interruption
+   * stays recoverable by running configure again. The remote outcome is
+   * classified like any other step, and a fresh observation must show the
+   * checkout before the step counts as verified.
+   */
+  private async materialize(
+    authorization: string,
+    plan: ConfigurePlan,
+    source: NonNullable<ConfigurePlan['checkout']>,
+    signal: AbortSignal,
+  ): Promise<Observation> {
+    const { checkout, directory, retry } = this.context
+    if (checkout.kind !== 'managed') {
+      throw new InstallerError({
+        code: 'INTERNAL_ERROR',
+      })
+    }
+    checkCancellation(signal)
+    if (this.installation.checkoutCommit !== source.commit) {
+      this.installation = await pinCheckout(directory, this.installation, source.commit, retry.inspect)
+    }
+    await this.fence(authorization, 'materialize-checkout')
+    await this.concludeRemote('materialize-checkout', await checkout.materialize(source.commit))
+    return await this.verified(plan, 'materialize-checkout')
   }
 
   /**
@@ -399,13 +468,11 @@ export class Configurer {
     }
   }
 
-  private async step(
-    authorization: string,
-    plan: ConfigurePlan,
-    action: InstallAction,
-    observation: Observation,
-  ): Promise<Observation> {
-    const { client, inputs, source, retry } = this.context
+  /**
+   * The step is open from here on, and stays open as evidence if the process
+   * ends before its outcome is persisted.
+   */
+  private async fence(authorization: string, action: InstallAction): Promise<void> {
     await this.persist({
       steps: [
         ...this.evidence.steps,
@@ -420,6 +487,16 @@ export class Configurer {
         },
       ],
     })
+  }
+
+  private async step(
+    authorization: string,
+    plan: ConfigurePlan,
+    action: IncusAction,
+    observation: Observation,
+  ): Promise<Observation> {
+    const { client, inputs, source, retry } = this.context
+    await this.fence(authorization, action)
     let accepted = false
     try {
       await apply(action, plan, observation, {
@@ -438,10 +515,33 @@ export class Configurer {
         },
       })
     } catch (error: unknown) {
-      return await this.conclude(action, error, accepted)
+      return await this.concludeRequest(action, error, accepted)
     }
     await this.amend({ completion: { exitCode: 0, completedAt: new Date().toISOString() } })
     return await this.verified(plan, action)
+  }
+
+  /**
+   * Records what the remote script reported. A refusal or an unconfirmed outcome
+   * is recorded and then thrown, so cancellation is classified before it
+   * propagates. A step with no exit status stays open, which is uncertain.
+   */
+  private async concludeRemote(action: InstallAction, outcome: StepOutcome): Promise<void> {
+    const { retry } = this.context
+    const at = new Date().toISOString()
+    switch (outcome.kind) {
+      case 'returned':
+        await this.amend({ completion: { exitCode: 0, completedAt: at } })
+        return
+      case 'refused':
+        await this.amend({ refusedAt: at })
+        throw remoteFailure(action, outcome, retry.configure)
+      case 'uncertain':
+        if (outcome.exitCode !== null) {
+          await this.amend({ completion: { exitCode: outcome.exitCode, completedAt: at } })
+        }
+        throw remoteFailure(action, outcome, retry.configure)
+    }
   }
 
   /**
@@ -453,7 +553,7 @@ export class Configurer {
    * a cancelled wait or upload, or a lost connection does not show that nothing
    * changed.
    */
-  private async conclude(action: InstallAction, error: unknown, accepted: boolean): Promise<never> {
+  private async concludeRequest(action: IncusAction, error: unknown, accepted: boolean): Promise<never> {
     const { retry } = this.context
     const at = new Date().toISOString()
     if (error instanceof IncusCancelledError) {

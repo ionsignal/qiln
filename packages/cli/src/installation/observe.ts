@@ -2,6 +2,7 @@ import { INSTALLER_SPEC } from './spec'
 import { validateImagePreflight } from './preflight/image'
 import { toInstallerError } from '../transport/incus/errors'
 import { loadCredentials, type Credentials } from './credentials'
+import type { CheckoutState } from './checkout/judge'
 import type { ImageSource } from './image'
 import type { IncusClient } from '../transport/incus/client'
 import type {
@@ -15,15 +16,17 @@ import type {
 import type { Retry } from './retry'
 import type { Dir } from '../state/files'
 import type { InstallationState } from './state'
+import type { CheckoutAccess } from './target/types'
 import type { InstallationInputs } from './types'
 
 export interface ObservationRequest {
   client: IncusClient
-  /** The installation directory that holds the local credential files. */
   directory: Dir
   sshKeygen: string
   source: ImageSource
   installation: InstallationState | null
+  checkoutCommit: string | null
+  checkout: CheckoutAccess
   inputs: InstallationInputs
   retry: Retry
 }
@@ -33,7 +36,9 @@ export interface ObservationRequest {
  * the selected content, `alias` is the managed orchestrator alias, and
  * `aliased` is the image that alias currently targets. A reference selection
  * never touches the managed alias. Absent resources are null, and the local
- * credential set is `absent` only when none of its files exist.
+ * credential set is `absent` only when none of its files exist. `checkout` is
+ * the managed checkout of an AWS target. Origin is resolved only when the
+ * checkout is absent and no restore point is recorded.
  */
 export interface Observation {
   kind: ImageSource['kind']
@@ -46,6 +51,7 @@ export interface Observation {
   volume: IncusStorageVolume | null
   instance: IncusRead<IncusInstance> | null
   credentials: Credentials | 'absent'
+  checkout: CheckoutState
 }
 
 type Images = Pick<Observation, 'fingerprint' | 'image' | 'alias' | 'aliased'>
@@ -82,8 +88,23 @@ async function imagesOf({ client, source, installation, inputs, retry }: Observa
   }
 }
 
+/**
+ * An absent managed checkout is restored from the recorded restore point, so
+ * origin is asked for its current main only when none is recorded yet.
+ */
+async function checkoutOf(access: CheckoutAccess, pin: string | null): Promise<CheckoutState> {
+  if (access.kind === 'operator') {
+    return { kind: 'operator' }
+  }
+  const pinned = pin !== null
+  if ((await access.head()) !== null) {
+    return { kind: 'present', pinned }
+  }
+  return { kind: 'absent', commit: pin ?? (await access.resolve()), pinned }
+}
+
 export async function observe(request: ObservationRequest): Promise<Observation> {
-  const { client, directory, sshKeygen, source, installation, inputs, retry } = request
+  const { client, directory, sshKeygen, source, installation, checkout, checkoutCommit, inputs, retry } = request
   const { layout } = inputs
   return {
     kind: source.kind,
@@ -99,5 +120,6 @@ export async function observe(request: ObservationRequest): Promise<Observation>
       client.getInstanceWithEtagOrNull(INSTALLER_SPEC.orchestrator.name),
     ),
     credentials: await loadCredentials(directory, sshKeygen, retry.configure),
+    checkout: await checkoutOf(checkout, checkoutCommit),
   }
 }

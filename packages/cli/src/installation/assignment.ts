@@ -121,7 +121,11 @@ export function requireAssignable(
 
 /**
  * Uses planning only as a predicate: the live target must already match the
- * installation, so reassignment never repairs or completes a configuration.
+ * installation, so reassignment never repairs or completes a configuration. A
+ * managed checkout that is absent is the one tolerated difference, because the
+ * next configure restores it from the recorded restore point and reassignment
+ * never clones. A checkout plan that would first record a restore point is not
+ * tolerated.
  */
 export function requireMatching(
   observation: Observation,
@@ -136,6 +140,7 @@ export function requireMatching(
   const changes: [boolean, string][] = [
     [plan.image.import || plan.image.alias || plan.image.replace !== null, 'the orchestrator image'],
     [plan.pin, 'the image pin'],
+    [plan.checkout?.pin === true, 'the checkout restore point'],
     [plan.network, 'the managed network'],
     [plan.volume, 'the PostgreSQL volume'],
     [plan.instance, 'the orchestrator instance'],
