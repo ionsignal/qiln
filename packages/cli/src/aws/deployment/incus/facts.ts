@@ -143,8 +143,8 @@ export function incusFacts(record: IncusRecord | null): readonly DiagnosticFact[
   const release = record?.steps.findLast(step => step.action === 'release' && journal.stateOf(step) === 'verified')
   return [
     ['Incus storage', STORAGE_LABELS[storageState(record)]],
-    ['Last verified Incus step', verified?.action ?? 'none'],
-    ['Last verified Incus release', release?.verifiedAt ?? 'none'],
+    ['Last Incus step', verified?.action ?? 'none'],
+    ['Last Incus release', release?.verifiedAt ?? 'none'],
     ['Unresolved Incus steps', open.length === 0 ? 'none' : open.map(step => `${step.action} (${journal.stateOf(step)})`).join(', ')],
   ]
 }
