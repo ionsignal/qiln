@@ -7,9 +7,8 @@ import {
   reportDeployment,
   reportHandoff,
   reportIncus,
-  reportIncusUnreadable,
+  reportUnreadable,
   reportZfs,
-  reportZfsUnreadable,
 } from './report'
 import * as deployments from '../../../aws/deployment/records'
 import * as incus from '../../../aws/deployment/incus/evidence'
@@ -38,20 +37,20 @@ async function reportHandoffs(reporter: Reporter, root: Dir, record: Deployment)
 }
 
 /**
- * Unreadable preparation evidence degrades to a notice, independently for ZFS
- * and Incus, so readable AWS evidence stays visible.
+ * Unreadable evidence degrades to a notice, so readable AWS evidence stays
+ * visible.
  */
+async function reportEvidence(reporter: Reporter, label: string, report: () => Promise<void>): Promise<void> {
+  try {
+    await report()
+  } catch {
+    reportUnreadable(reporter, label)
+  }
+}
+
 async function reportPreparation(reporter: Reporter, root: Dir, record: Deployment): Promise<void> {
-  try {
-    reportZfs(reporter, await lineage.evidence(root, record))
-  } catch {
-    reportZfsUnreadable(reporter)
-  }
-  try {
-    reportIncus(reporter, await incus.evidence(root, record))
-  } catch {
-    reportIncusUnreadable(reporter)
-  }
+  await reportEvidence(reporter, 'ZFS', async () => reportZfs(reporter, await lineage.evidence(root, record)))
+  await reportEvidence(reporter, 'Incus', async () => reportIncus(reporter, await incus.evidence(root, record)))
 }
 
 export async function status(options: AwsDeploymentOptions, reporter: Reporter): Promise<void> {

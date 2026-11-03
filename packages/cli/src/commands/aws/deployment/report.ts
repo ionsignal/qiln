@@ -325,13 +325,6 @@ export function reportZfs(reporter: Reporter, preparation: ZfsRecord | null): vo
   }
 }
 
-export function reportZfsUnreadable(reporter: Reporter): void {
-  reporter.section('ZFS preparation')
-  reporter.notice(
-    'The ZFS preparation evidence is unreadable or incompatible, so conflicting work is refused. It was not repaired, migrated, or discarded.',
-  )
-}
-
 /**
  * Retained Incus preparation evidence only. Absence is not a statement about
  * the host or the Incus daemon. The server identity is the certificate
@@ -368,9 +361,14 @@ export function reportIncus(reporter: Reporter, preparation: IncusRecord | null)
   }
 }
 
-export function reportIncusUnreadable(reporter: Reporter): void {
-  reporter.section('Incus preparation')
+/**
+ * Preparation evidence that cannot be read degrades to this notice, so readable
+ * AWS evidence stays visible. The evidence is never repaired, migrated, or
+ * discarded.
+ */
+export function reportUnreadable(reporter: Reporter, label: string): void {
+  reporter.section(`${label} preparation`)
   reporter.notice(
-    'The Incus preparation evidence is unreadable or incompatible, so conflicting work is refused. It was not repaired, migrated, or discarded.',
+    `The ${label} preparation evidence is unreadable or incompatible, so conflicting work is refused. It was not repaired, migrated, or discarded.`,
   )
 }

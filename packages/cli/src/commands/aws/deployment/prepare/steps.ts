@@ -5,7 +5,7 @@ import type { IncusAction } from '../../../../host/incus/spec'
 import type { StepAction } from '../../../../host/zfs/spec'
 import type { Reporter, TableCell } from '../../../../terminal/reporter'
 
-const DIGEST_LENGTH = 12
+const DIGEST_PREFIX_LENGTH = 12
 
 export const ZFS_LABELS: Record<StepAction, string> = {
   'install-packages': 'Install the approved ZFS packages',
@@ -42,8 +42,8 @@ export interface ApprovalStep {
 /**
  * What one approval screen says. The steps come from `actionsOf(plan)`, so the
  * screen never claims more than the approval authorizes. `stays` names what is
- * left alone, `lasting` the consequences that outlive the step, and
- * `notEstablished` what the step does not prove.
+ * left alone, `lasting` what outlives the step, and `notEstablished` what the
+ * step does not prove.
  */
 export interface ApprovalScreen {
   title: string
@@ -93,6 +93,6 @@ export function reportRun(reporter: Reporter): void {
     'Each approved step is fenced and recorded as evidence. Qiln never undoes a step, and a failed or interrupted step is not replayed or resumed; interrupted work may already have completed.',
   )
   reporter.info(
-    `Recipes · ZFS revision ${ZFS_RECIPE.revision} (${ZFS_RECIPE.digest.slice(0, DIGEST_LENGTH)}) · Incus revision ${INCUS_RECIPE.revision} (${INCUS_RECIPE.digest.slice(0, DIGEST_LENGTH)})`,
+    `Recipes · ZFS revision ${ZFS_RECIPE.revision} (${ZFS_RECIPE.digest.slice(0, DIGEST_PREFIX_LENGTH)}) · Incus revision ${INCUS_RECIPE.revision} (${INCUS_RECIPE.digest.slice(0, DIGEST_PREFIX_LENGTH)})`,
   )
 }
