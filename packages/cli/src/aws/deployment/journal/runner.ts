@@ -2,8 +2,8 @@ import { randomUUID } from 'node:crypto'
 import { InstallerError, type InstallerErrorCode } from '../../../diagnostic/error'
 import { checkCancellation } from '../../../terminal/prompts'
 import { returned, type JournalStep } from '../../../journal/step'
+import { stepFailure, type StepOutcome } from '../../../host/step'
 import type { JournalAuthorization } from '../../../journal/history'
-import type { StepOutcome } from '../../../host/step'
 import { notify, withWaiting, type ProgressSink, type ProgressTask } from '../observe/progress'
 import { userId } from '../../host'
 
@@ -12,6 +12,10 @@ export interface Evidence<Plan, Action extends string> {
   steps: readonly (JournalStep & { action: Action })[]
 }
 
+/**
+ * `run` receives the record as it stands after the fence, so an owner derives
+ * execution authority from durable evidence and not from a retained request.
+ */
 export interface StepJournalOptions<Rec, Plan, Action extends string> {
   record: Rec
   save(next: Rec): Promise<void>
@@ -19,7 +23,7 @@ export interface StepJournalOptions<Rec, Plan, Action extends string> {
   failureCode: InstallerErrorCode
   retry: string
   task(action: Action): ProgressTask
-  run(plan: Plan, action: Action): Promise<StepOutcome>
+  run(plan: Plan, action: Action, record: Rec): Promise<StepOutcome>
   approve(plan: Plan): Promise<void>
   progress: ProgressSink | undefined
 }
@@ -29,32 +33,6 @@ type StepProgress = Partial<Pick<JournalStep, 'completion' | 'refusedAt' | 'veri
 interface Authorization<Plan> extends JournalAuthorization<Plan> {
   approvedBy: { method: 'local-interactive'; userId: number }
   recipe: { revision: number; digest: string }
-}
-
-function failure(
-  code: InstallerErrorCode,
-  retry: string,
-  action: string,
-  outcome: Exclude<StepOutcome, { kind: 'returned' }>,
-): InstallerError {
-  if (outcome.cause?.kind === 'cancelled') {
-    return outcome.cause
-  }
-  return new InstallerError({
-    code,
-    facts: [
-      ['Step', action],
-      [
-        'Outcome',
-        outcome.kind === 'refused'
-          ? 'refused; the step had no effect'
-          : 'uncertain; the step may have run partly or fully',
-      ],
-      ['Reason', outcome.reason],
-      ...(outcome.cause?.facts ?? []),
-    ],
-    retry,
-  })
 }
 
 /**
@@ -133,7 +111,7 @@ export class StepJournal<Rec extends Evidence<Plan, Action>, Plan, Action extend
       ],
     })
     const observed = await withWaiting(progress, task, async () => {
-      await this.conclude(action, await this.options.run(plan, action))
+      await this.conclude(action, await this.options.run(plan, action, this.current))
       return await verify()
     })
     notify(progress, { phase: 'verified', task })
@@ -173,12 +151,12 @@ export class StepJournal<Rec extends Evidence<Plan, Action>, Plan, Action extend
         return
       case 'refused':
         await this.amend({ refusedAt: at })
-        throw failure(failureCode, retry, action, outcome)
+        throw stepFailure(failureCode, retry, action, outcome)
       case 'uncertain':
         if (outcome.exitCode !== null) {
           await this.amend({ completion: { exitCode: outcome.exitCode, completedAt: at } })
         }
-        throw failure(failureCode, retry, action, outcome)
+        throw stepFailure(failureCode, retry, action, outcome)
     }
   }
 }

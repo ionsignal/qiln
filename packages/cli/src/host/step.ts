@@ -1,3 +1,4 @@
+import { InstallerError, type InstallerErrorCode } from '../diagnostic/error'
 import { SshError } from '../transport/ssh/failure'
 import type { Remote } from '../transport/ssh/connections'
 
@@ -25,6 +26,36 @@ export interface StepRun {
   maxOutputBytes: number
   refusals: Readonly<Record<number, string>>
   refusalCodes: { first: number; last: number }
+}
+
+/**
+ * The diagnostic of a step that did not return. A cancellation is passed
+ * through, so the caller can describe what it left behind.
+ */
+export function stepFailure(
+  code: InstallerErrorCode,
+  retry: string,
+  action: string,
+  outcome: Exclude<StepOutcome, { kind: 'returned' }>,
+): InstallerError {
+  if (outcome.cause?.kind === 'cancelled') {
+    return outcome.cause
+  }
+  return new InstallerError({
+    code,
+    facts: [
+      ['Step', action],
+      [
+        'Outcome',
+        outcome.kind === 'refused'
+          ? 'refused; the step had no effect'
+          : 'uncertain; the step may have run partly or fully',
+      ],
+      ['Reason', outcome.reason],
+      ...(outcome.cause?.facts ?? []),
+    ],
+    retry,
+  })
 }
 
 /**
