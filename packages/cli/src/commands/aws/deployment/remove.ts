@@ -1,5 +1,6 @@
 import { resolveAccess, withRemote } from './access'
 import { requireBaseline } from './baseline'
+import { confirmCheckpoint, installationOf, planCheckpoint } from './checkpoint'
 import { progressSink } from './progress'
 import { lifecycleOf, observationSummary, reportDeployment } from './report'
 import { authenticateDeployer, openTarget, type Target } from './shared'
@@ -22,9 +23,7 @@ import {
 import { ZfsPreparer } from '../../../aws/deployment/zfs/prepare'
 import { targetOf } from '../../../aws/deployment/zfs/target'
 import { requireAwsHost } from '../../../aws/host'
-import { awsInstallationName } from '../../../installation/target/aws/host'
 import { unsettled as installationUnsettled } from '../../../installation/journal/facts'
-import { listInstallations } from '../../../installation/state'
 import { stateOf } from '../../../journal/step'
 import { Prompts, withCancellation } from '../../../terminal/prompts'
 import { approvalLabel as incusApproval, reportPlan as reportIncusPlan } from './prepare/incus'
@@ -92,9 +91,8 @@ async function holdsOf(root: Dir, record: Deployment): Promise<Holds> {
  */
 async function requireInstallationSettled(record: Deployment): Promise<void> {
   const retry = `qiln installation status --id ${record.id}`
-  const name = await awsInstallationName({ kind: 'id', value: record.id })
-  const entry = (await listInstallations(retry)).find(item => item.name === name)
-  if (entry === undefined) {
+  const entry = await installationOf(record)
+  if (entry === null) {
     return
   }
   const open = installationUnsettled(await configureJournal.read(entry.directory, entry.record, retry))
@@ -102,7 +100,7 @@ async function requireInstallationSettled(record: Deployment): Promise<void> {
     throw new InstallerError({
       code: 'INSTALLATION_UNRESOLVED',
       facts: [
-        ['Installation', name],
+        ['Installation', entry.name],
         ['Unresolved steps', open.map(step => `${step.action} (${stateOf(step)})`).join(', ')],
       ],
       retry,
@@ -141,6 +139,14 @@ async function reservationCommand(root: Dir, record: Deployment): Promise<string
     return `qiln aws deployment handoff --id ${record.id}`
   }
   return abandonable(record) ? `qiln aws deployment abandon --id ${record.id}` : null
+}
+
+/**
+ * The termination deletes the root volume, and the source checkout with it, so
+ * once the instance is verified gone there is nothing left to protect.
+ */
+function terminationPending(record: Deployment): boolean {
+  return removalPlan(record).some(({ action }) => action === 'terminate-instance')
 }
 
 function refusal(record: Deployment, observation?: Observation): InstallerError {
@@ -199,14 +205,17 @@ function reportTarget(reporter: Reporter, record: Deployment, observation: Obser
  * Releases the host over the pinned SSH connection, so a successor host can
  * import the recorded pool without force. A pool step that returned but was
  * never verified is settled first from a fresh inspection, which repeats
- * nothing and needs no approval. Then Incus is checked, under its own default-no
- * approval when it must be released, because a running daemon holds the pool;
- * Incus with a verified release already retained and every unit inactive is only
- * observed. Then a pool still imported is exported under its own approval, and
- * one observed absent only corroborates the retained export evidence. Declining
- * leaves the host untouched, and an unreachable host refuses removal. Resolving
- * access may retain a host-key pin, so the returned target carries the access
- * record, which includes it, and the caller never holds a stale record.
+ * nothing and needs no approval. When an installation is assigned to this
+ * deployment, the HEAD of its managed checkout is judged next, before any host
+ * effect, and is recorded as the restore point only after the workloads stopped.
+ * Then Incus is checked, under its own default-no approval when it must be
+ * released, because a running daemon holds the pool; Incus with a verified
+ * release already retained and every unit inactive is only observed. Then a pool
+ * still imported is exported under its own approval, and one observed absent
+ * only corroborates the retained export evidence. Declining leaves the host
+ * untouched, and an unreachable host refuses removal. Resolving access may
+ * retain a host-key pin, so the returned target carries the access record, which
+ * includes it, and the caller never holds a stale record.
  */
 async function releaseHost(
   root: Dir,
@@ -249,6 +258,7 @@ async function releaseHost(
       reporter.row('verified', 'ZFS step', 'a returned step was verified by fresh inspection; nothing was rerun')
     }
     const holds = await holdsOf(root, record)
+    const checkpoint = holds.incus ? await planCheckpoint(record, remote, prompts, reporter, retry) : null
     if (holds.incus) {
       const recorded = await lineage.pool(root, record)
       if (recorded === null) {
@@ -269,6 +279,7 @@ async function releaseHost(
       })
       await incusPreparer.release({ pool: recorded.name, guid: recorded.guid, account: username }, signal)
     }
+    await checkpoint?.pin()
     if (holds.pool) {
       await zfsPreparer.release(signal)
     }
@@ -320,6 +331,9 @@ export async function remove(options: AwsDeploymentOptions, reporter: Reporter):
       }
       reportTarget(reporter, record, observation)
       await prompts.approve('Remove the displayed deployment resources')
+      if (terminationPending(record)) {
+        await confirmCheckpoint(root, record, prompts, reporter, signal)
+      }
       reporter.space()
       await deployer.remove(observation, signal)
       reportDeployment(reporter, deployer.record)
