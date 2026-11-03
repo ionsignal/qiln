@@ -197,7 +197,7 @@ export function planOf(
       percent: policy.arcMaxPercent,
       memoryBytes: system.memoryBytes,
       writeFile: !arcFileMatches(arc.ownedLines, maxBytes),
-      applyRuntime: zfsModule.loaded && arc.runningMax !== maxBytes,
+      applyRuntime: arc.runningMax !== maxBytes,
     },
     expectedPool: recorded?.guid ?? null,
   }

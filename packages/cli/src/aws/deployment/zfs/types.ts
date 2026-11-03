@@ -9,6 +9,8 @@ import {
   poolDatasetsSchema,
   poolNameSchema,
   prerequisitePlanSchema,
+  type Plan,
+  type PrerequisitePlan,
 } from '../../../host/zfs/types'
 import { bindingSchema, volumeId } from '../journal/binding'
 import { authorizationSchemaOf } from '../../../journal/history'
@@ -101,6 +103,23 @@ export function actionsOf(plan: ZfsAuthorization['plan']): readonly StepAction[]
     case 'export':
       return plan.unmount ? ['unmount-state', 'export-pool'] : ['export-pool']
   }
+}
+
+/**
+ * The next action to run under an approved prerequisite plan, judged against the
+ * fresh plan after a verified step. Null means the approval no longer covers
+ * what the host needs: the fresh plan is not a prerequisite plan, installs a
+ * package, changes the approved ARC limit, or needs an action that the approval
+ * did not list or that already ran. Such a plan must be shown and approved
+ * again.
+ */
+export function nextApproved(fresh: Plan, approved: PrerequisitePlan, done: readonly StepAction[]): StepAction | null {
+  if (fresh.kind !== 'prerequisites' || fresh.install.length > 0 || fresh.arc.maxBytes !== approved.arc.maxBytes) {
+    return null
+  }
+  const allowed = actionsOf(approved).filter(action => !done.includes(action))
+  const required = actionsOf(fresh)
+  return required.length > 0 && required.every(action => allowed.includes(action)) ? required[0] : null
 }
 
 /**

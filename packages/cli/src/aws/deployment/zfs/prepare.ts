@@ -10,6 +10,7 @@ import {
   type ApprovedPlan,
   type Observation,
   type Plan,
+  type PrerequisitePlan,
   type RecordedPool,
   type ZfsTarget,
 } from '../../../host/zfs/types'
@@ -17,7 +18,7 @@ import { verify } from '../../../host/zfs/verify'
 import { StepJournal } from '../journal/runner'
 import { prepareRetry } from '../retry'
 import { poolState, prepared, requireNotStuck, staged, zfsFacts } from './facts'
-import { actionsOf, establishesPool, type ZfsRecord } from './types'
+import { actionsOf, establishesPool, nextApproved, type ZfsRecord } from './types'
 import * as deployments from '../records'
 import * as records from './records'
 import type { ProgressSink } from '../observe/progress'
@@ -51,6 +52,21 @@ export interface Context {
 }
 
 type ZfsJournal = StepJournal<ZfsRecord, ApprovedPlan, StepAction>
+
+/**
+ * The live approval of a prerequisite plan within one `run`, with the actions it
+ * has run. It exists only for the process and is never durable authority: the
+ * approved plan is read back from the retained authorization.
+ */
+interface PrerequisiteApproval {
+  authorization: string
+  done: StepAction[]
+}
+
+interface Continuation {
+  approved: PrerequisitePlan
+  action: StepAction
+}
 
 /**
  * Coordinates ZFS preparation under the AWS-operation lock held by the command.
@@ -117,27 +133,37 @@ export class ZfsPreparer {
 
   /**
    * Verifies a step left returned by an earlier run, then plans from fresh
-   * evidence. Each approval covers only the plan displayed with it, so a plan
-   * that changed mid-run, such as runtime ARC after a package-started module
-   * load, asks again. The package step always ends its approval: the remaining
-   * steps are re-planned from the post-install observation and need a fresh
-   * approval, and a prerequisite approval never authorizes the storage plan.
-   * The same holds for the storage plan and the mount of the state dataset,
-   * which is planned afresh once the pool is created or imported with its scrub
-   * timer enabled. The `software` scope stops as soon as the next plan concerns
-   * the pool itself, without displaying it, so Incus software can be prepared
-   * while no pool is mounted. The `storage` scope continues until the pool is
-   * imported with its scrub timer enabled and its state dataset mounted. Returns
-   * how many steps were applied.
+   * evidence. Each approval covers only the plan displayed with it. A
+   * prerequisite approval is planned again after every verified step, and it
+   * continues without a new prompt only while the fresh plan is a prerequisite
+   * plan that installs no further packages, keeps the approved ARC limit, and
+   * needs only listed actions that have not run yet. Anything else is shown and
+   * approved again, so the storage plan and the mount of the state dataset
+   * always ask for their own approval. The `software` scope stops as soon as
+   * the next plan concerns the pool itself, without displaying it, so Incus
+   * software can be prepared while no pool is mounted. The `storage` scope
+   * continues until the pool is imported with its scrub timer enabled and its
+   * state dataset mounted. Returns how many steps were applied.
    */
   public async run(signal: AbortSignal, scope: 'software' | 'storage'): Promise<number> {
     const { target, hooks, deployment } = this.context
     let observation = (await this.settleReturned()) ?? (await this.inspect())
     let applied = 0
+    let approval: PrerequisiteApproval | null = null
     while (true) {
       const plan = planOf(observation, target, DEFAULT_POLICY, this.recorded())
       if (scope === 'software' && STORAGE_PLANS.includes(plan.kind)) {
         return applied
+      }
+      if (approval !== null) {
+        const next = this.resume(approval, plan)
+        if (next !== null) {
+          observation = await this.step(approval.authorization, next.approved, next.action, signal)
+          approval.done.push(next.action)
+          applied += 1
+          continue
+        }
+        approval = null
       }
       hooks.show(observation, plan)
       switch (plan.kind) {
@@ -155,7 +181,14 @@ export class ZfsPreparer {
           })
         case 'ready':
           return applied
-        case 'prerequisites':
+        case 'prerequisites': {
+          const authorization = await this.journal.authorize(plan)
+          const [action] = actionsOf(plan)
+          observation = await this.step(authorization, plan, action, signal)
+          approval = { authorization, done: [action] }
+          applied += 1
+          break
+        }
         case 'create':
         case 'import':
         case 'mount': {
@@ -163,12 +196,6 @@ export class ZfsPreparer {
           for (const action of actionsOf(plan)) {
             observation = await this.step(authorization, plan, action, signal)
             applied += 1
-            // Installing packages can load the module and start ZFS services, so
-            // the rest of this plan may be stale. The next iteration plans again
-            // from the post-install observation.
-            if (action === 'install-packages') {
-              break
-            }
           }
         }
       }
@@ -220,6 +247,20 @@ export class ZfsPreparer {
         }
       }
     }
+  }
+
+  /**
+   * The next action that a live approval still covers, judged against the fresh
+   * plan. The approved plan is read back from its retained authorization, so
+   * continuation never rests on a retained request.
+   */
+  private resume(approval: PrerequisiteApproval, fresh: Plan): Continuation | null {
+    const approved = this.journal.record.authorizations.find(({ id }) => id === approval.authorization)?.plan
+    if (approved?.kind !== 'prerequisites') {
+      return null
+    }
+    const action = nextApproved(fresh, approved, approval.done)
+    return action === null ? null : { approved, action }
   }
 
   /**
