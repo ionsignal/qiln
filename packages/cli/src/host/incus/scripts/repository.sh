@@ -1,12 +1,9 @@
 # Installs the approved Zabbly signing key, APT source, and package preferences.
 # The source and preferences arrive as base64 and the key is downloaded once
-# over HTTPS, each with its expected SHA-256 verified before anything is
-# installed. A file that already exists must be a regular file holding exactly
-# the approved bytes and is left alone, and an approved key already in place is
-# never downloaded again. New files are staged and verified first, then created
-# exclusively and never overwrite anything. Exit codes 20 to 99 mean nothing
-# was changed. A failed install is reported as 100, because it may have changed
-# the host.
+# over HTTPS, each verified against its expected SHA-256 before anything is
+# installed. New files are staged and verified first, then created exclusively;
+# an existing file must already hold exactly the approved bytes and is never
+# overwritten, and an approved key already in place is not downloaded again.
 LC_ALL=C
 export LC_ALL
 PATH=/usr/sbin:/usr/bin:/sbin:/bin

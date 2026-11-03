@@ -7,11 +7,10 @@ import { datasetNamesOf } from '../zfs/spec'
 const settings = z.record(z.string(), z.string())
 
 /**
- * The accepted preseed shape: one ZFS pool and one managed bridge, in Incus API
- * configuration form. Server config and profiles are deliberately absent, so
- * the remote API listener stays unset and the pristine default profile is
- * neither populated nor modified. The installation attaches its instance to the
- * pool and the bridge explicitly.
+ * One ZFS pool and one managed bridge, in Incus API form. Server config and
+ * profiles are deliberately absent, so no remote listener is set and the
+ * pristine default profile is untouched. The installation attaches its instance
+ * to the pool and the bridge explicitly.
  */
 const preseedSchema = z.strictObject({
   storage_pools: z.tuple([z.strictObject({ name: z.string(), driver: z.literal('zfs'), config: settings })]),
@@ -32,12 +31,11 @@ export interface Preseed {
 }
 
 /**
- * Builds the preseed once from Qiln-owned constants. The result is serialized
- * once, so the approved bytes are the bytes that run. The logical Incus pool is
- * named like the zpool, but its storage source is only the `incus` dataset, so
- * the state dataset stays outside the driver's exclusive control. `zfs.export`
- * stays false so that stopping Incus leaves the pool imported for the separate,
- * approved ZFS export. Never sets `source.wipe`.
+ * Serialized once, so the approved bytes are the bytes that run. The Incus pool
+ * is named like the zpool but sourced only from the `incus` dataset, which keeps
+ * the state dataset outside the driver's control. `zfs.export` stays false so
+ * stopping Incus leaves the pool imported for the separate approved export.
+ * `source.wipe` is never set.
  */
 export function preseedOf(pool: string): Preseed {
   const { network } = INCUS_SPEC

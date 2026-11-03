@@ -26,11 +26,10 @@ export function rangeWords(allocations: Allocations): string[] {
 }
 
 /**
- * Every way the allocation files fall short of what an open needs. A fresh open
- * needs a root range of the minimum size in each file. A preserved open needs
- * every recorded range listed exactly, and extra ranges are permitted. This
- * compares root ranges only and does not establish that every instance mapping
- * is correct. An unreadable file is never evidence.
+ * Every way the allocation files fall short of what an open needs: a fresh open
+ * needs a root range of the minimum size in each file, a preserved open needs
+ * every recorded range listed exactly (extra ranges are allowed). Only root
+ * ranges are compared, and an unreadable file is never evidence.
  */
 export function allocationReasons(observation: Observation, retained: Allocations | null): string[] {
   return KINDS.flatMap(kind => {

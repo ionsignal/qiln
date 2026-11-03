@@ -1,11 +1,8 @@
-# Installs the storage-identity guard: the expectation file that names the
-# recorded pool and state dataset, the startup check, and the service drop-in
-# that runs that check before the daemon service starts. Each file arrives as
-# base64 with its expected SHA-256 and is verified after decoding. A file that
-# already exists must be a regular file holding exactly the approved bytes and
-# is left alone, and nothing is ever overwritten. Masking is a separate step.
-# Exit codes 20 to 99 mean nothing was changed. A failed effect is reported as
-# 100, because it may have changed the host.
+# Installs the storage-identity guard: the expectation file naming the recorded
+# pool and state dataset, the startup check, and the service drop-in that runs
+# that check before the daemon starts. Each file arrives as base64 with its
+# expected SHA-256, verified after decoding; an existing file must already hold
+# exactly those bytes and is never overwritten. Masking is a separate step.
 LC_ALL=C
 export LC_ALL
 PATH=/usr/sbin:/usr/bin:/sbin:/bin

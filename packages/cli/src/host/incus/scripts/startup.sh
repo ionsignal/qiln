@@ -1,11 +1,11 @@
 #!/bin/sh
 # Refuses to start the Incus daemon service unless the filesystem mounted at the
-# state directory is the recorded state dataset of the recorded pool. The
-# argument is the root-owned expectation file. The check reads the kernel mount
-# table, the imported pool listing, and the dataset GUID. It never installs,
-# imports, mounts, repairs, or queries Incus. Directory existence and unit
-# ordering are not identity, so neither is consulted. Every refusal exits 255,
-# which makes a systemd ExecCondition fail the unit instead of skipping it.
+# state directory is the recorded state dataset of the recorded pool, as named by
+# the root-owned expectation file passed as the argument. It reads the kernel
+# mount table, the imported pool listing, and the dataset GUID, and never
+# installs, imports, mounts, repairs, or queries Incus. Directory existence and
+# unit ordering are not identity, so neither is consulted. Every refusal exits
+# 255, which makes a systemd ExecCondition fail the unit instead of skipping it.
 LC_ALL=C
 export LC_ALL
 PATH=/usr/sbin:/usr/bin:/sbin:/bin

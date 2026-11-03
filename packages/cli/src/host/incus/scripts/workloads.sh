@@ -2,13 +2,11 @@
 # inventory arrives as `project/name` words after the per-instance stop timeout
 # in seconds. The script re-enumerates every project and refuses before any
 # effect unless the instances are exactly the approved ones and none is
-# ephemeral, because stopping an ephemeral instance deletes it. Then it
-# persists boot.autostart=false on each instance with a single-key update, so a
-# reopened daemon never resumes it, and stops each one gracefully: never forced
-# and never stateful. These checks repeat the planning conditions just before
-# the effect and cannot exclude a concurrent administrator. Exit codes 20 to 99
-# mean nothing was changed. A failed effect is reported as 100, because it may
-# have changed the host.
+# ephemeral, because stopping an ephemeral instance deletes it. It then sets
+# boot.autostart=false on each instance with a single-key update, so a reopened
+# daemon never resumes it, and stops each gracefully, never forced or stateful.
+# These checks repeat the planning checks just before the effect and cannot
+# exclude a concurrent administrator.
 LC_ALL=C
 export LC_ALL
 PATH=/usr/sbin:/usr/bin:/sbin:/bin:/opt/incus/bin

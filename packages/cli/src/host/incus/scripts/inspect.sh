@@ -1,11 +1,10 @@
-# Fixed inspection of repository files, packages, software versions, units,
-# listeners, host network, Incus group access, subordinate-ID allocations, the
-# sysctl override, the ZFS pool, the state mount, the state directory, the
-# startup guard files, and the Incus API. Every section reports its own status,
-# so a missing capability is distinguishable from an empty result. Nothing here
-# installs, loads, or writes anything. Every section but the API ones is
-# offline: it never touches an Incus socket. The API is read only while the
-# daemon service itself is already active, because a query through an active
+# Fixed read-only inspection of the host: repository and guard files, packages,
+# software versions, units, listeners, network, Incus group access,
+# subordinate-ID allocations, the sysctl override, the ZFS pool, the state
+# mount, the state directory, and the Incus API. Every section reports its own
+# status, so a missing capability differs from an empty result. Nothing is
+# installed, loaded, or written. Only the API sections touch Incus, and only
+# while the daemon service itself is active, because a query through an active
 # socket alone would start the daemon by socket activation.
 LC_ALL=C
 export LC_ALL

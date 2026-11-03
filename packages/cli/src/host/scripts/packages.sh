@@ -1,10 +1,8 @@
 # Installs exactly the approved package set. It re-simulates first and refuses
 # unless APT still plans precisely those names and versions, so an approval is
-# never widened. Exit codes 20 to 99 mean nothing was changed. A failed install
-# is reported as 100, because it may have changed the host. The simulation and
-# the install are separate APT runs, so the install is not atomic with the
-# simulation; `--no-remove` keeps it from removing anything the simulation did
-# not show.
+# never widened. The simulation and the install are separate APT runs, so they
+# are not atomic; `--no-remove` keeps the install from removing anything the
+# simulation did not show.
 LC_ALL=C
 export LC_ALL
 PATH=/usr/sbin:/usr/bin:/sbin:/bin

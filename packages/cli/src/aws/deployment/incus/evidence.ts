@@ -5,8 +5,8 @@ import type { Deployment } from '../types'
 import type { IncusRecord } from './types'
 
 /**
- * Kept apart from `records.ts` because the deployment records import that
- * module for the reuse guard, and this one imports the deployment records.
+ * Separate from `records.ts` to avoid an import cycle: the deployment records
+ * import that module for the reuse guard.
  */
 export async function evidence(root: Dir, deployment: Deployment): Promise<IncusRecord | null> {
   return await records.read(await deployments.directoryOf(root, deployment.id), deployment)

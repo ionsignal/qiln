@@ -1,15 +1,12 @@
-# Closes the host to Incus activation before any package can start the daemon.
-# It masks every Incus unit persistently, so package scripts that honor masks
-# neither enable nor start them. It also installs the Qiln sysctl override that
+# Closes the host to Incus activation before any package can start the daemon:
+# masks every Incus unit persistently and installs the sysctl override that
 # keeps the AppArmor restriction enabled, because the package's own sysctl file
-# weakens it and the package script applies that file when it installs. The
-# override arrives as base64 with its expected SHA-256 and is verified after
-# decoding. An existing file must be a regular file holding exactly the approved
-# bytes and is left alone, and nothing is ever overwritten. It needs neither the
-# pool nor the state mount. A unit that is not positively inactive is refused,
-# because a mask does not stop it and a state that cannot be read is not
-# evidence of inactivity. Exit codes 20 to 99 mean nothing was changed. A failed
-# effect is reported as 100, because it may have changed the host.
+# weakens it and its install script applies that file. The override arrives as
+# base64 with its expected SHA-256, verified after decoding; an existing file
+# must already hold exactly those bytes and is never overwritten. Needs neither
+# the pool nor the state mount. A unit that is not positively inactive is
+# refused, because a mask does not stop it and an unreadable state is not
+# evidence of inactivity.
 LC_ALL=C
 export LC_ALL
 PATH=/usr/sbin:/usr/bin:/sbin:/bin

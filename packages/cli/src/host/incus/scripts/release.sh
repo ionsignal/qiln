@@ -1,11 +1,9 @@
 # Closes and stops Incus so the pool can be exported. Every unit is masked
-# persistently first, so nothing can reactivate it while it stops and it stays
-# closed across a reboot. Running instances are shut down in order: the
-# packaged startup unit does that when it stops, and a daemon that is still
-# running is asked directly, because the startup unit only acts when it was
-# active. Then the user and main units are stopped, sockets before services so
-# nothing reactivates them. Exit codes 20 to 99 mean nothing was changed. Any
-# failed mask or stop is reported as 100, because it may have changed the host.
+# persistently first, so nothing reactivates it while it stops and it stays
+# closed across a reboot. Running instances are shut down in order: by the
+# packaged startup unit when it was active, otherwise by asking the running
+# daemon directly. Then the user and main units are stopped, sockets before
+# services so nothing reactivates them.
 LC_ALL=C
 export LC_ALL
 PATH=/usr/sbin:/usr/bin:/sbin:/bin:/opt/incus/bin

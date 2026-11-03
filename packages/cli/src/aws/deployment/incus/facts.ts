@@ -18,8 +18,8 @@ const STORAGE_LABELS: Record<StorageState, string> = {
 }
 
 /**
- * Steps whose effect is unknown and which only an operator can resolve: open
- * or uncertain. Nothing clears them, and they are never replayed or resumed.
+ * Steps whose effect is unknown (open or uncertain). Nothing clears them, and
+ * they are never replayed or resumed.
  */
 export function stuck(record: IncusRecord | null): IncusStep[] {
   return journal.stuck(record?.steps ?? [])
@@ -45,7 +45,7 @@ function storageUnsettled(record: IncusRecord | null): IncusStep[] {
 }
 
 /**
- * Any open or initialization that was not refused may have let the daemon write
+ * An open or initialization that was not refused may have let the daemon write
  * Incus data to the state directory and the pool.
  */
 export function storageTouched(record: IncusRecord | null): boolean {
@@ -53,10 +53,9 @@ export function storageTouched(record: IncusRecord | null): boolean {
 }
 
 /**
- * A verified open or initialization let the daemon run, so closed-host
- * protection no longer keeps it closed. This is history, not current state: it
- * stays true after a reboot or a release stops the daemon, and whether the
- * daemon runs now is read from a fresh inspection.
+ * History, not current state: a verified open or initialization let the daemon
+ * run, which stays true after a reboot or a release. Whether it runs now comes
+ * from a fresh inspection.
  */
 export function opened(record: IncusRecord | null): boolean {
   return (record?.steps ?? []).some(step => opens(step.action) && journal.stateOf(step) === 'verified')
@@ -66,9 +65,9 @@ export function opened(record: IncusRecord | null): boolean {
  * Storage counts as released when it was never touched, or when a release step
  * was verified after the last open or initialization that was not refused. A
  * verified release stops the daemon and masks every unit, so it is the only
- * evidence of release: an observed inactivity is not, because nothing then
- * shows that the instances were stopped or that the host stays closed. The
- * evidence is point-in-time, and unresolved steps are judged separately.
+ * evidence: observed inactivity is not, because it does not show that the
+ * instances were stopped or that the host stays closed. The evidence is
+ * point-in-time, and unresolved steps are judged separately.
  */
 export function storageReleased(record: IncusRecord | null): boolean {
   const steps = record?.steps ?? []
@@ -98,8 +97,8 @@ export function storageState(record: IncusRecord | null): StorageState {
 }
 
 /**
- * Whether a verified step is the one that establishes the baseline and the
- * server identity: an initialization, or the open of a preserved installation.
+ * Whether a verified step establishes the baseline and the server identity: an
+ * initialization, or the open of a preserved installation.
  */
 export function establishes(record: IncusRecord, step: IncusStep): boolean {
   if (journal.stateOf(step) !== 'verified') {
@@ -113,8 +112,8 @@ export function establishes(record: IncusRecord, step: IncusStep): boolean {
 }
 
 /**
- * The approved preseed bytes of the newest establishing step, read back from
- * the retained evidence. Null means no such step was verified.
+ * The approved preseed bytes of the newest establishing step, read back from the
+ * retained evidence. Null means no such step was verified.
  */
 export function retainedPreseedBytes(record: IncusRecord | null): { yaml: string; sha256: string } | null {
   if (record === null) {
@@ -158,10 +157,10 @@ function refusal(record: IncusRecord | null, deploymentId: string): InstallerErr
 }
 
 /**
- * A stuck step of any action blocks further preparation, while a returned one
- * is verified by the next fresh inspection. Removal that must stop Incus also
- * calls this before connecting, because the journal accepts no new work after
- * an unresolved step.
+ * A stuck step of any action blocks further preparation, while a returned one is
+ * verified by the next fresh inspection. Removal that must stop Incus also calls
+ * this before connecting, because the journal accepts no new work after an
+ * unresolved step.
  */
 export function requireNotStuck(record: IncusRecord | null, deploymentId: string): void {
   if (stuck(record).length > 0) {
@@ -170,10 +169,9 @@ export function requireNotStuck(record: IncusRecord | null, deploymentId: string
 }
 
 /**
- * Removal starts here: only a storage-affecting step with an unknown effect
- * blocks this gate. Once Incus was opened, removal is additionally refused
- * by `requireNotStuck`. A step that exited zero is left for the release check
- * to verify from a fresh inspection, which is settlement and not replay.
+ * Removal starts here: only a stuck storage-affecting step blocks. Once Incus
+ * was opened, `requireNotStuck` additionally applies. A returned step is
+ * verified from a fresh inspection, which is settlement and not replay.
  */
 export function requireStorageNotStuck(record: IncusRecord | null, deploymentId: string): void {
   if (stuck(record).some(step => affectsStorage(step.action))) {
@@ -182,8 +180,8 @@ export function requireStorageNotStuck(record: IncusRecord | null, deploymentId:
 }
 
 /**
- * Any unsettled Incus step blocks a handoff to installation, because a returned
- * step has not yet been verified by a fresh inspection.
+ * Any unsettled step blocks a handoff to installation, because a returned step
+ * has not yet been verified by a fresh inspection.
  */
 export function requireSettled(record: IncusRecord | null, deploymentId: string): void {
   if (unsettled(record).length > 0) {
@@ -203,8 +201,8 @@ export function requireStorageSettled(record: IncusRecord | null, deploymentId: 
 }
 
 /**
- * Handing off the volume or removing the host needs Incus storage whose state
- * is known and that was released.
+ * Handing off the volume or removing the host needs Incus storage whose state is
+ * known and that was released.
  */
 export function requireStorageReleased(record: IncusRecord | null, deploymentId: string): void {
   requireStorageSettled(record, deploymentId)

@@ -6,8 +6,7 @@ export { baselineSchema }
 export type { Baseline }
 
 /**
- * The software part of a baseline, which a selected set of pins can express
- * without any observation.
+ * The part of a baseline that selected pins can express without an observation.
  */
 type Software = Pick<Baseline, 'architecture' | 'packages'>
 
@@ -23,16 +22,15 @@ export type Comparison =
   | { kind: 'differs'; reasons: string[] }
 
 /**
- * The Incus packages that must return at exactly their recorded version. Their
- * configured builds identify the bundled LXC runtime, liblxc, and mapping
- * helpers, so distribution LXC and uidmap packages are not additional pins.
- * Other recorded packages, such as ZFS, are judged by version floors, because
- * other preparation steps install them.
+ * Incus packages must return at exactly their recorded version: their builds
+ * identify the bundled LXC runtime and helpers, so distribution LXC and uidmap
+ * packages are not pins. Other recorded packages, such as ZFS, are judged by
+ * version floors.
  */
-const PINNED = INCUS_SPEC.software.pinned.map(glob => new RegExp(`^${glob.replace('*', '.*')}$`))
+const PINNED_PATTERNS = INCUS_SPEC.software.pinned.map(glob => new RegExp(`^${glob.replace('*', '.*')}$`))
 
 export function isPinned(name: string): boolean {
-  return PINNED.some(pattern => pattern.test(name))
+  return PINNED_PATTERNS.some(pattern => pattern.test(name))
 }
 
 function byName(left: PackageChange, right: PackageChange): number {
@@ -40,10 +38,10 @@ function byName(left: PackageChange, right: PackageChange): number {
 }
 
 /**
- * Null means the observation does not hold a complete Incus installation, or a
- * subordinate-ID file could not be read, so there is nothing to record. A
- * preserved open passes the retained baseline so that its subordinate-ID ranges
- * are kept unchanged and extra ranges never ratchet into the record.
+ * Null means there is nothing to record: the installation is incomplete or a
+ * subordinate-ID file was unreadable. A preserved open passes its retained
+ * baseline so its ranges stay unchanged and extra ranges never ratchet into the
+ * record.
  */
 export function baselineOf(observation: Observation, retained: Baseline | null = null): Baseline | null {
   const parsed = baselineSchema.safeParse({

@@ -1,8 +1,6 @@
 # Refreshes the APT package lists. This updates every configured source, not
-# only the approved repository, and the preview discloses that. APT's own fetch
-# retries are the only retry logic. Exit codes 20 to 99 mean nothing was
-# changed. A failed refresh is reported as 100, because it may have changed the
-# host.
+# only the approved repository, which the approval screen discloses. APT's own
+# fetch retries are the only retries.
 LC_ALL=C
 export LC_ALL
 PATH=/usr/sbin:/usr/bin:/sbin:/bin

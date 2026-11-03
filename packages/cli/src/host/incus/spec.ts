@@ -20,11 +20,11 @@ interface StepSpec {
 }
 
 /**
- * The one enumeration of Incus preparation steps. `storage` marks the steps
- * that can leave Incus data on the pool or its outcome unknown, and only those
- * block removal and volume handoff. A step names one embedded script, its
- * deadline, and the wording of every exit code that script uses to refuse
- * before any effect. Arguments are built from the approved plan by `apply.ts`.
+ * The one enumeration of Incus preparation steps. `storage` marks the steps that
+ * can leave Incus data on the pool or an unknown outcome, and only those block
+ * removal and volume handoff. A step names one embedded script, its deadline,
+ * and the wording of every exit code that script uses to refuse before any
+ * effect. Arguments come from the approved plan in `apply.ts`.
  */
 const STEPS = {
   close: {
@@ -189,77 +189,61 @@ const STEPS = {
 
 /**
  * The packages that a replacement host must install at exactly their recorded
- * version to reopen a preserved installation. The LXC runtime, liblxc, and the
- * helper binaries are bundled under /opt/incus inside incus-base, and neither
- * incus-base nor incus-client depends on an lxc, liblxc, or uidmap package, so
- * none is pinned here: the exact incus pins identify the bundled runtime.
+ * version to reopen a preserved installation. The LXC runtime, liblxc, and
+ * helpers are bundled under /opt/incus inside incus-base, so no lxc, liblxc, or
+ * uidmap package is pinned: the exact incus pins identify the runtime.
  */
 const PINNED = ['incus*'] as const
 
 /**
  * Reviewed coordinates and fixed limits of the Incus preparation recipe.
  *
- * - `packages` are simulated and installed, `companions` must arrive with them,
- *   and `excluded` packages are refused if present. The scope is containers
- *   only: `incus` is the VM-capable meta-package, and VM support is out of
- *   scope.
- * - `packageVersions` selects the full version of both required packages for
- *   each native architecture. APT metadata and simulation must confirm the
- *   exact names, versions, architecture, and availability before installation;
- *   the selected pins alone do not establish successful host execution.
- * - The `stable` channel is moving, not a version pin. The preferences file
- *   selects these exact builds and excludes other versions from normal APT
- *   selection. Future Incus updates require deliberate repinning.
+ * - `packages` are simulated and installed, and `companions` must arrive with
+ *   them. `excluded` packages are refused if present. The scope is containers
+ *   only, so the VM-capable `incus` meta-package is excluded.
+ * - `packageVersions` selects one full version per native architecture for both
+ *   required packages. APT metadata and simulation must confirm names, versions,
+ *   architecture, and availability before installation. The `stable` channel
+ *   moves, so the preferences file pins these builds and a later Incus update
+ *   needs a deliberate repin.
  * - The signing key is downloaded on the host from `keyUrl` and must match
- *   `keySha256`, the SHA-256 of the raw file bytes. A rotated or re-issued key
- *   fails closed and needs a new reviewed constant. `fingerprint` is review
- *   metadata only, because the host verifies the file digest and not the
- *   OpenPGP fingerprint.
- * - `units` are the Incus activation paths. Closing and release mask all of
- *   them persistently, and their positive inactivity establishes quiescence.
- *   Closing, which precedes every package effect, refuses any unit that is not
- *   positively inactive. They must match the units reported by the inspection
- *   script. `incus-lxcfs.service` is deliberately absent: the packaged daemon
- *   unit requires it, and it mounts only its own FUSE filesystem and does not
- *   use the state directory. The package scripts therefore enable and start it
- *   when they install. `incus-startup.service` stays masked, so the host does
- *   not stop instances at shutdown, and release is the designed stop path.
- *   `open.units` are the only ones that the open step unmasks and starts, so the
- *   user and startup units stay masked.
- * - `sysctl` is the Qiln-owned override that the close step installs. The
- *   package ships `/usr/lib/sysctl.d/50-incus.conf`, which sets this key to 0
- *   and which the package script applies by restarting systemd-sysctl. The
- *   `99-` name sorts after it, so the override wins at that restart. The other
- *   sysctls of the package are accepted and disclosed.
+ *   `keySha256`, the SHA-256 of the raw bytes, so a rotated key fails closed.
+ *   `fingerprint` is review metadata only.
+ * - `units` are the Incus activation paths. Closing and release mask all of them
+ *   persistently, and their positive inactivity establishes quiescence.
+ *   `incus-lxcfs.service` is deliberately absent: the packaged daemon requires
+ *   it, package scripts start it, and it does not use the state directory.
+ *   `incus-startup.service` stays masked so the host does not stop instances at
+ *   shutdown, and release is the designed stop path. `open.units` are the only
+ *   units that the open step unmasks and starts.
+ * - `sysctl` is the override that keeps the AppArmor restriction enabled. The
+ *   package ships `/usr/lib/sysctl.d/50-incus.conf` setting this key to 0, and
+ *   the `99-` name sorts after it. The package's other sysctls are accepted and
+ *   disclosed.
  * - `guard` names the three root-owned files that protect the state directory:
- *   the expectation file with the recorded pool and state dataset identities,
- *   the startup check that compares them with the kernel mount table, and the
- *   drop-in that runs that check before the daemon service starts.
- * - `requiredExtensions` gate the `zfs.export` pool key, which keeps the Incus
- *   driver from exporting the whole pool when it unmounts.
+ *   the expectation of the recorded pool and state dataset, the startup check
+ *   that compares it with the kernel mount table, and the drop-in that runs that
+ *   check before the daemon service starts.
+ * - `requiredExtensions` gate the `zfs.export` pool key, which keeps the driver
+ *   from exporting the whole pool when it unmounts.
  * - `access.group` is the Incus administration group. Membership is
- *   root-equivalent authority over the Incus Unix socket, and Qiln only ever
- *   adds the administrator account to it.
- * - `idmap.minimum` is the size of the root range that a fresh open requires in
- *   each of `/etc/subuid` and `/etc/subgid`.
- * - `release` bounds the workload stop. Each running instance gets
- *   `stopTimeoutSeconds` to shut down cleanly, and `maximumRunning` of them
- *   fit the SSH command ceiling together with the autostart updates.
- *   `maximumInstances` bounds the frozen inventory that the evidence retains.
- * - `floors` are the configured minimum versions, compared by their leading
- *   dotted number only. The kernel floor is judged on the host. The LXC floor
- *   is judged on the version the running daemon reports, because an offline
- *   probe does not describe the bundled runtime. A missing version never
- *   meets its floor.
- * - `software.patterns` are the `dpkg-query` globs of the packages that make up
- *   the recorded software baseline: Incus and ZFS. `software.pinned` is the
- *   Incus subset that a preserved open requires at exactly the recorded
- *   version; its builds identify the bundled runtime, while ZFS is judged by
- *   the configured floors.
- * - `retained.metadata` are the entries, relative to the state directory, that
- *   a preserved open requires to be present before the daemon may start. Each
- *   final entry must not be a symbolic link; metadata contents are not
- *   validated.
+ *   root-equivalent authority over the socket, and Qiln only ever adds the
+ *   administrator account to it.
+ * - `idmap.minimum` is the root range that a fresh open requires in each of
+ *   `/etc/subuid` and `/etc/subgid`.
+ * - `release` bounds the workload stop: each running instance gets
+ *   `stopTimeoutSeconds`, `maximumRunning` of them fit the SSH command ceiling,
+ *   and `maximumInstances` bounds the frozen inventory.
+ * - `floors` are minimum versions compared by their leading dotted number only.
+ *   The kernel is judged on the host and LXC on the version the running daemon
+ *   reports. A missing version never meets its floor.
+ * - `software.patterns` are the `dpkg-query` globs of the recorded software
+ *   baseline (Incus and ZFS). `software.pinned` is the Incus subset that a
+ *   preserved open requires at exactly the recorded version, while ZFS is judged
+ *   by the floors.
+ * - `retained.metadata` are the state-directory entries that a preserved open
+ *   requires before the daemon may start, each not a symbolic link. Their
+ *   contents are not validated.
  * - `maximumInstalls` bounds the resolved transaction, not an expected count.
  */
 export const INCUS_SPEC = Object.freeze({
@@ -364,7 +348,7 @@ export function opens(action: IncusAction): boolean {
 
 /**
  * The steps that stop the workloads and the daemon again. A verified `release`
- * after the last opening is what establishes that Incus was released.
+ * after the last opening establishes that Incus was released.
  */
 export function releases(action: IncusAction): boolean {
   return action === 'stop-workloads' || action === 'release'
@@ -382,8 +366,8 @@ export function packagePins(architecture: Architecture) {
 }
 
 /**
- * The deb822 source for the verified dpkg architecture. The exact text is
- * hashed into the approved plan, so it is never regenerated from other inputs.
+ * The deb822 source for the verified dpkg architecture. Its exact text is hashed
+ * into the approved plan, so it is never regenerated from other inputs.
  */
 export function repositorySource(architecture: Architecture): string {
   const { uri, suite, component, keyFile } = INCUS_SPEC.repository
@@ -401,9 +385,9 @@ export function repositorySource(architecture: Architecture): string {
 }
 
 /**
- * APT uses the first matching specific record, so the exact version precedes
- * the exclusion. Priority 1000 selects it without authorizing a downgrade.
- * Explicit administrator overrides remain outside this configuration.
+ * APT uses the first matching specific record, so the exact version precedes the
+ * exclusion. Priority 1000 selects it without authorizing a downgrade, and
+ * explicit administrator overrides stay outside this configuration.
  */
 export function repositoryPreferences(architecture: Architecture): string {
   const packages = REQUIRED_PACKAGES.join(' ')
@@ -422,8 +406,7 @@ export function repositoryPreferences(architecture: Architecture): string {
 }
 
 /**
- * The exact text of the sysctl override. Its digest is hashed into the approved
- * close plan, so it is never regenerated from other inputs.
+ * The exact text of the sysctl override, hashed into the approved close plan.
  */
 export function sysctlOverride(): string {
   const { key, value } = INCUS_SPEC.sysctl

@@ -1,18 +1,15 @@
-# Opens a closed host to the Incus daemon. It verifies the installed startup
-# check against its approved digest and runs it, then checks the state
-# directory for the mode it was asked for, then checks the root rows of the
-# subordinate-ID files, then unmasks and starts the given units. The `fresh`
-# mode requires an empty state directory, so retained Incus state is never
+# Opens a closed host to the Incus daemon: verifies and runs the installed
+# startup check, checks the state directory and the root rows of the
+# subordinate-ID files for the requested mode, then unmasks and starts the given
+# units. `fresh` requires an empty state directory, so retained state is never
 # opened as a fresh installation, and a root range of the minimum size in each
-# ID file. The `preserved` mode requires every retained metadata entry to be
-# present as a real entry and every recorded root range to be listed exactly,
-# and never falls back to a fresh installation. Starting the daemon opens or
-# initializes its metadata in the state directory. The ID files are never
-# edited. Arguments: the mode, the startup check, its digest, the expectation
-# file, the state directory, the minimum root range size, the retained metadata
-# entries, `--`, the recorded ranges as `uid|gid:start:count` words, `--`, then
-# the units. Exit codes 20 to 99 mean nothing was changed. A failed unmask,
-# reload, or start is reported as 100, because it may have changed the host.
+# ID file. `preserved` requires every retained metadata entry to be a real entry
+# and every recorded root range to be listed exactly, and never falls back to
+# fresh. Starting the daemon writes its metadata to the state directory; the ID
+# files are never edited. Arguments: the mode, the startup check, its digest,
+# the expectation file, the state directory, the minimum root range size, the
+# retained metadata entries, `--`, the recorded ranges as `uid|gid:start:count`
+# words, `--`, then the units.
 LC_ALL=C
 export LC_ALL
 PATH=/usr/sbin:/usr/bin:/sbin:/bin

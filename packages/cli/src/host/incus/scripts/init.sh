@@ -1,17 +1,16 @@
-# Initializes Incus from the approved preseed. The preseed arrives as base64
-# with its expected SHA-256 and is verified after decoding. Initialization is not
-# an atomic transaction and merges into existing state, so the script refuses
-# before any effect unless Incus is pristine: no server configuration, no extra
-# project, profile content, storage pool, managed network, instance, or image,
-# no TCP listener, no host route in the bridge subnet, and the recorded ZFS pool
-# is still imported with the approved GUID, holding exactly its root, its state
-# dataset, and an empty storage dataset, with only the state dataset mounted at
-# the state directory. These repeat the planning conditions just before the
-# effect and cannot exclude a concurrent administrator. GUIDs are decimal
-# strings that awk could otherwise compare as doubles, so identity comparisons
-# either use shell text tests or concatenate an empty string to force an exact
-# text comparison. Any Incus failure is reported as 100 so it can never read as a
-# refusal. Exit codes 20 to 99 mean nothing was changed.
+# Initializes Incus from the approved preseed, which arrives as base64 with its
+# expected SHA-256, verified after decoding. Initialization merges into existing
+# state and is not atomic, so the script refuses before any effect unless Incus
+# is pristine (no server configuration, extra project, profile content, storage
+# pool, managed network, instance, image, TCP listener, or host route in the
+# bridge subnet) and the recorded ZFS pool is still imported with the approved
+# GUID, holding exactly its root, state dataset, and an empty storage dataset,
+# with only the state dataset mounted at the state directory. These repeat the
+# planning checks just before the effect and cannot exclude a concurrent
+# administrator. GUIDs are decimal strings that awk could compare as doubles, so
+# identity comparisons use shell text tests or concatenate an empty string to
+# force a text comparison. Every Incus failure exits 100, so it never reads as
+# a refusal.
 LC_ALL=C
 export LC_ALL
 PATH=/usr/sbin:/usr/bin:/sbin:/bin:/opt/incus/bin

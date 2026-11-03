@@ -12,8 +12,8 @@ import { observationSchema, type IdRange, type InspectTarget, type Observation }
 import type { Remote } from '../../transport/ssh/connections'
 
 /**
- * Carries only authored wording. Raw output, host names, and tool messages
- * never enter the diagnostic.
+ * Authored wording only: raw output, host names, and tool messages never enter
+ * the diagnostic.
  */
 function inspectionFailure(reason: string): InstallerError {
   return new InstallerError({
@@ -33,7 +33,7 @@ const settings = z
   .nullable()
   .transform(value => value ?? {})
 
-function list<T extends z.ZodType>(item: T) {
+function nullableList<T extends z.ZodType>(item: T) {
   return z
     .array(item)
     .nullable()
@@ -191,9 +191,8 @@ function installedOf(section: Section) {
 }
 
 /**
- * Each line is `service <unit> <load> <unit-file> <activation>`, taken from
- * machine-readable unit properties. A missing field fails validation, so
- * incomplete evidence never reads as inactive.
+ * Lines are `service <unit> <load> <unit-file> <activation>`. A missing field
+ * fails validation, so incomplete evidence never reads as inactive.
  */
 function servicesOf(section: Section) {
   return tagged(section.lines).map(([tag, value]) => {
@@ -272,8 +271,8 @@ function idmapOf(section: Section) {
 }
 
 /**
- * Whether the state directory holds nothing, and whether every retained
- * metadata entry is present. Both are required fields, never defaults.
+ * Both fields are required, never defaulted: whether the state directory is
+ * empty, and whether every retained metadata entry is present.
  */
 function stateOf(section: Section) {
   const values = fields(section.lines)
@@ -311,8 +310,8 @@ function zfsOf(section: Section) {
 }
 
 /**
- * The LXC version that the daemon reports, taken from the entry of the `lxc`
- * driver. Null means the daemon reported none, never a default.
+ * The LXC version taken from the entry of the `lxc` driver. Null means the
+ * daemon reported none, never a default.
  */
 function lxcVersionOf(driver: string, driverVersion: string): string | null {
   const names = driver.split('|').map(part => part.trim())
@@ -340,40 +339,40 @@ function apiOf(found: ReadonlyMap<string, Section>) {
       clustered: server.environment.server_clustered,
       lxc: lxcVersionOf(server.environment.driver, server.environment.driver_version),
     },
-    projects: read('projects', list(projectSchema)).map(project => project.name),
-    pools: read('storage', list(poolSchema)).map(({ name, driver, config }) => ({ name, driver, config })),
-    networks: read('networks', list(networkSchema)).map(({ name, type, managed, config }) => ({
+    projects: read('projects', nullableList(projectSchema)).map(project => project.name),
+    pools: read('storage', nullableList(poolSchema)).map(({ name, driver, config }) => ({ name, driver, config })),
+    networks: read('networks', nullableList(networkSchema)).map(({ name, type, managed, config }) => ({
       name,
       type,
       managed,
       config,
     })),
-    profiles: read('profiles', list(profileSchema)).map(({ name, config, devices }) => ({ name, config, devices })),
-    instances: read('instances', list(instanceSchema)).map(({ project, name, status, ephemeral, config }) => ({
+    profiles: read('profiles', nullableList(profileSchema)).map(({ name, config, devices }) => ({ name, config, devices })),
+    instances: read('instances', nullableList(instanceSchema)).map(({ project, name, status, ephemeral, config }) => ({
       project,
       name,
       status,
       ephemeral,
       autostart: config['boot.autostart'] ?? null,
     })),
-    images: read('images', list(imageSchema)).length,
+    images: read('images', nullableList(imageSchema)).length,
   }
 }
 
 /**
  * Runs the fixed inspection and validates its output into one observation.
- * Transport failures propagate unchanged: a failed channel ends the connection,
- * so nothing further runs on it. `target.pool` selects the one ZFS pool whose
- * datasets are reported, and null reports none, which is how the software stage
- * runs before any pool is imported. `target.account` is the account whose Incus
- * group membership is reported. A fresh installation simulates the exact native
- * package pins. `target.retained` instead supplies the recorded pinned packages,
- * which the planner must also find compatible with the selected recipe.
- * `approved` names the packages of an approved transaction, so a verification
- * checks all of them and not only the direct ones; they are reported but never
- * simulated. Every section except the API is offline evidence. The API is read
- * only while the daemon service is already running, so inspection never starts
- * the daemon through socket activation.
+ * Transport failures propagate unchanged, because a failed channel ends the
+ * connection.
+ * - `target.pool` selects the one ZFS pool whose datasets are reported. Null
+ *   reports none, which is how the software stage runs before any pool is
+ *   imported.
+ * - A fresh installation simulates the exact native package pins, while
+ *   `target.retained` simulates its recorded pinned packages instead.
+ * - `approved` names the packages of an approved transaction, so a verification
+ *   checks all of them. They are reported but never simulated.
+ * Only the API sections touch Incus, and only while the daemon service is
+ * already running, so inspection never starts the daemon through socket
+ * activation.
  */
 export async function inspectHost(
   remote: Remote,

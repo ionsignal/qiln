@@ -1,10 +1,8 @@
-# Adds the recorded administrator account to the Incus administration group.
-# Membership gives root-equivalent access to the Incus Unix socket, so the
-# script only adds a group to an existing non-root account with usermod -aG,
-# which keeps every other membership. It never creates a group, edits socket
-# permissions, or changes SSH configuration. A membership change applies to
-# new logins only. Exit codes 20 to 99 mean nothing was changed. A failed
-# usermod is reported as 100, because it may have changed the host.
+# Adds the administrator account to the Incus administration group, which is
+# root-equivalent authority over the Incus socket. It only appends the group to
+# an existing non-root account (usermod -aG keeps other memberships) and never
+# creates a group or edits socket permissions or SSH configuration. The change
+# applies to new logins only.
 LC_ALL=C
 export LC_ALL
 PATH=/usr/sbin:/usr/bin:/sbin:/bin

@@ -25,12 +25,11 @@ function artifact(path: string, text: string): Artifact {
 }
 
 /**
- * Derives the three guard files from the recorded pool identities alone, so the
- * approved bytes are the bytes the host receives. The expectation file is
- * the identity the startup check compares with the kernel mount table, and the
- * drop-in makes that check the first thing the daemon service runs. It is an
- * `ExecCondition`, whose refusal fails the unit instead of skipping it, and it
- * runs before any other start command of the packaged unit.
+ * Derived from the recorded pool identities alone, so the approved bytes are the
+ * bytes the host receives. The startup check compares the expectation file with
+ * the kernel mount table. The drop-in runs that check as an `ExecCondition`,
+ * whose exit 255 fails the unit instead of skipping it, before any other start
+ * command of the packaged unit.
  */
 export function guardOf(target: PoolTarget): Guard {
   const { guard } = INCUS_SPEC
