@@ -1,13 +1,10 @@
-import { RECIPE } from '../../../../host/incus/recipe'
-import { INCUS_SPEC, packagePins } from '../../../../host/incus/spec'
+import { INCUS_SPEC, type IncusAction } from '../../../../host/incus/spec'
 import { STATE_MOUNTPOINT } from '../../../../host/mount'
-import { guardOf } from '../../../../host/incus/activation'
-import { isPinned } from '../../../../host/incus/baseline'
 import { rangeText } from '../../../../host/incus/idmap'
-import { readPreseed } from '../../../../host/incus/preseed'
-import { instanceKey } from '../../../../host/incus/types'
 import { maskedUnits } from '../../../../host/incus/verify'
 import { datasetNamesOf } from '../../../../host/zfs/spec'
+import { actionsOf, instanceKey } from '../../../../host/incus/types'
+import { INCUS_LABELS, reportApproval, stepsOf, type ApprovalScreen } from './steps'
 import type { DiagnosticFact } from '../../../../diagnostic/error'
 import type {
   AccessPlan,
@@ -30,27 +27,40 @@ export interface PlanPreview {
   plan: Plan
 }
 
+type Details = Partial<Record<IncusAction, string>>
+
+const REPOSITORY_LASTING =
+  'The exact-package pins exclude other Incus builds, including security updates, until they are repinned. apt-get update refreshes every configured APT source.'
+
+function repositoryLabel(plan: RepositoryPlan): string {
+  return plan.add
+    ? 'Set up the displayed Zabbly repository and exact-package pins, then refresh APT package lists on the deployment host'
+    : 'Refresh APT package lists on the deployment host'
+}
+
 /**
  * The wording of the default-no approval that goes with each displayed plan.
  */
 export function approvalLabel(plan: ApprovedPlan): string {
   switch (plan.kind) {
-    case 'close':
-      return 'Close the deployment host to Incus: mask the displayed Incus units so no package can start them, and install the displayed sysctl override that keeps the AppArmor restriction enabled'
+    case 'close': {
+      const close = 'Close the deployment host to Incus (mask the Incus units and install the AppArmor sysctl override)'
+      return plan.repository === null
+        ? close
+        : `${close}, then ${repositoryLabel(plan.repository).replace(/^[A-Z]/, letter => letter.toLowerCase())}`
+    }
     case 'guard':
       return 'Install the displayed storage-identity startup guard on the deployment host'
     case 'repository':
-      return plan.add
-        ? 'Install the missing displayed Zabbly repository and Incus package-pin files, then refresh APT package lists on the deployment host'
-        : 'Refresh APT package lists on the deployment host'
+      return repositoryLabel(plan)
     case 'packages':
       return 'Install the displayed exact Incus package versions and dependencies on the deployment host'
     case 'open':
       return plan.retained === null
-        ? 'Open the deployment host to Incus: unmask and start the Incus daemon units on the recorded state dataset'
-        : 'Reopen the preserved Incus installation: unmask and start the Incus daemon units on the recorded state dataset, without initializing'
+        ? 'Open the deployment host to Incus: unmask and start the daemon on the recorded state dataset'
+        : 'Reopen the preserved Incus installation on the recorded state dataset, without initializing'
     case 'initialize':
-      return 'Initialize Incus from the displayed preseed on the deployment host'
+      return 'Initialize Incus from the approved preseed on the deployment host'
     case 'access':
       return `Add ${plan.account} to the ${plan.group} group on the deployment host (root-equivalent Incus access)`
     case 'release':
@@ -88,7 +98,11 @@ function rangesState(ranges: readonly IdRange[] | null): string {
   return ranges.map(rangeText).join(', ') || 'no root range'
 }
 
-function hostFacts({ observation }: PlanPreview): DiagnosticFact[] {
+/**
+ * The full inventory, shown only when a plan is refused, because that evidence
+ * explains the refusal.
+ */
+function hostFacts(observation: Observation): DiagnosticFact[] {
   const {
     system,
     runtime,
@@ -182,333 +196,184 @@ function hostFacts({ observation }: PlanPreview): DiagnosticFact[] {
   ]
 }
 
-function reportClose(reporter: Reporter, plan: ClosePlan): void {
-  const { units, sysctl } = INCUS_SPEC
-  reporter.section('Proposed closing of the host to Incus (applied only after approval)')
-  reporter.facts([
-    [
-      'Units',
-      `${units.join(', ')} · masked persistently, so package scripts that honor masks neither enable nor start them · a mask does not stop a unit that is running, so a unit that is not positively inactive is refused, and a state that cannot be read is not evidence of inactivity`,
-    ],
-    [
-      'Not masked',
-      'incus-lxcfs.service · the packaged daemon unit requires it, and it mounts its own filesystem at /var/lib/incus-lxcfs and not the Incus state directory (read from the extracted package unit file). The package scripts therefore enable and start it when they install, so the host is not entirely quiet while the packages install, and containers need it running',
-    ],
-    [
-      'Sysctl override',
-      `${sysctl.file} · SHA-256 ${plan.sysctl.sha256} · sets ${sysctl.key}=${sysctl.value} to keep the AppArmor restriction on unprivileged user namespaces enabled · written only when absent; an existing file must hold exactly the approved bytes · it sorts after the package file 50-incus.conf, so it wins when the package script restarts systemd-sysctl`,
-    ],
-    [
-      'Package sysctls',
-      'the Incus packages ship /usr/lib/sysctl.d/50-incus.conf (read from the extracted 1:7.5.1 incus-base package), and their postinst restarts systemd-sysctl, so its limits for inotify, AIO, kernel keys, neighbor tables, and vm.max_map_count apply host-wide once the packages install. They are accepted, disclosed here, and not undone. Its AppArmor line is overridden by the file above',
-    ],
-    [
-      'Scope',
-      'containers only: incus-base and incus-client. The VM-capable incus meta-package, incus-ui-canonical, and incus-extra are out of scope and refused if installed',
-    ],
-    [
-      'Consequence',
-      'incus-startup.service stays masked, so the host does not stop Incus instances when it halts. The release performed by remove is the designed way to stop them',
-    ],
-    [
-      'Order',
-      'this runs first, before the ZFS prerequisites, the Incus repository and packages, and before the state dataset is mounted, so no package is installed against an open daemon or mounted Incus state',
-    ],
-    [
-      'Limits',
-      'the masks do not prevent ZFS import units from running, and they do not stop an administrator who runs the daemon directly',
-    ],
-    ['Unchanged', 'packages, pools, mounts, every other unit, and every file except the sysctl override'],
-  ])
+function hostSummary({ system, services, api, zfs }: Observation): string {
+  const active = services.filter(service => service.activation === 'active').length
+  return [
+    `${system.kernel} · ${system.packageArchitecture}`,
+    `${active} of ${services.length} Incus units active`,
+    api === null ? 'daemon not running' : `daemon ${api.server.version}`,
+    zfs.pool === null ? 'no pool imported' : `pool ${zfs.pool.name}`,
+  ].join(' · ')
 }
 
-function reportGuard(reporter: Reporter, plan: GuardPlan): void {
-  const { guard } = INCUS_SPEC
-  const { expectation, check, dropIn } = guardOf(plan)
-  reporter.section('Proposed storage-identity guard (applied only after approval)')
-  reporter.facts([
-    [
-      'Expectation file',
-      `${guard.expectationFile} · SHA-256 ${expectation.sha256} · pool ${plan.pool} · GUID ${plan.guid} · state dataset GUID ${plan.datasets.state} · written only when absent`,
-    ],
-    [
-      'Startup check',
-      `${guard.checkFile} · SHA-256 ${check.sha256} · compares the filesystem mounted at ${STATE_MOUNTPOINT} with the expectation file, and never installs, imports, repairs, or queries Incus`,
-    ],
-    [
-      'Service drop-in',
-      `${guard.dropInFile} · SHA-256 ${dropIn.sha256} · runs the startup check before the daemon service starts, and fails the service when it refuses`,
-    ],
-    ['Order', 'installed once the state dataset is mounted and before the daemon is opened'],
-    ['Unchanged', 'the unit masks, packages, pools, mounts, and every other unit and configuration file'],
-  ])
-}
-
-function reportRepository(reporter: Reporter, plan: RepositoryPlan): void {
-  const { repository } = INCUS_SPEC
-  reporter.section('Proposed repository and package pins (applied only after approval)')
-  reporter.facts([
-    [
-      'Repository',
-      `${repository.uri} · suite ${repository.suite} · component ${repository.component} · architecture ${plan.architecture} · moving stable repository`,
-    ],
-    [
-      'Selected package pins',
-      packagePins(plan.architecture).map(pin => `${pin.name}=${pin.version} (${pin.architecture})`).join(', '),
-    ],
-    [
-      'Signing key',
-      `${plan.key.url} · SHA-256 ${plan.key.sha256} · OpenPGP fingerprint ${repository.fingerprint} (review metadata; the host verifies the file digest)`,
-    ],
-    [
-      'Key file',
-      `${repository.keyFile} · written only when absent; an existing file must hold exactly the approved bytes`,
-    ],
-    [
-      'Source file',
-      `${repository.sourceFile} · SHA-256 ${plan.source.sha256} · written only when absent; an existing file must hold exactly the approved bytes`,
-    ],
-    [
-      'Preferences file',
-      `${repository.preferencesFile} · SHA-256 ${plan.preferences.sha256} · written only when absent; an existing file must hold exactly the approved bytes`,
-    ],
-    [
-      'APT selection',
-      'the exact Incus builds receive priority 1000; other versions receive priority -1. This excludes other builds from normal APT selection, does not authorize a downgrade, and does not pin ZFS or the operating system',
-    ],
-    [
-      'Files',
-      plan.add ? 'missing files would be written; the key and preferences precede the source' : 'all three files already hold the approved bytes',
-    ],
-    ['Package lists', 'refreshed with apt-get update, which updates every configured APT source and not only this one'],
-  ])
-}
-
-function reportPackages(reporter: Reporter, plan: PackagesPlan): void {
-  reporter.section('Proposed packages (applied only after approval)')
-  reporter.facts([
-    ['Packages', plan.install.map(change => `${change.name} ${change.version} (${change.architecture})`).join(', ')],
-    ['Count', String(plan.install.length)],
-    ['Scope', 'containers only; the VM stack is out of scope'],
-    ['Refused if installed', INCUS_SPEC.excluded.join(', ')],
-    [
-      'Version policy',
-      'incus-base and incus-client must match the selected full native package versions. Missing exact builds or different installed versions refuse; no upgrade, downgrade, or substitute is offered',
-    ],
-    [
-      'Units',
-      'the host is closed, so the Incus units are masked while the packages install; package scripts that try to start them may fail, and a failed install is never replayed. incus-lxcfs.service is not masked, and the package scripts enable and start it',
-    ],
-    [
-      'Closed-host check',
-      'the install is verified only if every Incus unit is still persistently masked and inactive and the AppArmor restriction is not 0 afterwards. A package script that undoes this is detected, not prevented, and leaves the step unverified',
-    ],
-    [
-      'Purge',
-      'apt purge of the Incus packages deletes /var/lib/incus, which is the mounted state dataset. Packaging cannot prevent it, so it is unsupported. Qiln only detects the damage later, when retained metadata is found missing',
-    ],
-  ])
-}
-
-function reportOpen(reporter: Reporter, plan: OpenPlan): void {
-  const names = datasetNamesOf(plan.pool)
-  const { retained } = plan
-  const { minimum } = INCUS_SPEC.idmap
-  const units: DiagnosticFact = [
-    'Units',
-    `unmask and start ${INCUS_SPEC.open.units.join(', ')} · the other Incus units stay masked, and nothing is enabled`,
-  ]
-  const identity: DiagnosticFact = [
-    'Identity',
-    `${names.state} · GUID ${plan.datasets.state} must be the filesystem mounted at ${STATE_MOUNTPOINT}, which the startup check verifies against the expectation file just before the units start`,
-  ]
-  if (retained === null) {
-    reporter.section('Proposed open (applied only after approval)')
-    reporter.facts([
-      units,
-      identity,
-      [
-        'State directory',
-        'must be empty: this opens a fresh installation only, and retained Incus state is never opened through this plan',
-      ],
-      [
-        'Subordinate IDs',
-        `/etc/subuid and /etc/subgid must each list a root range of at least ${minimum} IDs, observed just now and checked again on the host just before the units start. Qiln never edits either file`,
-      ],
-      [
-        'Daemon',
-        'starting the daemon initializes its metadata in the state directory. No project, pool, network, image, or instance is created by this step.',
-      ],
-    ])
-    return
+function repositoryDetails(plan: RepositoryPlan): Details {
+  const { uri, suite } = INCUS_SPEC.repository
+  const version = INCUS_SPEC.packageVersions[plan.architecture]
+  return {
+    'add-repository': `${uri} (${suite}) signing key, source, and pins for incus-base and incus-client ${version} (${plan.architecture})`,
+    'refresh-lists': 'update every configured APT source, not only Zabbly',
   }
-  const { allocations } = retained.baseline
-  reporter.section('Proposed reopen of the preserved installation (applied only after approval)')
-  reporter.facts([
-    units,
-    identity,
-    [
-      'Preserved installation',
-      `established by deployment ${retained.origin} · server certificate SHA-256 ${retained.identity.certificateFingerprint} · retained preseed SHA-256 ${retained.preseed.sha256} · reopened, never initialized`,
-    ],
-    [
-      'Recorded software',
-      `${retained.baseline.packages.filter(item => isPinned(item.name)).length} pinned packages (${retained.baseline.architecture}) at their recorded versions, observed matching just now · Incus packages also match this recipe’s exact pins · ZFS is judged by version floors and not pinned`,
-    ],
-    [
-      'Recorded subordinate IDs',
-      `/etc/subuid ${rangesState(allocations.uid)} · /etc/subgid ${rangesState(allocations.gid)} · every recorded root range (start:count) must be listed exactly, checked again on the host just before the units start · extra ranges are permitted · Qiln never edits either file`,
-    ],
-    [
-      'State directory',
-      'must hold the retained Incus metadata entries (presence and final-entry symlink checks only, not content validation): a missing entry or one that is itself a symbolic link refuses, and Qiln never falls back to a fresh installation',
-    ],
-    [
-      'Daemon',
-      'starting the daemon opens the retained database, and a daemon of a different version could migrate it, which is why the recorded versions are required first. Afterwards the server identity, the LXC version the daemon reports, the pool registration, the bridge, and the stopped instances are verified. Nothing is initialized and no instance is started.',
-    ],
-  ])
 }
 
-function reportInitialize(reporter: Reporter, plan: InitializePlan): void {
-  const document = readPreseed(plan.preseed.yaml)
-  const [pool] = document?.storage_pools ?? []
-  const [network] = document?.networks ?? []
-  const names = datasetNamesOf(plan.pool)
-  const entries = (settings: Record<string, string>) =>
-    Object.entries(settings)
-      .map(([key, value]) => `${key}=${value}`)
-      .join(' ')
-  reporter.section('Proposed initialization (applied only after approval)')
-  reporter.facts([
-    ['Preseed', `${plan.preseed.yaml.length} bytes · SHA-256 ${plan.preseed.sha256} · retained exactly as approved`],
-    [
-      'Pool',
-      `${plan.pool} · GUID ${plan.guid} · registered from the existing, empty dataset ${names.incus} · GUID ${plan.datasets.incus} · ${names.state} stays outside the storage driver`,
-    ],
-    ['Pool settings', pool === undefined ? 'unreadable' : entries(pool.config)],
-    ['Bridge', network === undefined ? 'unreadable' : `${network.name} · ${entries(network.config)}`],
-    [
-      'Default profile',
-      'not configured; it stays as found, and the installation attaches its instance to the pool and bridge explicitly',
-    ],
-    ['Remote API', 'no listener address is configured; administration is the local Unix socket only'],
-    ['Created', 'no image, instance, or project is created'],
-  ])
+function closeScreen(plan: ClosePlan): ApprovalScreen {
+  const { units, sysctl } = INCUS_SPEC
+  const { repository } = plan
+  const details: Details = {
+    close: `mask ${units.join(', ')}; ${sysctl.file} sets ${sysctl.key}=${sysctl.value}`,
+    ...(repository === null ? {} : repositoryDetails(repository)),
+  }
+  return {
+    title: 'Proposed closing of the host to Incus (applied only after approval)',
+    steps: stepsOf(actionsOf(plan), INCUS_LABELS, details),
+    stays:
+      'Packages, pools, mounts, and every other unit and file. incus-lxcfs.service is not masked, and package scripts start it.',
+    lasting: `Units stay masked, including incus-startup, so the host does not stop Incus instances when it halts.${repository === null ? '' : ` ${REPOSITORY_LASTING}`}`,
+    notEstablished:
+      'Masks do not stop an administrator who runs the daemon directly, and containers starting with the AppArmor restriction enabled is not established.',
+  }
 }
 
-function reportAccess(reporter: Reporter, plan: AccessPlan): void {
-  reporter.section('Proposed socket access (applied only after approval)')
-  reporter.facts([
-    ['Account', plan.account],
-    ['Group', `${plan.group} · added with usermod -aG, which keeps every other membership`],
-    ['Authority', 'members can administer Incus through its Unix socket, which is root-equivalent authority on the host'],
-    ['Effect', 'applies to new SSH connections only; the current connection and its sessions keep their groups'],
-    ['Unchanged', 'socket permissions, SSH configuration, other groups, and other accounts'],
-  ])
+function guardScreen(plan: GuardPlan): ApprovalScreen {
+  const { expectationFile, checkFile, dropInFile } = INCUS_SPEC.guard
+  const details: Details = {
+    guard: `${expectationFile}, ${checkFile}, and ${dropInFile} for pool ${plan.pool} (GUID ${plan.guid})`,
+  }
+  return {
+    title: 'Proposed storage-identity guard (applied only after approval)',
+    steps: stepsOf(actionsOf(plan), INCUS_LABELS, details),
+    stays: 'Unit masks, packages, pools, mounts, and every other file.',
+    lasting: 'The daemon service refuses to start unless the recorded state dataset is mounted.',
+    notEstablished: 'Protection against an administrator who runs the daemon directly.',
+  }
 }
 
-function reportRelease(reporter: Reporter, observation: Observation, plan: ReleasePlan): void {
-  const running = observation.api?.instances.filter(instance => instance.status === 'Running').length
+function repositoryScreen(plan: RepositoryPlan): ApprovalScreen {
+  return {
+    title: 'Proposed repository and package pins (applied only after approval)',
+    steps: stepsOf(actionsOf(plan), INCUS_LABELS, repositoryDetails(plan)),
+    stays: 'Packages, pools, mounts, and units; no package is installed.',
+    lasting: REPOSITORY_LASTING,
+    notEstablished: 'That the pinned builds are installable; the package step checks that.',
+  }
+}
+
+function packagesScreen(plan: PackagesPlan): ApprovalScreen {
+  const details: Details = {
+    'install-packages': plan.install.map(change => `${change.name} ${change.version}`).join(', '),
+  }
+  return {
+    title: 'Proposed packages (applied only after approval)',
+    steps: stepsOf(actionsOf(plan), INCUS_LABELS, details),
+    stays: 'No unit is opened and no pool is touched. Containers only; the VM stack is out of scope.',
+    lasting:
+      'The package sysctls apply host-wide. Purging the Incus packages deletes /var/lib/incus (the state dataset), which Qiln cannot prevent.',
+    notEstablished:
+      'Runtime readiness. A package script that unmasks a unit or starts the daemon is detected afterwards, not prevented.',
+  }
+}
+
+function openScreen(plan: OpenPlan): ApprovalScreen {
+  const { retained } = plan
+  const units = INCUS_SPEC.open.units.join(', ')
+  const writes = 'The daemon writes its metadata to the state dataset when it opens.'
+  if (retained === null) {
+    return {
+      title: 'Proposed open (applied only after approval)',
+      steps: stepsOf(actionsOf(plan), INCUS_LABELS, {
+        open: `unmask and start ${units}; the state directory (${datasetNamesOf(plan.pool).state} at ${STATE_MOUNTPOINT}) must be empty and each subordinate-ID file must list a root range of at least ${INCUS_SPEC.idmap.minimum} IDs`,
+      }),
+      stays: 'Packages, pools, and instances. Nothing is initialized, and the other Incus units stay masked.',
+      lasting: writes,
+      notEstablished: 'Initialization, which needs its own approval.',
+    }
+  }
+  return {
+    title: 'Proposed reopen of the preserved installation (applied only after approval)',
+    steps: stepsOf(actionsOf(plan), INCUS_LABELS, {
+      open: `reopen the installation preserved by deployment ${retained.origin} (server certificate SHA-256 ${retained.identity.certificateFingerprint.slice(0, 12)}); its retained metadata and every recorded subordinate-ID root range must be present`,
+    }),
+    stays: 'Packages, pools, and instances. Nothing is initialized, and no instance is started.',
+    lasting: `${writes} A daemon of a different version could migrate the retained database, which is why the recorded package versions are required first.`,
+    notEstablished: 'That the preserved workloads work.',
+  }
+}
+
+function initializeScreen(plan: InitializePlan): ApprovalScreen {
+  const { network } = INCUS_SPEC
+  return {
+    title: 'Proposed initialization (applied only after approval)',
+    steps: stepsOf(actionsOf(plan), INCUS_LABELS, {
+      initialize: `register pool ${plan.pool} (GUID ${plan.guid}) on ${datasetNamesOf(plan.pool).incus} and the managed bridge ${network.name} (${network.subnet})`,
+    }),
+    stays:
+      'The default profile, the state dataset, and the local-only API (no remote listener). No image, instance, or project is created.',
+    lasting: 'Initialization is not atomic, and Qiln never relies on a rollback.',
+    notEstablished: 'Runtime readiness.',
+  }
+}
+
+function accessScreen(plan: AccessPlan): ApprovalScreen {
+  return {
+    title: 'Proposed socket access (applied only after approval)',
+    steps: stepsOf(actionsOf(plan), INCUS_LABELS, { 'grant-access': `add ${plan.account} to ${plan.group}` }),
+    stays: 'Socket permissions, SSH configuration, other groups, and other accounts.',
+    lasting:
+      'Members have root-equivalent authority over Incus and the host. Qiln never removes the membership, and it applies to new SSH connections only.',
+    notEstablished: 'That SSH forwarding to the socket works; the first new connection that uses it shows that.',
+  }
+}
+
+function releaseScreen(plan: ReleasePlan): ApprovalScreen {
   const { stopTimeoutSeconds } = INCUS_SPEC.release
-  reporter.section('Proposed release (applied only after approval)')
-  reporter.facts([
-    ['Pool', `${plan.pool} · GUID ${plan.guid} · stays imported for the separate ZFS export`],
-    [
-      'Instances',
-      `${plan.instances.map(instanceKey).join(', ') || 'none'} · the inventory observed just now, which the host must still match when the step runs`,
-    ],
-    ['Running instances', running === undefined ? 'unknown; the Incus API was not read' : String(running)],
-    [
-      'Autostart',
-      'boot.autostart=false is set on each instance with a single-key update, so a reopened daemon never resumes it',
-    ],
-    [
-      'Stop',
-      `each instance is stopped gracefully with ${stopTimeoutSeconds} seconds to shut down: never forced and never stateful`,
-    ],
-    [
-      'Daemon',
-      'every Incus unit is masked persistently first, then the user and main sockets and then the services are stopped',
-    ],
-  ])
+  return {
+    title: 'Proposed release (applied only after approval)',
+    steps: stepsOf(actionsOf(plan), INCUS_LABELS, {
+      'stop-workloads': `${plan.instances.map(instanceKey).join(', ') || 'no instances'} set not to autostart and stopped gracefully (${stopTimeoutSeconds} seconds each), never forced; the host must still match this inventory, and ephemeral instances are refused`,
+      release: `every Incus unit masked persistently, then the sockets and services stopped; pool ${plan.pool} (GUID ${plan.guid}) stays imported for the separate ZFS export`,
+    }),
+    stays: 'Packages and the pool. Qiln does not query Incus afterwards.',
+    lasting: 'boot.autostart=false stays set on each instance, and Incus stays stopped and masked until a later prepare reopens it.',
+  }
 }
 
-const NOTICES: Record<ApprovedPlan['kind'], string> = {
-  close:
-    'Approval authorizes only the listed masks and the listed sysctl override file, one fenced remote script followed by a fresh inspection that must agree. ' +
-    'A unit that is not positively inactive is refused, because a mask does not stop it and a state that cannot be read is not evidence of inactivity. The masks keep package scripts that honor them from starting the daemon; they do not stop an administrator who runs the daemon directly, and they do not prevent ZFS import units from running. ' +
-    'The override file is written only when absent, an existing file must hold exactly the approved bytes, and Qiln never removes it. It pins one AppArmor setting that the package would weaken; the other package sysctls are accepted. Whether containers start with the restriction enabled is not established by preparation. ' +
-    'incus-lxcfs.service is deliberately not masked, and the package scripts start it when they install. ' +
-    'This runs first, before the ZFS prerequisites, the Incus repository and packages, and before the state dataset is mounted. Installing packages can still start other units, such as ZFS import units, so an unmounted state dataset is not an inaccessible one. ' +
-    'incus-startup.service stays masked, so the host does not stop Incus instances when it halts; the release performed by remove is the designed way to stop them. ' +
-    'No package is installed, no pool is touched, and no daemon is started by this plan. A failed or cancelled step is not replayed, resumed, or rolled back, and interrupted work may already have completed.',
-  guard:
-    'Approval authorizes only the listed guard files, one fenced remote script followed by a fresh inspection that must agree. ' +
-    'Existing guard files must already hold exactly the approved bytes and are never overwritten. ' +
-    'The startup check compares the mounted state dataset with the expectation file before the daemon service starts. It is a guard against accidental activation and does not stop an administrator who runs the daemon directly. ' +
-    'No unit is masked, unmasked, or started and no package is installed by this plan. A failed or cancelled step is not replayed, resumed, or rolled back, and interrupted work may already have completed.',
-  repository:
-    'Approval authorizes only the listed files and package-list refresh, each step fenced and followed by a fresh inspection that must agree. ' +
-    'The stable repository remains a moving channel; the preferences select the displayed full package builds instead. APT metadata and simulation must confirm those exact builds before a separate package approval. ' +
-    'Existing files are never overwritten. The key is downloaded once on the host and used only when its digest matches. No package is installed by this plan. ' +
-    'Freezing the Incus packages also excludes future updates from normal APT selection until deliberate repinning; explicit administrator overrides remain outside this guard. ' +
-    'A failed or cancelled step is not replayed, resumed, or rolled back, and interrupted work may already have completed.',
-  packages:
-    'Approval authorizes only the listed package versions, re-simulated just before the install, with no upgrades or removals. ' +
-    'The host is closed while they install, so package scripts cannot start the masked Incus units, although they do start incus-lxcfs.service. In a normal preparation this runs before the state dataset is mounted, so no package is installed against mounted Incus state. ' +
-    'Full installed package versions and architectures are checked afterwards, together with the closed host: a package script that unmasks a unit, starts the daemon, or sets the AppArmor restriction to 0 leaves the step unverified, because the daemon’s upstream version label alone is insufficient. ' +
-    'Nothing is opened or initialized by this plan, and each needs its own approval after a fresh inspection. ' +
-    'A failed or cancelled step is not replayed, resumed, or rolled back, and interrupted work may already have completed.',
-  open:
-    'Approval authorizes only unmasking and starting the listed units, one fenced remote script followed by a fresh inspection that must agree. ' +
-    'The startup check, the empty state directory, and the subordinate-ID root ranges are verified on the host just before the units start, and neither ID file is ever edited. Starting the daemon writes its metadata to the state directory, so the open is treated as touching Incus storage. ' +
-    'Nothing is initialized by this plan, and the initialization needs its own approval after a fresh inspection. ' +
-    'A failed or cancelled step is not replayed, resumed, or rolled back, and interrupted work may already have completed.',
-  initialize:
-    'Initialization is not an atomic transaction, and Qiln never relies on a rollback. It runs only against a pristine daemon and a pool holding exactly its root, its state dataset, and an empty storage dataset, ' +
-    'planned again after approval and checked again just before it runs, and nothing is forced, wiped, or converged. A failed or cancelled step is not replayed, resumed, or rolled back, and ' +
-    'interrupted work may already have changed the daemon and the pool. Retained Incus state is never initialized over: a preserved installation is reopened by its own plan. Approval does not establish runtime readiness.',
-  access:
-    'Approval authorizes only adding the displayed account to the displayed group, one fenced remote script followed by a fresh inspection that must agree. ' +
-    'Membership is read from the account database, so it shows that the grant was recorded and not that SSH forwarding works: only the first new connection that uses it proves that. ' +
-    'Qiln never changes socket permissions, SSH configuration, or other groups, and never removes the membership. ' +
-    'A failed or cancelled step is not replayed, resumed, or rolled back, and interrupted work may already have completed.',
-  release:
-    'Approval authorizes two fenced remote scripts, each followed by a fresh inspection that must agree. First every instance of the displayed inventory is set not to start automatically and stopped gracefully, ' +
-    'never forced and never stateful, and the step refuses before changing anything if the inventory differs or an instance is ephemeral, because stopping an ephemeral instance deletes it. ' +
-    'Then every Incus unit is masked persistently and the sockets and services are stopped, while the pool stays imported. Qiln starts Incus only in the approved open step, ' +
-    'so Incus stays stopped and masked until a later prepare reopens it, on this deployment or on a separately prepared successor, after its own checks and approval. A failed or cancelled step is not replayed, resumed, or rolled back, ' +
-    'and interrupted work may already have completed.',
+function screenOf(plan: ApprovedPlan): ApprovalScreen {
+  switch (plan.kind) {
+    case 'close':
+      return closeScreen(plan)
+    case 'guard':
+      return guardScreen(plan)
+    case 'repository':
+      return repositoryScreen(plan)
+    case 'packages':
+      return packagesScreen(plan)
+    case 'open':
+      return openScreen(plan)
+    case 'initialize':
+      return initializeScreen(plan)
+    case 'access':
+      return accessScreen(plan)
+    case 'release':
+      return releaseScreen(plan)
+  }
 }
-
-const PRESERVED_OPEN_NOTICE =
-  'Approval authorizes only unmasking and starting the listed units, one fenced remote script followed by a fresh inspection that must agree. ' +
-  'The startup check runs on the host just before the units start; the retained metadata entries must be present and not themselves symbolic links, and every recorded subordinate-ID root range must be listed. Metadata contents are not validated, and the open is refused rather than falling back to a fresh installation. Neither ID file is ever edited. ' +
-  'Starting the daemon opens the retained database and may write to the state directory, so the open is treated as touching Incus storage. ' +
-  'The step is verified only when the exact package pins, retained software baseline, server certificate fingerprint, daemon-reported LXC version, standalone server, pool registration, and bridge match, and every instance is stopped. ' +
-  'The root-range check does not establish that every retained instance mapping is correct. ' +
-  'No workload is started, nothing is initialized or repaired, no credential is rotated, and approval does not establish that the preserved workloads work. ' +
-  'A failed or cancelled step is not replayed, resumed, or rolled back, and interrupted work may already have completed.'
 
 /**
- * Renders what was observed and what a later approved step would do. Every
- * proposed section describes a plan only: nothing in it has been applied until
- * the approval that follows it.
+ * Renders what was observed and what the approval that follows would do. A
+ * proposed screen describes a plan only: nothing in it has been applied until
+ * that approval.
  */
-export function reportPlan(reporter: Reporter, preview: PlanPreview): void {
-  const { observation, plan } = preview
-  reporter.section('Observed on the host (read-only)')
-  reporter.facts(hostFacts(preview))
+export function reportPlan(reporter: Reporter, { observation, plan }: PlanPreview): void {
   switch (plan.kind) {
     case 'refused':
+      reporter.section('Observed on the host (read-only)')
+      reporter.facts(hostFacts(observation))
       return
     case 'ready':
       reporter.section('Incus baseline')
       reporter.facts([
         [
           'Incus',
-          `pool ${plan.pool} · GUID ${plan.guid} · the exact pinned packages, local Unix-socket API, pool, and bridge were observed matching the required baseline, the recorded state dataset was observed mounted at ${STATE_MOUNTPOINT}, and the administrator account was observed in ${INCUS_SPEC.access.group}. The default profile, instances, and images are not part of this check, and SSH forwarding to the socket was not tested.`,
+          `pool ${plan.pool} · GUID ${plan.guid} · the pinned packages, local Unix-socket API, pool, bridge, recorded state mount, and administrator group membership match the baseline. The default profile, instances, and images are not part of this check, and SSH forwarding to the socket was not tested.`,
         ],
       ])
       return
@@ -517,37 +382,11 @@ export function reportPlan(reporter: Reporter, preview: PlanPreview): void {
       reporter.facts([
         [
           'Incus',
-          'every Incus unit was observed inactive, and a verified release is already retained, so there is nothing to release. This is point-in-time: no unit was changed, no step was run, and nothing new is recorded.',
+          'every Incus unit was observed inactive, and a verified release is already retained, so there is nothing to release. This is point-in-time: nothing was run or recorded.',
         ],
       ])
       return
-    case 'close':
-      reportClose(reporter, plan)
-      break
-    case 'guard':
-      reportGuard(reporter, plan)
-      break
-    case 'repository':
-      reportRepository(reporter, plan)
-      break
-    case 'packages':
-      reportPackages(reporter, plan)
-      break
-    case 'open':
-      reportOpen(reporter, plan)
-      break
-    case 'initialize':
-      reportInitialize(reporter, plan)
-      break
-    case 'access':
-      reportAccess(reporter, plan)
-      break
-    case 'release':
-      reportRelease(reporter, observation, plan)
-      break
+    default:
+      reportApproval(reporter, hostSummary(observation), screenOf(plan))
   }
-  reporter.space()
-  reporter.info(`Recipe revision ${RECIPE.revision} · SHA-256 ${RECIPE.digest}`)
-  reporter.space()
-  reporter.notice(plan.kind === 'open' && plan.retained !== null ? PRESERVED_OPEN_NOTICE : NOTICES[plan.kind])
 }

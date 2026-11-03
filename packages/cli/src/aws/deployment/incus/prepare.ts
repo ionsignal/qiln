@@ -67,22 +67,25 @@ function refusal(reasons: readonly string[], retry: string): InstallerError {
  * script runs, then its completion or refusal is persisted, then a fresh
  * inspection must agree before `verifiedAt` is persisted. Preparation runs in
  * stages around the ZFS preparation. Closing comes first, before any ZFS or
- * Incus package effect, and masks the units while no pool is mounted. The
- * software stage then installs the repository and packages while the host is
- * closed. The activation stage installs the storage-identity guard and opens
- * the daemon on the mounted state dataset. An open is planned whenever the
- * daemon is not running, including after a host reboot or a release, and
- * reopens the recorded installation without initializing it. The first verified
- * initialization, or the first verified open of a preserved installation, is
- * persisted together with the software baseline, the subordinate-ID ranges, and
- * the server identity it was verified against; later reopens verify against
- * them and never rewrite them. An open or initialization is also planned again
- * from a fresh inspection after approval, before anything is persisted. Nothing
- * is replayed, resumed, or rolled back, and an interrupted step stays open as
- * evidence. A release is one approval of two fenced steps, the workload stop and
- * then the daemon release, and it runs nothing when a verified release is
- * already recorded and every unit is inactive. It runs parallel to the ZFS
- * preparer and shares only the journal rules.
+ * Incus package effect, and masks the units while no pool is mounted. When the
+ * repository is not yet in place, the same approval also installs the
+ * repository files and refreshes the package lists. The ZFS prerequisites
+ * follow. The package stage then installs the exact packages while the host is
+ * closed and no pool is mounted. The activation stage installs the
+ * storage-identity guard and opens the daemon on the mounted state dataset. An
+ * open is planned whenever the daemon is not running, including after a host
+ * reboot or a release, and reopens the recorded installation without
+ * initializing it. The first verified initialization, or the first verified
+ * open of a preserved installation, is persisted together with the software
+ * baseline, the subordinate-ID ranges, and the server identity it was verified
+ * against; later reopens verify against them and never rewrite them. An open or
+ * initialization is also planned again from a fresh inspection after approval,
+ * before anything is persisted. Nothing is replayed, resumed, or rolled back,
+ * and an interrupted step stays open as evidence. A release is one approval of
+ * two fenced steps, the workload stop and then the daemon release, and it runs
+ * nothing when a verified release is already recorded and every unit is
+ * inactive. It runs parallel to the ZFS preparer and shares only the journal
+ * rules.
  */
 export class IncusPreparer {
   private constructor(
@@ -126,25 +129,27 @@ export class IncusPreparer {
   /**
    * The software stage, which needs no pool and runs before any pool is
    * mounted. Verifies a step left returned by an earlier run, then plans from
-   * fresh evidence. Each approval covers only the plan displayed with it, so the
-   * masks, the repository, and the packages each ask again. Returns how many
-   * steps were applied. The `close` scope stops as soon as the next plan is
-   * neither the closing nor a refusal, without displaying it, so the host is
-   * closed before any package effect and an already closed host asks nothing.
-   * The `packages` scope continues until the host is closed and the approved
+   * fresh evidence. An approval runs only the steps of the plan displayed with
+   * it, in order, each verified against a fresh observation before the next, so
+   * the closing together with its repository, and the packages, each ask
+   * again. Returns how many steps were applied. The `repository` scope stops as
+   * soon as the next plan is the packages or nothing, without displaying it, so
+   * the host is closed and its repository is in place before any ZFS or
+   * package effect, and a host that is already prepared asks nothing. The
+   * `packages` scope continues until the host is closed and the approved
    * packages are installed.
    */
   public async prepareSoftware(
     target: SoftwareTarget,
     signal: AbortSignal,
-    through: 'close' | 'packages',
+    through: 'repository' | 'packages',
   ): Promise<number> {
     const inspected: InspectTarget = { ...target, pool: null }
     let observation = (await this.settleReturned(inspected)) ?? (await this.inspect(inspected))
     let applied = 0
     while (true) {
       const plan = softwarePlanOf(observation, target, this.progress)
-      if (plan.kind === 'software' || (through === 'close' && plan.kind !== 'close' && plan.kind !== 'refused')) {
+      if (plan.kind === 'software' || (through === 'repository' && plan.kind === 'packages')) {
         return applied
       }
       this.context.hooks.show(observation, plan)

@@ -28,6 +28,7 @@ import { stateOf } from '../../../journal/step'
 import { Prompts, withCancellation } from '../../../terminal/prompts'
 import { approvalLabel as incusApproval, reportPlan as reportIncusPlan } from './prepare/incus'
 import { approvalLabel as zfsApproval, reportPlan as reportZfsPlan } from './prepare/zfs'
+import { reportRun } from './prepare/steps'
 import {
   requireNotStuck as requireIncusNotStuck,
   requireStorageNotStuck,
@@ -242,6 +243,8 @@ async function releaseHost(
       'Removal',
       'no Incus or ZFS settlement, release, check, or export was completed and no AWS resource was changed',
     ])
+    reporter.space()
+    reportRun(reporter)
     const zfsPreparer = await ZfsPreparer.open({
       root,
       deployment: record,

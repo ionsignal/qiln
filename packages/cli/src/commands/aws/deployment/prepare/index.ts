@@ -14,6 +14,7 @@ import { evidence as incusEvidence } from '../../../../aws/deployment/incus/evid
 import { opened, requireNotStuck as requireIncusNotStuck } from '../../../../aws/deployment/incus/facts'
 import { approvalLabel as incusApproval, reportPlan as reportIncusPlan } from './incus'
 import { approvalLabel as zfsApproval, reportPlan as reportZfsPlan } from './zfs'
+import { reportRun } from './steps'
 import * as incusLineage from '../../../../aws/deployment/lineage/incus'
 import * as lineage from '../../../../aws/deployment/lineage/zfs'
 import type { AwsDeploymentOptions } from '../../../../input'
@@ -22,27 +23,30 @@ import type { Reporter } from '../../../../terminal/reporter'
 /**
  * Plans preparation of the recorded data volume and the Incus installation on
  * it, in five phases, and applies each plan only after a default-no approval of
- * each displayed plan. First the Incus closing: persistent masks that are
- * verified before any package effect, so neither ZFS nor Incus package
- * configuration runs against an open daemon; a host that is already closed asks
+ * each displayed plan. First the Incus closing together with its repository:
+ * persistent masks that are verified before any package effect, so neither ZFS
+ * nor Incus package configuration runs against an open daemon, followed under
+ * the same approval by the Zabbly repository files and a package-list refresh;
+ * every refusal that offline evidence can decide is reached before the first
+ * mask, a host that is already closed with its repository in place asks
  * nothing, and once Qiln opened Incus it is never closed again here. Then the
  * ZFS prerequisites, which are refused once Qiln has opened Incus, because a
- * package script could disturb the running daemon. Then the Incus software,
- * while no pool is mounted and the host is closed: the repository and the exact
- * packages, so no package is ever installed against mounted Incus state. Then
- * the ZFS storage: one single-disk pool, created on a blank volume or imported
- * by its recorded GUID, together with its packaged monthly scrub timer, and the
- * mount of its state dataset. Last, the Incus activation, each stage from a
- * fresh inspection: the storage-identity guard, an explicit open of the daemon
- * on the mounted state dataset, and finally the administrator account's
- * membership in the Incus administration group. A fresh installation opens an
- * empty state directory and is followed by one initialization from a retained
- * preseed that registers the pool's `incus` dataset and the bridge. A volume
- * whose earlier deployment established and released an installation instead
- * installs the recorded package versions and reopens that preserved
- * installation, and never initializes. The local writes are the host-key pin,
- * retained before connecting exactly as for verify, and the retained ZFS and
- * Incus preparation evidence.
+ * package script could disturb the running daemon. Then the Incus packages,
+ * while no pool is mounted and the host is closed: the exact packages, so no
+ * package is ever installed against mounted Incus state. Then the ZFS storage:
+ * one single-disk pool, created on a blank volume or imported by its recorded
+ * GUID, together with its packaged monthly scrub timer, and the mount of its
+ * state dataset. Last, the Incus activation, each stage from a fresh
+ * inspection: the storage-identity guard, an explicit open of the daemon on the
+ * mounted state dataset, and finally the administrator account's membership in
+ * the Incus administration group. A fresh installation opens an empty state
+ * directory and is followed by one initialization from a retained preseed that
+ * registers the pool's `incus` dataset and the bridge. A volume whose earlier
+ * deployment established and released an installation instead installs the
+ * recorded package versions and reopens that preserved installation, and never
+ * initializes. The local writes are the host-key pin, retained before
+ * connecting exactly as for verify, and the retained ZFS and Incus preparation
+ * evidence.
  */
 export async function prepare(options: AwsDeploymentOptions, reporter: Reporter): Promise<void> {
   requireAwsHost()
@@ -74,6 +78,8 @@ export async function prepare(options: AwsDeploymentOptions, reporter: Reporter)
           'Preparation',
           'no ZFS or Incus inspection was performed',
         ])
+        reporter.space()
+        reportRun(reporter)
         const zfsPreparer = await ZfsPreparer.open({
           root,
           deployment: record,
@@ -110,25 +116,21 @@ export async function prepare(options: AwsDeploymentOptions, reporter: Reporter)
             progress: progressSink(reporter),
           },
         })
-        reporter.section('Incus closing inspection')
-        reporter.row('working', 'Inspecting', 'fixed host and unit inspection; no pool is mounted and no daemon is started')
-        const incusClosing = await incusPreparer.prepareSoftware(
+        reporter.section('1/5 Incus close and repository')
+        const incusClose = await incusPreparer.prepareSoftware(
           { account: username, retained: preserved },
           signal,
-          'close',
+          'repository',
         )
-        reporter.section('ZFS inspection')
-        reporter.row('working', 'Inspecting', 'fixed read-only host and storage inspection')
-        const zfsSoftware = await zfsPreparer.run(signal, 'software')
-        reporter.section('Incus software inspection')
-        reporter.row('working', 'Inspecting', 'fixed host and package inspection; no pool is mounted and no daemon is started')
-        const incusSoftware = await incusPreparer.prepareSoftware(
+        reporter.section('2/5 ZFS prerequisites')
+        const zfsPrerequisites = await zfsPreparer.run(signal, 'software')
+        reporter.section('3/5 Incus packages')
+        const incusPackages = await incusPreparer.prepareSoftware(
           { account: username, retained: preserved },
           signal,
           'packages',
         )
-        reporter.section('ZFS storage inspection')
-        reporter.row('working', 'Inspecting', 'fixed read-only host and storage inspection')
+        reporter.section('4/5 ZFS storage')
         const zfsStorage = await zfsPreparer.run(signal, 'storage')
         const pool = await lineage.pool(root, record)
         if (pool === null || !pool.ready || pool.datasets === null) {
@@ -143,25 +145,24 @@ export async function prepare(options: AwsDeploymentOptions, reporter: Reporter)
             retry,
           })
         }
-        reporter.section('Incus activation inspection')
-        reporter.row('working', 'Inspecting', 'fixed host, package, and Incus inspection')
+        reporter.section('5/5 Incus activation')
         const incusActivation = await incusPreparer.activate(
           { pool: pool.name, guid: pool.guid, datasets: pool.datasets, account: username, retained: preserved },
           signal,
         )
-        const applied = incusClosing + zfsSoftware + incusSoftware + zfsStorage + incusActivation
+        const applied = incusClose + zfsPrerequisites + incusPackages + zfsStorage + incusActivation
         const changed =
           applied === 0
             ? 'Nothing was changed.'
             : `${applied} approved ${applied === 1 ? 'step was' : 'steps were'} applied and verified by fresh inspection.`
         const reopened = preserved !== null && preserved.origin !== record.id
         const daemon = reopened
-          ? 'the preserved Incus installation reopened without initialization and left with its instances stopped'
-          : 'the opened daemon with its local Unix-socket access'
-        const limits = reopened
-          ? 'Preparation does not install or configure Qiln or reassign an existing installation. The preserved instances were not started, and workload correctness and runtime readiness are not established. For an existing installation, use qiln installation reassign under its separate approval.'
-          : 'Preparation does not install or configure Qiln or reassign an existing installation. Restoration and runtime readiness are not established.'
-        return `Incus baseline prepared: the persistent masks established before any package effect, the ${reopened ? 'recorded' : 'approved'} packages installed before the state dataset was mounted, the startup guard, ${daemon}, the recorded ZFS pool with its incus storage dataset, the bridge, and ${username}'s membership in the Incus administration group were verified as observed. The default profile was left untouched, and instances and images were not part of this check. ${changed} Group membership applies to new SSH connections only, and SSH forwarding to the Incus socket was not tested. The pool is a single disk with no redundancy or backup. ${limits}`
+          ? 'the preserved Incus installation was reopened without initialization and its instances remain stopped'
+          : 'Incus was opened with local Unix-socket access'
+        const next = reopened
+          ? ' Use qiln installation reassign to move the existing installation to this deployment.'
+          : ''
+        return `Incus baseline prepared: ${daemon}. ${changed} The pool is a single disk with no redundancy or backup, group membership applies to new SSH connections only, and workload correctness and runtime readiness are not established.${next}`
       })
     })
   })

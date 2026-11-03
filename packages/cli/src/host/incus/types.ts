@@ -363,14 +363,31 @@ export interface StoppedPlan {
 const file = z.strictObject({ sha256 })
 
 /**
+ * Writes the approved signing key, source, and exact-package preferences when
+ * absent, then refreshes the package lists. Existing files are never
+ * overwritten. The digests identify the exact approved bytes.
+ */
+export const repositoryPlanSchema = z.strictObject({
+  kind: z.literal('repository'),
+  architecture: z.enum(ARCHITECTURES),
+  add: z.boolean(),
+  key: z.strictObject({ url: text, sha256 }),
+  source: file,
+  preferences: file,
+})
+
+/**
  * Masks every Incus unit persistently, so no package can start the daemon, and
  * installs the sysctl override that keeps the AppArmor restriction enabled. The
  * digest identifies the exact approved override bytes. It names no pool,
- * because it runs before any storage exists.
+ * because it runs before any storage exists. `repository` is the repository
+ * plan that follows the closing under the same approval, and is null when the
+ * repository files are already in place and the package lists are refreshed.
  */
 export const closePlanSchema = z.strictObject({
   kind: z.literal('close'),
   sysctl: file,
+  repository: repositoryPlanSchema.nullable(),
 })
 
 /**
@@ -388,20 +405,6 @@ export const guardPlanSchema = z.strictObject({
   expectation: file,
   check: file,
   dropIn: file,
-})
-
-/**
- * Writes the approved signing key, source, and exact-package preferences when
- * absent, then refreshes the package lists. Existing files are never
- * overwritten. The digests identify the exact approved bytes.
- */
-export const repositoryPlanSchema = z.strictObject({
-  kind: z.literal('repository'),
-  architecture: z.enum(ARCHITECTURES),
-  add: z.boolean(),
-  key: z.strictObject({ url: text, sha256 }),
-  source: file,
-  preferences: file,
 })
 
 export const packagesPlanSchema = z.strictObject({
@@ -533,6 +536,21 @@ export type PreparationPlan =
  */
 export type Plan = PreparationPlan | ReleasePlan | StoppedPlan
 
+function repositoryActions(plan: RepositoryPlan): readonly IncusAction[] {
+  return plan.add ? ['add-repository', 'refresh-lists'] : ['refresh-lists']
+}
+
+/**
+ * The repository plan an approved plan carries: the plan itself, or the one that
+ * follows a closing under the same approval. Null means it carries none.
+ */
+export function repositoryOf(plan: ApprovedPlan): RepositoryPlan | null {
+  if (plan.kind === 'repository') {
+    return plan
+  }
+  return plan.kind === 'close' ? plan.repository : null
+}
+
 /**
  * The steps one approved plan allows, in the order they run. A step whose
  * action is not listed here was never authorized.
@@ -540,11 +558,11 @@ export type Plan = PreparationPlan | ReleasePlan | StoppedPlan
 export function actionsOf(plan: ApprovedPlan): readonly IncusAction[] {
   switch (plan.kind) {
     case 'close':
-      return ['close']
+      return plan.repository === null ? ['close'] : ['close', ...repositoryActions(plan.repository)]
     case 'guard':
       return ['guard']
     case 'repository':
-      return plan.add ? ['add-repository', 'refresh-lists'] : ['refresh-lists']
+      return repositoryActions(plan)
     case 'packages':
       return ['install-packages']
     case 'open':

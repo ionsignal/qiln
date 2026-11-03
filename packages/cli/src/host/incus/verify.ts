@@ -6,11 +6,13 @@ import { datasetNamesOf } from '../zfs/spec'
 import {
   identityOf,
   instanceKey,
+  repositoryOf,
   type Api,
   type ApprovedPlan,
   type InstanceRef,
   type Observation,
   type PoolTarget,
+  type RepositoryPlan,
   type Retained,
 } from './types'
 
@@ -42,6 +44,16 @@ export function listed(observation: Observation): boolean {
   const { candidates } = observation.repository
   return REQUIRED_PACKAGES.every(name =>
     candidates.some(candidate => candidate.package === name && fromRepository(candidate.source)),
+  )
+}
+
+/**
+ * The key, source, and preferences files hold exactly the approved bytes.
+ */
+function repositoryInPlace(observation: Observation, plan: RepositoryPlan): boolean {
+  const { key, source, preferences } = observation.repository
+  return (
+    holds(key, plan.key.sha256) && holds(source, plan.source.sha256) && holds(preferences, plan.preferences.sha256)
   )
 }
 
@@ -339,14 +351,16 @@ function reopened(observation: Observation, target: PoolTarget, retained: Retain
  * Pure check of one step's approved result against a fresh observation. A step
  * is verified only when the host agrees, never because its script exited zero.
  * Closing is verified by the persistent masks, positive inactivity, and the
- * approved sysctl override bytes. The guard is verified by the approved file
- * bytes alone, because it may legitimately run once the host is open. The
- * package install is verified only if the host is still closed, because a
- * package script can undo the masks or weaken the AppArmor restriction. An open
- * is verified by the startup check, the recorded state mount, the exact package
- * pins, and the running daemon units, and, for a preserved installation, by the
- * retained identity and configuration. An initialization is judged against the
- * preseed bytes retained in its plan. An access grant is judged by the account
+ * approved sysctl override bytes. The repository steps are judged against the
+ * repository plan that their approved plan carries, whether it stands alone or
+ * follows a closing. The guard is verified by the approved file bytes alone,
+ * because it may legitimately run once the host is open. The package install is
+ * verified only if the host is still closed, because a package script can undo
+ * the masks or weaken the AppArmor restriction. An open is verified by the
+ * startup check, the recorded state mount, the exact package pins, and the
+ * running daemon units, and, for a preserved installation, by the retained
+ * identity and configuration. An initialization is judged against the preseed
+ * bytes retained in its plan. An access grant is judged by the account
  * database, which does not show that SSH forwarding works. The workload stop is
  * judged while the daemon still answers, and the release only once every unit
  * is inactive and persistently masked.
@@ -363,21 +377,14 @@ export function verify(action: IncusAction, plan: ApprovedPlan, observation: Obs
         holds(guard.check, plan.check.sha256) &&
         holds(guard.dropIn, plan.dropIn.sha256)
       )
-    case 'add-repository':
-      return (
-        plan.kind === 'repository' &&
-        holds(observation.repository.key, plan.key.sha256) &&
-        holds(observation.repository.source, plan.source.sha256) &&
-        holds(observation.repository.preferences, plan.preferences.sha256)
-      )
-    case 'refresh-lists':
-      return (
-        plan.kind === 'repository' &&
-        holds(observation.repository.key, plan.key.sha256) &&
-        holds(observation.repository.source, plan.source.sha256) &&
-        holds(observation.repository.preferences, plan.preferences.sha256) &&
-        listed(observation)
-      )
+    case 'add-repository': {
+      const approved = repositoryOf(plan)
+      return approved !== null && repositoryInPlace(observation, approved)
+    }
+    case 'refresh-lists': {
+      const approved = repositoryOf(plan)
+      return approved !== null && repositoryInPlace(observation, approved) && listed(observation)
+    }
     case 'install-packages':
       return (
         plan.kind === 'packages' &&

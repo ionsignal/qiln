@@ -8,7 +8,7 @@ import { ZFS_SPEC } from '../zfs/spec'
 import { runStep, type StepOutcome } from '../step'
 import { shellCommand } from '../shell'
 import { InstallerError } from '../../diagnostic/error'
-import { accessPlanSchema, instanceKey, type ApprovedPlan } from './types'
+import { accessPlanSchema, instanceKey, repositoryOf, type ApprovedPlan } from './types'
 import type { Remote } from '../../transport/ssh/connections'
 
 /**
@@ -68,33 +68,34 @@ function argumentsOf(action: IncusAction, plan: ApprovedPlan): string[] {
       ]
     }
     case 'add-repository': {
-      if (plan.kind !== 'repository') {
+      const approved = repositoryOf(plan)
+      if (approved === null) {
         return defect()
       }
-      const source = repositorySource(plan.architecture)
-      const preferences = repositoryPreferences(plan.architecture)
+      const source = repositorySource(approved.architecture)
+      const preferences = repositoryPreferences(approved.architecture)
       if (
-        plan.key.url !== keyUrl ||
-        plan.key.sha256 !== keySha256 ||
-        sha256Of(source) !== plan.source.sha256 ||
-        sha256Of(preferences) !== plan.preferences.sha256
+        approved.key.url !== keyUrl ||
+        approved.key.sha256 !== keySha256 ||
+        sha256Of(source) !== approved.source.sha256 ||
+        sha256Of(preferences) !== approved.preferences.sha256
       ) {
         return defect()
       }
       return [
         keyFile,
-        plan.key.url,
-        plan.key.sha256,
+        approved.key.url,
+        approved.key.sha256,
         sourceFile,
         base64(source),
-        plan.source.sha256,
+        approved.source.sha256,
         preferencesFile,
         base64(preferences),
-        plan.preferences.sha256,
+        approved.preferences.sha256,
       ]
     }
     case 'refresh-lists':
-      return plan.kind === 'repository' ? [sourceFile] : defect()
+      return repositoryOf(plan) === null ? defect() : [sourceFile]
     case 'install-packages': {
       if (plan.kind !== 'packages') {
         return defect()

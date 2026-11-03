@@ -39,6 +39,7 @@ import type {
   RefusedPlan,
   ReleasePlan,
   ReleaseTarget,
+  RepositoryPlan,
   SoftwareStagePlan,
   SoftwareTarget,
   StoppedPlan,
@@ -138,22 +139,28 @@ function accessPlan(observation: Observation, target: IncusTarget): AccessPlan |
 }
 
 /**
- * Pure decision over the software stage. Closing is decided first and from
- * closing concerns alone: the sysctl override must fit and, until a verified
- * open or initialization exists, every unit must be positively inactive. It
- * masks the units and installs the sysctl override that keeps the AppArmor
- * restriction enabled. It needs no pool, no state mount, and no repository, so
- * it can precede every package effect, and nothing it plans touches the state
- * directory. Then the repository and exact-package preferences, then the
- * packages, installed while the host is closed. Each stage needs its own
- * approval and a fresh inspection before the next. Installed Incus packages
- * must match the selected native pins; differences refuse before further
- * preparation, never offering an upgrade or downgrade. A retained baseline that
- * conflicts with the selected pins is refused rather than replaced. The kernel
- * floor is judged once closing is settled. `progress.opened` says that a
- * verified open or initialization already let the daemon run, so the closed
- * host is no longer expected and closing is never planned again, and no package
- * is planned, because a package script restarts a running daemon.
+ * Pure decision over the software stage. The closing preconditions are judged
+ * first: the sysctl override must fit and, until a verified open or
+ * initialization exists, every unit must be positively inactive. Every other
+ * refusal that offline evidence decides follows at once (kernel floor, excluded
+ * packages, APT configuration, the selected pins, and the retained baseline),
+ * so a host that cannot be prepared is refused before the first mask. Then
+ * closing masks the units and installs the sysctl override that keeps the
+ * AppArmor restriction enabled. It needs no pool and no state mount, and
+ * nothing it plans touches the state directory. When the repository files and
+ * refreshed package lists are not yet in place, the closing carries the
+ * repository plan, so one approval covers both; on a host that is already
+ * closed the same plan stands alone. Then the packages, installed while the
+ * host is closed. Refusals that need the refreshed package lists, such as an
+ * unavailable pinned build or an APT simulation, can only follow the
+ * repository stage. Each approval needs a fresh inspection before the next.
+ * Installed Incus packages must match the selected native pins; differences
+ * refuse before further preparation, never offering an upgrade or downgrade. A
+ * retained baseline that conflicts with the selected pins is refused rather
+ * than replaced. `progress.opened` says that a verified open or initialization
+ * already let the daemon run, so the closed host is no longer expected and
+ * closing is never planned again, and no package is planned, because a package
+ * script restarts a running daemon.
  */
 export function softwarePlanOf(observation: Observation, target: SoftwareTarget, progress: Progress): SoftwareStagePlan {
   const { system, repository, sysctl, transaction } = observation
@@ -176,9 +183,6 @@ export function softwarePlanOf(observation: Observation, target: SoftwareTarget,
   )
   if (refusals.length > 0) {
     return refused()
-  }
-  if (!progress.opened && (!closed(observation) || sysctl.override.kind === 'absent')) {
-    return { kind: 'close', sysctl: { sha256: sysctlDigest } }
   }
   const architecture = ARCHITECTURES.find(name => name === system.packageArchitecture)
   const sourceDigest = architecture === undefined ? null : sha256Of(repositorySource(architecture))
@@ -239,15 +243,22 @@ export function softwarePlanOf(observation: Observation, target: SoftwareTarget,
     repository.key.kind === 'absent' ||
     repository.source.kind === 'absent' ||
     repository.preferences.kind === 'absent'
-  if (add || !listed(observation)) {
-    return {
-      kind: 'repository',
-      architecture,
-      add,
-      key: { url: keyUrl, sha256: keySha256 },
-      source: { sha256: sourceDigest },
-      preferences: { sha256: preferencesDigest },
-    }
+  const repositoryPlan: RepositoryPlan | null =
+    add || !listed(observation)
+      ? {
+          kind: 'repository',
+          architecture,
+          add,
+          key: { url: keyUrl, sha256: keySha256 },
+          source: { sha256: sourceDigest },
+          preferences: { sha256: preferencesDigest },
+        }
+      : null
+  if (!progress.opened && (!closed(observation) || sysctl.override.kind === 'absent')) {
+    return { kind: 'close', sysctl: { sha256: sysctlDigest }, repository: repositoryPlan }
+  }
+  if (repositoryPlan !== null) {
+    return repositoryPlan
   }
   const missing = comparison.kind === 'install' ? comparison.packages.map(change => change.name) : []
   if (missing.length === 0) {
