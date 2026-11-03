@@ -2,7 +2,7 @@ import { constants } from 'node:fs'
 import { access, lstat, readlink, realpath, readdir, stat } from 'node:fs/promises'
 import { isAbsolute, join, relative, resolve } from 'node:path'
 import { AWS_SPEC } from '../spec'
-import { RELEASE, TOOL_SPEC } from './spec'
+import { TOOL_SPEC, current } from './spec'
 import { InstallerError, isInstallerErrorCode, type InstallerErrorCode } from '../../diagnostic/error'
 import { inspectChild, openChildDir, readChild, writeChild, type Dir } from '../../state/files'
 import { acquireLock, type StateLock } from '../../state/lock'
@@ -58,7 +58,7 @@ export function toolsPath(): string {
 }
 
 export function location(): string {
-  const path = join(toolsPath(), TOOL_SPEC.version, RELEASE.target)
+  const path = join(toolsPath(), TOOL_SPEC.version, current().target)
   if (/[\u0000-\u001f\u007f]/.test(path) || /\s/.test(path)) {
     throw new InstallerError({
       code: 'AWS_TOOL_PATH_INVALID',
@@ -79,6 +79,7 @@ export function artifactIdentity(artifact: Artifact): Artifact {
 }
 
 function parse(value: unknown): InstallationRecord {
+  const release = current()
   if (
     !isRecord(value) ||
     !hasKeys(value, [
@@ -95,7 +96,7 @@ function parse(value: unknown): InstallationRecord {
     ]) ||
     value.version !== 1 ||
     value.cliVersion !== TOOL_SPEC.version ||
-    value.target !== RELEASE.target ||
+    value.target !== release.target ||
     (value.phase !== 'installing' && value.phase !== 'ready' && value.phase !== 'failed') ||
     !isTimestamp(value.startedAt) ||
     !isTimestamp(value.updatedAt) ||
@@ -105,7 +106,7 @@ function parse(value: unknown): InstallationRecord {
   ) {
     return invalid()
   }
-  const expected = artifactIdentity(RELEASE.artifact)
+  const expected = artifactIdentity(release.artifact)
   const artifact = value.artifact
   if (
     !isRecord(artifact) ||
@@ -119,7 +120,7 @@ function parse(value: unknown): InstallationRecord {
   return {
     version: 1,
     cliVersion: value.cliVersion,
-    target: RELEASE.target,
+    target: release.target,
     phase: value.phase,
     artifact: expected,
     startedAt: value.startedAt,
@@ -184,6 +185,7 @@ export async function unlocked(directory: Dir): Promise<void> {
 }
 
 async function versionDirectory(directory: Dir, create: boolean): Promise<Dir | null> {
+  const { target } = current()
   let version: Dir
   try {
     version = await openChildDir(
@@ -202,7 +204,7 @@ async function versionDirectory(directory: Dir, create: boolean): Promise<Dir | 
     throw error
   }
   for (const name of await version.list()) {
-    if (name !== RELEASE.target) {
+    if (name !== target) {
       return invalid()
     }
     const kind = await inspectChild(version, name, {
@@ -220,7 +222,7 @@ function partial(): never {
   throw new InstallerError({
     code: 'AWS_TOOL_PARTIAL',
     facts: [
-      ['Target', RELEASE.target],
+      ['Target', current().target],
       ['Installation', location()],
     ],
     retry: 'qiln aws connect',
@@ -229,16 +231,17 @@ function partial(): never {
 
 export async function create(directory: Dir): Promise<Dir> {
   try {
+    const release = current()
     const version = await versionDirectory(directory, true)
     if (!version) {
       return invalid()
     }
-    if ((await version.list()).includes(RELEASE.target)) {
+    if ((await version.list()).includes(release.target)) {
       return partial()
     }
     const target = await openChildDir(
       version,
-      RELEASE.target,
+      release.target,
       {
         owner: userId(),
         mode: 0o700,
@@ -355,7 +358,7 @@ export async function tree(root: string, links: readonly ReviewedLink[], roots?:
 }
 
 export async function executable(directory: Dir, release: Release): Promise<string> {
-  const roots = ['aws-cli', 'bin']
+  const { roots } = release
   const names = await directory.list()
   if (
     roots.some(name => !names.includes(name)) ||
@@ -392,11 +395,12 @@ export async function executable(directory: Dir, release: Release): Promise<stri
 
 export async function read(directory: Dir): Promise<ReadyInstallation | null> {
   try {
+    const release = current()
     const version = await versionDirectory(directory, false)
-    if (!version || !(await version.list()).includes(RELEASE.target)) {
+    if (!version || !(await version.list()).includes(release.target)) {
       return null
     }
-    const target = await openChildDir(version, RELEASE.target, {
+    const target = await openChildDir(version, release.target, {
       owner: userId(),
       mode: 0o700,
     })
@@ -432,7 +436,7 @@ export async function read(directory: Dir): Promise<ReadyInstallation | null> {
     return {
       directory: target,
       record,
-      executable: await executable(target, RELEASE),
+      executable: await executable(target, release),
     }
   } catch (error: unknown) {
     throw stateError(error)

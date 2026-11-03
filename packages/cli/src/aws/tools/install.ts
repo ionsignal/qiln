@@ -12,6 +12,7 @@ import { toolRecovery, type ToolRecoveryOutcomes } from '../recovery'
 import { inspect, type AwsCli } from '../auth/login'
 import { userId } from '../host'
 import { download, DownloadError } from './download'
+import { setupPkg } from './pkg'
 import { current, TOOL_SPEC, type Release } from './spec'
 import * as state from './state'
 
@@ -34,6 +35,8 @@ interface SetupTools {
   shell: string
   unzip: string
 }
+
+type Setup = (target: Dir, workspace: Dir, archive: string, options: InstallOptions) => Promise<void>
 
 function check(signal?: AbortSignal): void {
   if (signal) {
@@ -120,8 +123,7 @@ export async function verify(executable: string, signal?: AbortSignal, workspace
   }
 }
 
-async function setup(
-  release: Release,
+async function setupZip(
   target: Dir,
   workspace: Dir,
   archive: string,
@@ -144,7 +146,7 @@ async function setup(
       code: 'AWS_TOOL_PAYLOAD_INVALID',
     })
   }
-  await state.tree(extracted.path, release.archiveLinks)
+  await state.tree(extracted.path, [])
   const bundled = join(extracted.path, 'aws/dist/aws')
   const installer = join(extracted.path, 'aws/install')
   if (!(await lstat(bundled)).isFile() || !(await lstat(installer)).isFile()) {
@@ -169,6 +171,18 @@ async function setup(
 }
 
 /**
+ * Resolves what the release format needs before any state is created, so a
+ * missing prerequisite can never leave a partial installation behind.
+ */
+async function installer(release: Release): Promise<Setup> {
+  if (release.artifact.format === 'pkg') {
+    return (target, workspace, archive, options) => setupPkg(target, workspace, archive, setupOptions(workspace, options))
+  }
+  const tools = await prerequisites()
+  return (target, workspace, archive, options) => setupZip(target, workspace, archive, tools, options)
+}
+
+/**
  * Installation is called only after command-layer approval. Every executable,
  * artifact identity, and destination is re-derived from the pinned release.
  */
@@ -176,7 +190,7 @@ export async function install(options: InstallOptions = {}): Promise<AwsCli> {
   check(options.signal)
   const release = current()
   state.location()
-  const tools = await prerequisites()
+  const setup = await installer(release)
   check(options.signal)
   const toolsDirectory = await state.open(true)
   if (!toolsDirectory) {
@@ -214,7 +228,6 @@ export async function install(options: InstallOptions = {}): Promise<AwsCli> {
         startedAt,
         updatedAt: startedAt,
         failureCode: null,
-        // An interrupted installing record never asserts that setup was inactive.
         termination: 'unconfirmed',
         cleanup: 'unconfirmed',
       }
@@ -235,7 +248,7 @@ export async function install(options: InstallOptions = {}): Promise<AwsCli> {
         received: 0,
         total: release.artifact.bytes,
       })
-      const archive = await download(release.artifact, workspace, 'artifact.zip', {
+      const archive = await download(release.artifact, workspace, `artifact.${release.artifact.format}`, {
         signal: options.signal,
         progress(received, total) {
           emit(options, {
@@ -252,7 +265,7 @@ export async function install(options: InstallOptions = {}): Promise<AwsCli> {
       emit(options, {
         stage: 'installing',
       })
-      await setup(release, target, workspace, archive, tools, options)
+      await setup(target, workspace, archive, options)
       check(options.signal)
       cli = await verify(await state.executable(target, release), options.signal, workspace.path)
       emit(options, {

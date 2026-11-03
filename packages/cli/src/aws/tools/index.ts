@@ -6,10 +6,11 @@ import { SupervisedProcessError } from '../../transport/subprocess/supervise'
 import { toolDiagnostic } from '../errors'
 import { toolRecovery } from '../recovery'
 import { isErrorCode } from '../../guards'
+import { sameJson } from '../../json'
 import { inspect, type AwsCli } from '../auth/login'
 import { requireAwsHost } from '../host'
 import { environment, install as installTool, verify, type InstallOptions } from './install'
-import { current, RELEASE, TOOL_SPEC, type Artifact, type TargetId } from './spec'
+import { current, TOOL_SPEC, type Artifact, type TargetId } from './spec'
 import * as state from './state'
 
 export interface ExternalRejection {
@@ -63,14 +64,15 @@ async function isManagedExecutable(executable: string): Promise<boolean> {
 }
 
 function proposal(): Proposal {
+  const release = current()
   return {
     version: TOOL_SPEC.version,
-    target: RELEASE.target,
+    target: release.target,
     artifact: {
-      ...RELEASE.artifact,
+      ...release.artifact,
     },
     destination: state.location(),
-    effects: [...RELEASE.effects],
+    effects: [...release.effects],
   }
 }
 
@@ -181,19 +183,7 @@ export async function resolve(signal?: AbortSignal): Promise<Selection> {
 export async function install(approved: Proposal, options: InstallOptions = {}): Promise<AwsCli> {
   requireAwsHost()
   check(options.signal)
-  current()
-  const expected = proposal()
-  if (
-    approved.version !== expected.version ||
-    approved.target !== expected.target ||
-    approved.destination !== expected.destination ||
-    approved.artifact.url !== expected.artifact.url ||
-    approved.artifact.format !== expected.artifact.format ||
-    approved.artifact.bytes !== expected.artifact.bytes ||
-    approved.artifact.sha256 !== expected.artifact.sha256 ||
-    approved.effects.length !== expected.effects.length ||
-    approved.effects.some((effect, index) => effect !== expected.effects[index])
-  ) {
+  if (!sameJson(approved, proposal())) {
     throw new InstallerError({
       code: 'AWS_TOOL_STATE_INVALID',
       facts: [['Observed', 'The approved proposal differs from the pinned installation policy.']],

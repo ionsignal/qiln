@@ -1,11 +1,11 @@
 import { InstallerError } from '../../diagnostic/error'
 import { AWS_SPEC } from '../spec'
 
-export type TargetId = 'linux-x64'
+export type TargetId = 'linux-x64' | 'darwin-universal'
 
 export interface Artifact {
   readonly url: string
-  readonly format: 'zip'
+  readonly format: 'zip' | 'pkg'
   readonly bytes: number
   readonly sha256: string
 }
@@ -19,7 +19,7 @@ export interface Release {
   readonly target: TargetId
   readonly artifact: Artifact
   readonly executable: string
-  readonly archiveLinks: readonly ReviewedLink[]
+  readonly roots: readonly string[]
   readonly links: readonly ReviewedLink[]
   readonly effects: readonly string[]
 }
@@ -27,6 +27,7 @@ export interface Release {
 export const TOOL_SPEC = Object.freeze({
   version: AWS_SPEC.cliVersion,
   host: 'awscli.amazonaws.com',
+  signerTeamId: '94KV3E626L',
   redirects: 3,
   downloadTimeoutMs: 10 * 60 * 1_000,
   maximumArtifactBytes: 512 * 1_024 * 1_024,
@@ -42,71 +43,107 @@ export const TOOL_SPEC = Object.freeze({
   }),
 })
 
-export const RELEASE: Release = Object.freeze({
-  target: 'linux-x64',
-  artifact: Object.freeze({
-    url: `https://${TOOL_SPEC.host}/awscli-exe-linux-x86_64-${TOOL_SPEC.version}.zip`,
-    format: 'zip',
-    bytes: 74061592,
-    sha256: '6b3a6a3d7bb3997928f0bdf7b866914224abf242c2e54e1dcebbe84bee64f356',
+const FILENAMES = Object.freeze({
+  'linux-x64': `awscli-exe-linux-x86_64-${TOOL_SPEC.version}.zip`,
+  'darwin-universal': `AWSCLIV2-${TOOL_SPEC.version}.pkg`,
+} as const satisfies Record<TargetId, string>)
+
+function artifactUrl(target: TargetId): string {
+  return `https://${TOOL_SPEC.host}/${FILENAMES[target]}`
+}
+
+/**
+ * Both macOS architectures run the one universal package, so they share a release.
+ */
+const HOSTS: Readonly<Record<string, TargetId>> = Object.freeze({
+  'linux-x64': 'linux-x64',
+  'darwin-x64': 'darwin-universal',
+  'darwin-arm64': 'darwin-universal',
+})
+
+export const RELEASES: Readonly<Record<TargetId, Release>> = Object.freeze({
+  'linux-x64': Object.freeze({
+    target: 'linux-x64',
+    artifact: Object.freeze({
+      url: artifactUrl('linux-x64'),
+      format: 'zip',
+      bytes: 74061592,
+      sha256: '6b3a6a3d7bb3997928f0bdf7b866914224abf242c2e54e1dcebbe84bee64f356',
+    }),
+    executable: 'bin/aws',
+    roots: Object.freeze(['aws-cli', 'bin']),
+    links: Object.freeze([
+      Object.freeze({
+        path: `aws-cli/v2/${TOOL_SPEC.version}/bin/aws`,
+        to: `aws-cli/v2/${TOOL_SPEC.version}/dist/aws`,
+      }),
+      Object.freeze({
+        path: `aws-cli/v2/${TOOL_SPEC.version}/bin/aws_completer`,
+        to: `aws-cli/v2/${TOOL_SPEC.version}/dist/aws_completer`,
+      }),
+      Object.freeze({
+        path: 'aws-cli/v2/current',
+        to: `aws-cli/v2/${TOOL_SPEC.version}`,
+      }),
+      Object.freeze({
+        path: 'bin/aws',
+        to: 'aws-cli/v2/current/bin/aws',
+      }),
+      Object.freeze({
+        path: 'bin/aws_completer',
+        to: 'aws-cli/v2/current/bin/aws_completer',
+      }),
+    ]),
+    effects: Object.freeze([
+      'Extracts the verified ZIP into a private installation workspace.',
+      'Runs the bundled AWS installer without privilege escalation.',
+      'Creates the AWS CLI payload under aws-cli and command links under bin in the displayed destination.',
+    ]),
   }),
-  executable: 'bin/aws',
-  archiveLinks: Object.freeze([]),
-  // Preserve immediate destinations: resolving these ahead of validation would
-  // discard the vendor's current-version indirection.
-  links: Object.freeze([
-    Object.freeze({
-      path: `aws-cli/v2/${TOOL_SPEC.version}/bin/aws`,
-      to: `aws-cli/v2/${TOOL_SPEC.version}/dist/aws`,
+  'darwin-universal': Object.freeze({
+    target: 'darwin-universal',
+    artifact: Object.freeze({
+      url: artifactUrl('darwin-universal'),
+      format: 'pkg',
+      bytes: 60623265,
+      sha256: 'a2fae32b07ca81c4327e3858ea810b1042bdfc91745a97ca30f9d5297e21834c',
     }),
-    Object.freeze({
-      path: `aws-cli/v2/${TOOL_SPEC.version}/bin/aws_completer`,
-      to: `aws-cli/v2/${TOOL_SPEC.version}/dist/aws_completer`,
-    }),
-    Object.freeze({
-      path: 'aws-cli/v2/current',
-      to: `aws-cli/v2/${TOOL_SPEC.version}`,
-    }),
-    Object.freeze({
-      path: 'bin/aws',
-      to: 'aws-cli/v2/current/bin/aws',
-    }),
-    Object.freeze({
-      path: 'bin/aws_completer',
-      to: 'aws-cli/v2/current/bin/aws_completer',
-    }),
-  ]),
-  effects: Object.freeze([
-    'Extracts the verified ZIP into a private installation workspace.',
-    'Runs the bundled AWS installer without privilege escalation.',
-    'Creates the AWS CLI payload under aws-cli and command links under bin in the displayed destination.',
-  ]),
+    executable: 'aws-cli/aws',
+    roots: Object.freeze(['aws-cli']),
+    links: Object.freeze([]),
+    effects: Object.freeze([
+      `Verifies the package signature and notarization against Apple developer team ID ${TOOL_SPEC.signerTeamId}.`,
+      'Expands the verified package into a private installation workspace. The macOS installer and its scripts are never run, and no privilege escalation is used.',
+      'Moves the AWS CLI payload under aws-cli in the displayed destination.',
+    ]),
+  }),
 })
 
 export function current(): Release {
-  if (process.platform !== 'linux' || process.arch !== 'x64') {
+  const host = `${process.platform}-${process.arch}`
+  if (!Object.hasOwn(HOSTS, host)) {
     throw new InstallerError({
       code: 'AWS_TOOL_UNAVAILABLE',
       facts: [
         ['Version', TOOL_SPEC.version],
-        ['Target', `${process.platform}-${process.arch}`],
-        ['Supported managed target', RELEASE.target],
+        ['Target', host],
+        ['Supported managed targets', Object.keys(HOSTS).join(', ')],
       ],
       retry: 'qiln aws connect',
     })
   }
-  return RELEASE
+  return RELEASES[HOSTS[host]]
 }
 
 export function validateArtifact(artifact: Artifact): void {
   const url = new URL(artifact.url)
+  const pathnames = Object.values(FILENAMES).map(name => `/${name}`)
   if (
     !Number.isSafeInteger(artifact.bytes) ||
     artifact.bytes <= 0 ||
     artifact.bytes > TOOL_SPEC.maximumArtifactBytes ||
     !/^[a-f0-9]{64}$/.test(artifact.sha256) ||
     /^0{64}$/.test(artifact.sha256) ||
-    artifact.format !== 'zip' ||
     url.protocol !== 'https:' ||
     url.hostname !== TOOL_SPEC.host ||
     (url.port !== '' && url.port !== '443') ||
@@ -114,7 +151,8 @@ export function validateArtifact(artifact: Artifact): void {
     url.password !== '' ||
     url.hash !== '' ||
     url.search !== '' ||
-    url.pathname !== `/awscli-exe-linux-x86_64-${TOOL_SPEC.version}.zip`
+    !pathnames.includes(url.pathname) ||
+    !url.pathname.endsWith(`.${artifact.format}`)
   ) {
     throw new InstallerError({
       code: 'AWS_TOOL_STATE_INVALID',
