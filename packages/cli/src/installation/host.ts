@@ -2,7 +2,7 @@ import { InstallerError } from '../diagnostic/error'
 import { INSTALLER_SPEC } from './spec'
 import type { Layout } from './layout'
 
-const GIB = 1_073_741_824
+const GiB = 1_073_741_824
 
 export interface HostRelease {
   distributionId: string
@@ -111,14 +111,14 @@ export function requireSupportedRelease(host: HostRelease, retry: string): void 
  */
 export function requireCapacity(layout: Layout, memoryBytes: number, retry: string): void {
   const match = /^([1-9][0-9]*)GiB$/.exec(layout.orchestrator.limits['limits.memory'] ?? '')
-  if (match === null || Number(match[1]) * GIB <= memoryBytes) {
+  if (match === null || Number(match[1]) * GiB <= memoryBytes) {
     return
   }
   throw new InstallerError({
     code: 'INSTALLATION_TARGET_CAPACITY',
     facts: [
       ['Memory limit', `${match[1]} GiB`],
-      ['Observed memory', `${(memoryBytes / GIB).toFixed(1)} GiB total`],
+      ['Observed memory', `${(memoryBytes / GiB).toFixed(1)} GiB total`],
     ],
     retry,
   })

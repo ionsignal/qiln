@@ -2,7 +2,7 @@ import { identityOf } from '../journal/binding'
 import type { ZfsTarget } from '../../../host/zfs/types'
 import type { Deployment } from '../types'
 
-const GIB = 1_073_741_824
+const GiB = 1_073_741_824
 
 /**
  * Derives the preparation target from the protected deployment record alone.
@@ -16,6 +16,6 @@ export function targetOf(record: Deployment): ZfsTarget | null {
   }
   return {
     ...identity,
-    dataBytes: record.approval.host.plan.data.sizeGiB * GIB,
+    dataBytes: record.approval.host.plan.data.sizeGiB * GiB,
   }
 }
