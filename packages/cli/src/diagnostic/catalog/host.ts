@@ -3,7 +3,7 @@ import { entry } from './define'
 export const hostDiagnostics = Object.freeze({
   MISSING_HOST_TOOL: entry(
     'Required host tool is unavailable',
-    'Qiln uses tools already installed on the host. It does not install packages or invoke privilege escalation.',
+    'Qiln uses tools already installed on the host and neither installs packages nor escalates privileges.',
     'Install the indicated package manually after review, then return to an unprivileged developer session.',
   ),
   PACKAGE_QUERY_FAILED: entry(
@@ -24,7 +24,7 @@ export const hostDiagnostics = Object.freeze({
   ),
   UNSUPPORTED_INCUS_PACKAGE_VERSION: entry(
     'Incus package version is unsupported',
-    'The installed package is outside the installer’s supported range. Package metadata alone does not establish publisher provenance.',
+    'The installed package is outside the supported range, and package metadata alone does not establish publisher provenance.',
     'Review the package source and manually install a supported Incus release.',
   ),
   UNSUPPORTED_HOST_PLATFORM: entry(
@@ -44,7 +44,7 @@ export const hostDiagnostics = Object.freeze({
   ),
   UNSUPPORTED_HOST_ARCHITECTURE: entry(
     'Host architecture is unsupported',
-    'The installer supports native AMD64 and ARM64 hosts, and requires the package, machine, and Node architectures to agree. It does not rely on foreign-architecture emulation.',
+    'The installer supports only native AMD64 and ARM64 hosts whose package, machine, and Node architectures agree, without foreign-architecture emulation.',
     'Run Qiln on a supported amd64/x86_64 or arm64/aarch64 host with a matching Node runtime.',
   ),
   UNSUPPORTED_KERNEL_VERSION: entry(

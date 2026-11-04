@@ -46,12 +46,12 @@ export const stateDiagnostics = Object.freeze({
   ),
   INSTALLER_LOCK_FAILED: entry(
     'Installer lock could not be established',
-    'Incus mutations and state writes require a validated exclusive lock. A lock created before validation failed may remain for review.',
+    'Incus mutations and state writes require a validated exclusive lock, and a lock created before validation failed may remain for review.',
     'Inspect state-directory ownership, permissions, and lock state manually.',
   ),
   INVALID_LOCAL_CREDENTIAL: entry(
     'Retained credential text is malformed',
-    'Retained credentials must contain supported UTF-8 text. Qiln never regenerates over malformed credentials.',
+    'Retained credentials must contain supported UTF-8 text, and Qiln never regenerates over malformed ones.',
     recoverCredentialsStep,
   ),
   INVALID_NATS_CREDENTIAL: entry(

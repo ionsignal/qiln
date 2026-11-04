@@ -10,19 +10,18 @@ export const group: HelpContent = {
     'qiln installation reassign --id <deployment-id>',
   ],
   safety: [
-    'status, inspect and configure need exactly one target: --local for this machine, or --alias or --id for a retained AWS deployment. There is no default, so a command never silently chooses between this machine and a remote host. reassign takes only --alias or --id.',
-    'An AWS target is resolved from the retained deployment record alone. Installation never authenticates to AWS and never fills a gap: it needs a retained host-key pin, a ZFS pool verified imported with its scrub timer, an Incus initialization verified and not released, and no unresolved preparation step. Run qiln aws deployment verify and prepare first. Everything about the target is observed over the pinned, key-authenticated SSH connection, and Incus is reached through a new connection that relays its Unix socket. Recorded preparation state is point-in-time evidence, not proof that Incus is running.',
-    'The operator machine needs only ssh-keygen for an AWS target. A local target requires the supported Ubuntu host, the preinstalled tools, local Incus access, and ZFS storage.',
-    'An AWS target owns its source checkout. Qiln clones github.com/ionsignal/qiln to /home/<account>/qiln on the target, the same path on every host of a volume chain, and the orchestrator mounts it writable at /opt/qiln. The first configure records origin’s current main as the restore point, and configure restores the recorded restore point whenever the checkout is absent. Qiln never pulls, never moves HEAD, and never judges the working tree, so commits made in the checkout are accepted. Work in the checkout survives a host replacement only once it is pushed to origin: qiln aws deployment remove refuses when HEAD is not fetchable from origin, and records HEAD as the new restore point. Qiln never pushes and stores no git credentials. --source belongs to --local and is refused for an AWS target.',
-    'Installation uses the invoking operator’s existing authority only. Incus administrative access is root-equivalent development authority, and the development orchestrator is not a production privilege boundary.',
-    'Installation state and credentials live in one protected named installation directory under the Qiln state directory: dev for this machine, and aws-<deployment-id> for a deployment, where the ID is that of the deployment that created the retained data volume. The name and directory stay the same when the volume is reused by a replacement host. A record is bound to its current host, architecture, layout, and checkout path. A different architecture, layout, or checkout path is refused, not rebound. A later deployment of the same retained volume is refused until reassign records it.',
+    'status, inspect and configure need exactly one target: --local for this machine, or --alias or --id for a retained AWS deployment, with no default. reassign takes only --alias or --id.',
+    'An AWS target is resolved from retained deployment evidence and never authenticates to AWS, so run qiln aws deployment verify and prepare first. Everything is observed over the pinned SSH connection with the Incus socket relayed through it, and recorded preparation state is point-in-time evidence, not proof that Incus is running.',
+    'An AWS target owns its checkout at /home/<account>/qiln, cloned from github.com/ionsignal/qiln and restored at its recorded restore point whenever absent. Qiln never pulls, pushes, or judges the working tree, so work survives a host replacement only once pushed, and qiln aws deployment remove refuses an unpushed HEAD.',
+    'Installation uses the invoking operator’s existing authority only. Incus administrative access is root-equivalent, and the development orchestrator is not a production privilege boundary.',
+    'State and credentials live in one protected installation directory: dev for this machine, and aws-<deployment-id> for a deployment, where the ID is that of the deployment that created the retained volume and stays the same across replacement hosts. A record is bound to its host, architecture, layout, and checkout path, and a later deployment of the same volume is refused until reassign records it.',
   ],
 }
 
 export const list: HelpContent = {
   examples: ['qiln installation list'],
   safety: [
-    'Reads local installation records only. It contacts no target, uses no credentials, and takes no lock.',
+    'Reads local installation records only: it contacts no target, uses no credentials, and takes no lock.',
     'A record that cannot be read fails the whole listing instead of being skipped.',
   ],
 }
@@ -30,21 +29,20 @@ export const list: HelpContent = {
 export const status: HelpContent = {
   examples: ['qiln installation status --local', 'qiln installation status --alias <alias>', 'qiln installation status --id <deployment-id>'],
   safety: [
-    'Reports the retained binding, the previous hosts of the installation, the checkout restore point, image pin and configuration evidence without contacting the target, authenticating to AWS, or taking a lock, so it also works while another operation holds one.',
-    'Retained evidence does not establish the live state of the target. Use inspect for a fresh observation.',
-    'The restore point of a managed checkout is the commit that configure restores when the checkout is absent. It is not a statement about the running tree.',
-    'An unresolved configuration step is reported as blocking evidence. Nothing is replayed, resumed, or cleared.',
+    'Reports the retained binding, previous hosts, checkout restore point, image pin, and configuration evidence without contacting the target, authenticating to AWS, or taking a lock, so it also works while another operation holds one.',
+    'Retained evidence does not establish the live state of the target, so use inspect for a fresh observation. The restore point is the commit that configure restores when a managed checkout is absent, not a statement about the running tree.',
+    'An unresolved configuration step is reported as blocking evidence and is never cleared.',
   ],
 }
 
 export const inspect: HelpContent = {
   examples: ['qiln installation inspect --local', 'qiln installation inspect --alias <alias>', 'qiln installation inspect --id <deployment-id>'],
   safety: [
-    'Read-only inspection: Qiln does not change host, installer, or Incus state, and registers nothing. It needs no image selection and works for a target with no registered installation, which it reports.',
-    'It checks the target, the recorded installation state, the Incus daemon, and the storage and network of the layout. When an installation is registered, it also checks the retained binding and checkout, and, when an image is pinned and the orchestrator exists, the instance against the pinned image.',
-    'A deployment that holds the retained volume of an installation assigned to an earlier deployment is refused until reassign records it.',
-    'The checkout check runs no Git status and no repository hook. A local checkout is judged by its Git root, its committed baseline, and its package name. A managed checkout is reported as present or absent, with its HEAD shown beside the restore point as information only, and no network call is made.',
+    'Read-only: Qiln changes no host, installer, or Incus state and registers nothing. It needs no image selection and works for a target with no registered installation, which it reports.',
+    'It checks the target, the recorded installation state, the Incus daemon, and the layout’s storage and network, and for a registered installation also its binding, checkout, and instance against the pinned image.',
+    'A local checkout is judged by its Git root, committed baseline, and package name. A managed checkout is reported as present or absent with its HEAD as information only, and no Git status, hook, or network call runs.',
     'Reading the Incus API of an active socket can start the daemon through socket activation, and Qiln never starts units itself.',
+    'A deployment that holds the retained volume of an installation assigned to an earlier deployment is refused until reassign records it.',
   ],
 }
 
@@ -55,24 +53,22 @@ export const configure: HelpContent = {
     'qiln installation configure --alias <alias> --image-meta <metadata> --image-rootfs <rootfs>',
   ],
   safety: [
-    'Qiln observes the target first, then displays one installation plan and applies it only after an explicit default-no approval. Each Incus change, and the one remote clone of a managed source checkout, is journaled with its approval in the installation directory, and a failed or interrupted change is never replayed, resumed, or rolled back. An installation that already matches needs no approval and no terminal. The first run registers the installation, and a later run must match its binding.',
-    '--source names the checkout root on this machine, and is required with --local and refused for an AWS target. An AWS target manages its own checkout at /home/<account>/qiln on the target. When it is absent, configure clones the recorded restore point, or origin’s current main on the first run, from the approved repository over HTTPS in one fenced step that never overwrites an existing path, and records that commit before it clones. A present checkout must be a Git work tree at that path with the approved repository as its origin, a committed HEAD, and the Qiln package. Its HEAD and working tree are never judged, so commits made there are accepted, and Qiln never pulls or pushes. Git must already exist on the target, because Qiln installs no packages. The cloned code is trusted guest code that runs with the orchestrator’s credentials: HTTPS to GitHub establishes the transport, not publisher authenticity.',
-    '--image verifies an existing local alias or full lowercase SHA-256 fingerprint on the target. It does not pull or replace an image.',
-    '--image-meta with --image-rootfs stages and fingerprints the artifacts on this machine first and uploads them. Content identical to the managed qiln-orchestrator-dev alias target is never replaced. New content is imported without an alias and checked as a container image for the target architecture before anything else changes. If that fails, the imported image remains in the image store without an alias, the previous image is untouched, and you must remove the imported image manually. If the alias targets different content, deleting that image, with the aliases attached to it, is displayed in the plan and happens only after approval and only after the new image passes its check. It is refused while an orchestrator instance exists, so remove the stopped instance manually first. No automatic rollback is attempted.',
-    'The first credential set requires --authorized-keys. Later runs reuse retained credentials; a supplied roster replaces only authorized_keys. Credentials are generated and kept on this machine, and only the four intended credentials are delivered to the validated stopped instance.',
-    'The selected image is trusted guest code. Qiln does not establish its provenance, authenticity, guest compatibility, or bootstrap readiness.',
-    'The target checkout is attached as a writable shifted source device, so the instance can modify it. No source is copied from this machine and no service is started. The configured orchestrator remains stopped.',
-    'Run as an unprivileged developer. Persistent PostgreSQL data is preserved; incompatible retained resources require manual review. An AWS target also needs git installed, because Qiln installs no packages, and a target with at least the memory of the orchestrator limit.',
+    'Qiln observes the target, displays one plan, and applies it only after a default-no approval, and an installation that already matches needs no approval. Each Incus change and the one checkout clone is journaled and verified by a fresh observation, and the plan must be unchanged when derived again after approval.',
+    '--image verifies an existing local alias or full lowercase fingerprint and never pulls or replaces an image. --image-meta with --image-rootfs stages and uploads artifacts, never replaces identical content, and imports new content without an alias, checked as a container image for the target architecture first.',
+    'Replacing a different managed image is approved in two gates: the import (with any checkout clone) first, then, once the imported image passes its check, deleting the previous image with its aliases. A rejected import leaves the previous image untouched and the imported one unaliased in the store, where Qiln never deletes it, and replacement is refused while an orchestrator instance exists.',
+    '--source names the checkout root on this machine, is required with --local, and is refused for an AWS target. An AWS target’s managed checkout is cloned at its restore point (origin’s current main on the first run) in one fenced step that never overwrites a path, and git must already exist on the target.',
+    'The first credential set requires --authorized-keys, and later runs reuse the retained set, with a supplied roster replacing only authorized_keys. Credentials are generated and kept on this machine, and only the four intended credentials are delivered to the stopped instance.',
+    'The selected image and the cloned checkout are trusted guest code, and the checkout is attached to the instance as a writable shifted source device. The configured orchestrator remains stopped, and persistent PostgreSQL data is preserved.',
   ],
 }
 
 export const reassign: HelpContent = {
   examples: ['qiln installation reassign --alias <alias>', 'qiln installation reassign --id <deployment-id>'],
   safety: [
-    'Moves an existing installation to a replacement deployment that holds its retained data volume, keeping the installation directory, credentials, image pin, checkout binding, and configuration history. Only the current host assignment changes. Local installations are never reassigned.',
-    'It needs the installation to be configured and settled, and it needs every earlier deployment of the volume chain, back to the assigned host, to have verifiably released Incus, exported the ZFS pool, been removed, and handed the volume on. The selected deployment must hold the same Incus server identity, retained preseed, and ZFS pool as the assigned host, and its preserved open must be verified and Incus still running, as for configure. These are retained evidence, not fresh proof, and nothing is inferred from an alias, a hostname, a tag, or an instance name.',
-    'The live installation must already match: the pinned image, the managed network and PostgreSQL volume, the stopped orchestrator, and instance credentials equal to the retained local ones. The managed source checkout may be absent on the replacement, because it lived on the root volume of an earlier host: reassign never clones it, and the next configure for the replacement restores it from the recorded restore point. A checkout that is present must still be a conforming one. Planning is used only as a predicate. Reassignment never creates, repairs, or completes anything, so if the target does not match, run configure against the currently valid host first.',
-    'After a default-no approval the same checks run again under the AWS-operation lock and the installation lock, and then one atomic write records the new host and keeps the old one in the history. Earlier configuration evidence is not rewritten. No Incus resource is changed, no credential is rotated, no image is replaced, and no workload is started. An uncertain write stops the command, and a later command reads the record as authoritative.',
-    'Reassignment is planned host replacement, not clustering, failover, upgrade, or disaster recovery, and it does not establish workload correctness. Retention is not a backup. An unplanned reboot or crash of an opened host remains unsupported.',
+    'Moves an existing installation to a replacement deployment that holds its retained data volume, keeping its directory, credentials, image pin, checkout binding, and history. Only the current host assignment changes, and local installations are never reassigned.',
+    'It needs a configured, settled installation and every earlier deployment of the volume chain released, exported, removed, and handed on, and the selected deployment must hold the same Incus server identity, retained preseed, and ZFS pool. These are retained evidence, not fresh proof, and nothing is inferred from an alias, hostname, tag, or instance name.',
+    'The live installation must already match, and planning is only a predicate: reassign never creates, repairs, or completes anything. The managed checkout may be absent on the replacement, and the next configure restores it from the recorded restore point.',
+    'After a default-no approval the same checks run again under the AWS-operation and installation locks, then one atomic write records the new host and keeps the old one in the history. No Incus resource, credential, or image changes, and no workload starts.',
+    'An uncertain write stops the command, and a later command reads the record as authoritative. Reassignment is planned host replacement, not clustering, failover, upgrade, or disaster recovery, and retention is not a backup.',
   ],
 }

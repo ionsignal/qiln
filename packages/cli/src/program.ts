@@ -167,7 +167,7 @@ export function createProgram(handlers: ProgramHandlers, output: ProgramOutput):
   describeHelp(installation, installationHelp.group)
   const installationList = installation
     .command('list')
-    .description('List every registered installation from retained local records, without contacting any target.')
+    .description('List registered installations from retained local records, without contacting any target.')
     .summary('List local installation records.')
   describeHelp(installationList, installationHelp.list)
   installationList.action(() => handlers.installation.list(program.opts<GlobalOptions>().color))
@@ -185,7 +185,7 @@ export function createProgram(handlers: ProgramHandlers, output: ProgramOutput):
   )
   const installationInspect = installation
     .command('inspect')
-    .description('Inspect the selected target, its Incus daemon, its storage and network, and any registered installation, without changes.')
+    .description('Inspect a target, its Incus daemon, its storage and network, and any registered installation, without changes.')
     .summary('Inspect a target without changes.')
   addTargetOptions(installationInspect)
   describeHelp(installationInspect, installationHelp.inspect)
@@ -197,7 +197,7 @@ export function createProgram(handlers: ProgramHandlers, output: ProgramOutput):
   )
   const installationConfigure = installation
     .command('configure')
-    .description('Register if needed, then configure and verify the Qiln installation on the selected target, leaving the orchestrator stopped.')
+    .description('Configure and verify the Qiln installation on the selected target, leaving the orchestrator stopped.')
     .summary('Configure the stopped installation.')
   addTargetOptions(installationConfigure)
   addInstallOptions(installationConfigure)
@@ -210,7 +210,7 @@ export function createProgram(handlers: ProgramHandlers, output: ProgramOutput):
   })
   const installationReassign = installation
     .command('reassign')
-    .description('Validate an existing installation against a replacement AWS deployment that holds its retained volume and, after approval, record that deployment as its current host.')
+    .description('Validate an installation against a replacement AWS deployment that holds its retained volume and, after approval, record it as the current host.')
     .summary('Move the installation to a replacement host.')
   addDeploymentOptions(installationReassign)
   describeHelp(installationReassign, installationHelp.reassign)
@@ -230,7 +230,7 @@ export function createProgram(handlers: ProgramHandlers, output: ProgramOutput):
     const connect = aws
       .command('connect')
       .description(
-        'Save a verified operator login and offer explicitly approved creation or permission-only bootstrap.',
+        'Save a verified operator login and offer approved creation or permission-only bootstrap.',
       )
       .summary('Connect an operator and review Qiln-managed permissions.')
     addSingleOption(
@@ -243,7 +243,7 @@ export function createProgram(handlers: ProgramHandlers, output: ProgramOutput):
     )
     const status = aws
       .command('status')
-      .description('Verify saved AWS operator identities against their recorded account, ARN, and immutable user ID.')
+      .description('Verify saved AWS operator identities against their recorded account, ARN, and user ID.')
       .summary('Verify saved connections; credentials may refresh.')
     addSingleOption(status, new Option('--name <name>', 'Inspect one connection; otherwise inspect all.'))
     describeHelp(status, awsHelp.status)
@@ -264,7 +264,7 @@ export function createProgram(handlers: ProgramHandlers, output: ProgramOutput):
     )
     const deployment = aws
       .command('deployment')
-      .description('Create one approved AWS host, and inspect or remove retained deployments bound to a Qiln-managed operator.')
+      .description('Create one approved AWS host, and inspect or remove retained deployments.')
       .summary('Create a host; manage retained deployments.')
     describeHelp(deployment, deploymentHelp.group)
     const create = deployment
@@ -309,7 +309,7 @@ export function createProgram(handlers: ProgramHandlers, output: ProgramOutput):
     list.action(() => awsHandlers.deployment.list(program.opts<GlobalOptions>().color))
     const inspect = deployment
       .command('inspect')
-      .description('Authenticate as the recorded operator, observe the recorded resources, and retain the observation and, when due, one AWS health read.')
+      .description('Authenticate as the recorded operator and retain a fresh observation and, when due, one AWS health read.')
       .summary('Retain a fresh observation.')
     addSelectorOptions(inspect)
     describeHelp(inspect, deploymentHelp.inspect)
@@ -321,7 +321,7 @@ export function createProgram(handlers: ProgramHandlers, output: ProgramOutput):
     )
     const verify = deployment
       .command('verify')
-      .description('Retain the server host-key pin if needed, then run fixed read-only probes over the pinned SSH connection and report whether the guest meets the basic baseline.')
+      .description('Retain the host-key pin if needed, then run fixed read-only probes over the pinned SSH connection against the basic guest baseline.')
       .summary('Verify the basic guest baseline.')
     addSelectorOptions(verify)
     describeHelp(verify, deploymentHelp.verify)
@@ -333,7 +333,7 @@ export function createProgram(handlers: ProgramHandlers, output: ProgramOutput):
     )
     const prepare = deployment
       .command('prepare')
-      .description('Retain the host-key pin if needed, then inspect the host over the pinned SSH connection and apply each displayed plan only after its own approval: Incus close and repository, ZFS prerequisites, Incus packages, ZFS storage, then Incus activation.')
+      .description('Prepare ZFS and Incus on the host over the pinned SSH connection, applying each displayed plan only after its own approval.')
       .summary('Prepare ZFS and Incus after approval.')
     addSelectorOptions(prepare)
     describeHelp(prepare, deploymentHelp.prepare)
@@ -357,7 +357,7 @@ export function createProgram(handlers: ProgramHandlers, output: ProgramOutput):
     )
     const handoff = deployment
       .command('handoff')
-      .description('Record the missing local hand-off evidence of a replacement deployment that reuses a retained data volume, from matching retained records, without authenticating or calling AWS.')
+      .description('Record the missing local hand-off evidence of a replacement that reuses a retained data volume, without calling AWS.')
       .summary('Settle the retained-volume hand-off.')
     addSelectorOptions(handoff)
     describeHelp(handoff, deploymentHelp.handoff)
@@ -369,7 +369,7 @@ export function createProgram(handlers: ProgramHandlers, output: ProgramOutput):
     )
     const abandon = deployment
       .command('abandon')
-      .description('Authenticate as the recorded operator, freshly observe that the retained data volume is available and unattached, and after approval release the replacement’s reservation of it.')
+      .description('Release a replacement’s reservation of a retained data volume after a fresh observation shows it available and unattached.')
       .summary('Abandon a retained-volume reservation.')
     addSelectorOptions(abandon)
     describeHelp(abandon, deploymentHelp.abandon)
@@ -381,7 +381,7 @@ export function createProgram(handlers: ProgramHandlers, output: ProgramOutput):
     )
     const remove = deployment
       .command('remove')
-      .description('Approve and remove the removable recorded resources, then observe and retain their absence. Incus initialized by Qiln is stopped first, and a ZFS pool recorded as imported is exported, each under its own approval. Retained storage is not removed.')
+      .description('Approve and remove the removable recorded resources and retain evidence of their absence; retained storage is not removed.')
       .summary('Remove one approved deployment.')
     addSelectorOptions(remove)
     describeHelp(remove, deploymentHelp.remove)
