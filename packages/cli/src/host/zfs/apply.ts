@@ -5,8 +5,8 @@ import { STATE_MOUNTPOINT } from '../mount'
 import { runStep, type StepOutcome } from '../step'
 import { shellCommand } from '../shell'
 import { InstallerError } from '../../diagnostic/error'
+import { createsDatasets, type ApprovedPlan, type PoolIdentity } from './types'
 import type { Remote } from '../../transport/ssh/connections'
-import type { ApprovedPlan, PoolIdentity } from './types'
 
 /**
  * An action outside its approved plan is a defect of the caller, never an
@@ -57,7 +57,7 @@ function argumentsOf(action: StepAction, plan: ApprovedPlan, pool: PoolIdentity 
       ]
     }
     case 'create-datasets':
-      return plan.kind === 'create' ? [plan.pool, layout.state, layout.incus, STATE_MOUNTPOINT] : defect()
+      return createsDatasets(plan) ? [plan.pool, layout.state, layout.incus, STATE_MOUNTPOINT] : defect()
     case 'import-pool':
       return plan.kind === 'import'
         ? [plan.pool, plan.guid, plan.disk.path, plan.disk.volumeId, plan.disk.member]

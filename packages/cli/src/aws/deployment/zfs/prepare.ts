@@ -7,6 +7,7 @@ import { planOf, releasePlanOf } from '../../../host/zfs/plan'
 import { apply } from '../../../host/zfs/apply'
 import {
   DEFAULT_POLICY,
+  createsDatasets,
   type ApprovedPlan,
   type Observation,
   type Plan,
@@ -306,7 +307,7 @@ export class ZfsPreparer {
   private poolEvidence(plan: ApprovedPlan, action: StepAction, observation: Observation): Partial<ZfsRecord> {
     if (action === 'create-datasets') {
       const { pool } = this.journal.record
-      const datasets = plan.kind === 'create' ? readLayout(observation, plan.pool) : null
+      const datasets = createsDatasets(plan) ? readLayout(observation, plan.pool) : null
       if (pool === null || datasets === null) {
         throw new InstallerError({
           code: 'INTERNAL_ERROR',

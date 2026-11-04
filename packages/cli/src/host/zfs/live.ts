@@ -49,8 +49,8 @@ export function isLivePool(observation: Observation, expected: ExpectedPool): bo
 }
 
 /**
- * The GUIDs of the two datasets when the pool holds exactly its root, the
- * state dataset, and the storage dataset. The state dataset must be a
+ * The GUIDs of the two datasets when the pool holds exactly its root dataset,
+ * the state dataset, and the storage dataset. The state dataset must be a
  * filesystem with its mountpoint and canmount=noauto set locally, because
  * `noauto` is not inherited. Anything else is null.
  */
@@ -78,6 +78,18 @@ export function readLayout(observation: Observation, pool: string): PoolDatasets
 
 export function sameDatasets(left: PoolDatasets | null, right: PoolDatasets | null): boolean {
   return left !== null && right !== null && left.state === right.state && left.incus === right.incus
+}
+
+/**
+ * Whether the pool holds the datasets that a plan expects: exactly the recorded
+ * ones, or, when none were ever verified (`null`), nothing but its root dataset.
+ */
+export function holdsLayout(observation: Observation, pool: string, datasets: PoolDatasets | null): boolean {
+  if (datasets !== null) {
+    return sameDatasets(readLayout(observation, pool), datasets)
+  }
+  const topLevel = observation.pools.detail?.topLevel ?? []
+  return topLevel.length === 1 && topLevel[0].name === pool
 }
 
 export function stateMountOf(observation: Observation, pool: string): StateMount {

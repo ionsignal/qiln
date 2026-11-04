@@ -103,21 +103,18 @@ function sinceEstablished(record: ZfsRecord | null): { established: ZfsStep; lat
 }
 
 /**
- * The pool was last created or imported with a verified step, its datasets
- * were verified when it was created, its scrub timer was verified after that,
- * and no unmount or export has been attempted since. Like the pool state, this
- * is the last recorded outcome and not a fresh observation. The state dataset
- * may still be unmounted.
+ * The pool was last created or imported with a verified step, its datasets are
+ * recorded as verified, its scrub timer was verified after that, and no unmount
+ * or export has been attempted since. Like the pool state, this is the last
+ * recorded outcome and not a fresh observation. The state dataset may still be
+ * unmounted.
  */
 export function staged(record: ZfsRecord | null): boolean {
   const since = sinceEstablished(record)
-  if (since === null) {
-    return false
-  }
-  const required: StepAction[] =
-    since.established.action === 'create-pool' ? ['create-datasets', 'enable-scrub'] : ['enable-scrub']
   return (
-    required.every(action => since.later.some(step => step.action === action && verified(step))) &&
+    since !== null &&
+    record?.pool?.datasets != null &&
+    since.later.some(step => step.action === 'enable-scrub' && verified(step)) &&
     !since.later.some(step => RELEASES.includes(step.action) && step.refusedAt === null)
   )
 }

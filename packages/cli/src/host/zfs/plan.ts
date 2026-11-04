@@ -1,6 +1,14 @@
 import { arcFileMatches, datasetNamesOf, scrubTimerOf, ZFS_SPEC } from './spec'
 import { diskOf, layers, memberOf } from './disk'
-import { isLivePool, poolsEnumerated, readLayout, sameDatasets, scrubTimerRunning, stateMountOf } from './live'
+import {
+  holdsLayout,
+  isLivePool,
+  poolsEnumerated,
+  readLayout,
+  sameDatasets,
+  scrubTimerRunning,
+  stateMountOf,
+} from './live'
 import { transactionViolations } from '../apt'
 import { STATE_MOUNTPOINT } from '../mount'
 import type {
@@ -80,10 +88,12 @@ function targetDisk(disk: BlockDevice, target: ZfsTarget) {
  * reports everything that blocks. A pool is never adopted by name alone: with
  * no recorded pool the volume must be blank and no pool of the policy name may
  * be imported, and with a recorded pool only one that matches both its name and
- * GUID, and holds exactly its recorded datasets, is accepted. Mounting the
- * state dataset is the last step of a create or import plan. Once the pool is
- * imported and its scrub timer is verified, only that mount remains
- * (`mountOnly`).
+ * GUID, and holds exactly its recorded datasets, is accepted. A recorded pool
+ * whose datasets were never verified, for example after an interrupted
+ * creation, is accepted only while it holds nothing but its root dataset, and
+ * its import plan then creates the datasets. Mounting the state dataset is the
+ * last step of a create or import plan. Once the pool is imported and its scrub
+ * timer is verified, only that mount remains (`mountOnly`).
  */
 export function planOf(
   observation: Observation,
@@ -237,14 +247,6 @@ export function planOf(
     }
   }
   const { datasets } = recorded
-  if (datasets === null) {
-    return {
-      kind: 'refused',
-      reasons: [
-        'The recorded pool has no verified dataset layout, and Qiln does not create or repair datasets on an existing pool.',
-      ],
-    }
-  }
   const names = datasetNamesOf(recorded.name)
   const imported = pools.imported.some(pool => pool.name === recorded.name && pool.guid === recorded.guid)
   let mountOnly = false
@@ -258,28 +260,32 @@ export function planOf(
         ],
       }
     }
-    if (!sameDatasets(readLayout(observation, recorded.name), datasets)) {
+    if (!holdsLayout(observation, recorded.name, datasets)) {
       return {
         kind: 'refused',
         reasons: [
-          `The imported pool ${recorded.name} (GUID ${recorded.guid}) does not hold exactly the recorded ${names.state} and ${names.incus} datasets, and Qiln does not repair or adopt it.`,
+          datasets === null
+            ? `The imported pool ${recorded.name} (GUID ${recorded.guid}) holds more than its root dataset, but no datasets were recorded as verified, and Qiln does not repair or adopt it.`
+            : `The imported pool ${recorded.name} (GUID ${recorded.guid}) does not hold exactly the recorded ${names.state} and ${names.incus} datasets, and Qiln does not repair or adopt it.`,
         ],
       }
     }
-    const state = stateMountOf(observation, recorded.name)
-    if (state === 'unexpected') {
-      return {
-        kind: 'refused',
-        reasons: [
-          `The mount state of ${names.state} does not agree with the kernel mount table at ${STATE_MOUNTPOINT}, and Qiln does not adopt unexplained mounts.`,
-        ],
+    if (datasets !== null) {
+      const state = stateMountOf(observation, recorded.name)
+      if (state === 'unexpected') {
+        return {
+          kind: 'refused',
+          reasons: [
+            `The mount state of ${names.state} does not agree with the kernel mount table at ${STATE_MOUNTPOINT}, and Qiln does not adopt unexplained mounts.`,
+          ],
+        }
       }
-    }
-    if (recorded.staged && scrubTimerRunning(observation)) {
-      if (state === 'mounted' && recorded.ready) {
-        return { kind: 'ready', pool: recorded.name, guid: recorded.guid }
+      if (recorded.staged && scrubTimerRunning(observation)) {
+        if (state === 'mounted' && recorded.ready) {
+          return { kind: 'ready', pool: recorded.name, guid: recorded.guid }
+        }
+        mountOnly = true
       }
-      mountOnly = true
     }
   }
   const member = memberOf(data)
@@ -306,12 +312,17 @@ type ReleaseLayout = { datasets: PoolDatasets } | { reasons: string[] }
 /**
  * An imported pool may be released only when it holds exactly its recorded
  * datasets and nothing but the state dataset is mounted, in agreement with the
- * kernel mount table.
+ * kernel mount table. Removal never creates storage, so a pool whose datasets
+ * were never verified is refused until `prepare` has created them.
  */
 function releaseLayout(observation: Observation, recorded: RecordedPool): ReleaseLayout {
   const { datasets } = recorded
   if (datasets === null) {
-    return { reasons: ['The recorded pool has no verified dataset layout, so Qiln cannot tell what to unmount.'] }
+    return {
+      reasons: [
+        'The recorded pool has no verified dataset layout yet, so Qiln cannot tell what to unmount. Run prepare to create its datasets, and removal then releases it. Removal never creates storage.',
+      ],
+    }
   }
   const reasons: string[] = []
   const names = datasetNamesOf(recorded.name)

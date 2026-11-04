@@ -31,10 +31,11 @@ export function blank(deployment: Deployment): ZfsRecord | null {
 /**
  * Pool evidence exists if and only if a create-pool or import-pool step was
  * verified. It names the pool of that step's approved plan, and for an import
- * the GUID and datasets of that plan. It sits on the recorded data volume, and
- * was observed after the step completed and no later than its verification. The
- * datasets of a created pool are recorded once a later dataset step was
- * verified, and not before.
+ * the GUID of that plan. It sits on the recorded data volume, and was observed
+ * after the step completed and no later than its verification. The datasets of
+ * an import plan that recorded them are those of the pool. Otherwise, whether
+ * for a created pool or an import plan without datasets, they are recorded once
+ * a later dataset step was verified, and not before.
  */
 function isPoolConsistent({ pool, steps, authorizations, binding }: ZfsRecord): boolean {
   const index = steps.findLastIndex(
@@ -59,7 +60,9 @@ function isPoolConsistent({ pool, steps, authorizations, binding }: ZfsRecord): 
     pool.observedAt <= verifiedAt &&
     poolNameOf(plan) === pool.name &&
     (plan.kind !== 'import' || plan.guid === pool.guid) &&
-    (plan.kind === 'import' ? sameJson(pool.datasets, plan.datasets) : (pool.datasets !== null) === datasetsCreated)
+    (plan.kind === 'import' && plan.datasets !== null
+      ? sameJson(pool.datasets, plan.datasets)
+      : (pool.datasets !== null) === datasetsCreated)
   )
 }
 

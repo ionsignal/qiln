@@ -338,19 +338,23 @@ const targetDiskSchema = z.strictObject({
 })
 
 /**
- * Imports the pool recorded for the volume, by GUID and original name, requires
- * it to hold exactly the recorded datasets, enables its scrub timer, and mounts
- * its state dataset. `imported` records that the pool was already imported when
- * planned, so the import step is an idempotent confirmation. `mountOnly`
- * records that the pool was already staged, so only the mount remains. The
- * parent disk stays the identity authority, while `member` is the one ZFS
- * member partition where whole-disk creation put the pool labels.
+ * Imports the pool recorded for the volume, by GUID and original name, enables
+ * its scrub timer, and mounts its state dataset. `datasets` are the recorded
+ * dataset GUIDs, which the pool must hold exactly. A null value means the pool
+ * was recorded before its datasets were verified, for example after an
+ * interrupted creation: the pool must then hold only its root dataset, and the
+ * plan creates the two datasets after the import. `imported` records that the
+ * pool was already imported when planned, so the import step is an idempotent
+ * confirmation. `mountOnly` records that the pool was already staged, so only
+ * the mount remains. The parent disk stays the identity authority, while
+ * `member` is the one ZFS member partition where whole-disk creation put the
+ * pool labels.
  */
 export const importPlanSchema = z.strictObject({
   kind: z.literal('import'),
   pool: poolNameSchema,
   guid,
-  datasets: poolDatasetsSchema,
+  datasets: poolDatasetsSchema.nullable(),
   disk: targetDiskSchema.extend({
     member: text,
   }),
@@ -392,3 +396,11 @@ export type PreparationPlan = RefusedPlan | RebootPlan | ReadyPlan | Prerequisit
  * Preparation plans plus what `releasePlanOf` decides, only before AWS removal.
  */
 export type Plan = PreparationPlan | ExportPlan | AbsentPlan
+
+/**
+ * Whether the approved plan creates the pool's two datasets: a new pool, or an
+ * imported pool whose datasets were never verified.
+ */
+export function createsDatasets(plan: ApprovedPlan): plan is CreatePlan | (ImportPlan & { datasets: null }) {
+  return plan.kind === 'create' || (plan.kind === 'import' && plan.datasets === null)
+}

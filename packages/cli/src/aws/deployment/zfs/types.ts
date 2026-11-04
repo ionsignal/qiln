@@ -67,7 +67,8 @@ export function establishesPool(action: StepAction): boolean {
 
 /**
  * The steps one approved plan allows, in the order they run. A step whose
- * action is not listed here was never authorized.
+ * action is not listed here was never authorized. An import whose datasets
+ * were never verified also creates them, between the import and the scrub.
  */
 export function actionsOf(plan: ZfsAuthorization['plan']): readonly StepAction[] {
   switch (plan.kind) {
@@ -89,8 +90,14 @@ export function actionsOf(plan: ZfsAuthorization['plan']): readonly StepAction[]
     }
     case 'create':
       return ['create-pool', 'create-datasets', 'enable-scrub', 'mount-state']
-    case 'import':
-      return plan.mountOnly ? ['mount-state'] : ['import-pool', 'enable-scrub', 'mount-state']
+    case 'import': {
+      if (plan.mountOnly) {
+        return ['mount-state']
+      }
+      return plan.datasets === null
+        ? ['import-pool', 'create-datasets', 'enable-scrub', 'mount-state']
+        : ['import-pool', 'enable-scrub', 'mount-state']
+    }
     case 'export':
       return plan.unmount ? ['unmount-state', 'export-pool'] : ['export-pool']
   }

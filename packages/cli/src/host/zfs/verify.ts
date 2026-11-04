@@ -1,6 +1,14 @@
-import { isLivePool, poolsEnumerated, readLayout, sameDatasets, scrubTimerRunning, stateMountOf } from './live'
+import {
+  holdsLayout,
+  isLivePool,
+  poolsEnumerated,
+  readLayout,
+  sameDatasets,
+  scrubTimerRunning,
+  stateMountOf,
+} from './live'
 import { arcFileMatches, ZFS_SPEC, type StepAction } from './spec'
-import type { ApprovedPlan, CreatePlan, Observation, PoolIdentity } from './types'
+import { createsDatasets, type ApprovedPlan, type CreatePlan, type Observation, type PoolIdentity } from './types'
 
 type Detail = NonNullable<Observation['pools']['detail']>
 
@@ -32,9 +40,11 @@ function configured(plan: CreatePlan, { pool, dataset, ashifts, topLevel }: Deta
  * checks the pool without one, and its datasets take GUIDs that the dataset
  * step discovers. `recorded` is the identity that the journal recorded for this
  * deployment's pool, which the dataset, scrub, and mount steps of a created
- * pool must still find. A mount counts only when ZFS and the kernel mount table
- * agree, and an export only when the pool listing could run, because an
- * unavailable listing looks the same as an empty one.
+ * pool must still find. An import is verified against the recorded datasets, or
+ * against a pool holding only its root dataset when none were recorded. A mount
+ * counts only when ZFS and the kernel mount table agree, and an export only
+ * when the pool listing could run, because an unavailable listing looks the
+ * same as an empty one.
  */
 export function verify(
   action: StepAction,
@@ -72,7 +82,7 @@ export function verify(
       )
     case 'create-datasets':
       return (
-        plan.kind === 'create' &&
+        createsDatasets(plan) &&
         recorded !== null &&
         isLivePool(observation, { name: plan.pool, guid: recorded.guid, volumeId: plan.disk.volumeId }) &&
         readLayout(observation, plan.pool) !== null
@@ -81,7 +91,7 @@ export function verify(
       return (
         plan.kind === 'import' &&
         isLivePool(observation, { name: plan.pool, guid: plan.guid, volumeId: plan.disk.volumeId }) &&
-        sameDatasets(readLayout(observation, plan.pool), plan.datasets)
+        holdsLayout(observation, plan.pool, plan.datasets)
       )
     case 'mount-state':
       return (

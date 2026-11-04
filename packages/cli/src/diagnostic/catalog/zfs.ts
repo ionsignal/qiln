@@ -9,7 +9,7 @@ export const zfsDiagnostics = Object.freeze({
   ),
   ZFS_PLAN_REFUSED: entry(
     'ZFS preparation is not supported for this host state',
-    'Qiln plans ZFS preparation only for a package-owned module built for the running kernel and a data volume that is blank or holds its recorded pool with exactly its recorded datasets, and it never installs kernels or modules or wipes, repairs, adopts, or forces storage.',
+    'Qiln plans ZFS preparation only for a package-owned module built for the running kernel and a data volume that is blank or holds its recorded pool with exactly its recorded datasets, or with only its root dataset when its datasets were never verified, and it never installs kernels or modules or wipes, repairs, adopts, or forces storage.',
     'Review each displayed reason and resolve the condition outside Qiln, then run prepare again.',
     'Do not wipe or repartition the data volume to force a plan; an unexpected signature may be data that should be kept.',
   ),
