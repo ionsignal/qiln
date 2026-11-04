@@ -27,7 +27,7 @@ import type { AwsBinding } from '../../records'
  * workflow compares the limit with the memory the target reports.
  */
 const LIMITS: Readonly<IncusConfigMap> = Object.freeze({
-  'limits.memory': '16GiB',
+  'limits.memory': '2GiB',
 })
 
 /**
