@@ -5,6 +5,7 @@ import { invalidDeployment } from '../../../aws/deployment/ledger/invalid'
 import { settle } from '../../../aws/deployment/handoff/settle'
 import { holdsVolume, stageOf } from '../../../aws/deployment/handoff/stage'
 import { Prompts, withCancellation } from '../../../terminal/prompts'
+import { reportApproval } from '../../../terminal/approval'
 import { reportHandoff } from './report'
 import * as deployments from '../../../aws/deployment/records'
 import type { AwsDeploymentOptions } from '../../../input'
@@ -53,16 +54,14 @@ export async function handoff(options: AwsDeploymentOptions, reporter: Reporter)
           ? 'Nothing to do: the reservation and completion are already recorded.'
           : 'Nothing to do yet: the replacement does not hold the volume, so there is no completion to record.'
       }
-      reporter.section('Hand-off evidence to write')
-      reporter.facts([
-        ['Volume', volume.volumeId],
-        ['Records', writes.join(' · ')],
-      ])
-      reporter.space()
-      reporter.notice(
-        'Approval authorizes only the listed local evidence writes, derived from matching retained records. No AWS call is made, and nothing is attached, detached, replayed, or deleted. The volume stays retained and billable until it is deleted outside Qiln.',
-      )
-      await prompts.approve('Record the displayed hand-off evidence')
+      reportApproval(reporter, {
+        title: 'Proposed hand-off evidence',
+        steps: writes.map(write => ({ label: `Record ${write}` })),
+        covers: `Local evidence for volume ${volume.volumeId}, derived from matching retained records.`,
+        stays: 'No AWS call is made, and nothing is attached, detached, replayed, or deleted.',
+        lasting: 'The volume stays retained and billable until it is deleted outside Qiln.',
+      })
+      await prompts.approve('Record the hand-off evidence')
       await settle(root, replacement)
       return 'Hand-off evidence recorded from local evidence. No AWS call was made and no resource was changed.'
     })

@@ -1,12 +1,15 @@
+import { RECIPE as INCUS_RECIPE } from '../../../../host/incus/recipe'
+import { RECIPE as ZFS_RECIPE } from '../../../../host/zfs/recipe'
 import { openTarget } from '../shared'
 import { requireBaseline } from '../baseline'
 import { resolveAccess, withRemote } from '../access'
 import { progressSink } from '../progress'
-import { InstallerError } from '../../../../diagnostic/error'
+import { InstallerError, type DiagnosticFact } from '../../../../diagnostic/error'
 import { requireAwsHost } from '../../../../aws/host'
 import { targetOf } from '../../../../aws/deployment/zfs/target'
 import { requireNotStuck } from '../../../../aws/deployment/zfs/facts'
 import { Prompts, withCancellation } from '../../../../terminal/prompts'
+import { approve } from '../../../../terminal/approval'
 import { IncusPreparer } from '../../../../aws/deployment/incus/prepare'
 import { ZfsPreparer } from '../../../../aws/deployment/zfs/prepare'
 import { withConfirmedOperation } from '../../../../aws/operation'
@@ -14,11 +17,35 @@ import { evidence as incusEvidence } from '../../../../aws/deployment/incus/evid
 import { opened, requireNotStuck as requireIncusNotStuck } from '../../../../aws/deployment/incus/facts'
 import { approvalLabel as incusApproval, reportPlan as reportIncusPlan } from './incus'
 import { approvalLabel as zfsApproval, reportPlan as reportZfsPlan } from './zfs'
-import { reportRun } from './steps'
 import * as incusLineage from '../../../../aws/deployment/lineage/incus'
-import * as lineage from '../../../../aws/deployment/lineage/zfs'
+import * as zfsLineage from '../../../../aws/deployment/lineage/zfs'
 import type { AwsDeploymentOptions } from '../../../../input'
 import type { Reporter } from '../../../../terminal/reporter'
+
+const PHASE_COUNT = 5
+const DIGEST_PREFIX_LENGTH = 12
+
+function stepCount(count: number): string {
+  return `${count} approved ${count === 1 ? 'step' : 'steps'}`
+}
+
+function recipeFact(): DiagnosticFact {
+  return [
+    'Recipes',
+    `ZFS revision ${ZFS_RECIPE.revision} (${ZFS_RECIPE.digest.slice(0, DIGEST_PREFIX_LENGTH)}) · Incus revision ${INCUS_RECIPE.revision} (${INCUS_RECIPE.digest.slice(0, DIGEST_PREFIX_LENGTH)})`,
+  ]
+}
+
+/**
+ * Titles one phase and reports how many approved steps it applied. The count
+ * comes from the preparer, so a phase that changed nothing says so.
+ */
+async function phase(reporter: Reporter, number: number, title: string, run: () => Promise<number>): Promise<number> {
+  reporter.section(`Phase ${number}/${PHASE_COUNT} · ${title}`)
+  const applied = await run()
+  reporter.info(applied === 0 ? 'Nothing to change.' : `${stepCount(applied)} applied, each verified by fresh inspection.`)
+  return applied
+}
 
 /**
  * Prepares the recorded data volume and the Incus installation on it, in five
@@ -47,7 +74,7 @@ export async function prepare(options: AwsDeploymentOptions, reporter: Reporter)
       const { record } = deployment
       const retry = `qiln aws deployment prepare --id ${record.id}`
       const incusRecord = await incusEvidence(root, record)
-      requireNotStuck(await lineage.evidence(root, record), record.id)
+      requireNotStuck(await zfsLineage.evidence(root, record), record.id)
       requireIncusNotStuck(incusRecord, record.id)
       const preserved = await incusLineage.retained(root, record)
       const access = await resolveAccess(root, deployment, retry, reporter, signal)
@@ -58,17 +85,13 @@ export async function prepare(options: AwsDeploymentOptions, reporter: Reporter)
           retry,
         })
       }
-      const recorded = await lineage.pool(root, record)
-      const { host, port, username, fingerprint } = access.options
-      reporter.section('Guest baseline')
-      reporter.row('working', 'Connecting', `${username}@${host}:${port} · pinned host key SHA256:${fingerprint}`)
+      const recorded = await zfsLineage.pool(root, record)
+      const { username } = access.options
       return await withRemote(root, access, signal, async remote => {
         await requireBaseline(reporter, remote, username, record.id, [
           'Preparation',
           'no ZFS or Incus inspection was performed',
         ])
-        reporter.space()
-        reportRun(reporter)
         const zfsPreparer = await ZfsPreparer.open({
           root,
           deployment: record,
@@ -90,7 +113,7 @@ export async function prepare(options: AwsDeploymentOptions, reporter: Reporter)
                   retry,
                 })
               }
-              await prompts.approve(zfsApproval(plan))
+              await approve(prompts, reporter, zfsApproval(plan))
             },
             progress: progressSink(reporter),
           },
@@ -101,27 +124,20 @@ export async function prepare(options: AwsDeploymentOptions, reporter: Reporter)
           remote,
           hooks: {
             show: (observation, plan) => reportIncusPlan(reporter, { observation, plan }),
-            approve: plan => prompts.approve(incusApproval(plan)),
+            approve: plan => approve(prompts, reporter, incusApproval(plan)),
             progress: progressSink(reporter),
           },
         })
-        reporter.section('1/5 Incus close and repository')
-        const incusClose = await incusPreparer.prepareSoftware(
-          { account: username, retained: preserved },
-          signal,
-          'repository',
+        let applied = 0
+        applied += await phase(reporter, 1, 'Incus close and repository', () =>
+          incusPreparer.prepareSoftware({ account: username, retained: preserved }, signal, 'repository'),
         )
-        reporter.section('2/5 ZFS prerequisites')
-        const zfsPrerequisites = await zfsPreparer.run(signal, 'software')
-        reporter.section('3/5 Incus packages')
-        const incusPackages = await incusPreparer.prepareSoftware(
-          { account: username, retained: preserved },
-          signal,
-          'packages',
+        applied += await phase(reporter, 2, 'ZFS prerequisites', () => zfsPreparer.run(signal, 'software'))
+        applied += await phase(reporter, 3, 'Incus packages', () =>
+          incusPreparer.prepareSoftware({ account: username, retained: preserved }, signal, 'packages'),
         )
-        reporter.section('4/5 ZFS storage')
-        const zfsStorage = await zfsPreparer.run(signal, 'storage')
-        const pool = await lineage.pool(root, record)
+        applied += await phase(reporter, 4, 'ZFS storage', () => zfsPreparer.run(signal, 'storage'))
+        const pool = await zfsLineage.pool(root, record)
         if (pool === null || !pool.ready || pool.datasets === null) {
           throw new InstallerError({
             code: 'AWS_INCUS_PLAN_REFUSED',
@@ -134,24 +150,34 @@ export async function prepare(options: AwsDeploymentOptions, reporter: Reporter)
             retry,
           })
         }
-        reporter.section('5/5 Incus activation')
-        const incusActivation = await incusPreparer.activate(
-          { pool: pool.name, guid: pool.guid, datasets: pool.datasets, account: username, retained: preserved },
-          signal,
+        const datasets = pool.datasets
+        applied += await phase(reporter, 5, 'Incus activation', () =>
+          incusPreparer.activate(
+            { pool: pool.name, guid: pool.guid, datasets, account: username, retained: preserved },
+            signal,
+          ),
         )
-        const applied = incusClose + zfsPrerequisites + incusPackages + zfsStorage + incusActivation
-        const changed =
-          applied === 0
-            ? 'Nothing was changed.'
-            : `${applied} approved ${applied === 1 ? 'step was' : 'steps were'} applied and verified by fresh inspection.`
         const reopened = preserved !== null && preserved.origin !== record.id
-        const daemon = reopened
-          ? 'the preserved Incus installation was reopened without initialization and its instances remain stopped'
-          : 'Incus was opened with local Unix-socket access'
-        const next = reopened
-          ? ' Use qiln installation reassign to move the existing installation to this deployment.'
-          : ''
-        return `Incus baseline prepared: ${daemon}. ${changed} The pool is a single disk with no redundancy or backup, group membership applies to new SSH connections only, and workload correctness and runtime readiness are not established.${next}`
+        const facts: DiagnosticFact[] = [
+          [
+            'Incus',
+            reopened
+              ? 'The preserved installation was reopened without initialization, and its instances remain stopped.'
+              : 'Incus was opened with local Unix-socket access.',
+          ],
+          ['Storage', 'The pool is a single disk with no redundancy or backup.'],
+          ['Socket access', 'Group membership applies to new SSH connections only.'],
+          ['Not established', 'Workload correctness and runtime readiness.'],
+          recipeFact(),
+        ]
+        if (reopened) {
+          facts.push(['Next', 'Use qiln installation reassign to move the existing installation to this deployment.'])
+        }
+        reporter.section('Result')
+        reporter.facts(facts)
+        return applied === 0
+          ? 'Incus baseline prepared. Nothing was changed.'
+          : `Incus baseline prepared. ${stepCount(applied)} applied and verified by fresh inspection.`
       })
     })
   })

@@ -142,7 +142,7 @@ export async function create(options: AwsDeploymentCreateOptions, reporter: Repo
       if (previous !== null && offer !== null) {
         await deployments.requireFinalized(root, previous)
         reporter.notice(
-          'Attaching a retained data volume does not reopen Incus. When an earlier deployment established an Incus baseline through verified initialization or preserved open and then released Incus, a later prepare reopens that preserved installation only after checking its recorded software and the presence of retained metadata entries, with each final entry required not to be a symbolic link. Metadata contents are not validated, and retained state is never initialized over. Only the Incus state and storage on the data volume are preserved: the host root volume and its files are not.',
+          'Attaching a retained data volume does not reopen Incus: a later prepare reopens a preserved installation only after checking its recorded software and retained metadata entries, and never initializes over retained state. Only the Incus state and storage on the data volume are preserved; the host root volume and its files are not.',
         )
         const choice = await prompts.select('Data storage', [
           'Create a new data volume',
@@ -202,14 +202,14 @@ export async function create(options: AwsDeploymentCreateOptions, reporter: Repo
         })
       }
       reportCreationEffects(reporter, plan, proposal.reuse)
-      await prompts.approve('Approve the displayed host and create its AWS resources')
+      await prompts.approve('Create the host and its AWS resources')
       const deployer = await Deployer.approve(
         root,
         session,
         propose(connection, plan, options.alias, previous?.id ?? null, proposal.reuse),
         progressSink(reporter),
       )
-      reporter.space()
+      reporter.section('Provisioning')
       reporter.row(
         'created',
         'Approval record',

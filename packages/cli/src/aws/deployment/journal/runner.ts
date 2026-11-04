@@ -1,11 +1,11 @@
 import { randomUUID } from 'node:crypto'
-import { InstallerError, type InstallerErrorCode } from '../../../diagnostic/error'
+import { userId } from '../../host'
 import { checkCancellation } from '../../../terminal/prompts'
 import { returned, type JournalStep } from '../../../journal/step'
 import { stepFailure, type StepOutcome } from '../../../host/step'
+import { notify, type ProgressSink, type ProgressTask } from '../observe/progress'
+import { InstallerError, type InstallerErrorCode } from '../../../diagnostic/error'
 import type { JournalAuthorization } from '../../../journal/history'
-import { notify, withWaiting, type ProgressSink, type ProgressTask } from '../observe/progress'
-import { userId } from '../../host'
 
 export interface Evidence<Plan, Action extends string> {
   authorizations: readonly JournalAuthorization<Plan>[]
@@ -110,10 +110,8 @@ export class StepJournal<Rec extends Evidence<Plan, Action>, Plan, Action extend
         },
       ],
     })
-    const observed = await withWaiting(progress, task, async () => {
-      await this.conclude(action, await this.options.run(plan, action, this.current))
-      return await verify()
-    })
+    await this.conclude(action, await this.options.run(plan, action, this.current))
+    const observed = await verify()
     notify(progress, { phase: 'verified', task })
     return observed
   }

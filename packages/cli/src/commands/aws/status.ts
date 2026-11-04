@@ -1,9 +1,10 @@
+import { pendingFacts } from '../../aws/iam/facts'
+import { requireAwsHost } from '../../aws/host'
+import { Session } from '../../aws/auth/session'
 import { InstallerError } from '../../diagnostic/error'
 import { reviewRequired } from '../../aws/permission/spec'
-import { pendingFacts } from '../../aws/iam/facts'
-import { Session } from '../../aws/auth/session'
-import { requireAwsHost } from '../../aws/host'
 import { checkCancellation, withCancellation } from '../../terminal/prompts'
+import { withConfirmedOperation } from '../../aws/operation'
 import {
   authenticate,
   failAuthentication,
@@ -11,7 +12,6 @@ import {
   reportAuthentication,
   reportPermissionMetadata,
 } from './shared'
-import { withConfirmedOperation } from '../../aws/operation'
 import * as connections from '../../aws/connections'
 import type { Reporter } from '../../terminal/reporter'
 import type { AwsAuthentication } from '../../aws/types'
@@ -55,16 +55,14 @@ export async function status(options: AwsCommandOptions, reporter: Reporter): Pr
           throw error
         }
         reportAuthentication(reporter, authentication)
-        reporter.row('verified', 'Login region', connection.region)
+        reporter.facts([['Login region', connection.region]])
         reportPermissionMetadata(reporter, connection)
         if (reviewRequired(connection)) {
           reporter.notice('Current permission requirements need a renewed root review. Reconnect to offer that review.')
         }
         if (pending) {
           reporter.notice('An IAM operation requires explicit recovery. The saved operator login remains separate.')
-          for (const [label, value] of pendingFacts(pending)) {
-            reporter.info(`${label}: ${value}`)
-          }
+          reporter.facts(pendingFacts(pending))
         }
         reporter.info('This status check did not freshly inspect IAM or assess deployment readiness.')
       }

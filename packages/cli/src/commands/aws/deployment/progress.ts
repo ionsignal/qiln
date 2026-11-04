@@ -1,9 +1,9 @@
-import { INCUS_LABELS, ZFS_LABELS } from './prepare/steps'
+import { INCUS_STEPS, ZFS_STEPS } from './prepare/steps'
 import type { Action } from '../../../aws/deployment/graph'
 import type { ProgressSink, ProgressTask } from '../../../aws/deployment/observe/progress'
-import type { Reporter } from '../../../terminal/reporter'
+import type { LiveRow, Reporter } from '../../../terminal/reporter'
 
-const LABELS: Record<Action, string> = {
+export const ACTION_LABELS: Record<Action, string> = {
   'create-vpc': 'Create VPC',
   'create-subnet': 'Create subnet',
   'create-gateway': 'Create internet gateway',
@@ -32,6 +32,14 @@ const LABELS: Record<Action, string> = {
   'delete-vpc': 'Delete VPC',
 }
 
+/**
+ * ZFS and Incus rows are named by their step, so the row label already says
+ * what runs and a verified row only needs to say how it was confirmed.
+ */
+function isHostStep(task: ProgressTask): boolean {
+  return task.kind === 'zfs' || task.kind === 'incus'
+}
+
 function title(task: ProgressTask): string {
   switch (task.kind) {
     case 'key':
@@ -41,9 +49,9 @@ function title(task: ProgressTask): string {
     case 'hostkey':
       return 'SSH host key'
     case 'zfs':
-      return 'ZFS'
+      return ZFS_STEPS[task.action].short
     case 'incus':
-      return 'Incus'
+      return INCUS_STEPS[task.action].short
     case 'step':
       return `Step ${task.position}/${task.total}`
   }
@@ -58,11 +66,11 @@ function subject(task: ProgressTask): string {
     case 'hostkey':
       return 'Read the server host key from AWS console output'
     case 'zfs':
-      return ZFS_LABELS[task.action]
+      return ZFS_STEPS[task.action].label
     case 'incus':
-      return INCUS_LABELS[task.action]
+      return INCUS_STEPS[task.action].label
     case 'step': {
-      const label = LABELS[task.action]
+      const label = ACTION_LABELS[task.action]
       const numbered = task.slot > 0 ? `${label} #${task.slot + 1}` : label
       const { attempt } = task
       return attempt === undefined
@@ -82,30 +90,43 @@ function verifiedDetail(task: ProgressTask): string {
       return 'Ed25519 fingerprint retained as AWS-reported console evidence; not guest attestation'
     case 'zfs':
     case 'incus':
-      return 'a fresh inspection agrees with the approved result'
+      return 'fresh inspection agrees'
     case 'step':
       return 'observation agrees with the record'
   }
 }
 
+/**
+ * `working` starts a live row and `verified` finishes it, so a row is only
+ * permanent once the observation and its persistence succeeded. A failure
+ * leaves the live row to the diagnostic, which clears it.
+ */
 export function progressSink(reporter: Reporter): ProgressSink {
+  let live: LiveRow | null = null
   return event => {
     const { task } = event
     switch (event.phase) {
       case 'working':
-        reporter.row('working', title(task), subject(task))
-        return
-      case 'waiting':
-        reporter.info(`Waiting on '${subject(task)}' · ${Math.round(event.elapsedMs / 1000)}s elapsed.`)
+        live = reporter.live(title(task), subject(task))
         return
       case 'declined':
+        live?.drop()
+        live = null
         reporter.notice(
           `AWS has no capacity for '${subject(task)}'. The refusal is recorded and nothing was launched. The next approved zone is tried.`,
         )
         return
-      case 'verified':
-        reporter.row('verified', title(task), `${subject(task)} · ${verifiedDetail(task)}`)
+      case 'verified': {
+        const detail = verifiedDetail(task)
+        const text = isHostStep(task) ? detail : `${subject(task)} · ${detail}`
+        if (live === null) {
+          reporter.row('verified', title(task), text)
+        } else {
+          live.finish('verified', text)
+        }
+        live = null
         return
+      }
     }
   }
 }

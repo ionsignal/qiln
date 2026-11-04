@@ -1,121 +1,121 @@
 import { INSTALLER_SPEC } from '../../installation/spec'
-import { isEmpty, type ConfigurePlan } from '../../installation/journal/types'
-import type { DiagnosticFact } from '../../diagnostic/error'
+import { INSTALL_STEPS } from './steps'
+import { actionsOf, isEmpty, type ConfigurePlan, type InstallAction } from '../../installation/journal/types'
+import { reportApproval, stepsOf, type ApprovalScreen, type ApprovalStep } from '../../terminal/approval'
 import type { ImageSource } from '../../installation/image'
+import type { ImageReplacement } from '../../installation/plan'
 import type { InstallationInputs } from '../../installation/types'
 import type { Reporter } from '../../terminal/reporter'
 
+/**
+ * `held` is the image deletion that the first gate of a replacement leaves for
+ * its own approval, and null for every other plan.
+ */
 export interface PlanPreview {
   plan: ConfigurePlan
+  held: ImageReplacement | null
   inputs: InstallationInputs
   source: ImageSource
 }
 
-const NOTICE =
-  'Approval authorizes only the listed changes. Each Incus change is one fenced request followed by a fresh observation that must agree, ' +
-  'and the whole installation is observed again afterwards. The plan is derived again from the host after approval and must be unchanged before anything is recorded. ' +
-  'A failed or cancelled step is not replayed, resumed, or rolled back, and interrupted work may already have completed. ' +
-  'A source checkout is cloned by one fenced remote step that builds beside its destination and renames into place last, so it never overwrites an existing path, and Qiln never pulls or pushes it afterwards. ' +
-  'A staged split image is imported without an alias and checked as a container image for the target architecture before any previous image is deleted. ' +
-  'If it does not fit, it remains in the image store without an alias, Qiln never deletes it, and you must remove it manually. ' +
-  'The selected image is trusted guest code: Qiln has not established its provenance, authenticity, guest compatibility, or bootstrap readiness. ' +
-  'No service is started.'
+type Details = Partial<Record<InstallAction, string>>
 
 /**
- * The wording of the default-no approval that goes with the displayed plan.
+ * The actions that run before the image pin is written.
  */
-export function approvalLabel(plan: ConfigurePlan): string {
-  const including = [
-    plan.checkout === null ? null : 'cloning the displayed source checkout',
-    plan.image.replace === null ? null : 'deleting the displayed image',
-  ].filter(item => item !== null)
-  return including.length === 0
-    ? 'Apply the displayed installation plan to the Incus daemon'
-    : `Apply the displayed installation plan, including ${including.join(' and ')}, on the target`
+const BEFORE_PIN: readonly InstallAction[] = ['materialize-checkout', 'import-image', 'delete-image', 'create-alias']
+const AUTHORITY = 'The invoking developer’s Incus socket access is root-equivalent authority on the host.'
+const IMPORT_NOTE = 'A rejected import stays in the image store without an alias, and Qiln never deletes it.'
+const TRUSTED =
+  'The selected image and the checkout are trusted guest code, and Qiln has not established their provenance or compatibility.'
+
+const CREDENTIALS = {
+  generate: 'generate four protected credential files from the validated roster; values are never shown',
+  roster: 'replace only the retained authorized-key roster',
+  reuse: 'reuse the complete retained credential set',
+} as const satisfies Record<ConfigurePlan['credentials'], string>
+
+/**
+ * The wording of the default-no approval that goes with each displayed gate.
+ */
+export function approvalLabel(plan: ConfigurePlan, held: ImageReplacement | null): string {
+  if (held !== null) {
+    return 'Import the image, keeping the previous one'
+  }
+  return plan.image.replace === null
+    ? 'Apply the installation plan'
+    : 'Delete the previous image and apply the plan'
 }
 
-function checkoutFact({ commit, pin }: NonNullable<ConfigurePlan['checkout']>, path: string): DiagnosticFact {
+function detailsOf(plan: ConfigurePlan, inputs: InstallationInputs): Details {
+  const { layout, architecture, sourceRoot } = inputs
+  const { checkout, image } = plan
+  const { name, imageAlias } = INSTALLER_SPEC.orchestrator
   const { repository } = INSTALLER_SPEC.checkout
-  return [
-    'Source checkout',
-    `clone ${repository} at commit ${commit} to ${path} on the target · ${pin ? 'origin’s current main, recorded as the restore point before the clone' : 'the recorded restore point'} · fetched over HTTPS, which establishes the transport and not publisher authenticity · the orchestrator mounts it writable and runs this code with its own credentials`,
+  return {
+    ...(checkout === null
+      ? {}
+      : {
+          'materialize-checkout': `${repository} at commit ${checkout.commit} to ${sourceRoot} · ${checkout.pin ? 'origin’s current main, recorded as the restore point' : 'the recorded restore point'} · built beside the destination, so it never overwrites a path`,
+        }),
+    ...(image.replace === null
+      ? {}
+      : {
+          'delete-image': `${image.replace.fingerprint} · destructive · aliases removed with it: ${image.replace.aliases.join(', ') || 'none'}`,
+        }),
+    'import-image': 'uploaded without an alias, then checked as a container image for the target architecture',
+    'create-alias': `${imageAlias} points at the selected image`,
+    'create-network': `${layout.network.name} · ${layout.network.ipv4Subnet} · managed bridge`,
+    'create-volume': `${layout.postgres.volumeName} · ${layout.postgres.config.size} · in pool ${layout.pool.name}`,
+    'create-instance': `${name} · ${architecture.incus} container · created stopped`,
+    'update-instance': 'the four credentials in one guarded complete instance update',
+  }
+}
+
+function screenOf({ plan, held, inputs, source }: PlanPreview): ApprovalScreen {
+  const details = detailsOf(plan, inputs)
+  const fenced = (actions: readonly InstallAction[]): ApprovalStep[] => stepsOf(actions, INSTALL_STEPS, details)
+  const actions = actionsOf(plan)
+  const steps: ApprovalStep[] = [
+    ...fenced(actions.filter(action => BEFORE_PIN.includes(action))),
+    ...(plan.pin ? [{ label: 'Record the image pin in the installation record' }] : []),
+    ...actions
+      .filter(action => !BEFORE_PIN.includes(action))
+      .flatMap((action): ApprovalStep[] =>
+        action === 'update-instance' && plan.credentials !== 'reuse'
+          ? [{ label: 'Write the local credentials', detail: CREDENTIALS[plan.credentials] }, ...fenced([action])]
+          : fenced([action]),
+      ),
   ]
+  const covers = `Image ${plan.fingerprint} · ${source.kind === 'split' ? 'staged split artifacts' : 'existing local image; never pulled or replaced'}.`
+  if (held !== null) {
+    return {
+      title: 'Proposed image import (first of two approvals)',
+      steps,
+      covers,
+      stays: `The previous image ${held.fingerprint} (aliases: ${held.aliases.join(', ') || 'none'}) is not deleted by this approval. It is shown again for its own approval once the imported image passes its check.`,
+      lasting: `${AUTHORITY} ${IMPORT_NOTE}`,
+      notEstablished: TRUSTED,
+    }
+  }
+  return {
+    title: 'Proposed installation changes',
+    steps,
+    covers,
+    stays: 'The orchestrator is never started, and persistent PostgreSQL data is kept.',
+    lasting: `${AUTHORITY} The instance mounts ${inputs.sourceRoot} writable, so it can modify the host checkout.${plan.image.import ? ` ${IMPORT_NOTE}` : ''}`,
+    notEstablished: TRUSTED,
+  }
 }
 
 /**
- * Renders what an approved plan would change. Nothing described here has been
+ * Renders what an approved gate would change. Nothing described here has been
  * applied until the approval that follows it. An installation that already
  * matches has nothing to display.
  */
-export function reportPlan(reporter: Reporter, { plan, inputs, source }: PlanPreview): void {
-  if (isEmpty(plan)) {
+export function reportPlan(reporter: Reporter, preview: PlanPreview): void {
+  if (isEmpty(preview.plan)) {
     return
   }
-  const { layout } = inputs
-  const { image } = plan
-  const { name, imageAlias, sourceMountPath } = INSTALLER_SPEC.orchestrator
-  const facts: DiagnosticFact[] = []
-  if (plan.checkout !== null) {
-    facts.push(checkoutFact(plan.checkout, inputs.sourceRoot))
-  }
-  facts.push([
-    'Image',
-    `${plan.fingerprint} · ${source.kind === 'split' ? 'staged split artifacts' : 'existing local image; never pulled or replaced'}`,
-  ])
-  if (image.import) {
-    facts.push([
-      'Image import',
-      'the staged artifacts are uploaded without an alias, then checked as a container image for the target architecture before anything else changes',
-    ])
-  }
-  if (image.replace !== null) {
-    facts.push([
-      'Image deletion',
-      `${image.replace.fingerprint} · destructive · deleted only after the new image passes its check · the managed alias ${imageAlias} targets different content · aliases removed with it: ${image.replace.aliases.join(', ') || 'none'}`,
-    ])
-  }
-  if (image.alias) {
-    facts.push(['Image alias', `${imageAlias} is pointed at the selected image`])
-  }
-  if (plan.pin) {
-    facts.push(['Image pin', 'the full fingerprint is written to the installation record'])
-  }
-  if (plan.network) {
-    facts.push(['Network', `create ${layout.network.name} · ${layout.network.ipv4Subnet} · managed bridge`])
-  }
-  if (plan.volume) {
-    facts.push([
-      'PostgreSQL volume',
-      `create ${layout.postgres.volumeName} · ${layout.postgres.config.size} · persistent custom volume in ${layout.pool.name}`,
-    ])
-  }
-  if (plan.instance) {
-    facts.push(['Orchestrator', `create ${name} · ${inputs.architecture.incus} container · created stopped`])
-  }
-  switch (plan.credentials) {
-    case 'generate':
-      facts.push(['Local credentials', 'four protected credential files are generated from the validated roster; values are never shown'])
-      break
-    case 'roster':
-      facts.push(['Local credentials', 'only the retained authorized-key roster is replaced'])
-      break
-    case 'reuse':
-      facts.push(['Local credentials', 'the complete retained credential set is reused'])
-      break
-  }
-  if (plan.deliver) {
-    facts.push(['Instance credentials', 'the four credentials are delivered in one guarded complete instance update'])
-  }
-  facts.push(
-    [
-      'Source device',
-      `${inputs.sourceRoot} → ${sourceMountPath} · writable shifted disk; the instance can modify the host checkout`,
-    ],
-    ['Authority', 'uses the invoking developer’s Incus socket access, which is root-equivalent authority on the host'],
-    ['Final state', `${name} · configured · stopped`],
-  )
-  reporter.section('Proposed installation changes (applied only after approval)')
-  reporter.facts(facts)
-  reporter.space()
-  reporter.notice(NOTICE)
+  reportApproval(reporter, screenOf(preview))
 }

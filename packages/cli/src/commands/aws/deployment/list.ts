@@ -32,7 +32,6 @@ export async function list(reporter: Reporter): Promise<void> {
         ]
       }),
     )
-    reporter.space()
     reporter.info('Select a deployment with --alias (the part after qiln-) or --id.')
   }
   reporter.info('This list reads local evidence only. It did not authenticate, call AWS, or freshly observe any AWS resource.')

@@ -10,6 +10,7 @@ import { expectation, matches } from '../../../aws/deployment/observe/expect'
 import { abandon as writeAbandonment } from '../../../aws/deployment/handoff/settle'
 import { abandonable, deploymentFacts } from '../../../aws/deployment/observe/facts'
 import { Prompts, withCancellation } from '../../../terminal/prompts'
+import { reportApproval } from '../../../terminal/approval'
 import { InstallerError, type DiagnosticFact } from '../../../diagnostic/error'
 import * as deployments from '../../../aws/deployment/records'
 import type { AwsDeploymentOptions } from '../../../input'
@@ -29,17 +30,25 @@ function refusal(record: Deployment, reason: string, observation?: Observation):
 }
 
 function reportAbandonment(reporter: Reporter, record: Deployment, observation: Observation): void {
-  reporter.section('Reservation abandonment')
+  reporter.section('Reservation')
   reporter.facts([
     ['Deployment', record.id],
     ['Name', deploymentName(record.alias)],
     ['Previous deployment', record.previous ?? 'none'],
     ['Data volume', dataVolumeId(record) ?? 'no identity retained'],
   ])
-  reporter.row('verified', 'Fresh observation', `${observationSummary(observation)} · agrees with the record`)
-  reporter.space()
-  reporter.notice(
-    'Approval records, locally, that this deployment releases its reservation of the retained data volume. Nothing is attached, detached, deleted, or modified in AWS. This deployment keeps answering for the volume, which is retained, billable, and not removed by Qiln until it is deleted outside Qiln. Afterwards the alias can be taken over and the volume reused through this record. Abandonment is not undone, and no further provider step may follow for this deployment.',
+  reportApproval(
+    reporter,
+    {
+      title: 'Proposed abandonment',
+      steps: [{ label: 'Release the reservation of the retained data volume' }],
+      covers: "One local write that records this deployment's release of its reservation. Nothing is attached, detached, deleted, or modified in AWS.",
+      stays:
+        'This deployment keeps answering for the volume, which is retained, billable, and not removed by Qiln until it is deleted outside Qiln.',
+      lasting:
+        'Abandonment is not undone, and no further provider step may follow for this deployment. Afterwards the alias can be taken over and the volume reused through this record.',
+    },
+    { label: 'Fresh observation', detail: `${observationSummary(observation)} · agrees with the record` },
   )
 }
 
@@ -74,7 +83,7 @@ export async function abandon(options: AwsDeploymentOptions, reporter: Reporter)
         throw refusal(record, 'The fresh observation does not agree with the record, so nothing was released.', observation)
       }
       reportAbandonment(reporter, record, observation)
-      await prompts.approve('Abandon the displayed reservation and keep the retained data volume')
+      await prompts.approve('Abandon the volume reservation')
       await writeAbandonment(root, record, observation)
       reportDeployment(reporter, await deployments.select(root, { kind: 'id', value: record.id }))
       return 'Reservation abandoned. The retained data volume is not removed by Qiln and keeps incurring charges until it is deleted outside Qiln; the alias can now be taken over.'

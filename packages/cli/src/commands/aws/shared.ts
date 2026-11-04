@@ -129,25 +129,20 @@ export function reportPermissionMetadata(reporter: Reporter, connection: AwsConn
     return
   }
   const verified = managed.verified
-  reporter.row('verified', 'Deployment region', managed.deploymentRegion)
+  const facts: DiagnosticFact[] = [['Deployment region', managed.deploymentRegion]]
   for (const key of POLICY_KEYS) {
     const policy = managed.policies[key]
-    if (policy === undefined) {
-      reporter.row('working', `${key} policy`, 'not enrolled; review required')
-      continue
-    }
-    reporter.row('verified', `${key} policy`, `${policy.arn} (ID ${policy.id})`)
+    facts.push([`${key} policy`, policy === undefined ? 'not enrolled; review required' : `${policy.arn} (ID ${policy.id})`])
   }
-  reporter.row('verified', 'Recorded requirement', String(verified.version))
-  reporter.row('verified', 'Recorded SHA-256', verified.sha256)
+  facts.push(['Recorded requirement', String(verified.version)], ['Recorded SHA-256', verified.sha256])
   for (const key of POLICY_KEYS) {
     const policy = verified.policies[key]
     if (policy !== undefined) {
-      reporter.row('verified', `${key} version`, `${policy.policyVersion} · ${policy.sha256}`)
+      facts.push([`${key} version`, `${policy.policyVersion} · ${policy.sha256}`])
     }
   }
-  reporter.row('verified', 'Last verification', verified.verifiedAt)
-  reporter.space()
+  facts.push(['Last verification', verified.verifiedAt])
+  reporter.facts(facts)
   reporter.info('These are retained bindings and last-verified metadata, not a fresh inspection of live IAM.')
 }
 

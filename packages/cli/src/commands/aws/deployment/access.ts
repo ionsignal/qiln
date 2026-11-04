@@ -16,11 +16,14 @@ import type { Reporter } from '../../../terminal/reporter'
  * opening a connection. `record` is current as of resolution, including a
  * host-key pin that resolution retained, unlike the snapshot in `Target`. The
  * private key is deliberately absent: it is read only when a connection is made.
+ * A `reporter` makes the connection show a live row, and without one it is
+ * silent.
  */
 export interface Access {
   record: Deployment
   options: SshOptions
   retry: string
+  reporter?: Reporter
 }
 
 interface Pinned {
@@ -45,9 +48,10 @@ async function ensurePin(root: Dir, target: Target, reporter: Reporter, signal: 
 
 /**
  * Refuses unless the recorded deployment may be connected to, then resolves
- * the pinned endpoint. This may authenticate, call AWS, and retain the pin in
- * the deployment record. The returned `record` includes it. `retry` is the
- * command the caller wants shown when the connection cannot be established.
+ * the pinned endpoint under its own section. This may authenticate, call AWS,
+ * and retain the pin in the deployment record. The returned `record` includes
+ * it. `retry` is the command the caller wants shown when the connection cannot
+ * be established.
  */
 export async function resolveAccess(
   root: Dir,
@@ -57,11 +61,13 @@ export async function resolveAccess(
   signal: AbortSignal,
 ): Promise<Access> {
   requireReady(target.record)
+  reporter.section('SSH connection')
   const { record, pin } = await ensurePin(root, target, reporter, signal)
   return {
     record,
     retry,
     options: optionsOf(record, pin),
+    reporter,
   }
 }
 
@@ -77,12 +83,16 @@ export async function withRemote<T>(
   signal: AbortSignal,
   use: (remote: Remote) => Promise<T>,
 ): Promise<T> {
+  const { host, port, username, fingerprint } = access.options
+  const endpoint = `${username}@${host}:${port} · pinned host key SHA256:${fingerprint}`
   const privateKey = await readPrivateKey(root, access.record)
   try {
+    const connecting = access.reporter?.live('Connecting', endpoint)
     let started = false
     try {
       return await withSsh(access.options, privateKey, signal, remote => {
         started = true
+        connecting?.finish('verified', `${endpoint} · host key matched and the administrative key was accepted`)
         return use(remote)
       })
     } catch (error: unknown) {

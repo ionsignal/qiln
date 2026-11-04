@@ -15,7 +15,7 @@ import { request, type ChildEvidence } from '../child/request'
 import { creationPlan, removalPlan, type Planned } from './topology'
 import { deploymentRecovery, originalCode, terminationConfirmed } from '../recovery'
 import { InstallerError, type InstallerErrorCode } from '../../diagnostic/error'
-import { notify, withWaiting, type Place, type ProgressSink, type StepTask } from './observe/progress'
+import { notify, type Place, type ProgressSink, type StepTask } from './observe/progress'
 import {
   hostKeyName,
   isReceipt,
@@ -465,24 +465,22 @@ export class Deployer {
       termination: 'unconfirmed',
       steps: [...this.current.steps, step],
     })
-    await withWaiting(this.progress, task, async () => {
-      const result = await this.call(
-        {
-          kind: 'mutate',
-          deploymentId: this.current.id,
-          operationId: step.id,
-        },
-        signal,
-        this.evidence(step),
-      )
-      const returned = this.current.steps.at(-1)?.returned
-      if (result.kind !== 'done' || !returned || returned.resourceId !== result.resourceId) {
-        throw new InstallerError({
-          code: 'AWS_DEPLOYMENT_EVIDENCE_UNAVAILABLE',
-        })
-      }
-      await this.verify(planned.action === IMPLICIT.removal ? 'termination' : 'standard', signal)
-    })
+    const result = await this.call(
+      {
+        kind: 'mutate',
+        deploymentId: this.current.id,
+        operationId: step.id,
+      },
+      signal,
+      this.evidence(step),
+    )
+    const returned = this.current.steps.at(-1)?.returned
+    if (result.kind !== 'done' || !returned || returned.resourceId !== result.resourceId) {
+      throw new InstallerError({
+        code: 'AWS_DEPLOYMENT_EVIDENCE_UNAVAILABLE',
+      })
+    }
+    await this.verify(planned.action === IMPLICIT.removal ? 'termination' : 'standard', signal)
     notify(this.progress, { phase: 'verified', task })
   }
 
@@ -564,15 +562,13 @@ export class Deployer {
     checkCancellation(signal)
     const task = { kind: 'health' } as const
     notify(this.progress, { phase: 'working', task })
-    const result = await withWaiting(this.progress, task, () =>
-      this.call(
-        {
-          kind: 'health',
-          deploymentId: this.current.id,
-          wait,
-        },
-        signal,
-      ),
+    const result = await this.call(
+      {
+        kind: 'health',
+        deploymentId: this.current.id,
+        wait,
+      },
+      signal,
     )
     if (result.kind !== 'health') {
       throw new InstallerError({
@@ -638,14 +634,12 @@ export class Deployer {
       checkCancellation(signal)
       const task = { kind: 'hostkey' } as const
       notify(this.progress, { phase: 'working', task })
-      const result = await withWaiting(this.progress, task, () =>
-        this.call(
-          {
-            kind: 'hostkey',
-            deploymentId: this.current.id,
-          },
-          signal,
-        ),
+      const result = await this.call(
+        {
+          kind: 'hostkey',
+          deploymentId: this.current.id,
+        },
+        signal,
       )
       if (result.kind !== 'hostkey') {
         throw new InstallerError({

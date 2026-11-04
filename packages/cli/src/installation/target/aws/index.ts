@@ -8,20 +8,20 @@ import { managedCheckout } from './checkout'
 import { requireCapacity, requireGit, requireSupportedRelease } from '../../host'
 import { inspectHost } from './inspect'
 import { installationRetry, type Retry } from '../../retry'
+import { reportNetwork, reportStorage } from '../report'
 import type { DeploymentSelector } from '../../../aws/deployment/volume/alias'
 import type { InstallationTarget } from '../types'
 
-const GIB = 1_073_741_824
+const GiB = 1_073_741_824
 
 /**
  * An AWS deployment as an installation target. Every observation travels over
  * the pinned SSH connection of the retained deployment: one session for each
  * host inspection and checkout request, and a new one for the Incus socket
- * relay. Nothing is observed about the operator's machine except `ssh-keygen`.
- * The source checkout is the managed one at a derived path on the target. The
- * AWS lock held by `withAwsHost` outlives the target, so it is only valid inside
- * that scope. The signal bounds the inspection sessions, while the relay session
- * ignores it and the Incus client observes it instead.
+ * relay. Nothing about the operator's machine is observed except `ssh-keygen`.
+ * The AWS lock held by `withAwsHost` outlives the target, so the target is only
+ * valid inside that scope. The signal bounds the inspection sessions, while the
+ * relay session ignores it and the Incus client observes it instead.
  */
 function awsTarget(aws: AwsHost, signal: AbortSignal, commands: Retry): InstallationTarget {
   return {
@@ -38,7 +38,7 @@ function awsTarget(aws: AwsHost, signal: AbortSignal, commands: Retry): Installa
       reporter.row(
         'verified',
         'Target',
-        `Ubuntu ${observation.distributionVersion} · ${architecture.package} · kernel ${observation.kernelRelease} · ${(observation.memoryBytes / GIB).toFixed(1)} GiB memory`,
+        `Ubuntu ${observation.distributionVersion} · ${architecture.package} · kernel ${observation.kernelRelease} · ${(observation.memoryBytes / GiB).toFixed(1)} GiB memory`,
       )
       return await use({
         binding: aws.host,
@@ -61,23 +61,8 @@ function awsTarget(aws: AwsHost, signal: AbortSignal, commands: Retry): Installa
               extensions: server.apiExtensions,
               verifyLayout: async () => {
                 const { layout } = aws
-                const storage = await validateIncusStorage(client, layout, retry)
-                reporter.row('verified', 'Storage pool', `${storage.incusPool.name} is compatible`)
-                reporter.row(
-                  'verified',
-                  'PostgreSQL volume',
-                  storage.existingPostgresVolume
-                    ? `existing volume '${storage.existingPostgresVolume.name}' is compatible`
-                    : `volume '${layout.postgres.volumeName}' is absent and was not created`,
-                )
-                const network = await validateIncusNetwork(client, layout, retry)
-                reporter.row(
-                  'verified',
-                  'Network',
-                  network.disposition === 'existing-compatible'
-                    ? `existing managed network '${layout.network.name}' is compatible`
-                    : `managed network '${layout.network.name}' is absent and ${layout.network.ipv4Subnet} is available`,
-                )
+                reportStorage(reporter, layout, await validateIncusStorage(client, layout, retry))
+                reportNetwork(reporter, layout, await validateIncusNetwork(client, layout, retry))
               },
             })
           }),

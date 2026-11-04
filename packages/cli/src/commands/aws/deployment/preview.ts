@@ -1,5 +1,6 @@
 import { AWS_SPEC } from '../../../aws/spec'
 import { deploymentName } from '../../../aws/deployment/volume/alias'
+import { reportApproval } from '../../../terminal/approval'
 import type { ImagePin } from '../../../aws/ami'
 import type { AwsIdentity } from '../../../aws/types'
 import type { Reporter } from '../../../terminal/reporter'
@@ -308,13 +309,11 @@ export function reportProposal(reporter: Reporter, proposal: HostProposal, targe
     ],
     ['Discovered', proposal.discoveredAt],
   ])
-  reporter.space()
   reporter.info('Proposal from read-only discovery. Nothing below has been created, approved, or reserved yet.')
   reporter.section('Observed in AWS (read-only, point in time)')
   reporter.facts([...imageFacts(proposal.image, proposal.pin), ...instanceFacts(proposal.instanceType)])
   reporter.section('Reviewed by Qiln (not verified on a host)')
   reporter.facts(reviewedFacts())
-  reporter.space()
   reporter.info(
     'These are the reviewed repository expectations for the pinned image, not observed guest state. Qiln grants no instance profile and does not use SSM.',
   )
@@ -340,7 +339,6 @@ export function reportProposal(reporter: Reporter, proposal: HostProposal, targe
       proposal.findings.map((finding): DiagnosticFact => [finding.severity === 'blocker' ? 'Blocker' : 'Review', finding.message]),
     )
   }
-  reporter.space()
   reporter.info(
     'Quotas, capacity, pricing, guest operation, and network reachability were not verified. An offering is not a capacity reservation.',
   )
@@ -356,36 +354,46 @@ export function reportProposal(reporter: Reporter, proposal: HostProposal, targe
 export function reportCreationEffects(reporter: Reporter, plan: HostPlan, reuse: Reuse | null): void {
   const { data } = plan
   const candidates = plan.hostSlots.length
-  reporter.section('Creation approval')
-  reporter.facts([
-    ['Network', `one VPC ${plan.cidr} · one subnet in each of ${plan.zones.length} zones · internet gateway · route table · one security group`],
-    ['Access key', `generate one local ${plan.key.algorithm} key and import its public half to AWS as a key pair`],
-    [
-      'Host',
-      `launch ${plan.count} ${plan.instanceType} (${plan.purchase}) with the reviewed cloud-init user-data, trying ${candidates} approved ${candidates === 1 ? 'zone' : 'zones'} once each; the next zone is tried only after AWS definitively refuses capacity`,
+  const lasting = [
+    'Approval creates billable AWS resources immediately. It is not spend protection, and no cost estimate is shown.',
+    'The data volume is retained by removal and keeps incurring charges until it is deleted outside Qiln.',
+    ...(reuse === null
+      ? []
+      : [
+          `Approval reserves ${reuse.volumeId} for this deployment, and deployment ${reuse.from} keeps reporting it until hand-off completion is recorded.`,
+        ]),
+  ]
+  const notEstablished = [
+    'A rollback: cancelling or a failure rolls nothing back, and uncertain effects are never replayed.',
+    'SSH access, host identity, guest compatibility, and readiness: create makes no SSH connection.',
+    ...(reuse === null ? [] : ["The reused volume's contents, which Qiln does not inspect."]),
+  ]
+  reportApproval(reporter, {
+    title: 'Proposed creation',
+    steps: [
+      {
+        label: 'Network',
+        detail: `one VPC ${plan.cidr} · one subnet in each of ${plan.zones.length} zones · internet gateway · route table · one security group`,
+      },
+      {
+        label: 'Access key',
+        detail: `generate one local ${plan.key.algorithm} key and import its public half to AWS as a key pair`,
+      },
+      {
+        label: 'Host',
+        detail: `launch ${plan.count} ${plan.instanceType} (${plan.purchase}) with the reviewed cloud-init user-data, trying ${candidates} approved ${candidates === 1 ? 'zone' : 'zones'} once each; the next zone is tried only after AWS definitively refuses capacity`,
+      },
+      {
+        label: 'Storage',
+        detail:
+          reuse === null
+            ? `create and attach one ${data.sizeGiB} GiB data volume in the launched zone · ${termination(data.deleteOnTermination)}`
+            : `attach existing data volume ${reuse.volumeId} from deployment ${reuse.from} · no new volume is created · ${termination(data.deleteOnTermination)}`,
+      },
+      { label: 'Public address', detail: 'allocate and associate one Elastic IP' },
+      { label: 'Verification', detail: 'each step is followed by an observation, then AWS instance health is read' },
     ],
-    [
-      'Storage',
-      reuse === null
-        ? `create and attach one ${data.sizeGiB} GiB data volume in the launched zone · ${termination(data.deleteOnTermination)}`
-        : `attach existing data volume ${reuse.volumeId} from deployment ${reuse.from} · no new volume is created · ${termination(data.deleteOnTermination)}`,
-    ],
-    ['Public address', 'allocate and associate one Elastic IP'],
-    ['Verification', 'each step is followed by an observation, then AWS instance health is read'],
-  ])
-  reporter.space()
-  reporter.notice(
-    'Approval creates billable AWS resources immediately. It is not spend protection and no cost estimate is shown. The data volume is retained by removal and keeps incurring charges until it is deleted outside Qiln.',
-  )
-  if (reuse !== null) {
-    reporter.notice(
-      `Approval reserves ${reuse.volumeId} for this deployment. Deployment ${reuse.from} keeps reporting the volume until hand-off completion is recorded from verified attachment or abandonment evidence; its removal evidence is unchanged. Qiln does not inspect or verify the volume's contents.`,
-    )
-  }
-  reporter.notice(
-    'Cancelling or a failure does not roll back. Completed and uncertain effects are retained as evidence and are never replayed automatically.',
-  )
-  reporter.notice(
-    'Success means AWS provisioning and health verified. Create makes no SSH connection, so SSH access, host identity, guest compatibility, and readiness are not established.',
-  )
+    lasting: lasting.join(' '),
+    notEstablished: notEstablished.join(' '),
+  })
 }

@@ -1,12 +1,12 @@
 import { INSTALLER_SPEC } from '../../installation/spec'
 import { requireNoCollision } from '../../installation/credentials'
 import { assertInstance } from '../../installation/instance'
-import { requireBound, type InstallationRecord } from '../../installation/records'
 import { inspectInstallation } from '../../installation/state'
 import { toInstallerError } from '../../transport/incus/errors'
+import { requireBound, type InstallationRecord } from '../../installation/records'
+import type { Reporter } from '../../terminal/reporter'
 import type { IncusInstance } from '../../transport/incus/types'
 import type { InstallationInputs } from '../../installation/types'
-import type { Reporter } from '../../terminal/reporter'
 import type { HostAccess, IncusAccess, InstallationTarget } from '../../installation/target/types'
 
 /**
@@ -83,7 +83,7 @@ async function verifyRecord(
     const head = await checkout.head()
     const restore = record.checkoutCommit ?? 'origin’s current main when none is recorded yet'
     reporter.row(
-      head === null ? 'working' : 'verified',
+      head === null ? 'pending' : 'verified',
       'Source checkout',
       head === null
         ? `${checkout.path} is absent and nothing was created · configure restores it from ${restore}`
@@ -92,7 +92,7 @@ async function verifyRecord(
   }
   const { name } = INSTALLER_SPEC.orchestrator
   if (record.imageFingerprint === null) {
-    reporter.row('working', 'Orchestrator', 'no image is pinned yet, so the instance was not checked')
+    reporter.row('pending', 'Orchestrator', 'no image is pinned yet, so the instance was not checked')
     return
   }
   let instance: IncusInstance | null
@@ -106,7 +106,7 @@ async function verifyRecord(
     })
   }
   if (instance === null) {
-    reporter.row('working', 'Orchestrator', `${name} is absent and nothing was created`)
+    reporter.row('pending', 'Orchestrator', `${name} is absent and nothing was created`)
     return
   }
   requireNoCollision(instance.config, retry)

@@ -1,17 +1,17 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { INSTALLER_SPEC } from './spec'
+import { CHECKOUT_DIGEST } from './checkout/manifest'
 import { apply } from './apply'
 import { verify } from './verify'
-import { planOf, type PlanRequest } from './plan'
+import { firstGate, planOf, requireContainer, type ImageReplacement, type PlanRequest } from './plan'
 import { observe, type Observation } from './observe'
 import { createCredentials, replaceRoster } from './credentials'
 import { pinCheckout, pinImage, pinned } from './state'
-import { CHECKOUT_DIGEST } from './checkout/manifest'
-import { requireNotStuck, returned } from './journal/facts'
-import { validateContainerImage } from './preflight/image'
 import { canonical, sameJson } from '../json'
+import { requireNotStuck, returned } from './journal/facts'
 import { InstallerError } from '../diagnostic/error'
 import { stateOf, type StepState } from '../journal/step'
+import { stepFailure, type StepOutcome } from '../host/step'
 import { toInstallerError } from '../transport/incus/errors'
 import { checkCancellation } from '../terminal/prompts'
 import { currentUserId } from '../state/user'
@@ -33,7 +33,6 @@ import {
   type InstallAction,
 } from './journal/types'
 import * as records from './journal/records'
-import type { StepOutcome } from '../host/step'
 import type { Retry } from './retry'
 import type { Dir, FileSnapshot } from '../state/files'
 import type { ImageSource } from './image'
@@ -42,9 +41,9 @@ import type { CheckoutAccess } from './target/types'
 import type { InstallationInputs } from './types'
 
 /**
- * No scripts are approved here for Incus, so the recipe identifies the installer
- * specification that was in force when the plan was approved, together with the
- * embedded checkout scripts.
+ * No Incus scripts are approved here, so the recipe identifies the installer
+ * specification in force at approval together with the embedded checkout
+ * scripts.
  */
 const RECIPE = Object.freeze({
   revision: INSTALLER_SPEC.evidenceVersion,
@@ -83,13 +82,27 @@ const CANCELLED_STEP_OUTCOMES: Record<StepState, string> = {
 }
 
 /**
+ * `working` follows the fence of a step, and `verified` follows only after a
+ * fresh observation agreed and the verification was persisted. A step that was
+ * refused or left uncertain emits nothing further, so the failure diagnostic
+ * owns what the operator sees.
+ */
+export interface ConfigureProgress {
+  phase: 'working' | 'verified'
+  action: InstallAction
+}
+
+/**
  * The command owns presentation and consent. `show` renders the plan the moment
  * it is derived, and `approve` resolves only when the operator approved the
- * plan that was just shown.
+ * plan that was just shown. `held` is the image deletion that the first gate of
+ * a replacement postpones to its own approval, and null otherwise. `progress`
+ * only observes.
  */
 export interface ConfigureHooks {
-  show(plan: ConfigurePlan): void
-  approve(plan: ConfigurePlan): Promise<void>
+  show(plan: ConfigurePlan, held: ImageReplacement | null): void
+  approve(plan: ConfigurePlan, held: ImageReplacement | null): Promise<void>
+  progress(event: ConfigureProgress): void
 }
 
 export interface ConfigureContext {
@@ -106,13 +119,22 @@ export interface ConfigureContext {
 }
 
 /**
- * The plan that was applied, or the empty plan of an installation that already
- * matched, and the fresh observation that agreed with it.
+ * The plan that was applied (the full plan when it was approved in gates), or
+ * the empty plan of an installation that already matched, and the fresh
+ * observation that agreed with it.
  */
 export interface ConfigureResult {
   plan: ConfigurePlan
   observation: Observation
 }
+
+/**
+ * Maps the plan derived from a fresh observation to the part that one approval
+ * covers.
+ */
+type Projection = (plan: ConfigurePlan) => ConfigurePlan | null
+
+const wholePlan: Projection = plan => plan
 
 function failure(
   action: IncusAction,
@@ -142,35 +164,6 @@ function failure(
   })
 }
 
-/**
- * A cancellation is reported as such, so the caller can describe what it left
- * behind. Anything else carries the authored outcome of the remote script.
- */
-function remoteFailure(
-  action: InstallAction,
-  outcome: Exclude<StepOutcome, { kind: 'returned' }>,
-  retry: string,
-): InstallerError {
-  if (outcome.cause?.kind === 'cancelled') {
-    return outcome.cause
-  }
-  return new InstallerError({
-    code: 'INSTALLATION_STEP_FAILED',
-    facts: [
-      ['Step', action],
-      [
-        'Outcome',
-        outcome.kind === 'refused'
-          ? 'refused; the step had no effect'
-          : 'uncertain; the step may have run partly or fully',
-      ],
-      ['Reason', outcome.reason],
-      ...(outcome.cause?.facts ?? []),
-    ],
-    retry,
-  })
-}
-
 function unverified(installation: string, subject: string, retry: string): InstallerError {
   return new InstallerError({
     code: 'INSTALLATION_NOT_VERIFIED',
@@ -184,18 +177,15 @@ function unverified(installation: string, subject: string, retry: string): Insta
 
 /**
  * Coordinates one installation configuration under the installation lock held
- * by the command. Per step: the authorization is persisted, then the fence, then
- * the single Incus request or remote script runs, then its outcome is persisted,
- * then a fresh observation must agree before `verifiedAt` is persisted. The plan
- * is derived again after approval and must be unchanged before anything is
- * persisted. The managed checkout is cloned first, so a clone failure never
- * follows an image upload. A split image is imported without an alias and must
- * be a container image for the target architecture before it is verified and
- * before the previous image is deleted. Nothing is replayed, resumed, or rolled
- * back, and an interrupted step stays open as evidence. The pins and the local
- * credential files are atomic local writes covered by the approval, and they are
- * not journaled steps. Cancellation stops before the next step, and the
- * diagnostic states what it left behind for the newest one.
+ * by the command. Per step: authorization persisted, fence persisted, one Incus
+ * request or remote script, outcome persisted, then a fresh observation must
+ * agree before `verifiedAt` is persisted. The plan is derived again after
+ * approval and must be unchanged. The managed checkout is cloned first, and a
+ * split image is imported without an alias and checked before any previous
+ * image is deleted, which `firstGate` separates into its own approval. Nothing
+ * is replayed, resumed, or rolled back, and an interrupted step stays open as
+ * evidence. The pins and credential files are atomic local writes covered by
+ * the approval, not journaled steps.
  */
 export class Configurer {
   private constructor(
@@ -213,17 +203,23 @@ export class Configurer {
 
   /**
    * Verifies a step left returned by an earlier run, then plans from fresh
-   * evidence. An installation that already matches needs no approval.
+   * evidence. An installation that already matches needs no approval. A plan
+   * that replaces the managed image is approved in two gates (see `firstGate`),
+   * and the result keeps the full plan.
    */
   public async run(signal: AbortSignal): Promise<ConfigureResult> {
-    const observation = (await this.settleReturned()) ?? (await this.fresh())
-    const plan = planOf(observation, this.planRequest)
-    this.context.hooks.show(plan)
-    if (isEmpty(plan)) {
-      return { plan, observation }
+    const observed = (await this.settleReturned()) ?? (await this.fresh())
+    const full = planOf(observed, this.planRequest)
+    if (isEmpty(full)) {
+      return { plan: full, observation: observed }
     }
-    const current = await this.confirm(plan)
-    return await this.execute(plan, current, signal)
+    const first = firstGate(full)
+    let remaining = full
+    if (first !== null) {
+      remaining = planOf(await this.applyGate(first, full.image.replace, firstGate, signal), this.planRequest)
+    }
+    await this.applyGate(remaining, null, wholePlan, signal)
+    return { plan: full, observation: await this.guarded(() => this.verifyComplete(signal)) }
   }
 
   private get planRequest(): PlanRequest {
@@ -247,14 +243,44 @@ export class Configurer {
   }
 
   /**
-   * The operator may take a while to approve, so the plan is derived again from
-   * a fresh observation, and it must be exactly the plan that was approved.
-   * This refuses before anything is persisted.
+   * Presentation cannot decide whether a step completed or verified.
    */
-  private async confirm(plan: ConfigurePlan): Promise<Observation> {
-    await this.context.hooks.approve(plan)
+  private notify(phase: ConfigureProgress['phase'], action: InstallAction): void {
+    try {
+      this.context.hooks.progress({ phase, action })
+    } catch {
+      // Intentionally ignored.
+    }
+  }
+
+  /**
+   * Shows one gate, waits for its approval, applies it, and returns the last
+   * observation that verified a step.
+   */
+  private async applyGate(
+    plan: ConfigurePlan,
+    held: ImageReplacement | null,
+    projection: Projection,
+    signal: AbortSignal,
+  ): Promise<Observation> {
+    this.context.hooks.show(plan, held)
+    const current = await this.confirm(plan, held, projection)
+    return await this.guarded(() => this.applyActions(plan, current, signal))
+  }
+
+  /**
+   * The operator may take a while to approve, so the plan is derived again from
+   * a fresh observation, and the part that this approval covers must be exactly
+   * what was approved. This refuses before anything is persisted.
+   */
+  private async confirm(
+    plan: ConfigurePlan,
+    held: ImageReplacement | null,
+    projection: Projection,
+  ): Promise<Observation> {
+    await this.context.hooks.approve(plan, held)
     const current = await this.fresh()
-    if (!sameJson(planOf(current, this.planRequest), plan)) {
+    if (!sameJson(projection(planOf(current, this.planRequest)), plan)) {
       throw new InstallerError({
         code: 'INSTALLATION_PLAN_CHANGED',
         retry: this.context.retry.configure,
@@ -264,12 +290,12 @@ export class Configurer {
   }
 
   /**
-   * Applies the approved plan, and reports a cancellation together with what it
-   * left behind for the newest step.
+   * Reports a cancellation together with what it left behind for the newest
+   * step.
    */
-  private async execute(plan: ConfigurePlan, observation: Observation, signal: AbortSignal): Promise<ConfigureResult> {
+  private async guarded<T>(work: () => Promise<T>): Promise<T> {
     try {
-      return await this.applyActions(plan, observation, signal)
+      return await work()
     } catch (error: unknown) {
       throw this.describeCancellation(error)
     }
@@ -277,14 +303,11 @@ export class Configurer {
 
   /**
    * Runs the approved actions: the checkout first, then the image actions, then
-   * the pin, then the rest. The whole installation is observed once more at the
-   * end, and it must need nothing further.
+   * the pin, then the rest. An imported image is judged as a container image
+   * right after its step, so no alias, pin, or deletion follows content that
+   * does not fit.
    */
-  private async applyActions(
-    plan: ConfigurePlan,
-    observation: Observation,
-    signal: AbortSignal,
-  ): Promise<ConfigureResult> {
+  private async applyActions(plan: ConfigurePlan, observation: Observation, signal: AbortSignal): Promise<Observation> {
     const authorization = await this.authorize(plan)
     let latest = observation
     if (plan.checkout !== null) {
@@ -293,17 +316,27 @@ export class Configurer {
     const actions = actionsOf(plan).filter(isIncusAction)
     for (const action of actions.filter(isImageAction)) {
       latest = await this.perform(authorization, plan, action, latest, signal)
+      if (action === 'import-image') {
+        requireContainer(latest, this.context.inputs, this.context.retry.configure)
+      }
     }
     await this.pin(plan)
     for (const action of actions.filter(item => !isImageAction(item))) {
       latest = await this.perform(authorization, plan, action, latest, signal)
     }
+    return latest
+  }
+
+  /**
+   * The whole installation is observed once more and must need nothing further.
+   */
+  private async verifyComplete(signal: AbortSignal): Promise<Observation> {
     const final = await this.fresh()
     if (!isEmpty(planOf(final, this.planRequest))) {
       throw unverified(this.installation.name, 'the complete installation', this.context.retry.configure)
     }
     checkCancellation(signal)
-    return { plan, observation: final }
+    return final
   }
 
   private describeCancellation(error: unknown): unknown {
@@ -393,8 +426,7 @@ export class Configurer {
   /**
    * One approved Incus action. Credentials are written locally just before the
    * guarded instance update and observed again, so the update is built from a
-   * snapshot that includes them. Cancellation is checked before each action,
-   * so none starts after it.
+   * snapshot that includes them. No action starts after a cancellation.
    */
   private async perform(
     authorization: string,
@@ -413,10 +445,9 @@ export class Configurer {
   }
 
   /**
-   * The source phase. The restore point is pinned first, so an interruption
-   * stays recoverable by running configure again. The remote outcome is
-   * classified like any other step, and a fresh observation must show the
-   * checkout before the step counts as verified.
+   * The restore point is pinned first, so an interruption stays recoverable by
+   * running configure again. A fresh observation must show the checkout before
+   * the step counts as verified.
    */
   private async materialize(
     authorization: string,
@@ -435,37 +466,11 @@ export class Configurer {
       this.installation = await pinCheckout(directory, this.installation, source.commit, retry.inspect)
     }
     await this.fence(authorization, 'materialize-checkout')
+    this.notify('working', 'materialize-checkout')
     await this.concludeRemote('materialize-checkout', await checkout.materialize(source.commit))
-    return await this.verified(plan, 'materialize-checkout')
-  }
-
-  /**
-   * The imported image stays in the store without an alias when it does not
-   * fit. Qiln never deletes it, so the diagnostic says the operator must.
-   */
-  private requireContainerImage({ image, fingerprint }: Observation): void {
-    const { inputs, retry } = this.context
-    if (image === null) {
-      throw unverified(this.installation.name, 'the imported image', retry.configure)
-    }
-    try {
-      validateContainerImage(image, fingerprint, inputs.architecture, retry.configure)
-    } catch (error: unknown) {
-      if (!(error instanceof InstallerError)) {
-        throw error
-      }
-      throw new InstallerError({
-        code: error.code,
-        facts: [
-          ...error.facts,
-          [
-            'Imported image',
-            `${fingerprint} remains in the Incus image store without an alias. The previous image was not deleted, and Qiln never deletes the imported one: remove it manually.`,
-          ],
-        ],
-        retry: error.retry,
-      })
-    }
+    const observed = await this.verified(plan, 'materialize-checkout')
+    this.notify('verified', 'materialize-checkout')
+    return observed
   }
 
   /**
@@ -497,6 +502,7 @@ export class Configurer {
   ): Promise<Observation> {
     const { client, inputs, source, retry } = this.context
     await this.fence(authorization, action)
+    this.notify('working', action)
     let accepted = false
     try {
       await apply(action, plan, observation, {
@@ -518,13 +524,15 @@ export class Configurer {
       return await this.concludeRequest(action, error, accepted)
     }
     await this.amend({ completion: { exitCode: 0, completedAt: new Date().toISOString() } })
-    return await this.verified(plan, action)
+    const observed = await this.verified(plan, action)
+    this.notify('verified', action)
+    return observed
   }
 
   /**
-   * Records what the remote script reported. A refusal or an unconfirmed outcome
-   * is recorded and then thrown, so cancellation is classified before it
-   * propagates. A step with no exit status stays open, which is uncertain.
+   * Records what the remote script reported. A refusal or an unconfirmed
+   * outcome is recorded and then thrown, so cancellation is classified before
+   * it propagates. A step with no exit status stays open, which is uncertain.
    */
   private async concludeRemote(action: InstallAction, outcome: StepOutcome): Promise<void> {
     const { retry } = this.context
@@ -535,20 +543,19 @@ export class Configurer {
         return
       case 'refused':
         await this.amend({ refusedAt: at })
-        throw remoteFailure(action, outcome, retry.configure)
+        throw stepFailure('INSTALLATION_STEP_FAILED', retry.configure, action, outcome)
       case 'uncertain':
         if (outcome.exitCode !== null) {
           await this.amend({ completion: { exitCode: outcome.exitCode, completedAt: at } })
         }
-        throw remoteFailure(action, outcome, retry.configure)
+        throw stepFailure('INSTALLATION_STEP_FAILED', retry.configure, action, outcome)
     }
   }
 
   /**
-   * A client error before the request was accepted, or a local refusal raised
-   * before any request was sent, is a definite absence of effect. A cancelled
-   * request is the same only when it never reached the daemon and no operation
-   * was accepted. A completed but unsuccessful operation is recorded as a
+   * A client error before the request was accepted, a local refusal before any
+   * request was sent, and a cancelled request that never reached the daemon are
+   * definite absences of effect. A completed but unsuccessful operation is a
    * nonzero completion. Anything else leaves the step open, because a timeout,
    * a cancelled wait or upload, or a lost connection does not show that nothing
    * changed.
@@ -580,18 +587,17 @@ export class Configurer {
   }
 
   /**
-   * An imported image is judged here, before its step is stamped verified, so a
-   * step never claims an image that is not a container image for the target
-   * architecture.
+   * Verifies the effect of one step against a fresh observation. An imported
+   * image is only observed present here, so the step is truthfully verified once
+   * the content is in the store. Whether that content is a container image for
+   * the target architecture is judged by `requireContainer`, right after the
+   * import and again by planning.
    */
   private async verified(plan: ConfigurePlan, action: InstallAction): Promise<Observation> {
     const { inputs, retry } = this.context
     const observation = await this.fresh()
     if (!verify(action, plan, observation, inputs, retry.configure)) {
       throw unverified(this.installation.name, `step ${action}`, retry.configure)
-    }
-    if (action === 'import-image') {
-      this.requireContainerImage(observation)
     }
     await this.amend({ verifiedAt: new Date().toISOString() })
     return observation

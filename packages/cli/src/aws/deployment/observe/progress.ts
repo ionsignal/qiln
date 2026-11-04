@@ -2,8 +2,6 @@ import type { Action } from '../graph'
 import type { IncusAction } from '../../../host/incus/spec'
 import type { StepAction } from '../../../host/zfs/spec'
 
-const WAITING_INTERVAL_MS = 10_000
-
 export interface LaunchAttempt {
   number: number
   total: number
@@ -52,16 +50,16 @@ export interface IncusTask {
 export type ProgressTask = KeyTask | StepTask | HealthTask | HostKeyTask | ZfsTask | IncusTask
 
 /**
- * `working` precedes the activity, `waiting` repeats while it lasts, and
- * `verified` follows only after the observation and its persistence succeeded.
- * `declined` is the one event that reports a failure: AWS definitely refused
- * one launch attempt for lack of capacity, it was durably recorded, and the
- * next approved zone is tried. No other event states that an activity failed
- * or was rolled back.
+ * `working` precedes the activity, and `verified` follows only after the
+ * observation and its persistence succeeded. `declined` is the one event that
+ * reports a failure: AWS definitely refused one launch attempt for lack of
+ * capacity, it was durably recorded, and the next approved zone is tried. No
+ * other event states that an activity failed or was rolled back.
  */
-export type ProgressEvent =
-  | { phase: 'working' | 'verified' | 'declined'; task: ProgressTask }
-  | { phase: 'waiting'; task: ProgressTask; elapsedMs: number }
+export interface ProgressEvent {
+  phase: 'working' | 'verified' | 'declined'
+  task: ProgressTask
+}
 
 export type ProgressSink = (event: ProgressEvent) => void
 
@@ -70,30 +68,5 @@ export function notify(sink: ProgressSink | undefined, event: ProgressEvent): vo
     sink?.(event)
   } catch {
     // Intentionally ignored.
-  }
-}
-
-/**
- * Emits throttled elapsed-time events while `run` is pending. The timer is
- * always cleared, so it cannot outlive the operation or hold the process open.
- */
-export async function withWaiting<T>(
-  sink: ProgressSink | undefined,
-  task: ProgressTask,
-  run: () => Promise<T>,
-): Promise<T> {
-  if (sink === undefined) {
-    return await run()
-  }
-  const started = Date.now()
-  const timer = setInterval(
-    () => notify(sink, { phase: 'waiting', task, elapsedMs: Date.now() - started }),
-    WAITING_INTERVAL_MS,
-  )
-  timer.unref()
-  try {
-    return await run()
-  } finally {
-    clearInterval(timer)
   }
 }

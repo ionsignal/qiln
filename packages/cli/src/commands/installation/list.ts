@@ -16,7 +16,6 @@ export async function list(reporter: Reporter): Promise<void> {
         record.imageFingerprint?.slice(0, 12) ?? 'none',
       ]),
     )
-    reporter.space()
     reporter.info('Select an installation with --local, or an AWS deployment with --alias or --id.')
   }
   reporter.info('This list reads local evidence only. It did not contact any target or authenticate to AWS.')

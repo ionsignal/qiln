@@ -20,7 +20,7 @@ import * as awsLogin from '../../aws/auth/login'
 import * as tools from '../../aws/tools'
 import * as connections from '../../aws/connections'
 import type { Dir } from '../../state/files'
-import type { Reporter } from '../../terminal/reporter'
+import type { LiveRow, Reporter } from '../../terminal/reporter'
 import type { AwsAuthentication, AwsConnection, LoginFlow } from '../../aws/types'
 
 type PermissionOutcome = 'not-applicable' | 'recorded' | 'declined' | 'changed' | 'unchanged'
@@ -36,35 +36,44 @@ async function inspectConnection(name: string, reporter: Reporter): Promise<bool
   if (!saved) {
     return false
   }
-  reporter.row('verified', 'Recorded account', saved.identity.accountId)
-  reporter.row('verified', 'Recorded IAM user', saved.identity.arn)
-  reporter.row('verified', 'Recorded user ID', saved.identity.userId)
-  reporter.space()
+  reporter.facts([
+    ['Recorded account', saved.identity.accountId],
+    ['Recorded IAM user', saved.identity.arn],
+    ['Recorded user ID', saved.identity.userId],
+  ])
   reporter.info(
     `Connection '${name}' is saved. Sign in as its recorded IAM user; no operator will be recreated.`,
   )
   return true
 }
 
+/**
+ * The download and the installation are each one live row, so the byte count
+ * updates in place and no row is permanent until its step was verified.
+ */
 function toolProgress(reporter: Reporter): (event: tools.Progress) => void {
-  let lastUpdate = 0
+  let live: LiveRow | null = null
   return event => {
     switch (event.stage) {
       case 'downloading': {
-        const now = Date.now()
-        if (event.received === 0 || event.received === event.total || now - lastUpdate >= 5_000) {
-          lastUpdate = now
-          reporter.info(`Downloading AWS CLI: ${event.received} / ${event.total} bytes.`)
+        const detail = `downloading ${event.received} / ${event.total} bytes`
+        if (live === null) {
+          live = reporter.live('Artifact', detail)
+        } else {
+          live.update(detail)
         }
         return
       }
       case 'artifact-verified':
-        reporter.row('verified', 'Artifact', 'downloaded byte count and SHA-256 match the pinned release')
+        live?.finish('verified', 'downloaded byte count and SHA-256 match the pinned release')
+        live = null
         return
       case 'installing':
+        live = reporter.live('Installation', 'running the bundled AWS installer')
         return
       case 'installation-verified':
-        reporter.row('verified', 'Installation', 'Installed managed payload and exact CLI version verified')
+        live?.finish('verified', 'Installed managed payload and exact CLI version verified')
+        live = null
         return
       case 'ready':
         reporter.row('verified', 'Managed tool', 'installation transaction and tool-lock handling completed')
@@ -133,27 +142,24 @@ async function selectCli(reporter: Reporter, prompts: Prompts, signal: AbortSign
     return selection.cli
   }
   const proposal = selection.proposal
-  reporter.row('verified', 'CLI policy', proposal.version)
-  reporter.row('verified', 'Target', proposal.target)
-  reporter.row('verified', 'Artifact size', `${proposal.artifact.bytes} bytes`)
-  reporter.row('verified', 'Download host', new URL(proposal.artifact.url).hostname)
-  reporter.row('verified', 'Destination', proposal.destination)
-  reporter.space()
-  for (const effect of proposal.effects) {
-    reporter.info(effect)
-  }
+  reporter.facts([
+    ['CLI policy', proposal.version],
+    ['Target', proposal.target],
+    ['Artifact size', `${proposal.artifact.bytes} bytes`],
+    ['Download host', new URL(proposal.artifact.url).hostname],
+    ['Destination', proposal.destination],
+  ])
+  reporter.list([...proposal.effects])
   reporter.info(
     'Existing external and global installations remain untouched. No package manager, privilege escalation, global PATH changes, or shell-profile edits are performed.',
   )
   reporter.info(
     'Authentication starts only after installation, workspace cleanup, and tool-lock handling complete. Managed tools remain installed after disconnect.',
   )
-  reporter.space()
   reporter.notice(
     'Installation effects are not automatically rolled back. Unconfirmed setup termination retains potentially active inputs and the protective lock.',
   )
-  await prompts.approve('Install the displayed Qiln-managed AWS CLI')
-  reporter.space()
+  await prompts.approve('Install the Qiln-managed AWS CLI')
   checkCancellation(signal)
   const cli = await tools.install(proposal, {
     signal,
@@ -174,19 +180,22 @@ async function selectFlow(prompts: Prompts): Promise<LoginFlow> {
 
 function reportLogin(reporter: Reporter, flow: LoginFlow): void {
   reporter.section('Browser sign-in')
-  reporter.info(
+  reporter.list(
     flow === 'remote'
-      ? '1. Open the AWS link below in your browser on another machine.'
-      : '1. Continue in the browser AWS opens, or open the AWS link displayed below.',
+      ? [
+          'Open the AWS link below in your browser on another machine.',
+          'Sign in as the AWS identity requested above.',
+          'Copy the complete authorization code shown in the browser.',
+          'Paste it into this terminal when AWS prompts, then press Enter.',
+        ]
+      : [
+          'Continue in the browser AWS opens, or open the AWS link displayed below.',
+          'Sign in as the AWS identity requested above.',
+          'Return to this terminal when browser sign-in is complete.',
+        ],
+    true,
   )
-  reporter.info('2. Sign in as the AWS identity requested above.')
-  if (flow === 'remote') {
-    reporter.info('3. Copy the complete authorization code shown in the browser.')
-    reporter.info('4. Paste it into this terminal when AWS prompts, then press Enter.')
-  } else {
-    reporter.info('3. Return to this terminal when browser sign-in is complete.')
-  }
-  reporter.help('\n')
+  reporter.handOff()
 }
 
 async function recheck(prompts: Prompts, label: string): Promise<void> {
@@ -206,15 +215,15 @@ function reportSetup(reporter: Reporter, proposal: Proposal): void {
   reporter.info(
     'Create a dedicated operator with browser sign-in and the customer-managed EC2 policies displayed below.',
   )
-  reporter.space()
-  reporter.line('- Initial password shown once; replacement required.')
-  reporter.line('- Operator MFA optional. No permanent access keys.')
-  reporter.line('- No IAM administration. Connect does not create or remove infrastructure.')
+  reporter.list([
+    'Initial password shown once; replacement required.',
+    'Operator MFA optional. No permanent access keys.',
+    'No IAM administration. Connect does not create or remove infrastructure.',
+  ])
   reportPermissionChange(reporter, proposal)
 }
 
 function reportDeclined(reporter: Reporter): void {
-  reporter.space()
   reporter.info(
     'Policy update declined. The saved operator login is retained; current IAM configuration is not claimed.',
   )
@@ -257,11 +266,7 @@ async function maintain(
     return 'not-applicable'
   }
   if (!reviewRequired(saved)) {
-    reporter.row(
-      'verified',
-      'Metadata',
-      'Recorded metadata matches current requirements; live IAM was not freshly inspected.',
-    )
+    reporter.info('Recorded metadata matches current requirements; live IAM was not freshly inspected.')
     return 'recorded'
   }
   reporter.notice(
@@ -278,14 +283,13 @@ async function maintain(
   try {
     reporter.section('Root sign-in')
     reporter.info('This separate root context does not replace or remove the saved ordinary operator login.')
-    reporter.space()
     reporter.action(`Sign in as the root user of recorded AWS account ${saved.identity.accountId}.`)
     await inspectRoot(bootstrap, cli, flow, prompts, signal, reporter)
     const proposal = bootstrap.proposal()
     const modes = modesOf(proposal)
     policiesChanged = POLICY_KEYS.some(key => modes[key] !== 'none')
     reportPermissionChange(reporter, proposal)
-    if (policiesChanged && !(await prompts.consent('Apply the displayed IAM policy changes'))) {
+    if (policiesChanged && !(await prompts.consent('Apply the IAM policy changes'))) {
       await bootstrap.decline()
       reporter.row('verified', 'Root context', 'processes terminated and local authentication removed')
       reportDeclined(reporter)
@@ -314,7 +318,7 @@ function reportReadiness(reporter: Reporter, readiness: Readiness): void {
   const passwordReplaced = readiness.passwordResetRequired === false
   reporter.section('Operator readiness')
   reporter.row(
-    passwordReplaced ? 'verified' : 'working',
+    passwordReplaced ? 'verified' : 'pending',
     'Password',
     passwordReplaced ? 'replacement requirement cleared' : 'replacement not confirmed',
   )
@@ -343,7 +347,6 @@ async function connectOperator(
   try {
     await removeAuth(directory)
     const session = await Session.create(directory, region)
-    reporter.space()
     reporter.action('Sign in as the intended IAM user. Root, assumed-role, and SSO identities are not accepted.')
     reportLogin(reporter, flow)
     await awsLogin.login(cli, session, flow, signal)
@@ -390,9 +393,8 @@ async function onboard(
       facts: [['Connection', 'Initial onboarding requires an empty current-layout connection directory.']],
     })
   }
-  const region = validateAwsRegion(
-    await prompts.text('Deployment region (fixed for this connection; also the initial default login region)', AWS_SPEC.defaultRegion),
-  )
+  reporter.info('The deployment region is fixed for this connection and is also the initial default login region.')
+  const region = validateAwsRegion(await prompts.text('Deployment region (fixed once created)', AWS_SPEC.defaultRegion))
   const flow = await selectFlow(prompts)
   const bootstrap = await Bootstrap.onboard(directory, name, region)
   let operatorStarted = false
@@ -406,7 +408,7 @@ async function onboard(
     await inspectRoot(bootstrap, cli, flow, prompts, signal, reporter)
     const proposal = bootstrap.proposal()
     reportSetup(reporter, proposal)
-    await prompts.approve('Approve this AWS operator setup')
+    await prompts.approve('Create the AWS operator and policies')
     await bootstrap.approve(proposal, signal)
     reporter.section('IAM setup')
     await bootstrap.createOperator(signal, iamProgress(reporter))
@@ -421,8 +423,8 @@ async function onboard(
     reporter.row('verified', 'Operator ARN', operator.arn)
     reporter.row('verified', 'User identity', operator.userId)
     reporter.info('Use a separate browser session or sign out of root first.')
-    reporter.action(`Open the AWS console and sign in as ${userName}:`)
-    reporter.line(`https://${operator.accountId}.signin.aws.amazon.com/console/`)
+    reporter.action(`Open the AWS console and sign in as ${userName}.`)
+    reporter.facts([['Console URL', `https://${operator.accountId}.signin.aws.amazon.com/console/`]])
     reporter.action('Replace the initial password before continuing. Operator MFA enrollment is optional.')
     reporter.info(`Optional virtual MFA names: ${userName} or a name beginning ${userName}-.`)
     checkCancellation(signal)
@@ -492,7 +494,7 @@ export async function connect(options: AwsCommandOptions, reporter: Reporter): P
   const outcome = await withCancellation(async signal => {
     const prompts = new Prompts(signal, 'qiln aws connect', reporter)
     reporter.section('AWS connection')
-    reporter.row('verified', 'Connection', name)
+    reporter.facts([['Connection', name]])
     const saved = await inspectConnection(name, reporter)
     checkCancellation(signal)
     if (!saved) {
@@ -515,7 +517,6 @@ export async function connect(options: AwsCommandOptions, reporter: Reporter): P
       return await maintain(directory, connection, cli, prompts, signal, reporter)
     })
   })
-  reporter.space()
   switch (outcome) {
     case 'completed':
       reporter.info('Operator onboarding and the current approved IAM configuration were verified.')

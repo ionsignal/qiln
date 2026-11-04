@@ -184,9 +184,11 @@ export async function run(argumentsList: readonly string[]): Promise<number> {
     })
     return 0
   } catch (error: unknown) {
-    reporter = new Reporter({
-      color: program.opts<GlobalOptions>().color,
-    })
+    if (command === undefined) {
+      reporter = new Reporter({
+        color: program.opts<GlobalOptions>().color,
+      })
+    }
     if (error instanceof CommanderError) {
       if (error.code === 'commander.helpDisplayed' || error.code === 'commander.help') {
         for (const chunk of output) {

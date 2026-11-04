@@ -1,10 +1,10 @@
 import { INSTALLER_SPEC } from '../../installation/spec'
-import { awsInstallationName } from '../../installation/target/aws/host'
+import { describeHost } from './host'
+import { stateOf } from '../../journal/step'
 import { unsettled } from '../../installation/journal/facts'
 import { listInstallations } from '../../installation/state'
-import { stateOf } from '../../journal/step'
 import { selectorFlags } from '../../installation/retry'
-import { describeHost } from './host'
+import { awsInstallationName } from '../../installation/target/aws/host'
 import * as journal from '../../installation/journal/records'
 import type { Reporter } from '../../terminal/reporter'
 import type { InstallationSelector } from '../../installation/target/types'
@@ -49,12 +49,10 @@ export async function status(selector: InstallationSelector, reporter: Reporter)
     ['Unresolved steps', open.length === 0 ? 'none' : open.map(step => `${step.action} (${stateOf(step)})`).join(', ')],
   ])
   if (open.length > 0) {
-    reporter.space()
     reporter.notice(
       'An unresolved step blocks configuration. Interrupted work may already have completed, and nothing was replayed, resumed, or rolled back.',
     )
   }
-  reporter.space()
   reporter.info('This status reads local evidence only. It did not contact the target, authenticate to AWS, or take a lock.')
   reporter.summary(`Installation '${name}' is recorded. Its live state was not observed.`)
 }

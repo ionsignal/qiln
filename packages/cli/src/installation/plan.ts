@@ -12,6 +12,8 @@ import type { ConfigurePlan } from './journal/types'
 import type { Observation } from './observe'
 import type { InstallationInputs } from './types'
 
+export type ImageReplacement = NonNullable<ConfigurePlan['image']['replace']>
+
 export interface PlanRequest {
   inputs: InstallationInputs
   roster: FileSnapshot | null
@@ -43,18 +45,51 @@ function managedTarget(alias: IncusImageAlias, aliased: IncusImage | null, retry
 }
 
 /**
- * Identical content is never replaced. Content that is not in the store is
- * imported without an alias, and the configurer checks it before the previous
- * target is deleted. The managed alias is then pointed at the selected image.
+ * Judges the selected content, when the store holds it, as a container image
+ * for the target architecture. Planning applies it to every observation, and the
+ * configurer applies it right after an import, before any alias, pin, or
+ * deletion. Content that does not fit stays in the image store without an alias.
+ * Qiln never deletes it, so the diagnostic tells the operator to.
+ */
+export function requireContainer(
+  { image, fingerprint }: Observation,
+  inputs: InstallationInputs,
+  retry: string,
+): void {
+  if (image === null) {
+    return
+  }
+  try {
+    validateContainerImage(image, fingerprint, inputs.architecture, retry)
+  } catch (error: unknown) {
+    if (!(error instanceof InstallerError)) {
+      throw error
+    }
+    throw new InstallerError({
+      code: error.code,
+      facts: [
+        ...error.facts,
+        [
+          'Imported image',
+          `${fingerprint} remains in the Incus image store without an alias. No previous image was deleted for it, and Qiln never deletes it: remove it manually.`,
+        ],
+      ],
+      retry: error.retry,
+    })
+  }
+}
+
+/**
+ * Identical content is never replaced. New content is imported without an
+ * alias, and the previous target is deleted only after the imported image is
+ * checked.
  */
 function imagePlan(observation: Observation, inputs: InstallationInputs, retry: string): ConfigurePlan['image'] {
   const { kind, fingerprint, image, alias, aliased } = observation
   if (kind === 'reference') {
     return { replace: null, import: false, alias: false }
   }
-  if (image !== null) {
-    validateContainerImage(image, fingerprint, inputs.architecture, retry)
-  }
+  requireContainer(observation, inputs, retry)
   if (alias === null) {
     return { replace: null, import: image === null, alias: true }
   }
@@ -135,5 +170,29 @@ export function planOf(observation: Observation, request: PlanRequest): Configur
       credentials === 'absent' ||
       mode !== 'reuse' ||
       !matchesCredentials(instance.value.config, credentials.values),
+  }
+}
+
+/**
+ * Replacing the managed image is approved in two gates. The first only adds
+ * (the checkout clone and the unaliased import), so a rejected image costs
+ * nothing, and deleting the previous image waits until the imported one passed
+ * its check. Null means a single gate covers the plan.
+ */
+export function firstGate(plan: ConfigurePlan): ConfigurePlan | null {
+  if (plan.image.replace === null || !plan.image.import) {
+    return null
+  }
+  return {
+    kind: 'configure',
+    fingerprint: plan.fingerprint,
+    checkout: plan.checkout,
+    image: { replace: null, import: true, alias: false },
+    pin: false,
+    network: false,
+    volume: false,
+    instance: false,
+    credentials: 'reuse',
+    deliver: false,
   }
 }

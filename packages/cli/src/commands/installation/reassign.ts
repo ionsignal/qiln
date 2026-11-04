@@ -1,7 +1,10 @@
+import { describeHost } from './host'
 import { observe } from '../../installation/observe'
-import { refusal, requireAssignable, requireMatching } from '../../installation/assignment'
+import { Prompts } from '../../terminal/prompts'
+import { reportApproval } from '../../terminal/approval'
 import { rootOf } from '../../installation/checkout/judge'
 import { requireIncusExtensions } from '../../installation/preflight/incus'
+import { refusal, requireAssignable, requireMatching } from '../../installation/assignment'
 import { invalidRecord, requireInputs, sameHost, type AwsBinding, type InstallationRecord } from '../../installation/records'
 import {
   acquireInstallationLock,
@@ -10,40 +13,35 @@ import {
   readInstallation,
   type InstallationState,
 } from '../../installation/state'
-import { Prompts } from '../../terminal/prompts'
-import { describeHost } from './host'
 import * as journal from '../../installation/journal/records'
 import type { InstallationInputs } from '../../installation/types'
 import type { AwsHost } from '../../installation/target/aws/host'
 import type { InstallationTarget } from '../../installation/target/types'
 import type { Reporter } from '../../terminal/reporter'
 
-const NOTICE =
-  'Approval authorizes only recording the displayed deployment as the current host of the installation, as one atomic local record write that keeps the superseded host in the history. ' +
-  'The retained handoff, release, export, and identity evidence and one fresh observation through the pinned connection were checked, and both are checked again after approval. ' +
-  'Reassignment changes no Incus resource, replaces no image, rotates no credential, and starts no workload, and it never repairs or completes a configuration. ' +
-  'It does not clone the managed source checkout either: a missing checkout on the replacement is restored from the recorded restore point by the next configure, which is the only restorer. ' +
-  'It does not establish that the retained workloads work, and retention is not a backup. ' +
-  'If the write is uncertain the command stops: read installation status before trying again.'
-
 function reportProposal(reporter: Reporter, installation: InstallationState, host: AwsBinding): void {
-  reporter.section('Proposed host reassignment (applied only after approval)')
-  reporter.facts([
-    ['Installation', installation.name],
-    ['Current host', describeHost(installation.host)],
-    ['Proposed host', describeHost(host)],
-    [
-      'Unchanged',
-      `image pin ${installation.imageFingerprint} · ${installation.architecture} · checkout ${installation.checkoutPath} · restore point ${installation.checkoutCommit ?? 'none'} · retained credentials and configuration evidence`,
-    ],
-    [
-      'Validated',
-      'volume handoff, Incus release, ZFS export, and removal of every earlier deployment · the same Incus server identity, retained preseed, and ZFS pool · a live installation that needs no change, where the managed checkout may be absent and is restored by the next configure',
-    ],
-    ['Effect', 'one atomic write of the installation record; no Incus change and no workload start'],
-  ])
-  reporter.space()
-  reporter.notice(NOTICE)
+  reportApproval(
+    reporter,
+    {
+      title: 'Proposed host reassignment',
+      steps: [
+        {
+          label: 'Record the deployment as the current host',
+          detail: `${describeHost(installation.host)} → ${describeHost(host)} · the superseded host stays in the history`,
+        },
+      ],
+      covers:
+        'One atomic write of the installation record. The retained evidence and the live installation are checked again after approval.',
+      stays: `Image pin ${installation.imageFingerprint} · ${installation.architecture} · checkout ${installation.checkoutPath} · restore point ${installation.checkoutCommit ?? 'none'}, and every Incus resource, credential, image, and workload.`,
+      lasting: 'Retention is not a backup. If the write is uncertain, read installation status before trying again.',
+      notEstablished: 'Workload correctness.',
+    },
+    {
+      label: 'Validated',
+      detail:
+        'volume handoff, Incus release, ZFS export, and removal of every earlier deployment · the same Incus server identity, retained preseed, and ZFS pool · a live installation that needs no change (the managed checkout may be absent)',
+    },
+  )
 }
 
 /**
@@ -51,7 +49,8 @@ function reportProposal(reporter: Reporter, installation: InstallationState, hos
  * approval. The AWS lock is held by the target, and the installation lock is
  * held from validation until the record is written. Validation runs before and
  * after approval, and planning is used only as a predicate, so nothing here
- * mutates Incus.
+ * mutates Incus. The recheck after approval is silent, because a disagreement
+ * throws a diagnostic instead of printing.
  */
 export async function reassign(target: InstallationTarget, aws: AwsHost, reporter: Reporter): Promise<void> {
   const { name, retry, signal } = target
@@ -106,11 +105,17 @@ export async function reassign(target: InstallationTarget, aws: AwsHost, reporte
       if (sameHost(assigned.host, aws.host)) {
         return 'The installation is already assigned to this deployment. Nothing was changed.'
       }
-      reportProposal(reporter, await validate(assigned), aws.host)
-      await new Prompts(signal, retry.reassign, reporter).approve(
-        'Record the displayed deployment as the current host of the installation',
+      const proposed = await validate(assigned)
+      reportProposal(reporter, proposed, aws.host)
+      await new Prompts(signal, retry.reassign, reporter).approve('Record this deployment as the installation host')
+      const confirmed = await reporter.silent(async () => await validate(await load()))
+      reporter.section('Recording')
+      await assignHost(directory, confirmed, aws.host, retry.inspect)
+      reporter.row(
+        'transferred',
+        'Host assignment',
+        `${describeHost(aws.host)} recorded as the current host · ${describeHost(confirmed.host)} kept in the history`,
       )
-      await assignHost(directory, await validate(await load()), aws.host, retry.inspect)
       return 'Installation host assignment recorded. No Incus resource, credential, or workload was changed, and workload correctness is not established.'
     } finally {
       await lock.release()

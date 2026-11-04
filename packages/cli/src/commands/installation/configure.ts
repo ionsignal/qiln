@@ -1,18 +1,20 @@
 import { INSTALLER_SPEC } from '../../installation/spec'
+import { INSTALL_STEPS } from './steps'
 import { withInspection } from './inspect'
 import { approvalLabel, reportPlan } from './plan'
+import { approve } from '../../terminal/approval'
+import { Prompts } from '../../terminal/prompts'
 import { rootOf } from '../../installation/checkout/judge'
 import { requireIncusExtensions } from '../../installation/preflight/incus'
-import { withImageSource, type InstallerImageSelection } from '../../installation/image'
-import { isEmpty } from '../../installation/journal/types'
 import { readRoster, validateRoster } from '../../installation/roster'
+import { isEmpty, type InstallAction } from '../../installation/journal/types'
 import { acquireInstallationLock, loadInstallation, registerInstallation } from '../../installation/state'
-import { Configurer, type ConfigureResult } from '../../installation/configure'
-import { Prompts } from '../../terminal/prompts'
+import { Configurer, type ConfigureProgress } from '../../installation/configure'
+import { withImageSource, type InstallerImageSelection } from '../../installation/image'
 import type { InstallationInputs } from '../../installation/types'
 import type { FileSnapshot } from '../../state/files'
 import type { InstallerLock } from '../../state/lock'
-import type { Reporter } from '../../terminal/reporter'
+import type { LiveRow, Outcome, Reporter } from '../../terminal/reporter'
 import type { InstallationTarget } from '../../installation/target/types'
 
 /**
@@ -25,93 +27,46 @@ export interface ConfigureOptions {
   image: InstallerImageSelection
 }
 
+const OUTCOMES: Record<InstallAction, Outcome> = {
+  'materialize-checkout': 'created',
+  'delete-image': 'verified',
+  'import-image': 'imported',
+  'create-alias': 'created',
+  'create-network': 'created',
+  'create-volume': 'created',
+  'create-instance': 'created',
+  'update-instance': 'transferred',
+}
+
+const VERIFIED_DETAIL = 'fresh observation agrees'
+
 /**
- * Rows are derived from the plan that was applied, or from the empty plan of an
- * installation that already matched.
+ * `working` starts a live row and `verified` finishes it, so a row is only
+ * permanent once the observation and its persistence succeeded. A failure
+ * leaves the live row to the diagnostic, which clears it.
  */
-function reportResult(
-  reporter: Reporter,
-  inputs: InstallationInputs,
-  managed: boolean,
-  { plan, observation }: ConfigureResult,
-): void {
-  const { layout, architecture } = inputs
-  const { name, sourceMountPath } = INSTALLER_SPEC.orchestrator
-  const replaced = plan.image.replace !== null
-  if (plan.checkout !== null) {
-    reporter.row(
-      'created',
-      'Source checkout',
-      `${inputs.sourceRoot} · commit ${plan.checkout.commit} · ${plan.checkout.pin ? 'origin main, recorded as the restore point' : 'recorded restore point restored'}`,
-    )
-  } else if (managed) {
-    reporter.row(
-      'reused',
-      'Source checkout',
-      `${inputs.sourceRoot} · managed checkout present · HEAD and the working tree are not judged`,
-    )
+function progressSink(reporter: Reporter): (event: ConfigureProgress) => void {
+  let live: LiveRow | null = null
+  return ({ phase, action }) => {
+    const { short, label } = INSTALL_STEPS[action]
+    if (phase === 'working') {
+      live = reporter.live(short, label)
+      return
+    }
+    if (live === null) {
+      reporter.row(OUTCOMES[action], short, VERIFIED_DETAIL)
+    } else {
+      live.finish(OUTCOMES[action], VERIFIED_DETAIL)
+    }
+    live = null
   }
-  reporter.row(
-    plan.image.import ? 'imported' : 'verified',
-    'Image',
-    replaced
-      ? `${plan.fingerprint} · ${architecture.incus} container image · explicit development replacement completed`
-      : `${plan.fingerprint} · ${architecture.incus} container image`,
-  )
-  reporter.row(
-    'verified',
-    'Image pin',
-    `persisted full fingerprint in ${INSTALLER_SPEC.state.installationFileName} of installation '${INSTALLER_SPEC.state.localName}'`,
-  )
-  if (replaced) {
-    reporter.notice(
-      'The approved plan deleted the previous managed alias target after the replacement was imported and checked. Other aliases attached to that image may also have been removed, and no automatic rollback was attempted.',
-    )
-  }
-  reporter.row(
-    plan.network ? 'created' : 'reused',
-    'Network',
-    `${layout.network.name} · ${layout.network.ipv4Subnet} · managed bridge`,
-  )
-  reporter.row(
-    plan.volume ? 'created' : 'reused',
-    'PostgreSQL volume',
-    `${layout.postgres.volumeName} · ${layout.postgres.config.size} · persistent custom volume`,
-  )
-  reporter.row(
-    plan.instance ? 'created' : 'reused',
-    'Orchestrator',
-    `${name} · ${architecture.incus} container · ${observation.instance?.value.status ?? 'unknown'}`,
-  )
-  reporter.row('verified', 'Source device', `${inputs.sourceRoot} → ${sourceMountPath} · writable shifted disk`)
-  reporter.row(
-    plan.credentials === 'generate' ? 'created' : plan.credentials === 'roster' ? 'transferred' : 'reused',
-    'Local credentials',
-    plan.credentials === 'generate'
-      ? 'generated and retained four protected credential files'
-      : plan.credentials === 'roster'
-        ? 'replaced only the retained authorized-key roster'
-        : 'reused the complete retained credential set',
-  )
-  reporter.row(
-    plan.deliver ? 'transferred' : 'reused',
-    'Instance credentials',
-    plan.deliver
-      ? 'delivered four credentials through one guarded complete instance update'
-      : 'instance credentials already matched the retained local source of truth',
-  )
-  reporter.row('verified', 'Final state', `${name} · configured · stopped`)
-  reporter.summary(
-    isEmpty(plan)
-      ? 'Qiln installation already matched its configuration and is stopped.'
-      : 'Qiln installation configured and stopped.',
-  )
 }
 
 /**
- * Observes the target first, then displays one installation plan and applies
- * it only after an explicit approval. Registration, locking and image-source
- * handling are shared by every target. Cancellation is owned by the target.
+ * Observes the target first, then displays the installation plan and applies it
+ * only after an explicit approval. A plan that replaces the managed image is
+ * approved in two gates. Registration, locking and image-source handling are
+ * shared by every target. Cancellation is owned by the target.
  */
 export async function configure(
   target: InstallationTarget,
@@ -139,7 +94,7 @@ export async function configure(
       reporter.row('verified', 'Source', `validated Git checkout '${sourceRoot}'`)
     } else {
       reporter.row(
-        'working',
+        'pending',
         'Source',
         `managed checkout path '${sourceRoot}' on the target · its state is observed with the plan`,
       )
@@ -152,7 +107,7 @@ export async function configure(
     try {
       lock = await acquireInstallationLock(directory, retry.inspect)
       const installation = await loadInstallation(directory, host.binding, inputs, retry.inspect)
-      const result = await withImageSource(options.image, async imageSource => {
+      const { plan } = await withImageSource(options.image, async imageSource => {
         const prompts = new Prompts(signal, retry.configure, reporter)
         const configurer = await Configurer.open({
           directory,
@@ -164,14 +119,25 @@ export async function configure(
           sshKeygen: host.sshKeygen,
           roster,
           hooks: {
-            show: plan => reportPlan(reporter, { plan, inputs, source: imageSource }),
-            approve: plan => prompts.approve(approvalLabel(plan)),
+            show: (gate, held) => reportPlan(reporter, { plan: gate, held, inputs, source: imageSource }),
+            approve: (gate, held) => approve(prompts, reporter, approvalLabel(gate, held)),
+            progress: progressSink(reporter),
           },
           retry,
         })
         return await configurer.run(signal)
       })
-      reportResult(reporter, inputs, host.checkout.kind === 'managed', result)
+      reporter.section('Result')
+      reporter.row(
+        'verified',
+        'Final state',
+        `${INSTALLER_SPEC.orchestrator.name} · configured · stopped · image ${plan.fingerprint.slice(0, 12)} · ${VERIFIED_DETAIL}`,
+      )
+      reporter.summary(
+        isEmpty(plan)
+          ? 'Qiln installation already matched its configuration and is stopped.'
+          : 'Qiln installation configured and stopped.',
+      )
     } finally {
       await lock?.release()
     }

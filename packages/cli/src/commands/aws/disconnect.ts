@@ -1,5 +1,4 @@
-import { InstallerError } from '../../diagnostic/error'
-import * as connections from '../../aws/connections'
+import { InstallerError, type DiagnosticFact } from '../../diagnostic/error'
 import { describe } from '../../aws/deployment/observe/facts'
 import { retained } from '../../aws/deployment/topology'
 import { diagnostic } from '../../aws/errors'
@@ -10,8 +9,9 @@ import { withAwsOperation } from '../../aws/root'
 import { requireAwsHost } from '../../aws/host'
 import { resolveAwsName, type AwsCommandOptions } from '../../input'
 import { checkCancellation, Prompts, withCancellation } from '../../terminal/prompts'
-import type { Reporter } from '../../terminal/reporter'
 import { pendingFailure, reportPermissionMetadata, requireSettledDeployments } from './shared'
+import * as connections from '../../aws/connections'
+import type { Reporter, TableCell } from '../../terminal/reporter'
 
 export async function disconnect(options: AwsCommandOptions, reporter: Reporter): Promise<void> {
   requireAwsHost()
@@ -27,39 +27,42 @@ export async function disconnect(options: AwsCommandOptions, reporter: Reporter)
       }
       const identity = connection?.identity ?? pending?.operator
       const settled = identity ? await requireSettledDeployments(root, identity) : []
-      reporter.section('AWS connection')
-      reporter.row('verified', 'Connection', name)
+      const recorded: DiagnosticFact[] = [['Connection', name]]
       if (identity) {
-        reporter.row('verified', 'Recorded account', identity.accountId)
-        reporter.row('verified', 'Recorded IAM user', identity.arn)
-        reporter.row('verified', 'Recorded user ID', identity.userId)
+        recorded.push(
+          ['Recorded account', identity.accountId],
+          ['Recorded IAM user', identity.arn],
+          ['Recorded user ID', identity.userId],
+        )
       } else if (pending?.accountId) {
-        reporter.row('verified', 'Recorded account', pending.accountId)
+        recorded.push(['Recorded account', pending.accountId])
       }
+      reporter.section('AWS connection')
+      reporter.facts(recorded)
       if (connection) {
         reportPermissionMetadata(reporter, connection)
       }
       if (pending) {
         reporter.section('Pending IAM evidence')
-        for (const [label, value] of pendingFacts(pending)) {
-          reporter.info(`${label}: ${value}`)
-        }
+        reporter.facts(pendingFacts(pending))
       }
       if (settled.length > 0) {
         reporter.section('Retained deployment evidence')
-        for (const record of settled) {
-          reporter.info(`${record.id}: ${describe(record)}`)
-        }
+        reporter.table(
+          ['Deployment', 'Recorded outcome'],
+          settled.map((record): TableCell[] => [record.id, describe(record)]),
+        )
         reporter.notice('Deployment records remain in protected local state after removal. AWS resources are not deleted.')
       }
       const kept = settled.flatMap(record => retained(record).map(resource => ({ record, resource })))
       if (kept.length > 0) {
         reporter.section('Retained AWS resources')
-        for (const { record, resource } of kept) {
-          reporter.info(`${record.id}: ${resource.kind} ${resource.id} · retained by design`)
-        }
+        reporter.table(
+          ['Deployment', 'Kind', 'ID'],
+          kept.map(({ record, resource }): TableCell[] => [record.id, resource.kind, resource.id]),
+        )
         reporter.notice(
-          'Qiln never deletes these resources. They keep incurring charges until they are deleted outside Qiln. Once this connection is removed, Qiln can no longer authenticate to observe them, so keep the deployment ID and these identifiers.',
+          'Qiln never deletes these resources. They are retained by design and keep incurring charges until they are deleted outside Qiln. Once this connection is removed, Qiln can no longer authenticate to observe them, so keep the deployment ID and these identifiers.',
         )
       }
       if (connection?.managed || pending) {
@@ -74,7 +77,7 @@ export async function disconnect(options: AwsCommandOptions, reporter: Reporter)
       reporter.info(
         'Only this validated current-layout connection and its local authentication and pending evidence are removed. Shared tools and AWS resources remain.',
       )
-      await prompts.approve(`Remove local AWS connection '${name}' and its disclosed evidence`)
+      await prompts.approve(`Remove local connection '${name}' and its evidence`)
       checkCancellation(signal)
       try {
         await removeAuth(directory)

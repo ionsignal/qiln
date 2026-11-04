@@ -6,6 +6,7 @@ import { validateSourcePreflight } from '../preflight/source'
 import { validateStoragePreflight } from '../preflight/storage'
 import { devLayout } from '../layout'
 import { localBinding } from '../records'
+import { reportNetwork, reportStorage } from './report'
 import type { Retry } from '../retry'
 import type { InstallationTarget } from './types'
 
@@ -52,26 +53,8 @@ export const localTarget = (commands: Retry, signal: AbortSignal): InstallationT
           extensions: incus.server.apiExtensions,
           verifyLayout: async () => {
             const storage = await validateStoragePreflight(preflight, incus.client, layout, retry)
-            reporter.row(
-              'verified',
-              'Storage pool',
-              `${storage.incusPool.name} is compatible · host ZFS health is ${storage.hostPoolHealth}`,
-            )
-            reporter.row(
-              'verified',
-              'PostgreSQL volume',
-              storage.existingPostgresVolume
-                ? `existing volume '${storage.existingPostgresVolume.name}' is compatible`
-                : `volume '${layout.postgres.volumeName}' is absent and was not created`,
-            )
-            const network = await validateNetworkPreflight(preflight, incus.client, layout, retry)
-            reporter.row(
-              'verified',
-              'Network',
-              network.disposition === 'existing-compatible'
-                ? `existing managed network '${layout.network.name}' is compatible`
-                : `managed network '${layout.network.name}' is absent and ${layout.network.ipv4Subnet} is available`,
-            )
+            reportStorage(reporter, layout, storage, ` · host ZFS health is ${storage.hostPoolHealth}`)
+            reportNetwork(reporter, layout, await validateNetworkPreflight(preflight, incus.client, layout, retry))
           },
         })
       },

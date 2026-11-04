@@ -1,6 +1,6 @@
 import { createInterface } from 'node:readline/promises'
 import { InstallerError } from '../diagnostic/error'
-import { Reporter, type PromptTone } from './reporter'
+import type { PromptTone, Reporter } from './reporter'
 
 export function checkCancellation(signal: AbortSignal): void {
   if (signal.aborted) {
@@ -26,16 +26,17 @@ export async function withCancellation<T>(run: (signal: AbortSignal) => Promise<
 export class Prompts {
   /**
    * The retry command is supplied by the owning command so this class carries
-   * no knowledge of any particular command family.
+   * no knowledge of any particular command family. The reporter is shared with
+   * the command so both agree on where the output currently stands.
    */
   constructor(
     private readonly signal: AbortSignal,
     private readonly retry: string,
-    private readonly reporter: Reporter = new Reporter(),
+    private readonly reporter: Reporter,
   ) {}
 
   public async text(label: string, defaultValue?: string): Promise<string> {
-    return await this.readAnswer(label, defaultValue)
+    return await this.ask(label, defaultValue)
   }
 
   public async select(label: string, choices: readonly string[]): Promise<number> {
@@ -45,7 +46,7 @@ export class Prompts {
     checkCancellation(this.signal)
     this.reporter.promptSelection(label, choices)
     while (true) {
-      const answer = await this.text('Selection', '1')
+      const answer = await this.ask('Selection', '1')
       const selection = Number(answer)
       if (/^[1-9][0-9]*$/.test(answer) && Number.isSafeInteger(selection) && selection <= choices.length) {
         return selection - 1
@@ -55,29 +56,30 @@ export class Prompts {
   }
 
   public async consent(label: string): Promise<boolean> {
-    const answer = (await this.readAnswer(`${label} [y/N]`, undefined, 'approval')).toLowerCase()
-    return answer === 'y' || answer === 'yes'
+    return await this.yes(label)
   }
 
   public async approve(label: string): Promise<void> {
-    const answer = (await this.readAnswer(`${label} [y/N]`, undefined, 'approval')).toLowerCase()
-    if (answer !== 'y' && answer !== 'yes') {
+    if (!(await this.yes(label))) {
       throw new InstallerError({
         code: 'COMMAND_CANCELLED',
       })
     }
   }
 
-  public async confirm(label: string, expected: string): Promise<void> {
-    const answer = await this.readAnswer(`${label}. Enter ${expected} to continue`, undefined, 'approval')
-    if (answer !== expected) {
-      throw new InstallerError({
-        code: 'COMMAND_CANCELLED',
-      })
-    }
+  /**
+   * The question mark is added here, so every approval prompt reads the same.
+   */
+  private async yes(label: string): Promise<boolean> {
+    const answer = (await this.ask(`${label}? [y/N]`, undefined, 'approval')).toLowerCase()
+    return answer === 'y' || answer === 'yes'
   }
 
-  private async readAnswer(label: string, defaultValue?: string, tone: PromptTone = 'input'): Promise<string> {
+  /**
+   * The reporter spaces the prompt from the output before it, and the next block
+   * is spaced from the prompt.
+   */
+  private async ask(label: string, defaultValue?: string, tone: PromptTone = 'input'): Promise<string> {
     checkCancellation(this.signal)
     if (!process.stdin.isTTY || !process.stdout.isTTY) {
       throw new InstallerError({
@@ -96,7 +98,6 @@ export class Prompts {
     readline.once('SIGINT', cancelPrompt)
     readline.once('close', cancelPrompt)
     try {
-      this.reporter.space()
       const question = this.reporter.promptQuestion(label, defaultValue, tone)
       const answer = await readline.question(question, {
         signal: questionSignal,

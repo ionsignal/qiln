@@ -80,6 +80,8 @@ async function restorableOn(remote: Remote, path: string, retry: string): Promis
  * Qiln, and deleting the checkout is the deliberate way to discard its work.
  * Null means there is nothing to record: no installation is assigned to this
  * deployment, its checkout is absent, or HEAD already is the restore point.
+ * `announce` says whether those agreeing outcomes are reported. Something that
+ * needs the operator is always reported, under a section opened only then.
  */
 export async function planCheckpoint(
   record: Deployment,
@@ -87,16 +89,23 @@ export async function planCheckpoint(
   prompts: Prompts,
   reporter: Reporter,
   retry: string,
+  announce: boolean,
 ): Promise<Checkpoint | null> {
+  const agreed = (outcome: 'pending' | 'reused', label: string, detail: string) => {
+    if (announce) {
+      reporter.section('Source checkout')
+      reporter.row(outcome, label, detail)
+    }
+  }
   const entry = await installationOf(record)
   if (entry === null || !assignedTo(entry, record)) {
-    reporter.row('working', 'Source checkout', 'no installation is assigned to this deployment, so no restore point is recorded')
+    agreed('pending', 'Installation', 'none is assigned to this deployment, so no restore point is recorded')
     return null
   }
   const { checkoutPath: path, checkoutCommit: restorePoint } = entry.record
   const probe = await restorableOn(remote, path, retry)
   if (probe === null) {
-    reporter.row('working', 'Source checkout', `${path} is absent, so the recorded restore point stands unchanged`)
+    agreed('reused', 'Checkout', `${path} is absent, so the recorded restore point stands unchanged`)
     return null
   }
   if (restorePoint === null) {
@@ -107,7 +116,7 @@ export async function planCheckpoint(
     })
   }
   if (probe.head === restorePoint) {
-    reporter.row('reused', 'Source checkout', `${path} · HEAD ${probe.head} is already the recorded restore point, and origin serves it`)
+    agreed('reused', 'Restore point', `${path} · HEAD ${probe.head} is already recorded, and origin serves it`)
     return null
   }
   reporter.section('Source checkout')
@@ -123,7 +132,7 @@ export async function planCheckpoint(
   reporter.notice(
     'Only this commit is verified and recorded, and Qiln never pushes. Other local branches, stashes, uncommitted changes, and ignored files such as .env or node_modules are not preserved, because the root volume of the host is discarded with it. The restore point is written only after the Incus workloads are stopped.',
   )
-  await prompts.approve('Record the displayed HEAD as the restore point of the installation')
+  await prompts.approve('Record HEAD as the installation restore point')
   return {
     pin: async () => {
       const confirmed = await restorableOn(remote, path, retry)
@@ -145,7 +154,8 @@ export async function planCheckpoint(
           throw invalidRecord('The installation is no longer assigned to this deployment.', retry)
         }
         await pinCheckout(entry.directory, current, probe.head, retry)
-        reporter.row('verified', 'Restore point', `${probe.head} recorded for the installation; origin was observed serving it`)
+        reporter.section('Restore point')
+        reporter.row('verified', 'Recorded', `${probe.head} for the installation; origin was observed serving it`)
       } finally {
         await lock.release()
       }
@@ -157,10 +167,10 @@ export async function planCheckpoint(
  * The last guard before AWS deletion. The checkpoint taken during the host
  * release can go stale while the removal approval waits, or between retries
  * after a refused step, so HEAD is judged again over a fresh connection. An
- * unchanged HEAD asks nothing, unpushed work refuses, and pushed work needs a
- * new approval. The retained host-key pin is used directly, because
- * `resolveAccess` refuses once removal has started. An unreachable host is
- * reported and removal continues, since cleanup must not depend on SSH.
+ * unchanged HEAD asks nothing and prints nothing, unpushed work refuses, and
+ * pushed work needs a new approval. The retained host-key pin is used directly,
+ * because `resolveAccess` refuses once removal has started. An unreachable host
+ * is reported and removal continues, since cleanup must not depend on SSH.
  */
 export async function confirmCheckpoint(
   root: Dir,
@@ -177,7 +187,7 @@ export async function confirmCheckpoint(
   const retry = `qiln aws deployment remove --id ${record.id}`
   try {
     await withRemote(root, { record, options: optionsOf(record, hostKey), retry }, signal, async remote => {
-      const checkpoint = await planCheckpoint(record, remote, prompts, reporter, retry)
+      const checkpoint = await planCheckpoint(record, remote, prompts, reporter, retry, false)
       await checkpoint?.pin()
     })
   } catch (error: unknown) {

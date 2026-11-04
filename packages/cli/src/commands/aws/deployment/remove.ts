@@ -1,8 +1,8 @@
+import { ACTION_LABELS, progressSink } from './progress'
 import { resolveAccess, withRemote } from './access'
 import { requireBaseline } from './baseline'
 import { confirmCheckpoint, installationOf, planCheckpoint } from './checkpoint'
-import { progressSink } from './progress'
-import { lifecycleOf, observationSummary, reportDeployment } from './report'
+import { observationSummary, reportDeployment, reportResources } from './report'
 import { authenticateDeployer, openTarget, type Target } from './shared'
 import { withConfirmedOperation } from '../../../aws/operation'
 import { InstallerError, type DiagnosticFact } from '../../../diagnostic/error'
@@ -26,9 +26,9 @@ import { requireAwsHost } from '../../../aws/host'
 import { unsettled as installationUnsettled } from '../../../installation/journal/facts'
 import { stateOf } from '../../../journal/step'
 import { Prompts, withCancellation } from '../../../terminal/prompts'
+import { approve, reportApproval, type ApprovalScreen, type ApprovalStep } from '../../../terminal/approval'
 import { approvalLabel as incusApproval, reportPlan as reportIncusPlan } from './prepare/incus'
 import { approvalLabel as zfsApproval, reportPlan as reportZfsPlan } from './prepare/zfs'
-import { reportRun } from './prepare/steps'
 import {
   requireNotStuck as requireIncusNotStuck,
   requireStorageNotStuck,
@@ -44,19 +44,13 @@ import type { Reporter } from '../../../terminal/reporter'
 import type { Deployment, Observation } from '../../../aws/deployment/types'
 import type { AwsDeploymentOptions } from '../../../input'
 
-const EFFECTS: Partial<Record<Action, string>> = {
-  'disassociate-address': 'Disassociate the Elastic IP from the primary network interface.',
-  'release-address': 'Release the Elastic IP allocation.',
-  'terminate-instance': 'Terminate the instance. AWS deletes its root volume and primary interface with it.',
-  'delete-key-pair':
-    'Delete the AWS key pair. This is not guest SSH revocation: guest authorized keys are unaffected, and Qiln neither reads nor deletes the local administrative key files.',
-  'delete-group': 'Delete the security group.',
-  'disassociate-subnet': 'Disassociate the route table from each subnet.',
-  'delete-subnet': 'Delete each subnet.',
-  'delete-route-table': 'Delete the route table.',
-  'detach-gateway': 'Detach the internet gateway from the VPC.',
-  'delete-gateway': 'Delete the internet gateway.',
-  'delete-vpc': 'Delete the VPC.',
+/**
+ * Only the removals whose effect is easy to misread carry a caveat. The row
+ * label already says what the other removals do.
+ */
+const CAVEATS: Partial<Record<Action, string>> = {
+  'terminate-instance': 'AWS deletes the root volume and primary interface with it',
+  'delete-key-pair': 'not guest SSH revocation; guest authorized keys and the local key files are unaffected',
 }
 
 /**
@@ -162,9 +156,42 @@ function refusal(record: Deployment, observation?: Observation): InstallerError 
   })
 }
 
+/**
+ * One row per run of consecutive identical actions, so a deployment with three
+ * subnets lists one subnet row. The calls themselves stay separate fenced steps.
+ */
+function removalSteps(record: Deployment): ApprovalStep[] {
+  const groups: { action: Action; count: number }[] = []
+  for (const { action } of removalPlan(record)) {
+    const last = groups.at(-1)
+    if (last?.action === action) {
+      last.count += 1
+    } else {
+      groups.push({ action, count: 1 })
+    }
+  }
+  return groups.map(({ action, count }) => ({
+    label: count > 1 ? `${ACTION_LABELS[action]} x${count}` : ACTION_LABELS[action],
+    detail: CAVEATS[action],
+  }))
+}
+
+function removalScreen(record: Deployment): ApprovalScreen {
+  const kept = retained(record).length > 0
+  return {
+    title: 'Proposed removal',
+    steps: removalSteps(record),
+    covers: `${removalPlan(record).length} provider calls in dependency order, each followed by an observation. Removal stops at the first refused or uncertain call.`,
+    stays: kept
+      ? 'Resources that Qiln did not record, which AWS refuses to delete under a recorded one, and the retained resources listed above. Qiln has no DeleteVolume or DetachVolume authority, so a retained data volume keeps incurring charges until it is deleted outside Qiln.'
+      : 'Resources that Qiln did not record, which AWS refuses to delete under a recorded one.',
+    lasting:
+      "Completed deletions are not rolled back, and another invocation needs a fresh observation and approval. On success AWS also removes the VPC's default security group, network ACL, and main route table, and flow logs eventually.",
+    notEstablished: 'Who deleted a resource: absence is observed afterwards and never proves it.',
+  }
+}
+
 function reportTarget(reporter: Reporter, record: Deployment, observation: Observation): void {
-  const kept = retained(record)
-  const effects = [...new Set(removalPlan(record).map(({ action }) => EFFECTS[action] ?? action))]
   reporter.section('Deployment removal')
   reporter.facts([
     ['Deployment', record.id],
@@ -172,34 +199,13 @@ function reportTarget(reporter: Reporter, record: Deployment, observation: Obser
     ['Account', record.binding.accountId],
     ['Deployment region', record.binding.region],
     ['CIDR', record.approval.cidr],
-    ...[...unreleased(record), ...kept].map((resource): DiagnosticFact => [
-      resource.kind,
-      `${resource.id} · ${lifecycleOf(resource)}`,
-    ]),
-    ...record.approval.tags.map((tag): DiagnosticFact => ['Tag', `${tag.Key}=${tag.Value}`]),
+    ['Tags', record.approval.tags.map(tag => `${tag.Key}=${tag.Value}`).join(', ')],
   ])
-  reporter.row('verified', 'Fresh observation', observationSummary(observation))
-  reporter.section('Planned effects')
-  for (const effect of effects) {
-    reporter.line(`- ${effect}`)
-  }
-  reporter.space()
-  reporter.info(
-    `Removal runs ${removalPlan(record).length} provider calls in dependency order, each followed by an observation. It stops at the first refused or uncertain call; completed deletions are preserved and another invocation needs a fresh observation and approval.`,
-  )
-  reporter.info(
-    'AWS refuses a deletion while dependent resources remain; Qiln never removes dependents and does not inventory them.',
-  )
-  reporter.info(
-    "On success AWS also removes the VPC's default security group, network ACL, and main route table; flow logs are removed eventually.",
-  )
-  reporter.space()
-  if (kept.length > 0) {
-    reporter.notice(
-      'Retained by design: the listed retained resources are not removed. Qiln has no DeleteVolume or DetachVolume authority, so a retained data volume remains and keeps incurring charges until it is deleted outside Qiln.',
-    )
-  }
-  reporter.notice('Removal is not rolled back. Absence is observed afterwards and never proves who deleted a resource.')
+  reportResources(reporter, record)
+  reportApproval(reporter, removalScreen(record), {
+    label: 'Fresh observation',
+    detail: observationSummary(observation),
+  })
 }
 
 /**
@@ -235,16 +241,13 @@ async function releaseHost(
     })
   }
   const access = await resolveAccess(root, target, retry, reporter, signal)
-  const { host, port, username, fingerprint } = access.options
-  reporter.section('Host release check')
-  reporter.row('working', 'Connecting', `${username}@${host}:${port} · pinned host key SHA256:${fingerprint}`)
+  const { username } = access.options
   await withRemote(root, access, signal, async remote => {
     await requireBaseline(reporter, remote, username, record.id, [
       'Removal',
       'no Incus or ZFS settlement, release, check, or export was completed and no AWS resource was changed',
     ])
-    reporter.space()
-    reportRun(reporter)
+    reporter.section('Host release')
     const zfsPreparer = await ZfsPreparer.open({
       root,
       deployment: record,
@@ -253,7 +256,7 @@ async function releaseHost(
       remote,
       hooks: {
         show: (observation, plan) => reportZfsPlan(reporter, { observation, plan, target: zfsTarget }),
-        approve: plan => prompts.approve(zfsApproval(plan)),
+        approve: plan => approve(prompts, reporter, zfsApproval(plan)),
         progress: progressSink(reporter),
       },
     })
@@ -261,7 +264,7 @@ async function releaseHost(
       reporter.row('verified', 'ZFS step', 'a returned step was verified by fresh inspection; nothing was rerun')
     }
     const holds = await holdsOf(root, record)
-    const checkpoint = holds.incus ? await planCheckpoint(record, remote, prompts, reporter, retry) : null
+    const checkpoint = holds.incus ? await planCheckpoint(record, remote, prompts, reporter, retry, true) : null
     if (holds.incus) {
       const recorded = await lineage.pool(root, record)
       if (recorded === null) {
@@ -276,7 +279,7 @@ async function releaseHost(
         remote,
         hooks: {
           show: (observation, plan) => reportIncusPlan(reporter, { observation, plan }),
-          approve: plan => prompts.approve(incusApproval(plan)),
+          approve: plan => approve(prompts, reporter, incusApproval(plan)),
           progress: progressSink(reporter),
         },
       })
@@ -333,11 +336,11 @@ export async function remove(options: AwsDeploymentOptions, reporter: Reporter):
         throw refusal(record, observation)
       }
       reportTarget(reporter, record, observation)
-      await prompts.approve('Remove the displayed deployment resources')
+      await prompts.approve("Remove the deployment's AWS resources")
       if (terminationPending(record)) {
         await confirmCheckpoint(root, record, prompts, reporter, signal)
       }
-      reporter.space()
+      reporter.section('Removal')
       await deployer.remove(observation, signal)
       reportDeployment(reporter, deployer.record)
       return retained(deployer.record).length === 0
