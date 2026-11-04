@@ -173,7 +173,7 @@ async function selectCli(reporter: Reporter, prompts: Prompts, signal: AbortSign
 async function selectFlow(prompts: Prompts): Promise<LoginFlow> {
   const selected = await prompts.select('Authentication flow', [
     'Browser on this machine',
-    'Remote terminal: open the AWS-provided link on another machine',
+    'Manual link: open the AWS-provided link in any browser, such as a private window or another machine',
   ])
   return selected === 0 ? 'browser' : 'remote'
 }
@@ -183,7 +183,7 @@ function reportLogin(reporter: Reporter, flow: LoginFlow): void {
   reporter.list(
     flow === 'remote'
       ? [
-          'Open the AWS link below in your browser on another machine.',
+          'Open the AWS link below in the browser you want to use, including a private window or another machine.',
           'Sign in as the AWS identity requested above.',
           'Copy the complete authorization code shown in the browser.',
           'Paste it into this terminal when AWS prompts, then press Enter.',
@@ -419,18 +419,31 @@ async function onboard(
       })
     }
     const userName = operatorName(name)
-    reporter.section('Operator sign-in')
-    reporter.row('verified', 'Operator ARN', operator.arn)
-    reporter.row('verified', 'User identity', operator.userId)
-    reporter.info('Use a separate browser session or sign out of root first.')
-    reporter.action(`Open the AWS console and sign in as ${userName}.`)
-    reporter.facts([['Console URL', `https://${operator.accountId}.signin.aws.amazon.com/console/`]])
-    reporter.action('Replace the initial password before continuing. Operator MFA enrollment is optional.')
-    reporter.info(`Optional virtual MFA names: ${userName} or a name beginning ${userName}-.`)
+    reporter.section('Switch to the operator')
+    reporter.facts([
+      ['Sign in as', 'IAM user (not root)'],
+      ['Account ID', operator.accountId],
+      ['IAM user name', userName],
+      ['Password', 'the initial password shown above'],
+      ['Console URL', `https://${operator.accountId}.signin.aws.amazon.com/console/`],
+    ])
+    reporter.list(
+      [
+        'Sign out of the root user in the browser you will use next.',
+        `Open the console URL. If AWS asks for an account ID, enter ${operator.accountId}.`,
+        `Sign in as the IAM user ${userName} with the initial password, then replace the password when AWS prompts.`,
+      ],
+      true,
+    )
+    reporter.notice('The next AWS authorization must not select root.')
+    reporter.info(`Operator MFA enrollment is optional. Optional virtual MFA names: ${userName} or a name beginning ${userName}-.`)
+    reporter.info('The confirmation below is guidance only. AWS verifies the signed-in identity after login.')
+    while (!(await prompts.consent('Signed out of root in the browser you will use next'))) {
+      reporter.info('Sign out of root, then answer y to continue.')
+    }
     checkCancellation(signal)
     operatorStarted = true
     const session = await Session.create(directory, region)
-    reporter.action('For this AWS login, select the created operator, not the root browser session.')
     reportLogin(reporter, flow)
     await awsLogin.login(cli, session, flow, signal)
     let authentication = await authenticate(session, operator, signal)

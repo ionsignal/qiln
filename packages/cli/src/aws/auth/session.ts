@@ -18,7 +18,6 @@ import { replySchema, type Request } from './protocol'
  */
 const LOGIN_PASSTHROUGH = [
   'HOME',
-  'TERM',
   'DISPLAY',
   'WAYLAND_DISPLAY',
   'XDG_RUNTIME_DIR',
@@ -26,6 +25,12 @@ const LOGIN_PASSTHROUGH = [
   'XAUTHORITY',
   'BROWSER',
 ] as const
+
+/**
+ * Lets credential processes detect the operator's terminal color support, for
+ * example when the password child highlights its output. Presentation only.
+ */
+const TERMINAL_PASSTHROUGH = ['TERM', 'COLORTERM', 'NO_COLOR'] as const
 
 async function inspectAuth(directory: Dir): Promise<void> {
   for (const name of await directory.list()) {
@@ -155,7 +160,7 @@ export class Session {
    * directory, which the credential process requires.
    */
   public credentialEnvironment(): NodeJS.ProcessEnv {
-    return {
+    const environment: NodeJS.ProcessEnv = {
       PATH: process.env.PATH || '/usr/local/bin:/usr/bin:/bin',
       HOME: this.directory.path,
       LANG: 'C.UTF-8',
@@ -172,6 +177,13 @@ export class Session {
       AWS_CLI_AUTO_PROMPT: 'off',
       AWS_PAGER: '',
     }
+    for (const key of TERMINAL_PASSTHROUGH) {
+      const value = process.env[key]
+      if (value !== undefined) {
+        environment[key] = value
+      }
+    }
+    return environment
   }
 
   /**
