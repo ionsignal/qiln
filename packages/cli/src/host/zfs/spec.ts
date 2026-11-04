@@ -1,14 +1,14 @@
 const MIB = 1_048_576
 
+interface StepSpec {
+  pool: boolean
+  run: RunSpec
+}
+
 interface RunSpec {
   script: 'packages' | 'arc' | 'module' | 'create' | 'datasets' | 'import' | 'state' | 'scrub' | 'export'
   timeoutMs: number
   refusals: Readonly<Record<number, string>>
-}
-
-interface StepSpec {
-  pool: boolean
-  run: RunSpec
 }
 
 /**
@@ -21,6 +21,10 @@ interface StepSpec {
  * deadline, and the wording of every exit code that script uses to refuse
  * before any effect. Arguments are built from the approved plan by `apply.ts`,
  * never supplied by a caller.
+ * 
+ * Accepted assumption (not target-verified): ZFS can mount over a non-empty
+ * state directory. Underlying root-volume files are hidden, not copied into
+ * the dataset; Incus's later emptiness check cannot guard this mount.
  */
 const STEPS = {
   'install-packages': {
