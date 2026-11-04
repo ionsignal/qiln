@@ -252,8 +252,8 @@ export const INCUS_SPEC = Object.freeze({
   packages: ['incus-base'],
   companions: ['incus-client'],
   packageVersions: {
-    amd64: '1:7.5.1-ubuntu26.04-202610262256',
-    arm64: '1:7.5.1-ubuntu26.04-202610262324',
+    amd64: '1:7.6-ubuntu26.04-202611021332',
+    arm64: '1:7.6-ubuntu26.04-202611031730',
   },
   excluded: ['incus', 'incus-ui-canonical', 'incus-extra'],
   units: ['incus.socket', 'incus.service', 'incus-user.socket', 'incus-user.service', 'incus-startup.service'],
