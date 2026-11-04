@@ -1,20 +1,21 @@
 import { AWS_RECORD_VERSION, AWS_SPEC } from '../../aws/spec'
 import { POLICY_KEYS } from '../../aws/permission/keys'
+import { openInBrowser } from '../browser'
+import { canonical } from '../../json'
 import { InstallerError } from '../../diagnostic/error'
 import { terminationConfirmed } from '../../aws/recovery'
 import { Bootstrap } from '../../aws/iam/bootstrap'
-import { canonical } from '../../json'
 import { operatorName } from '../../aws/operator'
-import { ready, type MutationProgress, type Proposal, type Readiness } from '../../aws/iam/types'
+import { modesOf, policyLabel, reportPermissionChange } from './review'
 import { currentRequirement, reviewRequired } from '../../aws/permission/spec'
 import { requireIdentity } from '../../aws/auth/identity'
 import { removeAuth, Session } from '../../aws/auth/session'
 import { openExistingConnections } from '../../aws/root'
 import { requireAwsHost } from '../../aws/host'
-import { resolveAwsName, validateAwsRegion, type AwsCommandOptions } from '../../input'
-import { checkCancellation, Prompts, withCancellation } from '../../terminal/prompts'
-import { modesOf, policyLabel, reportPermissionChange } from './review'
 import { withConfirmedOperation } from '../../aws/operation'
+import { checkCancellation, Prompts, withCancellation } from '../../terminal/prompts'
+import { resolveAwsName, validateAwsRegion, type AwsCommandOptions } from '../../input'
+import { ready, type MutationProgress, type Proposal, type Readiness } from '../../aws/iam/types'
 import { authenticate, failAuthentication, reportAuthentication, requireAvailable } from './shared'
 import * as awsLogin from '../../aws/auth/login'
 import * as tools from '../../aws/tools'
@@ -442,14 +443,21 @@ async function onboard(
       reporter.info('Sign out of root, then answer y to continue.')
     }
     checkCancellation(signal)
+    const consoleUrl = `https://${operator.accountId}.signin.aws.amazon.com/console/`
+    const opened = await openInBrowser(consoleUrl)
     reporter.section('Switch to the operator')
     reporter.facts([
       ['Sign in as', 'IAM user (not root)'],
       ['Account ID', operator.accountId],
       ['IAM user name', userName],
       ['Password', 'the initial password shown above'],
-      ['Console URL', `https://${operator.accountId}.signin.aws.amazon.com/console/`],
+      ['Console URL', consoleUrl],
     ])
+    reporter.info(
+      opened
+        ? 'Requested the console URL from your default browser. Use that browser only after signing out of root.'
+        : 'No browser opener was found. Open the console URL above manually.',
+    )
     reporter.list(
       [
         'Sign out of the root user in the browser you will use next.',
