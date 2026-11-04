@@ -1,11 +1,11 @@
 import { AWS_RECORD_VERSION, AWS_SPEC } from '../../aws/spec'
+import { POLICY_KEYS } from '../../aws/permission/keys'
 import { InstallerError } from '../../diagnostic/error'
 import { terminationConfirmed } from '../../aws/recovery'
 import { Bootstrap } from '../../aws/iam/bootstrap'
 import { canonical } from '../../json'
 import { operatorName } from '../../aws/operator'
 import { ready, type MutationProgress, type Proposal, type Readiness } from '../../aws/iam/types'
-import { POLICY_KEYS } from '../../aws/permission/keys'
 import { currentRequirement, reviewRequired } from '../../aws/permission/spec'
 import { requireIdentity } from '../../aws/auth/identity'
 import { removeAuth, Session } from '../../aws/auth/session'
@@ -22,6 +22,8 @@ import * as connections from '../../aws/connections'
 import type { Dir } from '../../state/files'
 import type { LiveRow, Reporter } from '../../terminal/reporter'
 import type { AwsAuthentication, AwsConnection, LoginFlow } from '../../aws/types'
+
+const WRONG_IDENTITY_CODES = ['AWS_ROOT_REFUSED', 'AWS_IDENTITY_MISMATCH']
 
 type PermissionOutcome = 'not-applicable' | 'recorded' | 'declined' | 'changed' | 'unchanged'
 
@@ -198,6 +200,25 @@ function reportLogin(reporter: Reporter, flow: LoginFlow): void {
   reporter.handOff()
 }
 
+/**
+ * Replaces the connection's local authentication with a fresh browser login.
+ * The caller verifies which identity AWS authorized.
+ */
+async function signIn(
+  directory: Dir,
+  region: string,
+  cli: awsLogin.AwsCli,
+  flow: LoginFlow,
+  signal: AbortSignal,
+  reporter: Reporter,
+): Promise<Session> {
+  await removeAuth(directory)
+  const session = await Session.create(directory, region)
+  reportLogin(reporter, flow)
+  await awsLogin.login(cli, session, flow, signal)
+  return session
+}
+
 async function recheck(prompts: Prompts, label: string): Promise<void> {
   const selected = await prompts.select(label, [
     'I completed the browser steps; recheck now',
@@ -345,11 +366,8 @@ async function connectOperator(
   const flow = await selectFlow(prompts)
   checkCancellation(signal)
   try {
-    await removeAuth(directory)
-    const session = await Session.create(directory, region)
     reporter.action('Sign in as the intended IAM user. Root, assumed-role, and SSO identities are not accepted.')
-    reportLogin(reporter, flow)
-    await awsLogin.login(cli, session, flow, signal)
+    const session = await signIn(directory, region, cli, flow, signal, reporter)
     reporter.section('Verifying operator')
     const authentication = await session.verify(signal)
     if (saved) {
@@ -419,6 +437,11 @@ async function onboard(
       })
     }
     const userName = operatorName(name)
+    reporter.action('Sign out of the root user in the browser you will use next.')
+    while (!(await prompts.consent('Signed out of root in the browser you will use next'))) {
+      reporter.info('Sign out of root, then answer y to continue.')
+    }
+    checkCancellation(signal)
     reporter.section('Switch to the operator')
     reporter.facts([
       ['Sign in as', 'IAM user (not root)'],
@@ -435,18 +458,29 @@ async function onboard(
       ],
       true,
     )
-    reporter.notice('The next AWS authorization must not select root.')
     reporter.info(`Operator MFA enrollment is optional. Optional virtual MFA names: ${userName} or a name beginning ${userName}-.`)
-    reporter.info('The confirmation below is guidance only. AWS verifies the signed-in identity after login.')
-    while (!(await prompts.consent('Signed out of root in the browser you will use next'))) {
-      reporter.info('Sign out of root, then answer y to continue.')
-    }
-    checkCancellation(signal)
     operatorStarted = true
-    const session = await Session.create(directory, region)
-    reportLogin(reporter, flow)
-    await awsLogin.login(cli, session, flow, signal)
-    let authentication = await authenticate(session, operator, signal)
+    const signInOperator = async (): Promise<{ session: Session; authentication: AwsAuthentication }> => {
+      while (true) {
+        while (!(await prompts.consent(`Signed in as the IAM user ${userName} in the browser you will use next`))) {
+          reporter.info('Complete the console steps above, then answer y to continue.')
+        }
+        checkCancellation(signal)
+        const session = await signIn(directory, region, cli, flow, signal, reporter)
+        try {
+          return { session, authentication: await authenticate(session, operator, signal) }
+        } catch (error: unknown) {
+          if (!(error instanceof InstallerError) || !WRONG_IDENTITY_CODES.includes(error.code)) {
+            throw error
+          }
+          reporter.notice(
+            `AWS authorized an identity other than ${userName}, such as root. No IAM change was made and that login was removed. Sign out in the browser, sign in as ${userName}, then answer y to try again.`,
+          )
+        }
+      }
+    }
+    const { session, authentication: signedIn } = await signInOperator()
+    let authentication = signedIn
     let readiness = await bootstrap.readiness(authentication, signal)
     reportReadiness(reporter, readiness)
     while (!ready(readiness)) {
@@ -456,7 +490,7 @@ async function onboard(
       readiness = await bootstrap.readiness(authentication, signal)
       reportReadiness(reporter, readiness)
     }
-    finalAuthentication = await authenticate(session, operator, signal)
+    finalAuthentication = authentication
     await bootstrap.verify(finalAuthentication, signal)
     checkCancellation(signal)
     await bootstrap.complete(finalAuthentication)
