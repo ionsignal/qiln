@@ -6,6 +6,7 @@ import {
   keyDisclosure,
   launchDisclosure,
   phase,
+  resourceTally,
   volumeDisclosure,
   type Phase,
 } from '../../../aws/deployment/observe/facts'
@@ -144,6 +145,9 @@ export function observationSummary(observation: Observation): string {
   return [`${observation.resources.length} recorded`, ...counts].join(' · ')
 }
 
+/**
+ * A resource that was never targeted by a removal is present, not unconfirmed.
+ */
 function recordedOutcome(record: Deployment, resource: Resource): TableCell {
   if (resource.disposition === 'handed-off') {
     return 'handed off; not observed by this record'
@@ -151,12 +155,13 @@ function recordedOutcome(record: Deployment, resource: Resource): TableCell {
   if (released(record, resource)) {
     return 'observed absent'
   }
-  return resource.disposition === 'retained'
-    ? { text: 'retained; not removed by Qiln', tone: 'warning' }
-    : 'not confirmed removed'
+  if (resource.disposition === 'retained') {
+    return { text: 'retained; not removed by Qiln', tone: 'warning' }
+  }
+  return record.removals.length === 0 ? 'present' : 'not confirmed removed'
 }
 
-function reportResources(reporter: Reporter, record: Deployment): void {
+export function reportResources(reporter: Reporter, record: Deployment): void {
   const recorded = resources(record)
   if (recorded.length === 0) {
     return
@@ -201,10 +206,7 @@ export function reportDeployment(reporter: Reporter, record: Deployment): void {
     ['Launch attempts', launchDisclosure(record)],
     ['Data volume', volumeDisclosure(record)],
     ['AWS health', healthDisclosure(record)],
-    [
-      'Recorded resources',
-      `${resources(record).length} recorded · ${unreleased(record).length} not confirmed removed · ${retained(record).length} retained by design`,
-    ],
+    ['Recorded resources', resourceTally(record)],
     ['Recorded steps', String(record.steps.length)],
   ]
   if (record.removals.length > 0) {
@@ -226,15 +228,8 @@ export function reportDeployment(reporter: Reporter, record: Deployment): void {
   }
   reporter.section('AWS deployment')
   reporter.state('Recorded state', state.label, state.tone)
-  reporter.space()
   reporter.facts(facts)
-  reporter.space()
   reporter.info(state.text)
-  if (record.adminKey !== null) {
-    reporter.info(
-      'Removal never deletes the local key files, and deleting the AWS key pair is not guest SSH revocation.',
-    )
-  }
   reporter.notices([
     ...(unresolved
       ? [
@@ -318,7 +313,6 @@ export function reportZfs(reporter: Reporter, preparation: ZfsRecord | null): vo
     ['Recorded steps', String(preparation.steps.length)],
   ])
   if (unsettled(preparation).length > 0) {
-    reporter.space()
     reporter.notice(
       'A preparation step has no verified outcome. Interrupted remote work may already have completed, and nothing was replayed, resumed, or rolled back.',
     )
@@ -354,7 +348,6 @@ export function reportIncus(reporter: Reporter, preparation: IncusRecord | null)
     ['Recorded steps', String(preparation.steps.length)],
   ])
   if (incusUnsettled(preparation).length > 0) {
-    reporter.space()
     reporter.notice(
       'An Incus preparation step has no verified outcome. Interrupted remote work may already have completed, and nothing was replayed, resumed, or rolled back.',
     )

@@ -324,14 +324,26 @@ export function cleanup(record: Deployment): Cleanup {
   if (refused >= AWS_SPEC.deployment.maximumRefusals) {
     return { status: 'blocked', detail: `${refused} removal steps were refused, which spends the allowed budget` }
   }
+  const remaining = unreleased(record).length
   return {
     status: 'eligible',
-    detail: `${unreleased(record).length} recorded resources are not confirmed removed`,
+    detail: `${remaining} recorded ${remaining === 1 ? 'resource' : 'resources'} to remove`,
   }
 }
 
 export function removable(record: Deployment): boolean {
   return cleanup(record).status === 'eligible'
+}
+
+/**
+ * The single wording for the recorded resources. Before any removal starts the
+ * unreleased resources are simply present, and only once removal has started
+ * can one be described as not confirmed removed.
+ */
+export function resourceTally(record: Deployment): string {
+  const left = unreleased(record).length
+  const state = record.removals.length === 0 ? `${left} present` : `${left} not confirmed removed`
+  return `${resources(record).length} recorded · ${state} · ${retained(record).length} retained by design`
 }
 
 export function deploymentFacts(record: Deployment): readonly DiagnosticFact[] {
@@ -355,10 +367,7 @@ export function deploymentFacts(record: Deployment): readonly DiagnosticFact[] {
     ['Launch attempts', launchDisclosure(record)],
     ['Data volume', volumeDisclosure(record)],
     ['AWS health', healthDisclosure(record)],
-    [
-      'Recorded resources',
-      `${resources(record).length} recorded · ${unreleased(record).length} not confirmed removed · ${retained(record).length} retained by design`,
-    ],
+    ['Recorded resources', resourceTally(record)],
     ['Observed outcome', describe(record)],
     ['Recorded steps', String(record.steps.length)],
     ['Removal attempts', String(record.removals.length)],
