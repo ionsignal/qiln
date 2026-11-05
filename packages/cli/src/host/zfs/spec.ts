@@ -95,7 +95,7 @@ const STEPS = {
       script: 'datasets',
       timeoutMs: 60_000,
       refusals: {
-        20: 'The pool name, a dataset name, or the state mountpoint was not given or is malformed.',
+        20: 'The pool name, a dataset name, or a mountpoint was not given or is malformed.',
         21: 'The ZFS module or tools are not available.',
         22: 'The pool is not imported.',
         23: 'The pool already holds datasets, or its datasets could not be listed.',
@@ -183,17 +183,18 @@ const STEPS = {
  * selects how a pool is configured, never which resource is touched.
  * `cachefile=none` keeps pool import explicit: no unattended import mechanism
  * is introduced here, and boot persistence belongs to the later host slice.
- * `layout` names the two datasets of the pool: `state` is mounted at the Incus
- * state directory only by an explicit step, and `incus` is reserved for the
- * Incus storage driver. Its revision identifies this arrangement, so another
- * arrangement is never mistaken for it.
+ * `layout` names the three datasets of the pool: `state` is mounted at the
+ * Incus state directory only by an explicit step, `incus` is reserved for the
+ * Incus storage driver, and `artifacts` holds the retained Incus package files
+ * and is mounted only inside one fenced copy step. Its revision identifies this
+ * arrangement, so another arrangement is never mistaken for it.
  * `maximumInstalls` bounds the resolved package transaction that an approval
  * would freeze, so an unexpectedly large dependency closure is refused.
  * Script exit codes from `refusalCodes.first` to `refusalCodes.last` are
  * authored refusals that happen before any effect.
  */
 export const ZFS_SPEC = Object.freeze({
-  recipeRevision: 1,
+  recipeRevision: 2,
   maximumInstalls: 16,
   packages: ['zfsutils-linux'],
   scrubTemplate: 'zfs-scrub-monthly@.timer',
@@ -212,9 +213,10 @@ export const ZFS_SPEC = Object.freeze({
     xattr: 'sa',
   },
   layout: {
-    revision: 1,
+    revision: 2,
     state: 'server-state',
     incus: 'incus',
+    artifacts: 'incus-artifacts',
   },
   arc: {
     file: '/etc/modprobe.d/qiln-zfs.conf',
@@ -247,20 +249,19 @@ export function scrubTimerOf(pool: string): string {
   return `zfs-scrub-monthly@${pool}.timer`
 }
 
-/**
- * The full dataset names of one pool's layout.
- */
-export function datasetNamesOf(pool: string): { state: string; incus: string } {
-  return { state: `${pool}/${ZFS_SPEC.layout.state}`, incus: `${pool}/${ZFS_SPEC.layout.incus}` }
+export function datasetNamesOf(pool: string): { state: string; incus: string; artifacts: string } {
+  const { layout } = ZFS_SPEC
+  return {
+    state: `${pool}/${layout.state}`,
+    incus: `${pool}/${layout.incus}`,
+    artifacts: `${pool}/${layout.artifacts}`,
+  }
 }
 
 export function arcLine(bytes: number): string {
   return `options zfs zfs_arc_max=${bytes}`
 }
 
-/**
- * The owned file matches when its only non-comment line is the approved limit.
- */
 export function arcFileMatches(ownedLines: readonly string[] | null, bytes: number): boolean {
   const owned = ownedLines?.filter(line => !line.startsWith('#')) ?? null
   return owned !== null && owned.length === 1 && owned[0] === arcLine(bytes)

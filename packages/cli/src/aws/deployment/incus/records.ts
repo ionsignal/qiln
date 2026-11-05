@@ -23,17 +23,6 @@ function invalid(): never {
 }
 
 /**
- * The record of a deployment with no preparation history. Null means the
- * deployment record lacks an identity, which callers treat as a defect.
- */
-export function blank(deployment: Deployment): IncusRecord | null {
-  const binding = bindingOf(deployment)
-  return binding === null
-    ? null
-    : { version: AWS_RECORD_VERSION.incus, binding, authorizations: [], steps: [], baseline: null, identity: null }
-}
-
-/**
  * Every retained preseed, whether approved for an initialization or carried by
  * the open of a preserved installation, must still hash to its approved digest
  * and read back as one that Qiln would have produced, because verification
@@ -52,7 +41,13 @@ function hasValidPreseeds({ authorizations }: IncusRecord): boolean {
  */
 function hasOnePool({ authorizations }: IncusRecord): boolean {
   const pools = authorizations.flatMap(({ plan }) =>
-    plan.kind === 'open' || plan.kind === 'initialize' || plan.kind === 'release' ? [`${plan.pool}:${plan.guid}`] : [],
+    plan.kind === 'open' ||
+    plan.kind === 'initialize' ||
+    plan.kind === 'capture' ||
+    plan.kind === 'restore' ||
+    plan.kind === 'release'
+      ? [`${plan.pool}:${plan.guid}`]
+      : [],
   )
   return new Set(pools).size <= 1
 }
@@ -104,28 +99,6 @@ function parse(value: unknown, deployment: Deployment): IncusRecord {
 }
 
 /**
- * Lock-free so status can show evidence while an operation runs. An absent file
- * means no local evidence, never a pristine host. Any other failure fails
- * closed, because it does not establish that no host effects occurred.
- */
-export async function read(directory: Dir, deployment: Deployment): Promise<IncusRecord | null> {
-  try {
-    const snapshot = await readChild(directory, AWS_SPEC.state.incus, {
-      owner: userId(),
-      mode: 0o600,
-      minSize: 1,
-      maxSize: AWS_SPEC.limits.incus,
-    })
-    return parse(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(snapshot.bytes)) as unknown, deployment)
-  } catch (error: unknown) {
-    if (isErrorCode(error, 'ENOENT')) {
-      return null
-    }
-    return invalid()
-  }
-}
-
-/**
  * The baseline and the identity are set once, together, only in the write that
  * verifies the newest step, which must be the establishing step they describe.
  * Neither is ever rewritten or dropped.
@@ -163,6 +136,39 @@ function requireTransition(before: IncusRecord, after: IncusRecord): void {
     return invalid()
   }
   requireEstablished(before, after)
+}
+
+/**
+ * The record of a deployment with no preparation history. Null means the
+ * deployment record lacks an identity, which callers treat as a defect.
+ */
+export function blank(deployment: Deployment): IncusRecord | null {
+  const binding = bindingOf(deployment)
+  return binding === null
+    ? null
+    : { version: AWS_RECORD_VERSION.incus, binding, authorizations: [], steps: [], baseline: null, identity: null }
+}
+
+/**
+ * Lock-free so status can show evidence while an operation runs. An absent file
+ * means no local evidence, never a pristine host. Any other failure fails
+ * closed, because it does not establish that no host effects occurred.
+ */
+export async function read(directory: Dir, deployment: Deployment): Promise<IncusRecord | null> {
+  try {
+    const snapshot = await readChild(directory, AWS_SPEC.state.incus, {
+      owner: userId(),
+      mode: 0o600,
+      minSize: 1,
+      maxSize: AWS_SPEC.limits.incus,
+    })
+    return parse(JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(snapshot.bytes)) as unknown, deployment)
+  } catch (error: unknown) {
+    if (isErrorCode(error, 'ENOENT')) {
+      return null
+    }
+    return invalid()
+  }
 }
 
 /**

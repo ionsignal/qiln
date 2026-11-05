@@ -12,58 +12,33 @@ const sha256 = z.string().regex(/^[0-9a-f]{64}$/)
 const settings = z.record(z.string(), z.string())
 const account = z.string().regex(/^[a-z_][a-z0-9_-]{0,31}$/)
 
-/**
- * What software preparation needs: the administrator account that gets Incus
- * socket access, and the installation of an earlier deployment that this host
- * may reopen (null for a fresh one). No pool is needed, because software is
- * prepared while no pool is mounted.
- */
+export type PoolTarget = Pick<IncusTarget, 'pool' | 'guid' | 'datasets'>
+export type ReleaseTarget = Pick<IncusTarget, 'pool' | 'guid' | 'account'>
+
 export interface SoftwareTarget {
   account: string
   retained: Retained | null
 }
 
-/**
- * Software plus the recorded pool and its two dataset GUIDs. All of it comes
- * from the protected deployment record and its retained evidence, never from
- * the host.
- */
 export interface IncusTarget extends SoftwareTarget {
   pool: string
   guid: string
   datasets: PoolDatasets
 }
 
-/**
- * The recorded identities that the storage-identity guard and the mounted-state
- * checks compare with the host.
- */
-export type PoolTarget = Pick<IncusTarget, 'pool' | 'guid' | 'datasets'>
-
-/**
- * What an inspection needs. A null pool reports no ZFS pool. `retained` is only
- * needed to simulate its exact packages before a preserved open.
- */
 export interface InspectTarget {
   pool: string | null
   account: string
-  retained?: Retained | null
+  pins: readonly PackageChange[] | null
+  closure: readonly PackageChange[] | null
 }
-
-/**
- * What the release before the ZFS export needs.
- */
-export type ReleaseTarget = Pick<IncusTarget, 'pool' | 'guid' | 'account'>
-
-/**
- * What retained evidence says about earlier preparation. `opened` is history: a
- * verified open or initialization exists, so the closed host is no longer
- * expected; it says nothing about whether the daemon runs now. `retained` is the
- * preseed of a verified initialization or preserved open.
- */
 export interface Progress {
   opened: boolean
   retained: PreseedDocument | null
+  baseline: Baseline | null
+  pins: readonly PackageChange[] | null
+  closure: readonly PackageChange[] | null
+  artifacts: Manifest | null
 }
 
 export const packageChangeSchema = z.strictObject({
@@ -72,15 +47,26 @@ export const packageChangeSchema = z.strictObject({
   architecture: text,
 })
 
+export const manifestEntrySchema = z.strictObject({
+  name: text,
+  version: text,
+  architecture: text,
+  filename: text,
+  size: z.int().positive(),
+  sha256,
+  source: text,
+})
+
+export const manifestSchema = z.array(manifestEntrySchema).min(1).max(256)
+
+export type ManifestEntry = z.infer<typeof manifestEntrySchema>
+export type Manifest = z.infer<typeof manifestSchema>
+
 const idRangeSchema = z.strictObject({
   start: count,
   count: z.int().positive(),
 })
 
-/**
- * The root ranges of `/etc/subuid` and `/etc/subgid`. Retained instance
- * ownership depends on them, and Qiln never edits either file.
- */
 export const allocationsSchema = z.strictObject({
   uid: z.array(idRangeSchema).min(1).max(64),
   gid: z.array(idRangeSchema).min(1).max(64),
@@ -89,11 +75,6 @@ export const allocationsSchema = z.strictObject({
 export type IdRange = z.infer<typeof idRangeSchema>
 export type Allocations = z.infer<typeof allocationsSchema>
 
-/**
- * Evidence of what was running, not the original APT transaction: the installed
- * Incus packages and runtime dependencies at their full versions, the package
- * architecture, and the root subordinate-ID ranges. It grants no authority.
- */
 export const baselineSchema = z
   .strictObject({
     architecture: z.enum(ARCHITECTURES),
@@ -112,6 +93,21 @@ const observedFileSchema = z.strictObject({
   sha256: sha256.nullable(),
 })
 
+const stagedFileSchema = z.strictObject({
+  name: text,
+  size: count,
+  sha256,
+})
+
+const indexEntrySchema = z.strictObject({
+  package: text,
+  version: text,
+  architecture: text,
+  filename: text,
+  size: count,
+  sha256,
+})
+
 /**
  * Normalized, bounded evidence from one inspection. A missing capability is a
  * value (`null` or `false`), never an empty result.
@@ -119,15 +115,19 @@ const observedFileSchema = z.strictObject({
  *   through an active socket alone would start the daemon. Everything else is
  *   offline evidence that never touches an Incus socket.
  * - `repository` and `guard` report files by digest, `candidates` are the
- *   `apt-cache madison` rows, and `transaction` simulates exact selected or
- *   retained versions without changing the host.
+ *   `apt-cache madison` rows, and `transaction` simulates the exact selected
+ *   versions without changing the host.
+ * - `stage` lists the regular package files of the staging directory, and
+ *   `index` the repository index records of the closure that was asked about.
+ *   Both are empty unless a closure was asked about.
  * - `sysctl.apparmor` is null when the key could not be read.
  * - `access` comes from the account database, not from a live SSH session.
  * - A null `idmap` list means the file was unreadable, which is not the same as
  *   a readable file without a root range.
- * - `stateMount` is null when nothing was reported, which is a missing
- *   observation and not proof of absence. `state` reports whether the state
- *   directory is empty and whether every retained metadata entry is present.
+ * - `stateMount` and `artifactsMount` are null when nothing was reported, which
+ *   is a missing observation and not proof of absence. `state` reports whether
+ *   the state directory is empty and whether every retained metadata entry is
+ *   present.
  * - A service reports its load state, so an absent unit (`not-found`) differs
  *   from a loaded one, and its enablement shows a persistent (`masked`) or
  *   runtime (`masked-runtime`) mask.
@@ -180,6 +180,8 @@ export const observationSchema = z.strictObject({
       removals: z.array(text).max(512),
     })
     .nullable(),
+  stage: z.array(stagedFileSchema).max(512),
+  index: z.array(indexEntrySchema).max(512),
   services: z
     .array(
       z.strictObject({
@@ -218,6 +220,7 @@ export const observationSchema = z.strictObject({
     topLevel: z.array(datasetSchema).max(64),
   }),
   stateMount: mountSchema.nullable(),
+  artifactsMount: mountSchema.nullable(),
   state: z.strictObject({
     empty: z.boolean(),
     metadata: z.boolean(),
@@ -261,22 +264,15 @@ export const observationSchema = z.strictObject({
 export type Observation = z.infer<typeof observationSchema>
 export type Api = NonNullable<Observation['api']>
 export type PackageChange = z.infer<typeof packageChangeSchema>
+export type StagedFile = z.infer<typeof stagedFileSchema>
+export type IndexEntry = z.infer<typeof indexEntrySchema>
+export type Identity = z.infer<typeof identitySchema>
 
-/**
- * The server that a verified initialization or preserved open established. The
- * certificate fingerprint is evidence of which installation this is, not
- * authorization to use it.
- */
 export const identitySchema = z.strictObject({
   certificateFingerprint: sha256,
   standalone: z.literal(true),
 })
 
-export type Identity = z.infer<typeof identitySchema>
-
-/**
- * Null means the observation holds no standalone server identity to record.
- */
 export function identityOf(observation: Observation): Identity | null {
   const server = observation.api?.server
   if (server === undefined || server.clustered) {
@@ -313,15 +309,27 @@ export interface ReadyPlan {
 }
 
 /**
- * The host is closed and the approved packages are installed, so the software
- * stage has nothing left to apply. Never persisted.
+ * The host is closed and the software stage has nothing left to apply: the
+ * approved packages are installed, or a recorded installation is waiting for
+ * the activation stage to restore its retained package files. Never persisted.
  */
 export interface SoftwarePlan {
   kind: 'software'
 }
 
 /**
- * Every unit is positively inactive and a verified release is already recorded,
+ * The Incus build that selection chose from the approved repository's lists. It
+ * grants nothing: the preparer only simulates the chosen versions, and the
+ * packages plan that follows shows and freezes the whole transaction. Never
+ * persisted.
+ */
+export interface SelectPlan {
+  kind: 'select'
+  pins: PackageChange[]
+}
+
+/**
+ * Every Incus unit is positively inactive and a verified release is already recorded,
  * so there is nothing to release. Never persisted.
  */
 export interface StoppedPlan {
@@ -331,9 +339,9 @@ export interface StoppedPlan {
 const digestSchema = z.strictObject({ sha256 })
 
 /**
- * Writes the approved signing key, source, and exact-package preferences when
- * absent, then refreshes the package lists. Existing files are never
- * overwritten, and the digests identify the exact approved bytes.
+ * Writes the approved signing key and source when absent, then refreshes the
+ * package lists. Existing files are never overwritten, and the digests identify
+ * the exact approved bytes.
  */
 export const repositoryPlanSchema = z.strictObject({
   kind: z.literal('repository'),
@@ -341,7 +349,6 @@ export const repositoryPlanSchema = z.strictObject({
   add: z.boolean(),
   key: z.strictObject({ url: text, sha256 }),
   source: digestSchema,
-  preferences: digestSchema,
 })
 
 /**
@@ -349,7 +356,8 @@ export const repositoryPlanSchema = z.strictObject({
  * installs the sysctl override that keeps the AppArmor restriction enabled. It
  * names no pool, because it runs before any storage exists. `repository` follows
  * the closing under the same approval, and is null when the repository files and
- * refreshed lists are already in place.
+ * refreshed lists are already in place, or when a recorded installation is
+ * restored from its retained files and needs no repository.
  */
 export const closePlanSchema = z.strictObject({
   kind: z.literal('close'),
@@ -367,16 +375,52 @@ const guardFilesSchema = z.strictObject({
   dropIn: digestSchema,
 })
 
+/**
+ * Pins the selected version in the APT preferences, then installs the frozen
+ * transaction. `preferences` names the version and the digest of the exact
+ * approved bytes.
+ */
 export const packagesPlanSchema = z.strictObject({
   kind: z.literal('packages'),
   install: z.array(packageChangeSchema).max(256),
+  preferences: z.strictObject({ version: text, sha256 }),
+})
+
+/**
+ * Copies the staged package files of the installed transaction onto the
+ * artifacts dataset inside one mount window. The dataset identity and the exact
+ * manifest are frozen with the approval, and the manifest is what a later
+ * restore will judge the retained files against.
+ */
+export const capturePlanSchema = z.strictObject({
+  kind: z.literal('capture'),
+  pool: poolNameSchema,
+  guid,
+  datasets: poolDatasetsSchema,
+  manifest: manifestSchema,
+})
+
+/**
+ * Pins the recorded version in the APT preferences, then installs the retained
+ * package files of a preserved installation from the artifacts dataset inside
+ * one mount window, with no repository involved. The manifest is the one that
+ * the earlier capture froze, and the preferences are the exact approved bytes.
+ */
+export const restorePlanSchema = z.strictObject({
+  kind: z.literal('restore'),
+  pool: poolNameSchema,
+  guid,
+  datasets: poolDatasetsSchema,
+  manifest: manifestSchema,
+  preferences: z.strictObject({ version: text, sha256 }),
 })
 
 /**
  * The installation of an earlier deployment that a preserved open reopens: the
- * retained preseed bytes, the recorded software and subordinate-ID ranges, and
- * the server identity that the reopened daemon must present. `origin` is the
- * deployment whose evidence established them. It grants no authority.
+ * retained preseed bytes, the recorded software and subordinate-ID ranges, the
+ * server identity that the reopened daemon must present, and the manifest of
+ * the retained package files. `origin` is the deployment whose evidence
+ * established the installation. It grants no authority.
  */
 export const retainedSchema = z.strictObject({
   origin: operationId,
@@ -386,6 +430,7 @@ export const retainedSchema = z.strictObject({
   }),
   baseline: baselineSchema,
   identity: identitySchema,
+  artifacts: manifestSchema,
 })
 
 export type Retained = z.infer<typeof retainedSchema>
@@ -450,6 +495,8 @@ export const releasePlanSchema = z.strictObject({
 export type ClosePlan = z.infer<typeof closePlanSchema>
 export type RepositoryPlan = z.infer<typeof repositoryPlanSchema>
 export type PackagesPlan = z.infer<typeof packagesPlanSchema>
+export type CapturePlan = z.infer<typeof capturePlanSchema>
+export type RestorePlan = z.infer<typeof restorePlanSchema>
 export type OpenPlan = z.infer<typeof openPlanSchema>
 export type InitializePlan = z.infer<typeof initializePlanSchema>
 export type AccessPlan = z.infer<typeof accessPlanSchema>
@@ -462,6 +509,8 @@ export type ApprovedPlan =
   | ClosePlan
   | RepositoryPlan
   | PackagesPlan
+  | CapturePlan
+  | RestorePlan
   | OpenPlan
   | InitializePlan
   | AccessPlan
@@ -470,7 +519,7 @@ export type ApprovedPlan =
 /**
  * What `softwarePlanOf` can decide.
  */
-export type SoftwareStagePlan = RefusedPlan | ClosePlan | RepositoryPlan | PackagesPlan | SoftwarePlan
+export type SoftwareStagePlan = RefusedPlan | ClosePlan | RepositoryPlan | SelectPlan | PackagesPlan | SoftwarePlan
 
 /**
  * What `planOf` can decide.
@@ -480,7 +529,10 @@ export type PreparationPlan =
   | ReadyPlan
   | ClosePlan
   | RepositoryPlan
+  | SelectPlan
   | PackagesPlan
+  | CapturePlan
+  | RestorePlan
   | OpenPlan
   | InitializePlan
   | AccessPlan
@@ -516,7 +568,11 @@ export function actionsOf(plan: ApprovedPlan): readonly IncusAction[] {
     case 'repository':
       return repositoryActions(plan)
     case 'packages':
-      return ['install-packages']
+      return ['pin-versions', 'install-packages']
+    case 'capture':
+      return ['capture']
+    case 'restore':
+      return ['pin-versions', 'restore']
     case 'open':
       return plan.install ? ['guard', 'open'] : ['open']
     case 'initialize':

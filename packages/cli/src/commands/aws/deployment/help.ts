@@ -1,5 +1,4 @@
 import { AWS_SPEC } from '../../../aws/spec'
-import { INCUS_SPEC } from '../../../host/incus/spec'
 import type { HelpContent } from '../../../terminal/help'
 
 export const group: HelpContent = {
@@ -89,7 +88,6 @@ export const prepare: HelpContent = {
     'The phases are Incus close and repository, ZFS prerequisites, Incus packages, ZFS storage, and Incus activation, which keeps package effects away from an open daemon and from mounted Incus state. A pending reboot stops the command.',
     'The data volume is matched only by its recorded EBS volume ID. Qiln never wipes, repairs, adopts, forces, or renames existing storage or configuration, never edits /etc/subuid or /etc/subgid, and never reboots the host or installs a kernel or module.',
     'Each approved step is one fenced remote script followed by a fresh inspection that must agree, and a failed, cancelled, or unverified step is never replayed, resumed, or rolled back. An unresolved step blocks preparation and, depending on the step, removal, disconnect, or volume handoff.',
-    `Incus is pinned to exact package builds (${INCUS_SPEC.packageVersions.amd64} on amd64, ${INCUS_SPEC.packageVersions.arm64} on arm64) that exclude other builds, including security updates, until deliberately repinned. Socket access is root-equivalent, applies to new SSH connections only, and is never removed by Qiln, and a single-disk pool has no redundancy or backup.`,
     'A preserved Incus installation is reopened only through the retained-volume chain against its recorded software, ID ranges, and server identity, and is never initialized over; qiln installation reassign records it as the host of an existing installation. Success does not establish workload correctness, restoration, runtime readiness, or SSH forwarding to the Incus socket.',
   ],
 }

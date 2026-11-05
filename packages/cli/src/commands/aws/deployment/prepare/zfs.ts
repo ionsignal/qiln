@@ -1,6 +1,6 @@
 import { ZFS_SPEC, datasetNamesOf, type StepAction } from '../../../../host/zfs/spec'
 import { ZFS_STEPS } from './steps'
-import { STATE_MOUNTPOINT } from '../../../../host/mount'
+import { ARTIFACTS_MOUNTPOINT, STATE_MOUNTPOINT } from '../../../../host/mount'
 import { diskOf } from '../../../../host/zfs/disk'
 import { actionsOf } from '../../../../aws/deployment/zfs/types'
 import { reportApproval, stepsOf, type ApprovalScreen } from '../../../../terminal/approval'
@@ -131,7 +131,7 @@ function hostFacts({ observation, target }: PlanPreview): DiagnosticFact[] {
 function layoutDetails(pool: string, scrubTimer: string): Details {
   const names = datasetNamesOf(pool)
   return {
-    'create-datasets': `${names.state} (mountpoint ${STATE_MOUNTPOINT}, canmount=noauto) and ${names.incus} (left for Incus to manage)`,
+    'create-datasets': `${names.state} (mountpoint ${STATE_MOUNTPOINT}, canmount=noauto), ${names.incus} (left for Incus to manage), and ${names.artifacts} (mountpoint ${ARTIFACTS_MOUNTPOINT}, canmount=noauto)`,
     'enable-scrub': `${scrubTimer}, the packaged monthly timer`,
     'mount-state': `${names.state} at ${STATE_MOUNTPOINT}`,
   }
@@ -183,7 +183,7 @@ function importScreen(plan: ImportPlan): ApprovalScreen {
   const holds =
     plan.datasets === null
       ? 'its datasets were never verified, so it must hold no dataset besides its root'
-      : `it must hold exactly ${names.state} and ${names.incus} with their recorded GUIDs`
+      : `it must hold exactly ${names.state}, ${names.incus}, and ${names.artifacts} with their recorded GUIDs`
   const details: Details = {
     'import-pool': `${plan.pool} (GUID ${plan.guid}) from ${plan.disk.member}; ${holds}${plan.imported ? '. Already imported, so this step records and verifies it' : ''}`,
     ...layoutDetails(plan.pool, plan.scrubTimer),

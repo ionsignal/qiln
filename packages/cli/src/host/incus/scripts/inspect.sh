@@ -1,11 +1,12 @@
 # Fixed read-only inspection of the host: repository and guard files, packages,
 # software versions, units, listeners, network, Incus group access,
-# subordinate-ID allocations, the sysctl override, the ZFS pool, the state
-# mount, the state directory, and the Incus API. Every section reports its own
-# status, so a missing capability differs from an empty result. Nothing is
-# installed, loaded, or written. Only the API sections touch Incus, and only
-# while the daemon service itself is active, because a query through an active
-# socket alone would start the daemon by socket activation.
+# subordinate-ID allocations, the sysctl override, the ZFS pool, the state and
+# artifacts mounts, the state directory, the staged package files, and the
+# Incus API. Every section reports its own status, so a missing capability
+# differs from an empty result. Nothing is installed, loaded, or written. Only
+# the API sections touch Incus, and only while the daemon service itself is
+# active, because a query through an active socket alone would start the daemon
+# by socket activation.
 LC_ALL=C
 export LC_ALL
 PATH=/usr/sbin:/usr/bin:/sbin:/bin:/opt/incus/bin
@@ -18,11 +19,14 @@ exec 2>/dev/null
 # the source file, the bridge subnet, the administrator account, the Incus
 # administration group, the state mountpoint, the guard expectation file,
 # startup check, service drop-in, and package preferences file, the sysctl
-# override file and the sysctl key it pins, then the direct
+# override file and the sysctl key it pins, the package staging directory, the
+# artifacts mountpoint, then the direct
 # packages, `--`, extra packages whose installed state is reported but never
-# simulated, `--`, selected or retained `name=version` words whose exact
-# versions are simulated, `--`, the retained metadata entries of the state
-# directory, `--`, then the dpkg-query globs of the software to report.
+# simulated, `--`, the selected `name=version` words whose exact versions are
+# simulated (none before a selection), `--`, the retained metadata entries of
+# the state directory, `--`, the `name=version` words of the closure whose
+# staged files and index records are reported (none unless a capture is
+# pending), `--`, then the dpkg-query globs of the software to report.
 POOL=$1
 KEY_FILE=$2
 SOURCE_FILE=$3
@@ -36,7 +40,9 @@ DROPIN_FILE=${10}
 PREFERENCES_FILE=${11}
 SYSCTL_FILE=${12}
 SYSCTL_KEY=${13}
-shift 13
+STAGE=${14}
+ARTIFACTS=${15}
+shift 15
 PACKAGES=
 while test $# -gt 0 && test "$1" != --; do
   PACKAGES="$PACKAGES $1"
@@ -58,6 +64,12 @@ test $# -eq 0 || shift
 ENTRIES=
 while test $# -gt 0 && test "$1" != --; do
   ENTRIES="$ENTRIES $1"
+  shift
+done
+test $# -eq 0 || shift
+CLOSURE=
+while test $# -gt 0 && test "$1" != --; do
+  CLOSURE="$CLOSURE $1"
   shift
 done
 test $# -eq 0 || shift
@@ -168,10 +180,10 @@ software_info() {
   return 0
 }
 
-# A simulation only: it resolves exact selected or retained versions against
-# current package lists, never refreshes them, and never changes the host.
-# Installed versions that differ are reported to the planner, which refuses
-# rather than approving an upgrade or downgrade.
+# A simulation only: it resolves the exact selected versions against current
+# package lists, never refreshes them, and never changes the host. Installed
+# versions that differ are reported to the planner, which refuses rather than
+# approving an upgrade or downgrade.
 simulation_info() {
   need=
   for spec in $SELECTED; do
@@ -183,6 +195,45 @@ simulation_info() {
   done
   test -n "$need" || return 0
   apt-get --simulate --no-install-recommends install $need
+}
+
+# The regular `.deb` files of the staging directory with their sizes and
+# digests, as `file <size> <sha256> <name>`. Only reported while a capture is
+# pending, because hashing the closure is not free.
+stage_info() {
+  test -n "$CLOSURE" || return 0
+  for file in "$STAGE"/*.deb; do
+    test -f "$file" && test ! -L "$file" || continue
+    sum=$(sha256sum "$file") || return 1
+    printf 'file %s %s %s\n' "$(stat -c %s "$file")" "${sum%% *}" "${file##*/}"
+  done
+  return 0
+}
+
+# The repository index records of the closure that carry a file, a size, and a
+# digest, as `entry <package> <version> <architecture> <size> <sha256> <file>`.
+# A stanza without all of them, such as the installed-package record, is not
+# reported, and a failed lookup reads as no records.
+index_info() {
+  test -n "$CLOSURE" || return 0
+  out=$(apt-cache show $CLOSURE)
+  printf '%s\n' "$out" | awk '
+    function flush() {
+      if (pkg != "" && ver != "" && arch != "" && file != "" && size != "" && sha != "") {
+        print "entry " pkg " " ver " " arch " " size " " sha " " file
+      }
+      pkg = ver = arch = file = size = sha = ""
+    }
+    $0 == "" { flush(); next }
+    /^Package: / { pkg = $2 }
+    /^Version: / { ver = $2 }
+    /^Architecture: / { arch = $2 }
+    /^Filename: / { file = $2 }
+    /^Size: / { size = $2 }
+    /^SHA256: / { sha = $2 }
+    END { flush() }
+  '
+  return 0
 }
 
 # `show` succeeds for an absent unit and reports it as LoadState=not-found, so
@@ -272,15 +323,18 @@ zfs_info() {
   printf '%s\n' "$props" | awk -F'\t' 'NF == 4 { source = $4; sub(/ .*/, "", source); print "properties " $1 " " $2 " " source " " $3 }'
 }
 
-# The kernel mount table entry at the state directory. --mountpoint matches only
-# an exact mountpoint, because --target could return the containing root
+# The kernel mount table entry at one directory. --mountpoint matches only an
+# exact mountpoint, because --target could return the containing root
 # filesystem. findmnt exits 1 both when nothing is mounted there and on failure,
 # so its status is ignored and an empty section is only a missing observation.
-mount_info() {
+mount_at() {
   command -v findmnt >/dev/null || return 1
-  findmnt --kernel --json --mountpoint "$STATE" --output SOURCE,FSTYPE,TARGET,FSROOT,OPTIONS
+  findmnt --kernel --json --mountpoint "$1" --output SOURCE,FSTYPE,TARGET,FSROOT,OPTIONS
   return 0
 }
+
+mount_info() { mount_at "$STATE"; }
+artifacts_mount_info() { mount_at "$ARTIFACTS"; }
 
 # Whether the state directory holds nothing, and whether every retained metadata
 # entry is present as a real entry and not a symbolic link. A directory that
@@ -340,6 +394,8 @@ section candidates madison_info
 section packages package_info
 section software software_info
 section simulation simulation_info
+section stage stage_info
+section index index_info
 section services service_info
 section listeners listener_info
 section network network_info
@@ -347,6 +403,7 @@ section access access_info
 section idmap idmap_info
 section zfs zfs_info
 section mount mount_info
+section artifactsmount artifacts_mount_info
 section state state_info
 section api api_info
 if api_reachable; then

@@ -1,15 +1,16 @@
-import { INCUS_SPEC, type IncusAction } from '../../../../host/incus/spec'
-import { STATE_MOUNTPOINT } from '../../../../host/mount'
+import { INCUS_SPEC, REQUIRED_PACKAGES, type IncusAction } from '../../../../host/incus/spec'
+import { ARTIFACTS_MOUNTPOINT, STATE_MOUNTPOINT } from '../../../../host/mount'
 import { INCUS_STEPS } from './steps'
 import { reportApproval, stepsOf, type ApprovalScreen } from '../../../../terminal/approval'
 import { rangeText } from '../../../../host/incus/idmap'
 import { maskedUnits } from '../../../../host/incus/verify'
 import { datasetNamesOf } from '../../../../host/zfs/spec'
 import { actionsOf, instanceKey } from '../../../../host/incus/types'
-import { stateMountText } from './format'
+import { mountText } from './format'
 import type {
   AccessPlan,
   ApprovedPlan,
+  CapturePlan,
   ClosePlan,
   IdRange,
   InitializePlan,
@@ -19,6 +20,7 @@ import type {
   Plan,
   ReleasePlan,
   RepositoryPlan,
+  RestorePlan,
 } from '../../../../host/incus/types'
 import type { DiagnosticFact } from '../../../../diagnostic/error'
 import type { Reporter } from '../../../../terminal/reporter'
@@ -30,39 +32,17 @@ export interface PlanPreview {
 
 type Details = Partial<Record<IncusAction, string>>
 
-const REPOSITORY_LASTING =
-  'The exact-package pins exclude other Incus builds, including security updates, until repinned. APT refreshes every configured source.'
+const REPOSITORY_LASTING = 'APT refreshes every configured source, not only the approved repository.'
 const GUARD_LASTING = 'The guard makes the daemon service refuse to start unless the recorded state dataset is mounted.'
 const GUARD_NOT_ESTABLISHED = 'Protection against an administrator who runs the daemon directly.'
+const BYTES_PER_MIB = 1_048_576
 
 function repositoryApproval(plan: RepositoryPlan): string {
   return plan.add ? 'Add the Zabbly repository and refresh APT' : 'Refresh APT package lists'
 }
 
-/**
- * The wording of the default-no approval that goes with each displayed plan.
- * The screen above it lists the steps and the details.
- */
-export function approvalLabel(plan: ApprovedPlan): string {
-  switch (plan.kind) {
-    case 'close':
-      if (plan.repository === null) {
-        return 'Close the host to Incus'
-      }
-      return plan.repository.add ? 'Close Incus and add the Zabbly repository' : 'Close Incus and refresh APT'
-    case 'repository':
-      return repositoryApproval(plan)
-    case 'packages':
-      return 'Install the pinned Incus packages'
-    case 'open':
-      return plan.retained === null ? 'Open Incus on the state dataset' : 'Reopen the preserved Incus installation'
-    case 'initialize':
-      return 'Initialize Incus from the preseed'
-    case 'access':
-      return `Grant ${plan.account} root-equivalent Incus access`
-    case 'release':
-      return 'Stop Incus workloads and mask Incus'
-  }
+function megabytes(bytes: number): string {
+  return `${(bytes / BYTES_PER_MIB).toFixed(1)} MiB`
 }
 
 function fileState(file: Observation['repository']['key']): string {
@@ -84,10 +64,6 @@ function accessState({ account, groupExists, member }: Observation['access']): s
   return `${account} ${member ? 'is' : 'is not'} a member of ${group} (account database; not a test of SSH forwarding)`
 }
 
-/**
- * A null list is a file that could not be read, which is not the same as a
- * readable file that lists no root range.
- */
 function rangesState(ranges: readonly IdRange[] | null): string {
   if (ranges === null) {
     return 'unreadable'
@@ -95,10 +71,6 @@ function rangesState(ranges: readonly IdRange[] | null): string {
   return ranges.map(rangeText).join(', ') || 'no root range'
 }
 
-/**
- * The full inventory, shown only when a plan is refused, because that evidence
- * explains the refusal.
- */
 function hostFacts(observation: Observation): DiagnosticFact[] {
   const {
     system,
@@ -114,6 +86,7 @@ function hostFacts(observation: Observation): DiagnosticFact[] {
     idmap,
     zfs,
     stateMount,
+    artifactsMount,
     state,
     api,
   } = observation
@@ -172,7 +145,8 @@ function hostFacts(observation: Observation): DiagnosticFact[] {
         )
         .join(', ') || 'none',
     ],
-    ['State mount', stateMountText(stateMount)],
+    ['State mount', mountText(stateMount, STATE_MOUNTPOINT)],
+    ['Artifacts mount', mountText(artifactsMount, ARTIFACTS_MOUNTPOINT)],
     [
       'State directory',
       state.empty
@@ -190,9 +164,8 @@ function hostFacts(observation: Observation): DiagnosticFact[] {
 
 function repositoryDetails(plan: RepositoryPlan): Details {
   const { uri, suite } = INCUS_SPEC.repository
-  const version = INCUS_SPEC.packageVersions[plan.architecture]
   return {
-    'add-repository': `${uri} (${suite}) signing key, source, and pins for incus-base and incus-client ${version} (${plan.architecture})`,
+    'add-repository': `${uri} (${suite}) signing key and source for ${plan.architecture}`,
     'refresh-lists': 'update every configured APT source, not only Zabbly',
   }
 }
@@ -217,33 +190,64 @@ function closeScreen(plan: ClosePlan): ApprovalScreen {
 
 function repositoryScreen(plan: RepositoryPlan): ApprovalScreen {
   return {
-    title: 'Proposed repository and package pins',
+    title: 'Proposed repository',
     steps: stepsOf(actionsOf(plan), INCUS_STEPS, repositoryDetails(plan)),
     stays: 'Packages, pools, mounts, and units; no package is installed.',
     lasting: REPOSITORY_LASTING,
-    notEstablished: 'That the pinned builds are installable; the package step checks that.',
+    notEstablished: 'Which Incus build will be selected; the package step shows it and asks again.',
   }
 }
 
 function packagesScreen(plan: PackagesPlan): ApprovalScreen {
+  const { versions, stageDirectory, repository } = INCUS_SPEC
   const details: Details = {
-    'install-packages': plan.install.map(change => `${change.name} ${change.version}`).join(', '),
+    'pin-versions': `${repository.preferencesFile} pins ${REQUIRED_PACKAGES.join(' and ')} to exactly ${plan.preferences.version} and excludes every other version`,
+    'install-packages': `${plan.install.map(change => `${change.name} ${change.version}`).join(', ')}; downloaded packages are kept in ${stageDirectory}`,
   }
   return {
     title: 'Proposed packages',
     steps: stepsOf(actionsOf(plan), INCUS_STEPS, details),
     stays: 'No unit is opened and no pool is touched. Containers only; the VM stack is out of scope.',
-    lasting:
-      'The package sysctls apply host-wide. Purging the Incus packages deletes /var/lib/incus (the state dataset), which Qiln cannot prevent.',
+    lasting: `The Zabbly stable channel moves. Qiln selected the newest build that APT lists from ${versions.minimum} up to, not including, ${versions.maximumExclusive}, and the pin keeps other builds out until it is deliberately changed. A monthly release stops receiving upstream security fixes once its successor ships, so a retained build keeps its bytes but accumulates known, unpatched exposure. The package sysctls apply host-wide. The downloaded packages stay on the root volume, which Qiln never empties, until a capture copies them to the artifacts dataset. Purging the Incus packages deletes /var/lib/incus (the state dataset), which Qiln cannot prevent.`,
     notEstablished:
-      'Runtime readiness. A package script that unmasks a unit or starts the daemon is detected afterwards, not prevented.',
+      'Runtime readiness, and that the selected build is free of known vulnerabilities. A package script that unmasks a unit or starts the daemon is detected afterwards, not prevented.',
   }
 }
 
-/**
- * The open and, when it is not installed yet, the storage-identity guard that
- * precedes it under the same approval.
- */
+function captureScreen(plan: CapturePlan): ApprovalScreen {
+  const names = datasetNamesOf(plan.pool)
+  const bytes = plan.manifest.reduce((total, entry) => total + entry.size, 0)
+  return {
+    title: 'Proposed capture',
+    steps: stepsOf(actionsOf(plan), INCUS_STEPS, {
+      capture: `${plan.manifest.length} package files, ${megabytes(bytes)} in total, copied from ${INCUS_SPEC.stageDirectory} to ${names.artifacts} mounted at ${ARTIFACTS_MOUNTPOINT}; each file is checked against its approved size and SHA-256 before and after the copy, then the dataset is unmounted`,
+    }),
+    stays: `Packages, pools, the state and storage datasets, and the staging directory, which Qiln never empties.`,
+    lasting: `The artifacts dataset keeps the package files, and their manifest with its digests is retained with this deployment. The dataset is never mounted at boot. A retained build keeps its bytes but accumulates known, unpatched exposure once upstream support ends.`,
+    notEstablished:
+      'That the copied files still match after a later mount, or that the Incus build is free of known vulnerabilities. The copied content is checked inside the mount window, because the unmounted dataset cannot be read afterwards.',
+  }
+}
+
+function restoreScreen(plan: RestorePlan): ApprovalScreen {
+  const { repository } = INCUS_SPEC
+  const names = datasetNamesOf(plan.pool)
+  const bytes = plan.manifest.reduce((total, entry) => total + entry.size, 0)
+  return {
+    title: 'Proposed restore of the retained packages',
+    steps: stepsOf(actionsOf(plan), INCUS_STEPS, {
+      'pin-versions': `${repository.preferencesFile} pins ${REQUIRED_PACKAGES.join(' and ')} to exactly ${plan.preferences.version} and excludes every other version`,
+      restore: `${plan.manifest.length} retained package files, ${megabytes(bytes)} in total, installed from ${names.artifacts} mounted at ${ARTIFACTS_MOUNTPOINT}; each file is checked against its approved size and SHA-256, APT resolves only from those files with its package lists and sources emptied, then the dataset is unmounted`,
+    }),
+    stays:
+      'Every APT source and package list, and every unit. No repository is contacted and no newer build is substituted. The install is refused before any change if APT would upgrade or remove a package, or plan one outside the retained files.',
+    lasting:
+      'The retained build keeps its bytes but accumulates known, unpatched exposure once upstream support ends. The package sysctls apply host-wide, and the preferences file keeps other builds out until it is deliberately changed. Purging the Incus packages deletes /var/lib/incus (the state dataset), which Qiln cannot prevent.',
+    notEstablished:
+      'Runtime readiness, and that the retained build is free of known vulnerabilities. The files are checked inside the mount window, because the unmounted dataset cannot be read afterwards. A package script that unmasks a unit or starts the daemon is detected afterwards, not prevented.',
+  }
+}
+
 function openScreen(plan: OpenPlan): ApprovalScreen {
   const { retained } = plan
   const { guard, idmap, open } = INCUS_SPEC
@@ -284,7 +288,7 @@ function initializeScreen(plan: InitializePlan): ApprovalScreen {
       initialize: `register pool ${plan.pool} (GUID ${plan.guid}) on ${datasetNamesOf(plan.pool).incus} and the managed bridge ${network.name} (${network.subnet})`,
     }),
     stays:
-      'The default profile, the state dataset, and the local-only API (no remote listener). No image, instance, or project is created.',
+      'The default profile, the state and artifacts datasets, and the local-only API (no remote listener). No image, instance, or project is created.',
     lasting: 'Initialization is not atomic, and Qiln never relies on a rollback.',
     notEstablished: 'Runtime readiness.',
   }
@@ -322,6 +326,10 @@ function screenOf(plan: ApprovedPlan): ApprovalScreen {
       return repositoryScreen(plan)
     case 'packages':
       return packagesScreen(plan)
+    case 'capture':
+      return captureScreen(plan)
+    case 'restore':
+      return restoreScreen(plan)
     case 'open':
       return openScreen(plan)
     case 'initialize':
@@ -330,6 +338,32 @@ function screenOf(plan: ApprovedPlan): ApprovalScreen {
       return accessScreen(plan)
     case 'release':
       return releaseScreen(plan)
+  }
+}
+
+export function approvalLabel(plan: ApprovedPlan): string {
+  switch (plan.kind) {
+    case 'close':
+      if (plan.repository === null) {
+        return 'Close the host to Incus'
+      }
+      return plan.repository.add ? 'Close Incus and add the Zabbly repository' : 'Close Incus and refresh APT'
+    case 'repository':
+      return repositoryApproval(plan)
+    case 'packages':
+      return 'Pin and install the selected Incus packages'
+    case 'capture':
+      return 'Copy the installed Incus package files to the artifacts dataset'
+    case 'restore':
+      return 'Pin and restore the retained Incus packages from the artifacts dataset'
+    case 'open':
+      return plan.retained === null ? 'Open Incus on the state dataset' : 'Reopen the preserved Incus installation'
+    case 'initialize':
+      return 'Initialize Incus from the preseed'
+    case 'access':
+      return `Grant ${plan.account} root-equivalent Incus access`
+    case 'release':
+      return 'Stop Incus workloads and mask Incus'
   }
 }
 
@@ -343,6 +377,8 @@ export function reportPlan(reporter: Reporter, { observation, plan }: PlanPrevie
     case 'refused':
       reporter.section('Observed on the host (read-only)')
       reporter.facts(hostFacts(observation))
+      return
+    case 'select':
       return
     case 'ready':
       reporter.section('Incus baseline')

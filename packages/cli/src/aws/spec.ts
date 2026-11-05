@@ -216,7 +216,7 @@ export const AWS_SPEC = Object.freeze({
   limits: {
     record: 65_536,
     zfs: 131_072,
-    incus: 131_072,
+    incus: 262_144,
     config: 65_536,
     cache: 262_144,
     privateKey: 4_096,

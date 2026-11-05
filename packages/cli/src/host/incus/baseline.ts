@@ -5,28 +5,16 @@ import { baselineSchema, type Baseline, type Observation, type PackageChange } f
 export { baselineSchema }
 export type { Baseline }
 
-/**
- * The part of a baseline that selected pins can express without an observation.
- */
 type Software = Pick<Baseline, 'architecture' | 'packages'>
 
 /**
- * Whether a replacement host can reuse the recorded software. `install` lists
- * only recorded pinned packages that are absent, so the caller still has to
- * confirm that each exact version is available. `differs` is never reconciled:
- * no upgrade, downgrade, or architecture swap is offered.
+ * Whether a replacement host can reuse the recorded software. `missing` means
+ * that nothing differs but a recorded pinned package is absent, which a restore
+ * from the retained package files answers. `differs` is never reconciled: no
+ * upgrade, downgrade, or architecture swap is offered.
  */
-export type Comparison =
-  | { kind: 'match' }
-  | { kind: 'install'; packages: PackageChange[] }
-  | { kind: 'differs'; reasons: string[] }
+export type Comparison = { kind: 'match' } | { kind: 'missing' } | { kind: 'differs'; reasons: string[] }
 
-/**
- * Incus packages must return at exactly their recorded version: their builds
- * identify the bundled LXC runtime and helpers, so distribution LXC and uidmap
- * packages are not pins. Other recorded packages, such as ZFS, are judged by
- * version floors.
- */
 const PINNED_PATTERNS = INCUS_SPEC.software.pinned.map(glob => new RegExp(`^${glob.replace('*', '.*')}$`))
 
 export function isPinned(name: string): boolean {
@@ -60,12 +48,12 @@ export function compareSoftware(recorded: Software, observation: Observation): C
       reasons: [`The host package architecture is ${packageArchitecture}, but ${recorded.architecture} was recorded.`],
     }
   }
-  const missing: PackageChange[] = []
+  let missing = false
   const reasons: string[] = []
   for (const wanted of recorded.packages.filter(item => isPinned(item.name))) {
     const found = observation.software.find(item => item.name === wanted.name)
     if (found === undefined) {
-      missing.push(wanted)
+      missing = true
     } else if (found.version !== wanted.version || found.architecture !== wanted.architecture) {
       reasons.push(`${wanted.name} ${found.version} is installed, but ${wanted.version} was recorded.`)
     }
@@ -73,7 +61,7 @@ export function compareSoftware(recorded: Software, observation: Observation): C
   if (reasons.length > 0) {
     return { kind: 'differs', reasons }
   }
-  return missing.length === 0 ? { kind: 'match' } : { kind: 'install', packages: missing }
+  return missing ? { kind: 'missing' } : { kind: 'match' }
 }
 
 /**

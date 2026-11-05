@@ -1,37 +1,29 @@
 import { z } from 'zod'
 import { SCRIPTS } from './recipe'
-import { ARCHITECTURES, INCUS_SPEC, packagePins } from './spec'
+import { ARCHITECTURES, INCUS_SPEC } from './spec'
 import { PACKAGE_SPEC, transactionOf } from '../apt'
-import { isPinned } from './baseline'
 import { shellCommand } from '../shell'
 import { datasetsOf } from '../zfs/dataset'
 import { InstallerError } from '../../diagnostic/error'
-import { mountOf, STATE_MOUNTPOINT } from '../mount'
+import { ARTIFACTS_MOUNTPOINT, mountOf, STATE_MOUNTPOINT } from '../mount'
 import { outputOf, tagged, type Section } from '../output'
 import { observationSchema, type IdRange, type InspectTarget, type Observation } from './types'
 import type { Remote } from '../../transport/ssh/connections'
 
-/**
- * Authored wording only: raw output, host names, and tool messages never enter
- * the diagnostic.
- */
+
+const { fields, required, sections, succeeded, yesNo } = outputOf(inspectionFailure)
+const envelopeSchema = z.looseObject({ type: z.literal('sync'), metadata: z.unknown() })
+const settings = z
+  .record(z.string(), z.string())
+  .nullable()
+  .transform(value => value ?? {})
+
 function inspectionFailure(reason: string): InstallerError {
   return new InstallerError({
     code: 'AWS_INCUS_INSPECTION_FAILED',
     facts: [['Reason', reason]],
   })
 }
-
-const { fields, required, sections, succeeded, yesNo } = outputOf(inspectionFailure)
-
-/**
- * Provider JSON is validated loosely and then reduced to the strict observation.
- * A nil Go map or slice marshals as null, so both read as empty.
- */
-const settings = z
-  .record(z.string(), z.string())
-  .nullable()
-  .transform(value => value ?? {})
 
 function nullableList<T extends z.ZodType>(item: T) {
   return z
@@ -40,12 +32,6 @@ function nullableList<T extends z.ZodType>(item: T) {
     .transform(value => value ?? [])
 }
 
-const envelopeSchema = z.looseObject({ type: z.literal('sync'), metadata: z.unknown() })
-
-/**
- * `driver` and `driver_version` are pipe-separated lists that correspond by
- * position, such as `lxc | qemu` and `7.0.0 | 11.1.2`.
- */
 const serverSchema = z.looseObject({
   config: settings,
   api_extensions: z.array(z.string()),
@@ -188,6 +174,33 @@ function installedOf(section: Section) {
       const [name, version, architecture, state] = line.split('\t')
       return state === 'installed' ? [{ name, version, architecture }] : []
     })
+}
+
+/**
+ * Lines are `file <size> <sha256> <name>`. A missing field fails validation, so
+ * an incomplete line never reads as a staged file.
+ */
+function stagedOf(section: Section) {
+  return tagged(section.lines).map(([tag, value]) => {
+    if (tag !== 'file') {
+      throw inspectionFailure('The staging inspection reported an unrecognized line.')
+    }
+    const [size, sha256, name] = value.split(' ')
+    return { name, size: Number(size), sha256 }
+  })
+}
+
+/**
+ * Lines are `entry <package> <version> <architecture> <size> <sha256> <file>`.
+ */
+function indexedOf(section: Section) {
+  return tagged(section.lines).map(([tag, value]) => {
+    if (tag !== 'entry') {
+      throw inspectionFailure('The index inspection reported an unrecognized line.')
+    }
+    const [name, version, architecture, size, sha256, filename] = value.split(' ')
+    return { package: name, version, architecture, filename, size: Number(size), sha256 }
+  })
 }
 
 /**
@@ -366,8 +379,11 @@ function apiOf(found: ReadonlyMap<string, Section>) {
  * - `target.pool` selects the one ZFS pool whose datasets are reported. Null
  *   reports none, which is how the software stage runs before any pool is
  *   imported.
- * - A fresh installation simulates the exact native package pins, while
- *   `target.retained` simulates its recorded pinned packages instead.
+ * - `target.pins` are the packages whose exact versions are simulated. Null
+ *   simulates none, which is how a fresh host looks before it selected a build.
+ * - `target.closure` is the installed transaction whose staged files and index
+ *   records are reported. Null reports none, so the files are only hashed when
+ *   a capture is pending.
  * - `approved` names the packages of an approved transaction, so a verification
  *   checks all of them. They are reported but never simulated.
  * Only the API sections touch Incus, and only while the daemon service is
@@ -379,8 +395,20 @@ export async function inspectHost(
   target: InspectTarget,
   approved: readonly string[] = [],
 ): Promise<Observation> {
-  const { repository, network, access, guard, sysctl, packages, companions, excluded, software, retained, inspect } =
-    INCUS_SPEC
+  const {
+    repository,
+    network,
+    access,
+    guard,
+    sysctl,
+    packages,
+    companions,
+    excluded,
+    software,
+    retained,
+    inspect,
+    stageDirectory,
+  } = INCUS_SPEC
   const architectureResult = await remote.exec('dpkg --print-architecture', inspect)
   const architecture = ARCHITECTURES.find(name => name === architectureResult.stdout.trim())
   if (architectureResult.exitCode !== 0 || architecture === undefined) {
@@ -388,11 +416,9 @@ export async function inspectHost(
   }
   const known = new Set<string>([...packages, ...companions, ...excluded])
   const reported = [...companions, ...excluded, ...approved.filter(name => !known.has(name))]
-  const selected = target.retained === undefined || target.retained === null
-    ? packagePins(architecture)
-    : target.retained.baseline.packages.filter(change => isPinned(change.name))
-  const specifications = selected.map(change => `${change.name}=${change.version}`)
-  if (!specifications.every(item => PACKAGE_SPEC.test(item))) {
+  const specifications = (target.pins ?? []).map(change => `${change.name}=${change.version}`)
+  const closure = (target.closure ?? []).map(change => `${change.name}=${change.version}`)
+  if (![...specifications, ...closure].every(item => PACKAGE_SPEC.test(item))) {
     throw inspectionFailure('A selected package version is not a plain name and version.')
   }
   const command = shellCommand(
@@ -411,6 +437,8 @@ export async function inspectHost(
       repository.preferencesFile,
       sysctl.file,
       sysctl.key,
+      stageDirectory,
+      ARTIFACTS_MOUNTPOINT,
       ...packages,
       '--',
       ...reported,
@@ -418,6 +446,8 @@ export async function inspectHost(
       ...specifications,
       '--',
       ...retained.metadata,
+      '--',
+      ...closure,
       '--',
       ...software.patterns,
     ],
@@ -439,6 +469,8 @@ export async function inspectHost(
     packages: installedOf(succeeded(found, 'packages')),
     software: installedOf(succeeded(found, 'software')),
     transaction: transactionOf(simulation, inspectionFailure),
+    stage: stagedOf(succeeded(found, 'stage')),
+    index: indexedOf(succeeded(found, 'index')),
     services: servicesOf(succeeded(found, 'services')),
     listeners: listenersOf(succeeded(found, 'listeners')),
     network: networkOf(succeeded(found, 'network')),
@@ -446,6 +478,7 @@ export async function inspectHost(
     idmap: idmapOf(succeeded(found, 'idmap')),
     zfs: zfsOf(succeeded(found, 'zfs')),
     stateMount: mountOf(succeeded(found, 'mount'), inspectionFailure),
+    artifactsMount: mountOf(succeeded(found, 'artifactsmount'), inspectionFailure),
     state: stateOf(succeeded(found, 'state')),
     api: apiOf(found),
   }

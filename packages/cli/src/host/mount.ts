@@ -1,11 +1,8 @@
 import { z } from 'zod'
 import type { Failure, Section } from './output'
 
-/**
- * The directory that Incus keeps its state in, which the retained layout mounts
- * from the `server-state` dataset.
- */
 export const STATE_MOUNTPOINT = '/var/lib/incus'
+export const ARTIFACTS_MOUNTPOINT = '/var/lib/qiln/artifacts'
 
 const text = z.string().min(1).max(2_048)
 

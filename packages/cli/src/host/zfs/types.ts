@@ -3,22 +3,11 @@ import { ZFS_SPEC } from './spec'
 import { mountSchema } from '../mount'
 
 const { defaults } = ZFS_SPEC
-
-/**
- * Pool names must start with a letter, and OpenZFS reserves several prefixes.
- * This is deliberately narrower than what OpenZFS accepts.
- */
 const POOL_NAME = /^(?!c[0-9]|mirror|raidz|draid|spare|log)[a-z][a-z0-9_-]{0,31}$/
-
 const onOff = z.enum(['on', 'off'])
 const compression = z.enum(['lz4', 'zstd', 'off'])
 
 export const poolNameSchema = z.string().regex(POOL_NAME)
-
-/**
- * Policy selects pool configuration only. It never carries devices, commands,
- * force switches, or authorization.
- */
 export const policySchema = z.strictObject({
   poolName: poolNameSchema.default(defaults.poolName),
   arcMaxPercent: z.number().gt(0).lt(100).default(defaults.arcMaxPercent),
@@ -31,10 +20,6 @@ export const policySchema = z.strictObject({
 export type Policy = z.infer<typeof policySchema>
 export const DEFAULT_POLICY: Policy = policySchema.parse({})
 
-/**
- * Identities derived from the protected deployment record, never from the
- * host. `dataBytes` is the planned data volume capacity in bytes.
- */
 export interface ZfsTarget {
   instanceId: string
   rootVolumeId: string
@@ -46,7 +31,7 @@ export interface ZfsTarget {
  * The pool that retained evidence expects on the target volume, found through
  * the deployment's own record or its explicit volume-reuse chain. A plan must
  * never contradict it, and `deployment` names the record that holds it.
- * `datasets` are the GUIDs of its two datasets, null while none was verified.
+ * `datasets` are the GUIDs of its three datasets, null while none was verified.
  * `staged` means this deployment's own evidence shows the pool created or
  * imported, its datasets verified, and its scrub timer enabled, with no later
  * unmount or export. `ready` additionally means the state dataset was mounted.
@@ -60,10 +45,6 @@ export interface RecordedPool {
   ready: boolean
 }
 
-/**
- * What the journal records about the pool of one deployment, as far as
- * verification and the state mount need it.
- */
 export interface PoolIdentity {
   guid: string
   datasets: PoolDatasets | null
@@ -86,13 +67,10 @@ const text = z.string().min(1).max(2_048)
 const count = z.int().nonnegative()
 const guid = z.string().regex(/^[0-9]+$/)
 
-/**
- * The GUIDs of the two datasets of a pool, as decimal text. Names and paths
- * alone do not establish which dataset is meant.
- */
 export const poolDatasetsSchema = z.strictObject({
   state: guid,
   incus: guid,
+  artifacts: guid,
 })
 
 export type PoolDatasets = z.infer<typeof poolDatasetsSchema>
@@ -129,12 +107,6 @@ const propertySchema = z.strictObject({
   source: text,
 })
 
-/**
- * Identity and mount properties of one dataset. `source` is the first word of
- * the property source (`local`, `default`, `inherited`, ...), which matters
- * because `canmount=noauto` is not inherited. Names, paths, and properties
- * alone do not establish ownership.
- */
 export const datasetSchema = z.strictObject({
   name: text,
   guid,
@@ -308,7 +280,7 @@ export const prerequisitePlanSchema = z.strictObject({
 })
 
 /**
- * Creates the pool and its two datasets, enables the scrub timer, and mounts
+ * Creates the pool and its three datasets, enables the scrub timer, and mounts
  * the state dataset. ZFS assigns the GUIDs, so they are learned from the
  * verified dataset step, and the mount takes them from the journal record.
  */
@@ -343,7 +315,7 @@ const targetDiskSchema = z.strictObject({
  * dataset GUIDs, which the pool must hold exactly. A null value means the pool
  * was recorded before its datasets were verified, for example after an
  * interrupted creation: the pool must then hold only its root dataset, and the
- * plan creates the two datasets after the import. `imported` records that the
+ * plan creates the three datasets after the import. `imported` records that the
  * pool was already imported when planned, so the import step is an idempotent
  * confirmation. `mountOnly` records that the pool was already staged, so only
  * the mount remains. The parent disk stays the identity authority, while
@@ -382,25 +354,10 @@ export type CreatePlan = z.infer<typeof createPlanSchema>
 export type ImportPlan = z.infer<typeof importPlanSchema>
 export type ExportPlan = z.infer<typeof exportPlanSchema>
 
-/**
- * The plans that ask for approval and are persisted with it.
- */
 export type ApprovedPlan = PrerequisitePlan | CreatePlan | ImportPlan | ExportPlan
-
-/**
- * What `planOf` can decide.
- */
 export type PreparationPlan = RefusedPlan | RebootPlan | ReadyPlan | PrerequisitePlan | CreatePlan | ImportPlan
-
-/**
- * Preparation plans plus what `releasePlanOf` decides, only before AWS removal.
- */
 export type Plan = PreparationPlan | ExportPlan | AbsentPlan
 
-/**
- * Whether the approved plan creates the pool's two datasets: a new pool, or an
- * imported pool whose datasets were never verified.
- */
 export function createsDatasets(plan: ApprovedPlan): plan is CreatePlan | (ImportPlan & { datasets: null }) {
   return plan.kind === 'create' || (plan.kind === 'import' && plan.datasets === null)
 }

@@ -24,7 +24,7 @@ const stepSchema = stepSchemaOf(z.enum(STEP_ACTIONS))
 /**
  * The GUID stays a decimal string and is never converted to a number. `layout`
  * is the revision of the dataset arrangement, a literal of the record version,
- * and `datasets` holds the GUIDs of its two datasets once they were verified.
+ * and `datasets` holds the GUIDs of its three datasets once they were verified.
  * `observedAt` is the observation of the verified create or import step and
  * does not move when the datasets are recorded.
  */
@@ -32,7 +32,7 @@ const poolSchema = z.strictObject({
   name: poolNameSchema,
   guid: z.string().regex(/^[0-9]+$/),
   volumeId,
-  layout: z.literal(1),
+  layout: z.literal(2),
   datasets: poolDatasetsSchema.nullable(),
   observedAt: timestamp,
 })

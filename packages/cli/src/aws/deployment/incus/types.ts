@@ -1,9 +1,10 @@
 import { z } from 'zod'
 import { AWS_RECORD_VERSION } from '../../spec'
-import { baselineSchema } from '../../../host/incus/baseline'
 import { INCUS_ACTIONS } from '../../../host/incus/spec'
+import { baselineSchema } from '../../../host/incus/baseline'
 import {
   accessPlanSchema,
+  capturePlanSchema,
   closePlanSchema,
   identitySchema,
   initializePlanSchema,
@@ -11,6 +12,7 @@ import {
   packagesPlanSchema,
   releasePlanSchema,
   repositoryPlanSchema,
+  restorePlanSchema,
 } from '../../../host/incus/types'
 import { bindingSchema } from '../journal/binding'
 import { authorizationSchemaOf } from '../../../journal/history'
@@ -22,6 +24,8 @@ const authorizationSchema = authorizationSchemaOf(
     closePlanSchema,
     repositoryPlanSchema,
     packagesPlanSchema,
+    capturePlanSchema,
+    restorePlanSchema,
     openPlanSchema,
     initializePlanSchema,
     accessPlanSchema,
@@ -32,6 +36,11 @@ const authorizationSchema = authorizationSchemaOf(
 /**
  * Accounting and recovery evidence for Incus preparation, not a resumable
  * checkpoint. Status is derived from these facts and never stored.
+ * - Packages plans keep the frozen install list, which is the closure that a
+ *   capture later copies. Capture plans keep the exact manifest of the copied
+ *   package files, and the manifest of a verified capture is the one that the
+ *   deployment retains. Restore plans keep the manifest that was installed from
+ *   the artifacts dataset, which the deployment then retains in turn.
  * - Initialize and preserved-open plans keep the exact approved preseed bytes,
  *   which later verification reads back.
  * - `baseline` (installed software and root subordinate-ID ranges) and

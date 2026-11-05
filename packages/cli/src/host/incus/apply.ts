@@ -1,39 +1,27 @@
-import { guardOf, type Guard } from './activation'
-import { rangeWords } from './idmap'
 import { SCRIPTS, sha256Of } from './recipe'
 import { INCUS_SPEC, repositoryPreferences, repositorySource, sysctlOverride, type IncusAction } from './spec'
 import { PACKAGE_SPEC } from '../apt'
-import { STATE_MOUNTPOINT } from '../mount'
+import { ARTIFACTS_MOUNTPOINT, STATE_MOUNTPOINT } from '../mount'
 import { ZFS_SPEC } from '../zfs/spec'
-import { runStep, type StepOutcome } from '../step'
+import { rangeWords } from './idmap'
 import { shellCommand } from '../shell'
+import { manifestWords } from './artifacts'
+import { guardOf, type Guard } from './activation'
+import { runStep, type StepOutcome } from '../step'
 import { InstallerError } from '../../diagnostic/error'
 import { accessPlanSchema, instanceKey, repositoryOf, type ApprovedPlan, type OpenPlan } from './types'
 import type { Remote } from '../../transport/ssh/connections'
 
-/**
- * An action outside its approved plan, or bytes that no longer match their
- * approved digest, are defects of the caller or the recipe, never
- * operator-correctable input.
- */
 function defect(): never {
   throw new InstallerError({
     code: 'INTERNAL_ERROR',
   })
 }
 
-/**
- * The transport has no stdin, so file contents travel as base64 arguments that
- * the script decodes and re-checks against the approved digest.
- */
 function base64(text: string): string {
   return Buffer.from(text, 'utf8').toString('base64')
 }
 
-/**
- * The guard files regenerated from the open plan. All three must still hash to
- * their approved digests, which the guard and open steps share.
- */
 function approvedGuard(plan: OpenPlan): Guard {
   const files = guardOf(plan)
   if (
@@ -82,29 +70,27 @@ function argumentsOf(action: IncusAction, plan: ApprovedPlan): string[] {
         return defect()
       }
       const source = repositorySource(approved.architecture)
-      const preferences = repositoryPreferences(approved.architecture)
       if (
         approved.key.url !== keyUrl ||
         approved.key.sha256 !== keySha256 ||
-        sha256Of(source) !== approved.source.sha256 ||
-        sha256Of(preferences) !== approved.preferences.sha256
+        sha256Of(source) !== approved.source.sha256
       ) {
         return defect()
       }
-      return [
-        keyFile,
-        approved.key.url,
-        approved.key.sha256,
-        sourceFile,
-        base64(source),
-        approved.source.sha256,
-        preferencesFile,
-        base64(preferences),
-        approved.preferences.sha256,
-      ]
+      return [keyFile, approved.key.url, approved.key.sha256, sourceFile, base64(source), approved.source.sha256]
     }
     case 'refresh-lists':
       return repositoryOf(plan) === null ? defect() : [sourceFile]
+    case 'pin-versions': {
+      if (plan.kind !== 'packages' && plan.kind !== 'restore') {
+        return defect()
+      }
+      const preferences = repositoryPreferences(plan.preferences.version)
+      if (sha256Of(preferences) !== plan.preferences.sha256) {
+        return defect()
+      }
+      return [preferencesFile, base64(preferences), plan.preferences.sha256]
+    }
     case 'install-packages': {
       if (plan.kind !== 'packages') {
         return defect()
@@ -113,7 +99,36 @@ function argumentsOf(action: IncusAction, plan: ApprovedPlan): string[] {
       if (!packages.every(item => PACKAGE_SPEC.test(item))) {
         return defect()
       }
-      return packages
+      return [INCUS_SPEC.stageDirectory, ...packages]
+    }
+    case 'capture': {
+      if (plan.kind !== 'capture') {
+        return defect()
+      }
+      return [
+        'capture',
+        plan.pool,
+        plan.guid,
+        ZFS_SPEC.layout.artifacts,
+        plan.datasets.artifacts,
+        ARTIFACTS_MOUNTPOINT,
+        INCUS_SPEC.stageDirectory,
+        ...manifestWords(plan.manifest),
+      ]
+    }
+    case 'restore': {
+      if (plan.kind !== 'restore') {
+        return defect()
+      }
+      return [
+        'restore',
+        plan.pool,
+        plan.guid,
+        ZFS_SPEC.layout.artifacts,
+        plan.datasets.artifacts,
+        ARTIFACTS_MOUNTPOINT,
+        ...manifestWords(plan.manifest),
+      ]
     }
     case 'open': {
       if (plan.kind !== 'open') {
@@ -155,6 +170,8 @@ function argumentsOf(action: IncusAction, plan: ApprovedPlan): string[] {
         plan.datasets.state,
         layout.incus,
         plan.datasets.incus,
+        layout.artifacts,
+        plan.datasets.artifacts,
         STATE_MOUNTPOINT,
         name,
         subnet,

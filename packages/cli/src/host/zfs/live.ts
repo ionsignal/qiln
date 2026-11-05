@@ -49,20 +49,22 @@ export function isLivePool(observation: Observation, expected: ExpectedPool): bo
 }
 
 /**
- * The GUIDs of the two datasets when the pool holds exactly its root dataset,
- * the state dataset, and the storage dataset. The state dataset must be a
- * filesystem with its mountpoint and canmount=noauto set locally, because
- * `noauto` is not inherited. Anything else is null.
+ * The GUIDs of the three datasets when the pool holds exactly its root dataset,
+ * the state dataset, the storage dataset, and the artifacts dataset. The state
+ * dataset must be a filesystem with its mountpoint and canmount=noauto set
+ * locally, because `noauto` is not inherited. Anything else is null.
  */
 export function readLayout(observation: Observation, pool: string): PoolDatasets | null {
   const topLevel = observation.pools.detail?.topLevel ?? []
   const names = datasetNamesOf(pool)
   const state = topLevel.find(dataset => dataset.name === names.state)
   const incus = topLevel.find(dataset => dataset.name === names.incus)
+  const artifacts = topLevel.find(dataset => dataset.name === names.artifacts)
   if (
     state === undefined ||
     incus === undefined ||
-    topLevel.length !== 3 ||
+    artifacts === undefined ||
+    topLevel.length !== 4 ||
     !topLevel.some(dataset => dataset.name === pool) ||
     state.type !== 'filesystem' ||
     incus.type !== 'filesystem' ||
@@ -73,11 +75,17 @@ export function readLayout(observation: Observation, pool: string): PoolDatasets
   ) {
     return null
   }
-  return { state: state.guid, incus: incus.guid }
+  return { state: state.guid, incus: incus.guid, artifacts: artifacts.guid }
 }
 
 export function sameDatasets(left: PoolDatasets | null, right: PoolDatasets | null): boolean {
-  return left !== null && right !== null && left.state === right.state && left.incus === right.incus
+  return (
+    left !== null &&
+    right !== null &&
+    left.state === right.state &&
+    left.incus === right.incus &&
+    left.artifacts === right.artifacts
+  )
 }
 
 /**

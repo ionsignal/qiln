@@ -51,16 +51,21 @@ async function phase(reporter: Reporter, number: number, title: string, run: () 
  * Prepares the recorded data volume and the Incus installation on it, in five
  * phases. Each plans from a fresh inspection and is applied only after its own
  * default-no approval.
- * 1. Incus close and repository: persistent masks, then the Zabbly repository
- *    and a package-list refresh, before any package effect.
+ * 1. Incus close and repository: persistent masks, then, for a fresh
+ *    installation, the Zabbly repository and a package-list refresh, before any
+ *    package effect. A preserved installation only closes.
  * 2. ZFS prerequisites, refused once Qiln opened Incus, because a package
  *    script could disturb the running daemon.
- * 3. Incus packages: the exact pins, installed while the host is closed.
+ * 3. Incus packages: the exact pins of a fresh installation, installed while the
+ *    host is closed. A preserved installation has nothing to change here.
  * 4. ZFS storage: create the pool on a blank volume, or import it by its
  *    recorded GUID, then enable its scrub timer and mount its state dataset.
- * 5. Incus activation: the guard and open, then initialization of a fresh
- *    installation or the reopen of a preserved one, never initializing over
- *    retained state, then administrator socket access.
+ * 5. Incus activation: a fresh installation first copies its installed package
+ *    files to the artifacts dataset, and a preserved one first restores its
+ *    retained package files from it, never from a repository. Then the guard and
+ *    open, then initialization of a fresh installation or the reopen of a
+ *    preserved one, never initializing over retained state, then administrator
+ *    socket access.
  * The local writes are the host-key pin, retained before connecting exactly as
  * for verify, and the retained ZFS and Incus preparation evidence.
  */
@@ -166,6 +171,7 @@ export async function prepare(options: AwsDeploymentOptions, reporter: Reporter)
               : 'Incus was opened with local Unix-socket access.',
           ],
           ['Storage', 'The pool is a single disk with no redundancy or backup.'],
+          ['Package files', 'Installed Incus package files are retained on the artifacts dataset.'],
           ['Socket access', 'Group membership applies to new SSH connections only.'],
           ['Not established', 'Workload correctness and runtime readiness.'],
           recipeFact(),

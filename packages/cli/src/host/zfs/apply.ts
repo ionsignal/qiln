@@ -1,17 +1,13 @@
 import { ZFS_SPEC, arcLine, type StepAction } from './spec'
 import { SCRIPTS } from './recipe'
 import { PACKAGE_SPEC } from '../apt'
-import { STATE_MOUNTPOINT } from '../mount'
+import { ARTIFACTS_MOUNTPOINT, STATE_MOUNTPOINT } from '../mount'
 import { runStep, type StepOutcome } from '../step'
 import { shellCommand } from '../shell'
 import { InstallerError } from '../../diagnostic/error'
 import { createsDatasets, type ApprovedPlan, type PoolIdentity } from './types'
 import type { Remote } from '../../transport/ssh/connections'
 
-/**
- * An action outside its approved plan is a defect of the caller, never an
- * operator-correctable input.
- */
 function defect(): never {
   throw new InstallerError({
     code: 'INTERNAL_ERROR',
@@ -57,7 +53,9 @@ function argumentsOf(action: StepAction, plan: ApprovedPlan, pool: PoolIdentity 
       ]
     }
     case 'create-datasets':
-      return createsDatasets(plan) ? [plan.pool, layout.state, layout.incus, STATE_MOUNTPOINT] : defect()
+      return createsDatasets(plan)
+        ? [plan.pool, layout.state, layout.incus, layout.artifacts, STATE_MOUNTPOINT, ARTIFACTS_MOUNTPOINT]
+        : defect()
     case 'import-pool':
       return plan.kind === 'import'
         ? [plan.pool, plan.guid, plan.disk.path, plan.disk.volumeId, plan.disk.member]

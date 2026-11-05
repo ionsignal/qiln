@@ -1,3 +1,5 @@
+import { INCUS_SPEC } from '../host/incus/spec'
+
 const CREDENTIAL_FILES = Object.freeze({
   authorizedKeys: 'authorized_keys',
   nats: 'nats-server.conf',
@@ -85,7 +87,7 @@ export const INSTALLER_SPEC = Object.freeze({
     versionId: '26.04',
     minimumKernelRelease: '6.12.0-0-generic',
     minimumIncusVersion: '7.0',
-    maximumIncusVersionExclusive: '8.0',
+    maximumIncusVersionExclusive: INCUS_SPEC.versions.maximumExclusive,
   },
   tools: [
     {

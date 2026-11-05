@@ -4,7 +4,9 @@ interface RunSpec {
     | 'guard'
     | 'repository'
     | 'refresh'
-    | 'packages'
+    | 'pin'
+    | 'install'
+    | 'artifacts'
     | 'init'
     | 'open'
     | 'access'
@@ -60,10 +62,10 @@ const STEPS = {
       script: 'repository',
       timeoutMs: 60_000,
       refusals: {
-        20: 'The repository or preferences file paths, key URL, contents, or digests were not given or are malformed.',
-        21: 'An APT keyring, source, or preferences directory does not exist, or a file could not be staged.',
-        22: 'The source or preferences bytes do not match their approved SHA-256 digest.',
-        23: 'An existing repository or preferences file is not a regular file holding exactly the approved bytes.',
+        20: 'The repository file paths, key URL, source contents, or digests were not given or are malformed.',
+        21: 'An APT keyring or source directory does not exist, or a file could not be staged.',
+        22: 'The source bytes do not match their approved SHA-256 digest.',
+        23: 'An existing repository file is not a regular file holding exactly the approved bytes.',
         24: 'The guest has no curl, and Qiln does not install prerequisites.',
         25: 'The signing key could not be downloaded from the approved URL.',
         26: 'The downloaded signing key does not match its approved SHA-256 digest.',
@@ -81,17 +83,66 @@ const STEPS = {
       },
     },
   },
+  'pin-versions': {
+    storage: false,
+    run: {
+      script: 'pin',
+      timeoutMs: 30_000,
+      refusals: {
+        20: 'The preferences file path, contents, or digest was not given or is malformed.',
+        21: 'The APT preferences directory does not exist, or the file could not be staged.',
+        22: 'The preferences bytes do not match their approved SHA-256 digest.',
+        23: 'An existing preferences file is not a regular file holding exactly the approved bytes.',
+      },
+    },
+  },
   'install-packages': {
     storage: false,
     run: {
-      script: 'packages',
+      script: 'install',
       timeoutMs: 600_000,
       refusals: {
-        20: 'No packages were given to install.',
+        20: 'The staging directory or the packages to install were not given or are malformed.',
         21: 'APT could not resolve the approved packages from its current package lists.',
         22: 'APT no longer plans exactly the approved package names and versions.',
         23: 'APT would now upgrade or remove other packages.',
         24: 'APT would now configure a package that is not among the approved installations.',
+        25: 'The staging directory for the downloaded packages could not be created.',
+      },
+    },
+  },
+  capture: {
+    storage: true,
+    run: {
+      script: 'artifacts',
+      timeoutMs: 300_000,
+      refusals: {
+        20: 'The mode, the pool name, a GUID, the dataset name, the mountpoint, the staging directory, or a package file entry was not given or is malformed.',
+        21: 'The ZFS module, the ZFS tools, or findmnt is not available.',
+        22: 'The recorded pool is not imported with the approved GUID.',
+        23: 'The artifacts dataset is missing, is not a filesystem, or does not have the approved GUID.',
+        24: 'The artifacts dataset does not have the approved mountpoint and canmount=noauto set locally.',
+        25: 'The artifacts dataset is already mounted, or something else is mounted at its mountpoint.',
+        26: 'A staged package file is missing, is not a regular file, or does not have its approved size and SHA-256 digest.',
+      },
+    },
+  },
+  restore: {
+    storage: true,
+    run: {
+      script: 'artifacts',
+      timeoutMs: 600_000,
+      refusals: {
+        20: 'The mode, the pool name, a GUID, the dataset name, the mountpoint, or a package file entry was not given or is malformed.',
+        21: 'The ZFS module, the ZFS tools, or findmnt is not available.',
+        22: 'The recorded pool is not imported with the approved GUID.',
+        23: 'The artifacts dataset is missing, is not a filesystem, or does not have the approved GUID.',
+        24: 'The artifacts dataset does not have the approved mountpoint and canmount=noauto set locally.',
+        25: 'The artifacts dataset is already mounted, or something else is mounted at its mountpoint.',
+        27: 'A retained package file is missing, is not a regular file, or does not have its approved size and SHA-256 digest. The dataset was unmounted again and nothing was installed.',
+        28: 'APT could not resolve the retained package files offline, so a dependency outside the retained files is missing. The dataset was unmounted again and nothing was installed.',
+        29: 'APT would now upgrade or remove packages, or plan a package outside the retained package files. The dataset was unmounted again and nothing was installed.',
+        30: 'The private package-list directory could not be created.',
       },
     },
   },
@@ -134,7 +185,7 @@ const STEPS = {
         32: 'A managed Incus network, or a network interface with the approved bridge name, already exists.',
         33: 'Incus already holds images, so this is not a fresh initialization.',
         34: 'The Incus daemon is listening on a TCP address.',
-        35: 'The recorded ZFS pool does not hold exactly its root, its state dataset, and its storage dataset, so it does not look fresh.',
+        35: 'The recorded ZFS pool does not hold exactly its root, its state dataset, its storage dataset, and its artifacts dataset, so it does not look fresh.',
         36: 'A host route overlaps the approved bridge subnet.',
         37: 'A recorded dataset does not have its approved GUID.',
         38: 'The recorded state dataset is not the filesystem mounted at the state directory.',
@@ -159,7 +210,6 @@ const STEPS = {
     storage: true,
     run: {
       script: 'workloads',
-      // The SSH layer caps one command at ten minutes, which bounds the graceful stops.
       timeoutMs: 600_000,
       refusals: {
         20: 'The stop timeout or an instance reference was not given or is malformed.',
@@ -176,7 +226,6 @@ const STEPS = {
     storage: true,
     run: {
       script: 'release',
-      // The SSH layer caps one command at ten minutes, which bounds orderly instance shutdown.
       timeoutMs: 600_000,
       refusals: {
         20: 'The Incus unit names were not given or are malformed.',
@@ -201,11 +250,15 @@ const PINNED = ['incus*'] as const
  * - `packages` are simulated and installed, and `companions` must arrive with
  *   them. `excluded` packages are refused if present. The scope is containers
  *   only, so the VM-capable `incus` meta-package is excluded.
- * - `packageVersions` selects one full version per native architecture for both
- *   required packages. APT metadata and simulation must confirm names, versions,
- *   architecture, and availability before installation. The `stable` channel
- *   moves, so the preferences file pins these builds and a later Incus update
- *   needs a deliberate repin.
+ * - `versions` bound the Incus builds that selection may choose, from the lower
+ *   bound up to, not including, the upper one, compared by their leading dotted
+ *   number. The selector takes the newest build that the approved repository
+ *   lists for both required packages. The `stable` channel moves, so the
+ *   preferences file pins the chosen build and a later Incus update needs a
+ *   deliberate repin.
+ * - `stageDirectory` receives the packages that the install downloads, on the
+ *   root volume. Qiln never empties or deletes it. A capture copies them from
+ *   there to the artifacts dataset, and a restore installs from that dataset.
  * - The signing key is downloaded on the host from `keyUrl` and must match
  *   `keySha256`, the SHA-256 of the raw bytes, so a rotated key fails closed.
  *   `fingerprint` is review metadata only.
@@ -247,14 +300,15 @@ const PINNED = ['incus*'] as const
  * - `maximumInstalls` bounds the resolved transaction, not an expected count.
  */
 export const INCUS_SPEC = Object.freeze({
-  recipeRevision: 2,
+  recipeRevision: 5,
   maximumInstalls: 64,
   packages: ['incus-base'],
   companions: ['incus-client'],
-  packageVersions: {
-    amd64: '1:7.6-ubuntu26.04-202611021332',
-    arm64: '1:7.6-ubuntu26.04-202611031730',
+  versions: {
+    minimum: '7.6',
+    maximumExclusive: '8.0',
   },
+  stageDirectory: '/var/cache/qiln/incus-packages',
   excluded: ['incus', 'incus-ui-canonical', 'incus-extra'],
   units: ['incus.socket', 'incus.service', 'incus-user.socket', 'incus-user.service', 'incus-startup.service'],
   open: {
@@ -326,13 +380,12 @@ export const INCUS_SPEC = Object.freeze({
 } as const)
 
 export const ARCHITECTURES = ['amd64', 'arm64'] as const
+export const INCUS_ACTIONS = Object.keys(STEPS) as IncusAction[]
+export const REQUIRED_PACKAGES: readonly string[] = [...INCUS_SPEC.packages, ...INCUS_SPEC.companions]
+export const EXCLUDED_PACKAGES: readonly string[] = INCUS_SPEC.excluded
 
 export type Architecture = (typeof ARCHITECTURES)[number]
 export type IncusAction = keyof typeof STEPS
-export const INCUS_ACTIONS = Object.keys(STEPS) as IncusAction[]
-
-export const REQUIRED_PACKAGES: readonly string[] = [...INCUS_SPEC.packages, ...INCUS_SPEC.companions]
-export const EXCLUDED_PACKAGES: readonly string[] = INCUS_SPEC.excluded
 
 export function affectsStorage(action: IncusAction): boolean {
   return STEPS[action].storage
@@ -352,17 +405,6 @@ export function opens(action: IncusAction): boolean {
  */
 export function releases(action: IncusAction): boolean {
   return action === 'stop-workloads' || action === 'release'
-}
-
-/**
- * The two required packages share one full native package version.
- */
-export function packagePins(architecture: Architecture) {
-  return REQUIRED_PACKAGES.map(name => ({
-    name,
-    version: INCUS_SPEC.packageVersions[architecture],
-    architecture,
-  }))
 }
 
 /**
@@ -389,13 +431,13 @@ export function repositorySource(architecture: Architecture): string {
  * exclusion. Priority 1000 selects it without authorizing a downgrade, and
  * explicit administrator overrides stay outside this configuration.
  */
-export function repositoryPreferences(architecture: Architecture): string {
+export function repositoryPreferences(version: string): string {
   const packages = REQUIRED_PACKAGES.join(' ')
   return (
     [
       '# Managed by Qiln. Do not edit.',
       `Package: ${packages}`,
-      `Pin: version ${INCUS_SPEC.packageVersions[architecture]}`,
+      `Pin: version ${version}`,
       'Pin-Priority: 1000',
       '',
       `Package: ${packages}`,
@@ -405,9 +447,6 @@ export function repositoryPreferences(architecture: Architecture): string {
   )
 }
 
-/**
- * The exact text of the sysctl override, hashed into the approved close plan.
- */
 export function sysctlOverride(): string {
   const { key, value } = INCUS_SPEC.sysctl
   return ['# Managed by Qiln. Do not edit.', `${key}=${value}`].join('\n') + '\n'

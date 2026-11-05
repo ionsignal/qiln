@@ -37,7 +37,7 @@ while IFS='=' read -r key value; do
   esac
 done < "$expectation"
 
-test "$layout" = 1 || refuse 'the expectation file names an unsupported layout'
+test "$layout" = 2 || refuse 'the expectation file names an unsupported layout'
 case $pool in '' | *[!a-z0-9_-]*) refuse 'the expectation file has no valid pool name' ;; esac
 case $pool_guid in '' | *[!0-9]*) refuse 'the expectation file has no valid pool GUID' ;; esac
 case $state_guid in '' | *[!0-9]*) refuse 'the expectation file has no valid state dataset GUID' ;; esac

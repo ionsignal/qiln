@@ -6,12 +6,12 @@ interface MountEntry {
   fsroot: string
 }
 
-/**
- * The kernel mount-table entry at the state directory, or the absence of one.
- * Shared by the ZFS and Incus host inventories, which read the same table.
- */
-export function stateMountText(mount: MountEntry | null): string {
+export function mountText(mount: MountEntry | null, path: string): string {
   return mount === null
-    ? `nothing reported mounted at ${STATE_MOUNTPOINT}`
+    ? `nothing reported mounted at ${path}`
     : `${mount.source} · ${mount.fstype} · root ${mount.fsroot} · kernel mount table, read just now`
+}
+
+export function stateMountText(mount: MountEntry | null): string {
+  return mountText(mount, STATE_MOUNTPOINT)
 }
