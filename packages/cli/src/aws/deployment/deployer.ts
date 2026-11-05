@@ -41,6 +41,7 @@ import * as records from './records'
 import type { Dir } from '../../state/files'
 import type { Session } from '../auth/session'
 import type { Certainty } from '../child/protocol'
+import type { Quota } from './quota'
 import type { HostKey } from './ssh/hostkey'
 import type { HostPlan } from './host/types'
 import type { Reuse } from './volume/reuse'
@@ -50,11 +51,13 @@ import type { AwsConnection } from '../types'
  * The outcome of one call. The certainty is kept so the fence can record a
  * definite refusal differently from an unknown outcome. It comes from the EC2
  * child's reply, or from a call that was cancelled before any child started.
+ * `quota` is the limit that AWS reported, when it refused for one.
  */
 class CallFailure extends InstallerError {
   constructor(
     code: InstallerErrorCode,
     public readonly certainty: Certainty,
+    public readonly quota: Quota | null = null,
   ) {
     super({ code })
   }
@@ -333,7 +336,7 @@ export class Deployer {
       termination: 'confirmed',
     })
     if (!reply.ok) {
-      throw new CallFailure(reply.code, reply.certainty)
+      throw new CallFailure(reply.code, reply.certainty, 'quota' in reply ? reply.quota : null)
     }
     return reply.result
   }
@@ -401,10 +404,11 @@ export class Deployer {
       return
     }
     const closed: Failure = {
+      termination,
       outcome: outcomeOf(failure),
       code: originalCode(failure),
-      termination,
       recordedAt: new Date().toISOString(),
+      quota: failure instanceof CallFailure ? failure.quota : null,
     }
     await this.persist({
       termination,

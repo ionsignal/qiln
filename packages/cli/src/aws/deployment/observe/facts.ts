@@ -1,4 +1,5 @@
 import { AWS_SPEC } from '../../spec'
+import { QUOTAS } from '../quota'
 import { deploymentName } from '../volume/alias'
 import { abandoned, attachOf, handedOff, holdsVolume } from '../handoff/stage'
 import { expectation, matches } from './expect'
@@ -14,7 +15,7 @@ import {
   unnamed,
   unreleased,
 } from '../topology'
-import type { Deployment } from '../types'
+import type { Deployment, Failure } from '../types'
 import type { DiagnosticFact } from '../../../diagnostic/error'
 
 export type Phase =
@@ -167,6 +168,20 @@ export function launchDisclosure(record: Deployment): string {
   })
   const approved = `${hostSlots.length} approved ${hostSlots.length === 1 ? 'zone' : 'zones'}, each tried once`
   return `${attempts.join(', ') || 'none yet'} · ${approved}`
+}
+
+/**
+ * The single wording for the newest recorded failure. A limit refusal names the
+ * quota by its label and by the AWS error name, so the cause can be checked.
+ */
+export function failureDisclosure(record: Deployment): string {
+  const failed = record.steps.findLast(step => step.failure !== null)
+  if (failed?.failure == null) {
+    return 'none recorded'
+  }
+  const { code, outcome, quota } = failed.failure
+  const reached = quota === null ? '' : ` · ${QUOTAS[quota]} (${quota})`
+  return `${failed.action} · ${code} · ${outcome}${reached}`
 }
 
 /**
@@ -336,6 +351,22 @@ export function removable(record: Deployment): boolean {
 }
 
 /**
+ * The failure of a creation that AWS definitively refused, once the partial
+ * deployment can be cleaned up: the newest step was rejected, no removal has
+ * started, and either removal is eligible or a reuse replacement can release
+ * its reservation, which covers a refusal before anything was created. Null
+ * means no cleanup is offered.
+ */
+export function refusalOf(record: Deployment): Failure | null {
+  const failure = record.steps.at(-1)?.failure
+  return failure?.outcome === 'rejected' &&
+    record.removals.length === 0 &&
+    (removable(record) || abandonable(record))
+    ? failure
+    : null
+}
+
+/**
  * The single wording for the recorded resources. Before any removal starts the
  * unreleased resources are simply present, and only once removal has started
  * can one be described as not confirmed removed.
@@ -369,6 +400,7 @@ export function deploymentFacts(record: Deployment): readonly DiagnosticFact[] {
     ['AWS health', healthDisclosure(record)],
     ['Recorded resources', resourceTally(record)],
     ['Observed outcome', describe(record)],
+    ['Last failure', failureDisclosure(record)],
     ['Recorded steps', String(record.steps.length)],
     ['Removal attempts', String(record.removals.length)],
     ['Refused removals', `${refusals(record.steps)} of ${AWS_SPEC.deployment.maximumRefusals} allowed`],

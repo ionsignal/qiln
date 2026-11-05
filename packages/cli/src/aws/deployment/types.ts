@@ -1,11 +1,16 @@
 import { z } from 'zod'
 import { AWS_RECORD_VERSION, AWS_SPEC } from '../spec'
-import { isInstallerErrorCode, type InstallerErrorCode } from '../../diagnostic/error'
+import { shapeOf } from './topology'
+import { quotaSchema } from './quota'
+import { hostKeySchema } from './ssh/hostkey'
+import { hostPlanSchema } from './host/types'
+import { ingressSchema, tagsSchema, zoneSchema, type Zone } from './layout'
 import { operationId, timestamp } from '../../journal/step'
-import { sameJson } from '../../json'
 import { operatorArn } from '../operator'
 import { policyArn } from '../permission/policy'
 import { count } from '../primitives'
+import { sameJson } from '../../json'
+import { isInstallerErrorCode, type InstallerErrorCode } from '../../diagnostic/error'
 import { isFingerprint } from '../../transport/ssh/key'
 import {
   accountIdSchema,
@@ -27,10 +32,6 @@ import {
   type Action,
   type Kind,
 } from './graph'
-import { shapeOf } from './topology'
-import { hostKeySchema } from './ssh/hostkey'
-import { hostPlanSchema } from './host/types'
-import { ingressSchema, tagsSchema, zoneSchema, type Zone } from './layout'
 
 export type { Ingress, Placement, Tag, Zone } from './layout'
 
@@ -78,12 +79,6 @@ function isAdministratorFirst(ingress: readonly { cidr: string }[]): boolean {
   return validSource(ingress[0].cidr)
 }
 
-/**
- * Identity of the locally generated administrative key. The fingerprint is the
- * canonical SHA-256 form of the public key. It is the only key evidence that AWS
- * observation compares against, so local key files are never needed to observe
- * or remove AWS resources.
- */
 const adminKeySchema = z.strictObject({
   algorithm: z.literal('ed25519'),
   fingerprint: z.string().refine(isFingerprint, 'Expected an unpadded SHA-256 fingerprint.'),
@@ -93,6 +88,7 @@ const adminKeySchema = z.strictObject({
 const failureSchema = z.strictObject({
   outcome: z.enum(FAILURE_OUTCOMES),
   code: z.custom<InstallerErrorCode>(isInstallerErrorCode),
+  quota: quotaSchema.nullable(),
   termination: terminationSchema,
   recordedAt: timestamp,
 })
@@ -102,10 +98,6 @@ const returnedSchema = z.strictObject({
   resourceId: z.string().nullable(),
 })
 
-/**
- * One fenced provider call. The ledger is append-only: `returned`, `failure`,
- * and `verifiedAt` are each set once and never rewritten.
- */
 const stepSchema = z
   .strictObject({
     id: operationId,
@@ -127,10 +119,6 @@ const stepSchema = z
     'Expected a consistent step.',
   )
 
-/**
- * The root volume and primary interface that AWS created with the instance.
- * No mutation response names them, so they are observation evidence.
- */
 const implicitSchema = z.strictObject({
   rootVolumeId: z.string().regex(KIND_IDS.volume),
   interfaceId: z.string().regex(KIND_IDS.interface),
@@ -149,10 +137,6 @@ const observedResourceSchema = z
   })
   .refine(({ kind, id }) => KIND_IDS[kind].test(id), 'Expected an ID of the resource kind.')
 
-/**
- * `implicit` is the relationship the instance reported when it was observed
- * present, and null when no single root volume and interface were reported.
- */
 export const observationSchema = z.strictObject({
   observedAt: timestamp,
   resources: z.array(observedResourceSchema).max(MAXIMUM_OBSERVED),
@@ -304,13 +288,14 @@ const deploymentBindingSchema = z.strictObject({
  * The `version` covers every constant, format rule, and graph declaration
  * order that the schemas and the audit consult, such as the zone limit, tag and
  * key-name formats, the lifecycle invariants of the host plan, the
- * administrative key binding, the health evidence, the host-key pin, and the
- * creation and removal order. Version 1 is the baseline of a one-time
- * disposable development reset, before any release, so no earlier layout has a
- * reader. From the first release, changing any of them needs a version bump
- * and an explicit versioned reader. Records are never migrated silently, and a
- * stored launch plan is judged structurally, never rebuilt from today's
- * compute constants or checked against today's permission ceilings.
+ * administrative key binding, the health evidence, the host-key pin, the
+ * failure's quota, and the creation and removal order. Version 1 is the
+ * baseline of a one-time disposable development reset, before any release, so
+ * no earlier layout has a reader. From the first release, changing any of them
+ * needs a version bump and an explicit versioned reader. Records are never
+ * migrated silently, and a stored launch plan is judged structurally, never
+ * rebuilt from today's compute constants or checked against today's permission
+ * ceilings.
  */
 export const deploymentSchema = z
   .strictObject({

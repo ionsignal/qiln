@@ -1,13 +1,14 @@
 import { deploymentName } from '../../../aws/deployment/volume/alias'
 import {
-  cleanup,
-  healthDisclosure,
-  hostKeyDisclosure,
-  keyDisclosure,
-  launchDisclosure,
   phase,
+  cleanup,
   resourceTally,
+  keyDisclosure,
+  failureDisclosure,
+  healthDisclosure,
+  launchDisclosure,
   volumeDisclosure,
+  hostKeyDisclosure,
   type Phase,
 } from '../../../aws/deployment/observe/facts'
 import {
@@ -208,16 +209,13 @@ export function reportDeployment(reporter: Reporter, record: Deployment): void {
     ['AWS health', healthDisclosure(record)],
     ['Recorded resources', resourceTally(record)],
     ['Recorded steps', String(record.steps.length)],
+    ['Last failure', failureDisclosure(record)],
   ]
   if (record.removals.length > 0) {
     facts.push(['Removal attempts', String(record.removals.length)], ['Refused removals', String(refusals(record.steps))])
   }
   if (record.latest !== null) {
     facts.push(['Last observation', `${record.latest.observedAt} · ${observationSummary(record.latest)}`])
-  }
-  const failed = record.steps.findLast(step => step.failure !== null)
-  if (failed?.failure) {
-    facts.push(['Last failure', `${failed.action} · ${failed.failure.code} · ${failed.failure.outcome}`])
   }
   if (record.termination === 'unconfirmed') {
     facts.push(['Child termination', 'not confirmed'])
@@ -251,7 +249,9 @@ export function reportDeployment(reporter: Reporter, record: Deployment): void {
 
 /**
  * The command that moves a hand-off forward from its stage, or null when
- * nothing is to be done or the operator can only inspect.
+ * nothing is to be done or the operator can only inspect. A reservation that
+ * still has removable resources must be removed first, because abandonment
+ * refuses until nothing is left to remove.
  */
 function handoffCommand(stage: Stage, previous: Deployment, replacement: Deployment | null): string | null {
   if (replacement === null) {
@@ -259,7 +259,9 @@ function handoffCommand(stage: Stage, previous: Deployment, replacement: Deploym
   }
   switch (stage) {
     case 'reserved':
-      return `qiln aws deployment abandon --id ${replacement.id}`
+      return cleanup(replacement).status === 'eligible'
+        ? `qiln aws deployment remove --id ${replacement.id}`
+        : `qiln aws deployment abandon --id ${replacement.id}`
     case 'unfinalized':
     case 'unmatched':
       return `qiln aws deployment handoff --id ${replacement.id}`

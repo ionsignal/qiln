@@ -1,12 +1,12 @@
 import { z } from 'zod'
 import { AWS_SPEC } from '../spec'
-import { certaintySchema, childReplySchema, COMMON_CODES } from '../child/protocol'
+import { quotaSchema } from '../deployment/quota'
+import { issueSchema } from '../deployment/proposal/failure'
 import { operationId, timestamp } from '../../journal/step'
 import { hostKeySchema } from '../deployment/ssh/hostkey'
 import { discoverySchema } from '../deployment/proposal/validate'
-import { issueSchema } from '../deployment/proposal/failure'
+import { certaintySchema, childReplySchema, COMMON_CODES } from '../child/protocol'
 import { healthSchema, observationSchema, observationsSchema } from '../deployment/types'
-
 
 export const pollingSchema = z.enum(['none', 'standard', 'termination'])
 
@@ -28,6 +28,11 @@ const resultSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('hostkey'), hostKey: hostKeySchema }),
 ])
 
+const acknowledgmentSchema = z.strictObject({
+  kind: z.literal('evidence-retained'),
+  deploymentId: operationId,
+  operationId,
+})
 
 export const evidenceSchema = z.strictObject({
   kind: z.literal('step-returned'),
@@ -37,16 +42,6 @@ export const evidenceSchema = z.strictObject({
   returnedAt: timestamp,
 })
 
-
-const acknowledgmentSchema = z.strictObject({
-  kind: z.literal('evidence-retained'),
-  deploymentId: operationId,
-  operationId,
-})
-
-/**
- * The child continues only when the parent acknowledges this exact evidence.
- */
 export function acknowledgmentFor(evidence: Evidence) {
   return acknowledgmentSchema.refine(
     acknowledgment =>
@@ -115,6 +110,21 @@ const discoveryFailureSchema = z.strictObject({
   context: issueSchema,
 })
 
-export const replySchema = z.union([childReplySchema(resultSchema, CODES), discoveryFailureSchema])
+/**
+ * A limit refusal may also name the quota that AWS reported. Like the
+ * discovery context, this is an addition to the shared envelope, not a gate.
+ */
+const quotaFailureSchema = z.strictObject({
+  ok: z.literal(false),
+  code: z.literal('AWS_DEPLOYMENT_LIMIT'),
+  certainty: z.literal('rejected'),
+  quota: quotaSchema,
+})
+
+export const replySchema = z.union([
+  childReplySchema(resultSchema, CODES),
+  discoveryFailureSchema,
+  quotaFailureSchema,
+])
 
 export type Reply = z.infer<typeof replySchema>
