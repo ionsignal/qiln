@@ -15,8 +15,13 @@ import { ZfsPreparer } from '../../../../aws/deployment/zfs/prepare'
 import { withConfirmedOperation } from '../../../../aws/operation'
 import { evidence as incusEvidence } from '../../../../aws/deployment/incus/evidence'
 import { opened, requireNotStuck as requireIncusNotStuck } from '../../../../aws/deployment/incus/facts'
-import { approvalLabel as incusApproval, reportPlan as reportIncusPlan } from './incus'
 import { approvalLabel as zfsApproval, reportPlan as reportZfsPlan } from './zfs'
+import {
+  BUNDLE_APPROVAL,
+  approvalLabel as incusApproval,
+  reportBundle as reportIncusBundle,
+  reportPlan as reportIncusPlan,
+} from './incus'
 import * as incusLineage from '../../../../aws/deployment/lineage/incus'
 import * as zfsLineage from '../../../../aws/deployment/lineage/zfs'
 import type { AwsDeploymentOptions } from '../../../../input'
@@ -48,26 +53,19 @@ async function phase(reporter: Reporter, number: number, title: string, run: () 
 }
 
 /**
- * Prepares the recorded data volume and the Incus installation on it, in five
- * phases. Each plans from a fresh inspection and is applied only after its own
- * default-no approval.
  * 1. Incus close and repository: persistent masks, then, for a fresh
  *    installation, the Zabbly repository and a package-list refresh, before any
  *    package effect. A preserved installation only closes.
  * 2. ZFS prerequisites, refused once Qiln opened Incus, because a package
  *    script could disturb the running daemon.
  * 3. Incus packages: the exact pins of a fresh installation, installed while the
- *    host is closed. A preserved installation has nothing to change here.
+ *    host is closed.
  * 4. ZFS storage: create the pool on a blank volume, or import it by its
  *    recorded GUID, then enable its scrub timer and mount its state dataset.
- * 5. Incus activation: a fresh installation first copies its installed package
- *    files to the artifacts dataset, and a preserved one first restores its
- *    retained package files from it, never from a repository. Then the guard and
- *    open, then initialization of a fresh installation or the reopen of a
- *    preserved one, never initializing over retained state, then administrator
- *    socket access.
- * The local writes are the host-key pin, retained before connecting exactly as
- * for verify, and the retained ZFS and Incus preparation evidence.
+ * 5. Incus activation: a fresh installation approves its package-file capture,
+ *    open, and initialization once. A preserved one restores its retained
+ *    package files and reopens under separate approvals, and never initializes
+ *    over retained state. Administrator socket access asks separately.
  */
 export async function prepare(options: AwsDeploymentOptions, reporter: Reporter): Promise<void> {
   requireAwsHost()
@@ -78,9 +76,8 @@ export async function prepare(options: AwsDeploymentOptions, reporter: Reporter)
       const deployment = await openTarget(root, store, selector)
       const { record } = deployment
       const retry = `qiln aws deployment prepare --id ${record.id}`
-      const incusRecord = await incusEvidence(root, record)
       requireNotStuck(await zfsLineage.evidence(root, record), record.id)
-      requireIncusNotStuck(incusRecord, record.id)
+      requireIncusNotStuck(await incusEvidence(root, record), record.id)
       const preserved = await incusLineage.retained(root, record)
       const access = await resolveAccess(root, deployment, retry, reporter, signal)
       const target = targetOf(record)
@@ -128,9 +125,11 @@ export async function prepare(options: AwsDeploymentOptions, reporter: Reporter)
           deployment: record,
           remote,
           hooks: {
+            progress: progressSink(reporter),
             show: (observation, plan) => reportIncusPlan(reporter, { observation, plan }),
             approve: plan => approve(prompts, reporter, incusApproval(plan)),
-            progress: progressSink(reporter),
+            showBundle: bundle => reportIncusBundle(reporter, bundle),
+            approveBundle: () => approve(prompts, reporter, BUNDLE_APPROVAL),
           },
         })
         let applied = 0

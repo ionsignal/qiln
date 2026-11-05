@@ -36,7 +36,9 @@ import type {
   Api,
   CapturePlan,
   IncusTarget,
+  InitializePlan,
   Observation,
+  OpenPlan,
   PreparationPlan,
   Progress,
   ReadyPlan,
@@ -54,11 +56,33 @@ import type {
 type File = Observation['repository']['key']
 
 /**
+ * What a fresh installation approves together: the capture of its package files,
+ * the open, and the initialization, in the order they run.
+ */
+export type Bundle = readonly [CapturePlan, OpenPlan, InitializePlan]
+
+/**
+ * Collects the reasons of failed requirements, so one run reports everything
+ * that blocks.
+ */
+function expecter(reasons: string[]): (passed: boolean, reason: string) => void {
+  return (passed, reason) => {
+    if (!passed) {
+      reasons.push(reason)
+    }
+  }
+}
+
+/**
  * An absent file will be written. A present one must hold exactly the approved
  * bytes, and nothing is overwritten.
  */
 function fits(file: File, digest: string): boolean {
   return file.kind === 'absent' || (file.kind === 'file' && file.sha256 === digest)
+}
+
+function guardFilesPresent({ guard }: Observation): boolean {
+  return guard.expectation.kind === 'file' && guard.check.kind === 'file' && guard.dropIn.kind === 'file'
 }
 
 /**
@@ -79,18 +103,11 @@ function stateReasons({ state }: Observation, preserved: boolean): string[] {
 /**
  * Reasons that this is not a pristine Incus installation on a pool with no Incus
  * data. Initialization merges into existing state, so anything but a blank
- * daemon is refused, and retained data is only reopened by its own plan. The
- * pool must hold exactly its root, its state dataset, an `incus` dataset
- * without descendants, and the artifacts dataset, and only the state dataset
- * may be mounted, at the state directory.
+ * daemon is refused, and retained data is only reopened by its own plan.
  */
 function freshReasons(observation: Observation, api: Api, target: IncusTarget): string[] {
   const reasons: string[] = []
-  const expect = (passed: boolean, reason: string) => {
-    if (!passed) {
-      reasons.push(reason)
-    }
-  }
+  const expect = expecter(reasons)
   const { name: bridge, subnet } = INCUS_SPEC.network
   const names = datasetNamesOf(target.pool)
   const wanted = [target.pool, names.state, names.incus, names.artifacts]
@@ -145,38 +162,61 @@ function accessPlan(observation: Observation, target: IncusTarget): AccessPlan |
 }
 
 /**
- * Pure decision over the software stage, in order:
- * 1. Closing preconditions: the sysctl override must fit, and until a verified
- *    open or initialization exists every unit must be positively inactive.
- * 2. Every other refusal that offline evidence decides (kernel floor, excluded
- *    packages, APT configuration, recorded baseline), so a host that cannot be
- *    prepared is refused before the first mask.
- * 3. Closing (masks plus the override that keeps the AppArmor restriction
- *    enabled), carrying the repository plan when a fresh host lacks the files
- *    or refreshed lists. Otherwise the repository plan alone.
- * 4. A recorded installation, preserved or already opened, stops here: it is
- *    never installed from a repository, and its retained package files are
- *    restored by the activation stage instead.
- * 5. Selection: once the lists are refreshed, a fresh host chooses the newest
- *    supported Incus build that they list. Installed Incus packages must share
- *    one supported build.
- * 6. Packages, installed while the host is closed, with the preferences file
- *    that pins the build. Refusals that need refreshed package lists can only
- *    follow the repository stage.
- * Installed Incus packages are never upgraded or downgraded, and a conflicting
- * recorded baseline is refused rather than replaced. Once `progress.opened`,
- * closing and package installation are never planned again, because a package
- * script restarts a running daemon.
+ * The open carries the storage-identity guard when any of its files is absent.
+ */
+function openPlanOf(observation: Observation, target: IncusTarget): OpenPlan {
+  const { expectation, check, dropIn } = guardOf(target)
+  return {
+    kind: 'open',
+    pool: target.pool,
+    guid: target.guid,
+    datasets: target.datasets,
+    guard: {
+      expectation: { sha256: expectation.sha256 },
+      check: { sha256: check.sha256 },
+      dropIn: { sha256: dropIn.sha256 },
+    },
+    install: !guardFilesPresent(observation),
+    retained: target.retained,
+  }
+}
+
+function initializePlanOf(target: IncusTarget, preseed: Preseed): InitializePlan {
+  return {
+    kind: 'initialize',
+    pool: target.pool,
+    guid: target.guid,
+    datasets: target.datasets,
+    preseed: { yaml: preseed.yaml, sha256: preseed.sha256 },
+  }
+}
+
+/**
+ * The plans a fresh installation approves together once its capture is planned.
+ * They are built by the same functions that `planOf` uses, so each equals what
+ * the planner returns when its turn comes, provided the host is unchanged. The
+ * open and the initialization preconditions are observed only after the steps
+ * before them, so the planner may still refuse either later.
+ */
+export function bundleOf(capture: CapturePlan, observation: Observation, target: IncusTarget, preseed: Preseed): Bundle {
+  return [capture, openPlanOf(observation, target), initializePlanOf(target, preseed)]
+}
+
+/**
+ * Pure decision over the software stage: the closing preconditions, every
+ * refusal that offline evidence decides (so a host that cannot be prepared is
+ * refused before the first mask), closing with the repository plan when a fresh
+ * host needs it, then selection and packages. A recorded installation stops at
+ * `software`: it is never installed from a repository, and the activation stage
+ * restores its retained files. Installed Incus packages are never upgraded or
+ * downgraded. Once `progress.opened`, closing and package installation are never
+ * planned again, because a package script restarts a running daemon.
  */
 export function softwarePlanOf(observation: Observation, target: SoftwareTarget, progress: Progress): SoftwareStagePlan {
   const { system, repository, sysctl, transaction } = observation
   const { keyUrl, keySha256 } = INCUS_SPEC.repository
   const refusals: string[] = []
-  const expect = (passed: boolean, reason: string) => {
-    if (!passed) {
-      refusals.push(reason)
-    }
-  }
+  const expect = expecter(refusals)
   const refused = (reasons: string[] = refusals): RefusedPlan => ({ kind: 'refused', reasons })
   const sysctlDigest = sha256Of(sysctlOverride())
   expect(
@@ -340,11 +380,8 @@ function capturePlanOf(observation: Observation, target: IncusTarget, progress: 
 /**
  * The restore of a preserved installation's retained package files, frozen as
  * the manifest that the earlier capture recorded. It never reads a repository,
- * so it can never substitute another build. It needs the recorded Incus build
- * to be in the manifest, the artifacts dataset unmounted with its recorded
- * identity, and a preferences file that is absent or already holds the exact
- * pins. The content of the files is judged by the script inside the mount
- * window.
+ * so it can never substitute another build. The content of the files is judged
+ * by the script inside the mount window.
  */
 function restorePlanOf(observation: Observation, target: IncusTarget, retained: Retained): RestorePlan | RefusedPlan {
   const version = versionOf(retained.baseline.packages)
@@ -379,28 +416,17 @@ function restorePlanOf(observation: Observation, target: IncusTarget, retained: 
 
 /**
  * Pure decision over one observation: the software stage first, then, once the
- * recorded pool is imported and its state dataset mounted, the capture or
- * restore, the open, the initialization, and socket access. Each stage needs its
- * own approval and a fresh inspection before the next. The toolchain floors, the
- * state directory, and the subordinate-ID allocations are judged before the
- * open, so a host that cannot be opened is refused before anything is installed.
- * A restore is planned before the state and allocation checks, because a package
- * script may create the root allocation that they look for.
- *
- * A fresh installation is never opened before its installed package files were
- * captured on the artifacts dataset, and a running daemon without that capture
- * is refused, because Qiln did not open it. A recorded installation
- * (`target.retained`) whose packages are missing restores its retained files
- * first, and is then reopened with its recorded software, root ranges, and
- * metadata. It is never initialized or opened as a fresh one.
- *
- * The open is planned whenever the daemon service is not running, including
- * after a reboot or a release. It carries the storage-identity guard when its
- * files are not all in place. A running daemon without the guard is refused,
- * because installing it then would protect nothing until the next start.
+ * recorded pool is imported and its state dataset mounted, capture or restore,
+ * open, initialization, and socket access. Each stage needs a fresh inspection
+ * before the next. A fresh installation is never opened before its package files
+ * were captured, and a running daemon without that capture is refused. A
+ * recorded installation whose packages are missing restores its retained files
+ * first, is then reopened, and is never initialized. The open is planned
+ * whenever the daemon is not running and carries the guard when its files are not
+ * all in place; a running daemon without the guard is refused.
  * `progress.retained` is the preseed of an earlier verified initialization or
- * preserved open: a running daemon with a matching baseline proceeds to access,
- * and any drift, including from the recorded software, is refused.
+ * preserved open: a matching running daemon proceeds to access, and any drift is
+ * refused.
  */
 export function planOf(
   observation: Observation,
@@ -415,11 +441,7 @@ export function planOf(
   const { api, guard } = observation
   const approved = guardOf(target)
   const refusals: string[] = []
-  const expect = (passed: boolean, reason: string) => {
-    if (!passed) {
-      refusals.push(reason)
-    }
-  }
+  const expect = expecter(refusals)
   expect(
     poolImported(observation, target.pool, target.guid),
     `The recorded pool ${target.pool} (GUID ${target.guid}) is not imported on the host.`,
@@ -461,23 +483,10 @@ export function planOf(
           reasons: ['The Incus daemon is running although Qiln never captured its package files, and Qiln does not adopt a daemon it did not open.'],
         }
   }
-  const guarded = guard.expectation.kind === 'file' && guard.check.kind === 'file' && guard.dropIn.kind === 'file'
   if (api === null) {
-    return {
-      kind: 'open',
-      pool: target.pool,
-      guid: target.guid,
-      datasets: target.datasets,
-      guard: {
-        expectation: { sha256: approved.expectation.sha256 },
-        check: { sha256: approved.check.sha256 },
-        dropIn: { sha256: approved.dropIn.sha256 },
-      },
-      install: !guarded,
-      retained: target.retained,
-    }
+    return openPlanOf(observation, target)
   }
-  if (!guarded) {
+  if (!guardFilesPresent(observation)) {
     return {
       kind: 'refused',
       reasons: ['The Incus daemon is running without the storage-identity guard, and Qiln never installs the guard under a running daemon.'],
@@ -491,13 +500,7 @@ export function planOf(
   if (conflicts.length > 0) {
     return { kind: 'refused', reasons: conflicts }
   }
-  return {
-    kind: 'initialize',
-    pool: target.pool,
-    guid: target.guid,
-    datasets: target.datasets,
-    preseed: { yaml: preseed.yaml, sha256: preseed.sha256 },
-  }
+  return initializePlanOf(target, preseed)
 }
 
 function byKey(left: InstanceRef, right: InstanceRef): number {

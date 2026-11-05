@@ -28,12 +28,12 @@ export interface StepJournalOptions<Rec, Plan, Action extends string> {
   progress: ProgressSink | undefined
 }
 
-type StepProgress = Partial<Pick<JournalStep, 'completion' | 'refusedAt' | 'verifiedAt'>>
-
-interface Authorization<Plan> extends JournalAuthorization<Plan> {
-  approvedBy: { method: 'local-interactive'; userId: number }
-  recipe: { revision: number; digest: string }
+export interface AuthorizeOptions {
+  recheck?: (() => Promise<void>) | undefined
+  approvedAt?: string | undefined
 }
+
+type StepProgress = Partial<Pick<JournalStep, 'completion' | 'refusedAt' | 'verifiedAt'>>
 
 /**
  * The one fenced-step skeleton shared by the ZFS and Incus preparers: persist
@@ -69,19 +69,31 @@ export class StepJournal<Rec extends Evidence<Plan, Action>, Plan, Action extend
     })
   }
 
-  public async authorize(plan: Plan, recheck?: () => Promise<void>): Promise<string> {
-    await this.options.approve(plan)
+  /**
+   * Every plan is persisted as its own authorization, even when one approval
+   * covered several.
+   */
+  public async authorize(plan: Plan, { recheck, approvedAt }: AuthorizeOptions = {}): Promise<string> {
+    if (approvedAt === undefined) {
+      await this.options.approve(plan)
+    }
     await recheck?.()
     const { revision, digest } = this.options.recipe
-    const authorization: Authorization<Plan> = {
-      id: randomUUID(),
-      approvedAt: new Date().toISOString(),
-      approvedBy: { method: 'local-interactive', userId: userId() },
-      recipe: { revision, digest },
-      plan,
-    }
-    await this.commit({ ...this.current, authorizations: [...this.current.authorizations, authorization] })
-    return authorization.id
+    const id = randomUUID()
+    await this.commit({
+      ...this.current,
+      authorizations: [
+        ...this.current.authorizations,
+        {
+          id,
+          approvedAt: approvedAt ?? new Date().toISOString(),
+          approvedBy: { method: 'local-interactive', userId: userId() },
+          recipe: { revision, digest },
+          plan,
+        },
+      ],
+    })
+    return id
   }
 
   public async step<Observed>(

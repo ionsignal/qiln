@@ -26,7 +26,12 @@ import { unsettled as installationUnsettled } from '../../../installation/journa
 import { stateOf } from '../../../journal/step'
 import { Prompts, withCancellation } from '../../../terminal/prompts'
 import { approve, reportApproval, type ApprovalScreen, type ApprovalStep } from '../../../terminal/approval'
-import { approvalLabel as incusApproval, reportPlan as reportIncusPlan } from './prepare/incus'
+import {
+  BUNDLE_APPROVAL,
+  approvalLabel as incusApproval,
+  reportBundle as reportIncusBundle,
+  reportPlan as reportIncusPlan,
+} from './prepare/incus'
 import { approvalLabel as zfsApproval, reportPlan as reportZfsPlan } from './prepare/zfs'
 import {
   requireNotStuck as requireIncusNotStuck,
@@ -262,6 +267,8 @@ async function releaseHost(
         hooks: {
           show: (observation, plan) => reportIncusPlan(reporter, { observation, plan }),
           approve: plan => approve(prompts, reporter, incusApproval(plan)),
+          showBundle: bundle => reportIncusBundle(reporter, bundle),
+          approveBundle: () => approve(prompts, reporter, BUNDLE_APPROVAL),
           progress: progressSink(reporter),
         },
       })

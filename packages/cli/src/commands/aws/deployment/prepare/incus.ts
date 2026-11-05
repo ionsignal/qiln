@@ -22,8 +22,9 @@ import type {
   RepositoryPlan,
   RestorePlan,
 } from '../../../../host/incus/types'
-import type { DiagnosticFact } from '../../../../diagnostic/error'
+import type { Bundle } from '../../../../host/incus/plan'
 import type { Reporter } from '../../../../terminal/reporter'
+import type { DiagnosticFact } from '../../../../diagnostic/error'
 
 export interface PlanPreview {
   observation: Observation
@@ -32,14 +33,12 @@ export interface PlanPreview {
 
 type Details = Partial<Record<IncusAction, string>>
 
+export const BUNDLE_APPROVAL = 'Capture the package files, open Incus, and initialize it from the preseed'
+
 const REPOSITORY_LASTING = 'APT refreshes every configured source, not only the approved repository.'
 const GUARD_LASTING = 'The guard makes the daemon service refuse to start unless the recorded state dataset is mounted.'
 const GUARD_NOT_ESTABLISHED = 'Protection against an administrator who runs the daemon directly.'
 const BYTES_PER_MIB = 1_048_576
-
-function repositoryApproval(plan: RepositoryPlan): string {
-  return plan.add ? 'Add the Zabbly repository and refresh APT' : 'Refresh APT package lists'
-}
 
 function megabytes(bytes: number): string {
   return `${(bytes / BYTES_PER_MIB).toFixed(1)} MiB`
@@ -294,6 +293,19 @@ function initializeScreen(plan: InitializePlan): ApprovalScreen {
   }
 }
 
+function bundleScreen([capture, open, initialize]: Bundle): ApprovalScreen {
+  return {
+    title: 'Proposed capture, open, and initialization',
+    steps: [...captureScreen(capture).steps, ...openScreen(open).steps, ...initializeScreen(initialize).steps],
+    covers:
+      'These steps run in this order under this one approval. Each is planned again from a fresh inspection just before it runs and is applied only if it is exactly what is shown here; anything else is shown and approved on its own. Socket access asks separately.',
+    stays:
+      'Packages, the pool and its datasets beyond what is listed, the default profile, and the staging directory, which Qiln never empties. The other Incus units stay masked, the API is local-only (no remote listener), no image, instance, or project is created, and Qiln writes no file but the guard files.',
+    lasting: `${GUARD_LASTING} The daemon writes its metadata to the state dataset when it opens. The artifacts dataset keeps the package files, their manifest with its digests is retained with this deployment, and the dataset is never mounted at boot. A retained build keeps its bytes but accumulates known, unpatched exposure once upstream support ends. Initialization is not atomic, and Qiln never relies on a rollback.`,
+    notEstablished: `Runtime readiness, and that the Incus build is free of known vulnerabilities. What the open and the initialization require of the host is observed only after the steps before them, so either can still be refused: the earlier steps then stay applied and verified, nothing is rolled back, and prepare asks again for what remains. The copied files are checked inside the mount window. ${GUARD_NOT_ESTABLISHED}`,
+  }
+}
+
 function accessScreen(plan: AccessPlan): ApprovalScreen {
   return {
     title: 'Proposed socket access',
@@ -349,7 +361,7 @@ export function approvalLabel(plan: ApprovedPlan): string {
       }
       return plan.repository.add ? 'Close Incus and add the Zabbly repository' : 'Close Incus and refresh APT'
     case 'repository':
-      return repositoryApproval(plan)
+      return plan.add ? 'Add the Zabbly repository and refresh APT' : 'Refresh APT package lists'
     case 'packages':
       return 'Pin and install the selected Incus packages'
     case 'capture':
@@ -401,4 +413,8 @@ export function reportPlan(reporter: Reporter, { observation, plan }: PlanPrevie
     default:
       reportApproval(reporter, screenOf(plan))
   }
+}
+
+export function reportBundle(reporter: Reporter, bundle: Bundle): void {
+  reportApproval(reporter, bundleScreen(bundle))
 }

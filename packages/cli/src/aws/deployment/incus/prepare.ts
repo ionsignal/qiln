@@ -4,9 +4,9 @@ import { verify } from '../../../host/incus/verify'
 import { apply } from '../../../host/incus/apply'
 import { baselineOf } from '../../../host/incus/baseline'
 import { inspectHost } from '../../../host/incus/inspect'
-import { planOf, releasePlanOf, softwarePlanOf } from '../../../host/incus/plan'
 import { preseedOf, type Preseed } from '../../../host/incus/preseed'
 import { InstallerError, type DiagnosticFact } from '../../../diagnostic/error'
+import { bundleOf, planOf, releasePlanOf, softwarePlanOf, type Bundle } from '../../../host/incus/plan'
 import {
   artifactsOf,
   closureOf,
@@ -35,7 +35,7 @@ import {
   type SelectPlan,
   type SoftwareTarget,
 } from '../../../host/incus/types'
-import { StepJournal } from '../journal/runner'
+import { StepJournal, type AuthorizeOptions } from '../journal/runner'
 import { prepareRetry } from '../retry'
 import * as deployments from '../records'
 import * as records from './records'
@@ -51,7 +51,9 @@ type IncusJournal = StepJournal<IncusRecord, ApprovedPlan, IncusAction>
 
 export interface Hooks {
   show(observation: Observation, plan: Plan): void
+  showBundle(bundle: Bundle): void
   approve(plan: ApprovedPlan): Promise<void>
+  approveBundle(bundle: Bundle): Promise<void>
   progress?: ProgressSink
 }
 
@@ -85,23 +87,8 @@ function packageNamesOf(plan: ApprovedPlan | undefined): string[] {
  * command. Per step: authorization persisted, fence persisted, script run,
  * outcome persisted, then a fresh inspection must agree before `verifiedAt` is
  * persisted. Nothing is replayed, resumed, or rolled back, and an interrupted
- * step stays open as evidence.
- *
- * Stages, each planned from a fresh inspection and approved on its own:
- * closing, with its repository on a fresh host, the version selection and
- * packages of a fresh host, activation, and release. Selection grants nothing:
- * it only chooses the build whose transaction the packages plan then freezes. A
- * preserved host only closes in the software stage, and never touches a
- * repository. Activation is the capture of the installed package files onto the
- * artifacts dataset (a fresh installation only), or the restore of the retained
- * package files from it (a preserved installation whose packages are missing),
- * then the open together with the storage-identity guard when it is not yet
- * installed, then initialization (or the reopen of a preserved installation,
- * which never initializes), then socket access. The first verified
- * initialization, or first verified open of a preserved installation, persists
- * the baseline and server identity once; later reopens verify against them.
- * Captures, restores, opens and initializations are planned again after approval
- * and must be unchanged before anything is persisted.
+ * step stays open as evidence. Each stage is planned from a fresh inspection and
+ * approved on its own, except the bundle described at `activate`.
  */
 export class IncusPreparer {
   private pins: PackageChange[] | null = null
@@ -154,14 +141,12 @@ export class IncusPreparer {
   /**
    * The software stage, which needs no pool. Verifies a step left returned by an
    * earlier run, then plans from fresh evidence. Each approval runs only the
-   * steps of the plan displayed with it. A fresh host selects its Incus build
-   * once the repository lists are refreshed, which needs no approval. The
-   * `repository` scope stops as soon as the next plan is the selection, the
-   * packages, or nothing, without displaying it, so the host is closed with its
-   * repository in place before any ZFS or package effect. The `packages` scope
-   * continues until the host is closed and the approved packages are installed.
-   * A preserved host is only closed here, and its packages are restored by the
-   * activation stage. Returns how many steps were applied.
+   * steps of the plan displayed with it. The `repository` scope stops as soon as
+   * the next plan is the selection, the packages, or nothing, so the host is
+   * closed with its repository in place before any ZFS or package effect. The
+   * `packages` scope continues until the host is closed and the approved packages
+   * are installed. A preserved host is only closed here. Returns how many steps
+   * were applied.
    */
   public async prepareSoftware(
     target: SoftwareTarget,
@@ -194,47 +179,57 @@ export class IncusPreparer {
 
   /**
    * The activation stage, which needs the recorded pool imported with its state
-   * dataset mounted. Each approval covers only the plan displayed with it: the
-   * capture of a fresh installation's package files or the restore of a
-   * preserved installation's retained ones, the open (with its guard), the
-   * initialization, and the socket access grant each ask again. The open is
-   * planned whenever the daemon is not running, so a host that rebooted reopens
-   * its recorded installation here. Returns how many steps were applied, and
-   * stops once the approved configuration holds.
+   * dataset mounted. A fresh installation approves its capture, open, and
+   * initialization once. Each of them is still planned from a fresh inspection,
+   * persisted as its own authorization, and applied without a new prompt only if
+   * that plan equals the one displayed; any other plan is shown and approved on
+   * its own. The bundle approval lives only in this process, so after a failure
+   * the next run plans again and asks again. A preserved installation restores
+   * and reopens under separate approvals, and socket access always asks
+   * separately. Returns how many steps were applied, and stops once the approved
+   * configuration holds.
    */
   public async activate(target: IncusTarget, signal: AbortSignal): Promise<number> {
     const { hooks } = this.context
     const preseed = preseedOf(target.pool)
     let observation = (await this.settleReturned(target)) ?? (await this.inspect(target))
     let applied = 0
+    let bundleApprovedAt: string | undefined
+    const bundled: ApprovedPlan[] = []
     while (true) {
       const plan = planOf(observation, target, preseed, this.progress)
       if (plan.kind === 'select') {
         observation = await this.select(plan, target)
         continue
       }
-      hooks.show(observation, plan)
-      switch (plan.kind) {
-        case 'refused':
-          throw refusal(plan.reasons, this.retry)
-        case 'ready':
-          return applied
-        case 'close':
-        case 'repository':
-        case 'packages':
-        case 'capture':
-        case 'restore':
-        case 'open':
-        case 'access':
-        case 'initialize': {
-          const recheck =
-            plan.kind === 'initialize' || plan.kind === 'open' || plan.kind === 'capture' || plan.kind === 'restore'
-              ? () => this.confirmCurrent(plan, target, preseed)
-              : undefined
-          observation = await this.execute(plan, target, observation, signal, recheck)
-          applied += actionsOf(plan).length
-        }
+      const covered = bundled.findIndex(item => sameJson(item, plan))
+      let approvedAt: string | undefined
+      if (covered >= 0) {
+        bundled.splice(covered, 1)
+        approvedAt = bundleApprovedAt
+      } else if (plan.kind === 'capture') {
+        const bundle = bundleOf(plan, observation, target, preseed)
+        hooks.showBundle(bundle)
+        await hooks.approveBundle(bundle)
+        approvedAt = new Date().toISOString()
+        bundleApprovedAt = approvedAt
+        bundled.push(bundle[1], bundle[2])
+      } else {
+        hooks.show(observation, plan)
       }
+      if (plan.kind === 'refused') {
+        throw refusal(plan.reasons, this.retry)
+      }
+      if (plan.kind === 'ready') {
+        return applied
+      }
+      const recheck =
+        covered < 0 &&
+        (plan.kind === 'capture' || plan.kind === 'restore' || plan.kind === 'open' || plan.kind === 'initialize')
+          ? () => this.confirmCurrent(plan, target, preseed)
+          : undefined
+      observation = await this.execute(plan, target, observation, signal, { recheck, approvedAt })
+      applied += actionsOf(plan).length
     }
   }
 
@@ -271,21 +266,20 @@ export class IncusPreparer {
   }
 
   /**
-   * One approval and every step it covers, in order. Returns the observation
-   * that verified the last step. `recheck` runs after approval and before
-   * anything is persisted.
+   * One authorization and every step it covers, in order. Returns the
+   * observation that verified the last step.
    */
   private async execute(
     plan: ApprovedPlan,
     scope: Scope,
     from: Observation,
     signal: AbortSignal,
-    recheck?: () => Promise<void>,
+    approval: AuthorizeOptions = {},
   ): Promise<Observation> {
-    const authorization = await this.journal.authorize(plan, recheck)
+    const authorization = await this.journal.authorize(plan, approval)
     let latest = from
     for (const action of actionsOf(plan)) {
-      latest = await this.step(authorization, plan, action, scope, signal)
+      latest = await this.journal.step(authorization, plan, action, signal, () => this.verified(plan, action, scope))
     }
     return latest
   }
@@ -293,10 +287,9 @@ export class IncusPreparer {
   /**
    * The inspection reports on the pool the approved plan names, else on the
    * scope's, which is none during the software stage. It asks about the
-   * approved packages too, so the whole frozen transaction is checked and not
-   * only the direct packages. The staged package files and index records are
-   * only inspected for the closure of the packages plan being verified, which
-   * is not recorded as verified yet, or for a fresh installation whose capture
+   * approved packages too, so the whole frozen transaction is checked. The
+   * staged package files and index records are only inspected for the closure of
+   * the packages plan being verified, or for a fresh installation whose capture
    * is still pending, because hashing them is not free.
    */
   private async inspect(scope: Scope, plan?: ApprovedPlan): Promise<Observation> {
@@ -312,10 +305,8 @@ export class IncusPreparer {
   }
 
   /**
-   * The operator may take a while to approve, so a capture, restore, open or
-   * initialization is planned again from a fresh inspection, and the approved
-   * plan must still be exactly what is planned now. This refuses before
-   * anything is persisted.
+   * The approved plan must still be exactly what is planned now. This refuses
+   * before anything is persisted.
    */
   private async confirmCurrent(
     approved: CapturePlan | RestorePlan | InitializePlan | OpenPlan,
@@ -334,16 +325,6 @@ export class IncusPreparer {
     }
   }
 
-  private step(
-    authorization: string,
-    plan: ApprovedPlan,
-    action: IncusAction,
-    scope: Scope,
-    signal: AbortSignal,
-  ): Promise<Observation> {
-    return this.journal.step(authorization, plan, action, signal, () => this.verified(plan, action, scope))
-  }
-
   private unresolved(): InstallerError {
     return new InstallerError({
       code: 'AWS_INCUS_PREPARATION_UNRESOLVED',
@@ -357,8 +338,7 @@ export class IncusPreparer {
    * establishes the software baseline and the standalone server identity, so
    * neither exists without its step. A preserved open keeps the retained
    * subordinate-ID ranges, so extra ranges never ratchet into the record. Once a
-   * baseline is recorded, later opens of the same deployment write nothing, so
-   * benign drift in unpinned packages never rewrites it.
+   * baseline is recorded, later opens of the same deployment write nothing.
    */
   private established(plan: ApprovedPlan, action: IncusAction, observation: Observation): Partial<IncusRecord> {
     if (this.journal.record.baseline !== null) {

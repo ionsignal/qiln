@@ -333,7 +333,7 @@ export function createProgram(handlers: ProgramHandlers, output: ProgramOutput):
     )
     const prepare = deployment
       .command('prepare')
-      .description('Prepare ZFS and Incus on the host over the pinned SSH connection, applying each displayed plan only after its own approval.')
+      .description('Prepare ZFS and Incus on the host over the pinned SSH connection, applying each displayed plan only after approval; a fresh installation approves its Incus capture, open, and initialization together.')
       .summary('Prepare ZFS and Incus after approval.')
     addSelectorOptions(prepare)
     describeHelp(prepare, deploymentHelp.prepare)
