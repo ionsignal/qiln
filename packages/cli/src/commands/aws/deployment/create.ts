@@ -1,11 +1,15 @@
 import { AWS_SPEC } from '../../../aws/spec'
 import { POLICY_KEYS, enrolledKeys } from '../../../aws/permission/keys'
-import { findPin } from '../../../aws/ami'
-import { Session } from '../../../aws/auth/session'
+import { progressSink } from './progress'
+import { removeRefused, tryRemoveRefused } from './refused'
+import { reportCreationEffects, reportProposal } from './preview'
+import { observationSummary, reportDeployment } from './report'
 import { requireEnvelope } from '../../../aws/permission/envelope'
 import { deploymentName } from '../../../aws/deployment/volume/alias'
 import { requireBound } from '../../../aws/deployment/binding'
 import { validSource } from '../../../aws/deployment/cidr'
+import { findPin } from '../../../aws/ami'
+import { Session } from '../../../aws/auth/session'
 import { Deployer, propose } from '../../../aws/deployment/deployer'
 import { expectation, matches } from '../../../aws/deployment/observe/expect'
 import { evaluate, isBlocked } from '../../../aws/deployment/proposal/evaluate'
@@ -21,9 +25,6 @@ import { InstallerError } from '../../../diagnostic/error'
 import { resolveAwsName, type AwsDeploymentCreateOptions } from '../../../input'
 import { authenticate, reportAuthentication, requireAvailable } from '../shared'
 import { withConfirmedOperation } from '../../../aws/operation'
-import { reportCreationEffects, reportProposal } from './preview'
-import { progressSink } from './progress'
-import { observationSummary, reportDeployment } from './report'
 import { evidence as incusEvidence } from '../../../aws/deployment/incus/evidence'
 import * as deployments from '../../../aws/deployment/records'
 import * as connections from '../../../aws/connections'
@@ -94,6 +95,12 @@ async function requireVolumeAvailable(
  * and the fenced creation steps and the AWS health read run under the operation
  * lock. Success establishes AWS provisioning and health only; create makes no
  * SSH connection to the instance.
+ *
+ * A creation that AWS definitively refused leaves a partial deployment. Right
+ * after the refusal, and again at the start of the next create for the same
+ * alias, the operator is offered its removal and, for a reused data volume, the
+ * release of its reservation, each with default no. The original refusal is
+ * always reported, and declining leaves the alias reserved.
  */
 export async function create(options: AwsDeploymentCreateOptions, reporter: Reporter): Promise<void> {
   requireAwsHost()
@@ -103,6 +110,10 @@ export async function create(options: AwsDeploymentCreateOptions, reporter: Repo
   const message = await withCancellation(async signal => {
     const prompts = new Prompts(signal, 'qiln aws deployment create', reporter)
     return await withConfirmedOperation(false, async ({ root, connections: store }) => {
+      const existing = await deployments.find(root, { kind: 'alias', value: options.alias })
+      if (existing !== null) {
+        await removeRefused(root, store, existing, prompts, reporter, signal)
+      }
       const previous = await deployments.predecessor(root, options.alias)
       const directory = await connections.open(store, name)
       await requireAvailable(directory)
@@ -115,8 +126,6 @@ export async function create(options: AwsDeploymentCreateOptions, reporter: Repo
         })
       }
       const managed = requireCurrentPermissions(connection)
-      // An unindexed region stops here, before any prompt, authentication, or
-      // AWS read. The credential child resolves the same entry on its own.
       const pin = findPin(managed.deploymentRegion)
       if (pin === null) {
         throw new InstallerError({
@@ -127,9 +136,7 @@ export async function create(options: AwsDeploymentCreateOptions, reporter: Repo
           ],
         })
       }
-      // Checked before approval, so a missing tool cannot strand an approved record.
       await requireKeygen()
-      // Asked before authentication so invalid input fails without any AWS read.
       const administrator = await prompts.text('Administrator IPv4 network for SSH (for example 203.0.113.7/32)')
       if (!validSource(administrator)) {
         throw new InstallerError({
@@ -215,7 +222,12 @@ export async function create(options: AwsDeploymentCreateOptions, reporter: Repo
         'Approval record',
         `${deploymentName(options.alias)} · ${deployer.record.id} · saved locally; no AWS resource exists yet`,
       )
-      await deployer.create(signal)
+      try {
+        await deployer.create(signal)
+      } catch (error: unknown) {
+        await tryRemoveRefused(root, store, deployer.record.id, prompts, reporter, signal)
+        throw error
+      }
       reportDeployment(reporter, deployer.record)
       return 'AWS provisioning and health verified. Billable resources remain until removed. This is not SSH access, guest compatibility, or readiness.'
     })

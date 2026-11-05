@@ -125,9 +125,9 @@ export const awsDeploymentDiagnostics = Object.freeze({
   ),
   AWS_DEPLOYMENT_LIMIT: entry(
     'AWS resource limit prevents creation',
-    'AWS definitively refused a creation call because a regional resource limit was reached, so that call created nothing and Qiln never probes or manages quotas or moves to another zone.',
-    'Review existing resources in the account and region through an explicitly approved procedure, or request a quota change outside Qiln.',
-    'Clean up any resources already created with qiln aws deployment remove, then create a new deployment; the refused attempt is never retried.',
+    'AWS definitively refused a creation call because an account or regional limit was reached, so that call is recorded as having had no effect, and Qiln never probes or manages quotas or moves to another zone.',
+    'Raise the quota named under Last failure through Service Quotas, or free resources of that kind, outside Qiln.',
+    'Run qiln aws deployment create again with the same alias. It offers to remove what the refused attempt already created, and to release the reservation of a reused data volume, then provisions a new deployment; the refused attempt is never retried.',
   ),
   AWS_DEPLOYMENT_CAPACITY: entry(
     'AWS has no capacity for the requested instance',
@@ -185,7 +185,7 @@ export const awsDeploymentDiagnostics = Object.freeze({
   AWS_DEPLOYMENT_REMOVAL_REFUSED: entry(
     'Deployment removal was refused locally',
     'Removal requires confirmed prior termination, retained resource identities, remaining refusal budget, no unresolved earlier step, and a fresh observation matching the record, and one of these did not hold, so no deletion call was made and retained resources are never removed.',
-    'Inspect the displayed deployment evidence and the actual resources.',
+    'Review the displayed reason, then inspect the displayed deployment evidence and the actual resources.',
     'Inspect the deployment again to retain a fresh observation before offering removal.',
     'Resolve unexpected changes to the deployment through an explicitly reviewed procedure outside Qiln.',
   ),

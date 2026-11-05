@@ -7,9 +7,8 @@ import { authenticateDeployer, openTarget, type Target } from './shared'
 import { withConfirmedOperation } from '../../../aws/operation'
 import { InstallerError, type DiagnosticFact } from '../../../diagnostic/error'
 import { deploymentName } from '../../../aws/deployment/volume/alias'
-import { isBroken, stageOf } from '../../../aws/deployment/handoff/stage'
 import { expectation, matches } from '../../../aws/deployment/observe/expect'
-import { abandonable, canSettle, cleanup, deploymentFacts, removable } from '../../../aws/deployment/observe/facts'
+import { canSettle, cleanup, deploymentFacts } from '../../../aws/deployment/observe/facts'
 import { removalPlan, retained, sshReady, unreleased } from '../../../aws/deployment/topology'
 import { evidence as incusEvidence } from '../../../aws/deployment/incus/evidence'
 import { IncusPreparer } from '../../../aws/deployment/incus/prepare'
@@ -36,9 +35,9 @@ import {
   storageTouched,
 } from '../../../aws/deployment/incus/facts'
 import * as configureJournal from '../../../installation/journal/records'
-import * as deployments from '../../../aws/deployment/records'
 import * as lineage from '../../../aws/deployment/lineage/zfs'
 import type { Action } from '../../../aws/deployment/graph'
+import type { Deployer } from '../../../aws/deployment/deployer'
 import type { Dir } from '../../../state/files'
 import type { Reporter } from '../../../terminal/reporter'
 import type { Deployment, Observation } from '../../../aws/deployment/types'
@@ -120,23 +119,6 @@ async function requireReleaseJournals(root: Dir, record: Deployment, holds: Hold
 }
 
 /**
- * The command that resolves the retained-volume reservation of a replacement
- * when nothing is left to remove: a contradicting hand-off is settled, and a
- * reservation whose attach never returned can be abandoned.
- */
-async function reservationCommand(root: Dir, record: Deployment): Promise<string | null> {
-  const { volume } = record.approval.host
-  if (volume.kind !== 'reuse') {
-    return null
-  }
-  const previous = await deployments.read(root, volume.from)
-  if (previous !== null && isBroken(stageOf(previous, record))) {
-    return `qiln aws deployment handoff --id ${record.id}`
-  }
-  return abandonable(record) ? `qiln aws deployment abandon --id ${record.id}` : null
-}
-
-/**
  * The termination deletes the root volume, and the source checkout with it, so
  * once the instance is verified gone there is nothing left to protect.
  */
@@ -144,8 +126,8 @@ function terminationPending(record: Deployment): boolean {
   return removalPlan(record).some(({ action }) => action === 'terminate-instance')
 }
 
-function refusal(record: Deployment, observation?: Observation): InstallerError {
-  const facts: DiagnosticFact[] = [...deploymentFacts(record)]
+function refusal(record: Deployment, reason: string, observation?: Observation): InstallerError {
+  const facts: DiagnosticFact[] = [...deploymentFacts(record), ['Reason', reason]]
   if (observation) {
     facts.push(['Observed resources', observationSummary(observation)])
   }
@@ -293,6 +275,40 @@ async function releaseHost(
   return { ...target, record: access.record }
 }
 
+/**
+ * Judges a fresh observation against the deployer's record, shows the removal,
+ * and runs it only after a default-no approval. Returns false when the operator
+ * declines, and then nothing was removed.
+ */
+export async function removeOnApproval(
+  root: Dir,
+  deployer: Deployer,
+  observation: Observation,
+  prompts: Prompts,
+  reporter: Reporter,
+  signal: AbortSignal,
+): Promise<boolean> {
+  const record = deployer.record
+  const plan = cleanup(record)
+  if (plan.status !== 'eligible') {
+    throw refusal(record, plan.detail, observation)
+  }
+  if (!matches(expectation(record), observation)) {
+    throw refusal(record, 'The fresh observation does not agree with the record, so nothing was removed.', observation)
+  }
+  reportTarget(reporter, record, observation)
+  if (!(await prompts.consent("Remove the deployment's AWS resources"))) {
+    return false
+  }
+  if (terminationPending(record)) {
+    await confirmCheckpoint(root, record, prompts, reporter, signal)
+  }
+  reporter.section('Removal')
+  await deployer.remove(observation, signal)
+  reportDeployment(reporter, deployer.record)
+  return true
+}
+
 export async function remove(options: AwsDeploymentOptions, reporter: Reporter): Promise<void> {
   requireAwsHost()
   const { selector } = options
@@ -303,18 +319,13 @@ export async function remove(options: AwsDeploymentOptions, reporter: Reporter):
       requirePoolNotStuck(await lineage.evidence(root, target.record), target.record.id)
       requireStorageNotStuck(await incusEvidence(root, target.record), target.record.id)
       if (!canSettle(target.record)) {
-        throw refusal(target.record)
+        throw refusal(target.record, cleanup(target.record).detail)
       }
       if (cleanup(target.record).status === 'not-needed') {
-        if (retained(target.record).length === 0) {
-          throw refusal(target.record)
-        }
         reportDeployment(reporter, target.record)
-        const next = await reservationCommand(root, target.record)
-        if (next !== null) {
-          reporter.info(`To resolve the reservation of the retained data volume, run: ${next}`)
-        }
-        return 'No removable resource remains. Retained resources are not removed by Qiln and keep incurring charges until they are deleted outside Qiln.'
+        return retained(target.record).length === 0
+          ? 'Nothing to remove: no recorded resource remains.'
+          : 'No removable resource remains. Retained resources are not removed by Qiln and keep incurring charges until they are deleted outside Qiln.'
       }
       const holds = await holdsOf(root, target.record)
       if ((holds.returned || holds.incus || holds.pool) && sshReady(target.record)) {
@@ -325,24 +336,17 @@ export async function remove(options: AwsDeploymentOptions, reporter: Reporter):
       requireStorageReleased(await incusEvidence(root, target.record), target.record.id)
       const deployer = await authenticateDeployer(root, target, signal, progressSink(reporter))
       const observation = await deployer.observe(signal)
-      const record = deployer.record
-      if (unreleased(record).length === 0) {
-        reportDeployment(reporter, record)
-        return retained(record).length === 0
+      if (unreleased(deployer.record).length === 0) {
+        reportDeployment(reporter, deployer.record)
+        return retained(deployer.record).length === 0
           ? 'All recorded resources were observed absent; no deletion call was made.'
           : 'All removable resources were observed absent; no deletion call was made. Retained resources remain; see the recorded resources.'
       }
-      if (!removable(record) || !matches(expectation(record), observation)) {
-        throw refusal(record, observation)
+      if (!(await removeOnApproval(root, deployer, observation, prompts, reporter, signal))) {
+        throw new InstallerError({
+          code: 'COMMAND_CANCELLED',
+        })
       }
-      reportTarget(reporter, record, observation)
-      await prompts.approve("Remove the deployment's AWS resources")
-      if (terminationPending(record)) {
-        await confirmCheckpoint(root, record, prompts, reporter, signal)
-      }
-      reporter.section('Removal')
-      await deployer.remove(observation, signal)
-      reportDeployment(reporter, deployer.record)
       return retained(deployer.record).length === 0
         ? 'Recorded resources observed absent after approved removal; evidence retained.'
         : 'Removable resources observed absent after approved removal. Retained resources remain, are not removed by Qiln, and keep incurring charges until deleted outside Qiln; see the removal outcome.'

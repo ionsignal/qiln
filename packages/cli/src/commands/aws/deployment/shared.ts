@@ -9,23 +9,13 @@ import type { ProgressSink } from '../../../aws/deployment/observe/progress'
 import type { Deployment } from '../../../aws/deployment/types'
 import type { DeploymentSelector } from '../../../aws/deployment/volume/alias'
 
-/**
- * `record` is a snapshot from the moment the target was opened. An operation
- * that retains evidence, such as resolving a host-key pin, outdates it, so such
- * an operation must hand back its own current record.
- */
 export interface Target {
   record: Deployment
   directory: Dir
   region: string
 }
 
-/**
- * The connection is resolved from the record, never from an argument, and must
- * match its immutable bindings rather than just its name.
- */
-export async function openTarget(root: Dir, store: Dir, selector: DeploymentSelector): Promise<Target> {
-  const record = await deployments.select(root, selector)
+export async function bindTarget(store: Dir, record: Deployment): Promise<Target> {
   const directory = await connections.open(store, record.connection)
   await requireAvailable(directory)
   const connection = requireBound(await connections.read(directory, record.connection), record)
@@ -34,6 +24,10 @@ export async function openTarget(root: Dir, store: Dir, selector: DeploymentSele
     directory,
     region: connection.region,
   }
+}
+
+export async function openTarget(root: Dir, store: Dir, selector: DeploymentSelector): Promise<Target> {
+  return await bindTarget(store, await deployments.select(root, selector))
 }
 
 export async function authenticateDeployer(
