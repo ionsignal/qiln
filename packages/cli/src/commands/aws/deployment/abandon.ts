@@ -15,6 +15,8 @@ import { InstallerError, type DiagnosticFact } from '../../../diagnostic/error'
 import * as deployments from '../../../aws/deployment/records'
 import type { AwsDeploymentOptions } from '../../../input'
 import type { Reporter } from '../../../terminal/reporter'
+import type { Deployer } from '../../../aws/deployment/deployer'
+import type { Dir } from '../../../state/files'
 import type { Deployment, Observation } from '../../../aws/deployment/types'
 
 function refusal(record: Deployment, reason: string, observation?: Observation): InstallerError {
@@ -53,6 +55,32 @@ function reportAbandonment(reporter: Reporter, record: Deployment, observation: 
 }
 
 /**
+ * Takes a fresh observation, which must still agree with the record, shows the
+ * release, and writes it only after a default-no approval. Returns false when
+ * the operator declines, and then nothing was released.
+ */
+export async function releaseReservation(
+  root: Dir,
+  deployer: Deployer,
+  prompts: Prompts,
+  reporter: Reporter,
+  signal: AbortSignal,
+): Promise<boolean> {
+  const observation = await deployer.observe(signal)
+  const record = deployer.record
+  if (!matches(expectation(record), observation)) {
+    throw refusal(record, 'The fresh observation does not agree with the record, so nothing was released.', observation)
+  }
+  reportAbandonment(reporter, record, observation)
+  if (!(await prompts.consent('Abandon the volume reservation'))) {
+    return false
+  }
+  await writeAbandonment(root, record, observation)
+  reportDeployment(reporter, await deployments.select(root, { kind: 'id', value: record.id }))
+  return true
+}
+
+/**
  * Releases the reservation of a retained data volume by a replacement whose
  * attach never returned. It needs the replacement to be settled with nothing
  * left to remove, and a fresh observation that still agrees with the record,
@@ -77,15 +105,11 @@ export async function abandon(options: AwsDeploymentOptions, reporter: Reporter)
         )
       }
       const deployer = await authenticateDeployer(root, target, signal, progressSink(reporter))
-      const observation = await deployer.observe(signal)
-      const record = deployer.record
-      if (!matches(expectation(record), observation)) {
-        throw refusal(record, 'The fresh observation does not agree with the record, so nothing was released.', observation)
+      if (!(await releaseReservation(root, deployer, prompts, reporter, signal))) {
+        throw new InstallerError({
+          code: 'COMMAND_CANCELLED',
+        })
       }
-      reportAbandonment(reporter, record, observation)
-      await prompts.approve('Abandon the volume reservation')
-      await writeAbandonment(root, record, observation)
-      reportDeployment(reporter, await deployments.select(root, { kind: 'id', value: record.id }))
       return 'Reservation abandoned. The retained data volume is not removed by Qiln and keeps incurring charges until it is deleted outside Qiln; the alias can now be taken over.'
     })
   })
