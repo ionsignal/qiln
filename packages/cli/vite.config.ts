@@ -35,7 +35,12 @@ export default defineConfig(() => {
       dts({
         insertTypesEntry: true,
         include: ['src/**/*.ts'],
-        exclude: ['src/aws/auth/process.ts', 'src/aws/iam/process.ts', 'src/aws/ec2/process.ts'],
+        exclude: [
+          'src/aws/auth/process.ts',
+          'src/aws/iam/process.ts',
+          'src/aws/ec2/process.ts',
+          'src/aws/domain/process.ts',
+        ],
       }),
     ],
     build: {
@@ -46,6 +51,7 @@ export default defineConfig(() => {
           aws: resolve(import.meta.dirname, 'src/aws/auth/process.ts'),
           iam: resolve(import.meta.dirname, 'src/aws/iam/process.ts'),
           ec2: resolve(import.meta.dirname, 'src/aws/ec2/process.ts'),
+          domain: resolve(import.meta.dirname, 'src/aws/domain/process.ts'),
         },
         formats: ['es'],
         fileName: (_format, entryName) => `${entryName}.js`,

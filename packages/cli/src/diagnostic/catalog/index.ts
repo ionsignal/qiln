@@ -5,6 +5,7 @@ import { awsIamDiagnostics } from './aws/iam'
 import { awsIncusDiagnostics } from './aws/incus'
 import { awsToolDiagnostics } from './aws/tools'
 import { commandDiagnostics } from './command'
+import { domainDiagnostics } from './domain'
 import { hostDiagnostics } from './host'
 import { incusDiagnostics } from './incus'
 import { installationDiagnostics } from './installation'
@@ -18,6 +19,7 @@ export const catalog = Object.freeze({
   ...hostDiagnostics,
   ...incusDiagnostics,
   ...installationDiagnostics,
+  ...domainDiagnostics,
   ...stateDiagnostics,
   ...commandDiagnostics,
   ...awsToolDiagnostics,
@@ -34,6 +36,7 @@ const domainCodeCount = [
   hostDiagnostics,
   incusDiagnostics,
   installationDiagnostics,
+  domainDiagnostics,
   stateDiagnostics,
   commandDiagnostics,
   awsToolDiagnostics,

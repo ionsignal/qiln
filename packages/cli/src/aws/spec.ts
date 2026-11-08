@@ -16,6 +16,7 @@ export const AWS_SPEC = Object.freeze({
     auth: 'aws.js',
     iam: 'iam.js',
     ec2: 'ec2.js',
+    domain: 'domain.js',
   }),
   loginTimeoutMs: 15 * 60 * 1_000,
   requestTimeoutMs: 30_000,
@@ -74,6 +75,15 @@ export const AWS_SPEC = Object.freeze({
       commandTimeoutMs: 30_000,
       maxOutputBytes: 16_384,
     }),
+  }),
+  domain: Object.freeze({
+    zone: 'qiln.org',
+    origin: 'https://domains.qiln.com',
+    audience: 'domains.qiln.com',
+    maximumResponseBytes: 65_536,
+    registerTimeoutMs: 300_000,
+    issueTimeoutMs: 660_000,
+    reserveMs: 5_000,
   }),
   permission: Object.freeze({
     instanceTypes: Object.freeze([
