@@ -1,17 +1,17 @@
 import { EC2Client } from '@aws-sdk/client-ec2'
 import { Ec2 } from './client'
+import { mutate } from './mutate'
+import { discover } from './discover'
+import { observeHealth } from './health'
+import { observeHostKey } from './hostkey/observe'
+import { candidates, observe } from './observe'
 import { findPin } from '../ami'
 import { configuration } from '../auth/credentials'
 import { sendEvidence } from '../child/evidence'
-import { discover } from './discover'
-import { armDispatch } from './dispatch'
-import { observeHealth } from './health'
-import { observeHostKey } from './hostkey/observe'
-import { mutate } from './mutate'
-import { candidates, observe } from './observe'
+import { armDispatch } from '../child/dispatch'
 import { expectation, matches } from '../deployment/observe/expect'
 import { readPublicKey, type PublicKeyReader } from '../ssh/store'
-import { authorizeDeployment, authorizePreparation, notAttempted, type Credentials } from './context'
+import { authorizeDeployment, authorizePreparation, notAttempted } from './context'
 import {
   acknowledgmentFor,
   childDeadlineMs,
@@ -20,6 +20,7 @@ import {
   type Request,
   type Result,
 } from './protocol'
+import type { Credentials } from '../child/context'
 import type { Deployment } from '../deployment/types'
 
 function retain(evidence: Evidence, signal: AbortSignal): Promise<void> {

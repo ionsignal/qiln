@@ -1,4 +1,4 @@
-import { InstallerError } from '../diagnostic/error'
+import { InstallerError, type InstallerErrorOptions } from '../diagnostic/error'
 import { ProcessExecutionError } from '../transport/process'
 import { FileValidationError } from '../state/files'
 import { SupervisedProcessError } from '../transport/subprocess/supervise'
@@ -10,7 +10,7 @@ export type AuthMode = 'login' | 'context'
 class ExecutionFailure extends InstallerError {
   public readonly terminationConfirmed: boolean
 
-  constructor(error: SupervisedProcessError, mode: AuthMode) {
+  constructor(error: SupervisedProcessError, mode: AuthMode, override: Partial<InstallerErrorOptions>) {
     const login = mode === 'login'
     const code =
       error.kind === 'cancelled'
@@ -29,13 +29,22 @@ class ExecutionFailure extends InstallerError {
         ['Authentication termination', error.terminationConfirmed ? 'confirmed' : 'not confirmed'],
       ],
       retry: 'qiln aws connect',
+      ...override,
     })
     this.terminationConfirmed = error.terminationConfirmed
   }
 }
 
-export function executionFailure(error: SupervisedProcessError, mode: AuthMode): InstallerError {
-  return new ExecutionFailure(error, mode)
+/**
+ * A caller that can name the failure in its own terms passes an override. The
+ * termination evidence stays attached either way.
+ */
+export function executionFailure(
+  error: SupervisedProcessError,
+  mode: AuthMode,
+  override: Partial<InstallerErrorOptions> = {},
+): InstallerError {
+  return new ExecutionFailure(error, mode, override)
 }
 
 /**

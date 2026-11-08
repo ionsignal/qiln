@@ -1,7 +1,7 @@
 import { QUOTAS, isQuota, type Quota } from '../deployment/quota'
 import { FAILURES, requestSchema, type Code } from './protocol'
 import { execute } from './operations'
-import { undispatched } from './dispatch'
+import { undispatched } from '../child/dispatch'
 import { classifier, rejected } from '../child/classify'
 import { serveChild } from '../child/serve'
 import { isRecord } from '../../guards'

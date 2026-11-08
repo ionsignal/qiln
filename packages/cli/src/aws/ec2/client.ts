@@ -1,6 +1,6 @@
-import type { EC2Client } from '@aws-sdk/client-ec2'
 import { AWS_SPEC } from '../spec'
-import { markDispatched } from './dispatch'
+import { markDispatched } from '../child/dispatch'
+import type { EC2Client } from '@aws-sdk/client-ec2'
 
 export interface Call {
   abortSignal: AbortSignal

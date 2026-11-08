@@ -1,10 +1,11 @@
 import { fork } from 'node:child_process'
-import type { z } from 'zod'
-import { checkCancellation } from '../../terminal/prompts'
-import { executionFailure } from '../errors'
-import { accept } from '../primitives'
 import { AWS_SPEC } from '../spec'
+import { accept } from '../primitives'
+import { executionFailure } from '../errors'
+import { checkCancellation } from '../../terminal/prompts'
 import { interruptedBySignal, SupervisedProcessError, supervise } from '../../transport/subprocess/supervise'
+import type { z } from 'zod'
+import type { InstallerErrorOptions } from '../../diagnostic/error'
 
 export interface ChildEvidence {
   accept(message: unknown): boolean
@@ -16,6 +17,7 @@ export interface ChildOptions {
   timeoutMs?: number
   evidence?: ChildEvidence
   keepReply?: boolean
+  failure?: (error: SupervisedProcessError) => Partial<InstallerErrorOptions>
 }
 
 function cancelledAfterClose(error: unknown): boolean {
@@ -125,7 +127,7 @@ export async function request<S extends z.ZodType>(
     return result
   } catch (error: unknown) {
     if (error instanceof SupervisedProcessError) {
-      throw executionFailure(error, 'context')
+      throw executionFailure(error, 'context', options.failure?.(error))
     }
     throw error
   }
