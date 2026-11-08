@@ -35,7 +35,7 @@ export const INSTALL_STEPS: Record<InstallAction, StepText> = {
     label: 'Create the stopped orchestrator instance',
   },
   'update-instance': {
-    short: 'Deliver credentials',
-    label: 'Deliver the credentials to the stopped orchestrator instance',
+    short: 'Deliver credentials/ports',
+    label: 'Deliver the credentials and published ports to the stopped orchestrator instance',
   },
 }

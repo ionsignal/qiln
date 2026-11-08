@@ -1,8 +1,8 @@
 import { INSTALLER_SPEC } from './spec'
 import { instancePut, requireNoCollision } from './credentials'
-import { assertInstance, instanceInput } from './instance'
 import { networkInput } from './network'
 import { volumeInput } from './storage'
+import { assertInstance, instanceInput, publishedDevices } from './instance'
 import { InstallerError } from '../diagnostic/error'
 import type { IncusClient } from '../transport/incus/client'
 import type { IncusOperationRef } from '../transport/incus/types'
@@ -106,7 +106,7 @@ export async function apply(
         context,
         await client.updateInstance(
           INSTALLER_SPEC.orchestrator.name,
-          instancePut(instance.value, credentials.values),
+          instancePut(instance.value, credentials.values, publishedDevices(inputs)),
           instance.etag,
         ),
       )

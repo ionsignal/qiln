@@ -24,10 +24,15 @@ export interface CheckoutObservation {
   packageName: string | null
 }
 
+/**
+ * `address` is the source address that the target uses for outbound IPv4
+ * traffic, which is the address that NAT proxy devices listen on.
+ */
 export interface HostObservation extends HostRelease {
   packageArchitecture: string
   machine: string
   memoryBytes: number
+  address: string
   git: boolean
   checkout: CheckoutObservation | null
 }

@@ -22,11 +22,14 @@ section() {
   printf '#qiln:end %s %s\n' "$1" "$code"
 }
 
+# The address is the source of the route to a public destination, which sends no
+# packet. A missing address is a missing line, never a guess.
 system_info() {
   printf 'kernel %s\n' "$(uname -r)"
   printf 'machine %s\n' "$(uname -m)"
   printf 'packageArchitecture %s\n' "$(dpkg --print-architecture)"
   awk '$1 == "MemTotal:" { print "memTotalKiB " $2 }' /proc/meminfo
+  ip -4 route get 1.1.1.1 | awk '{ for (i = 1; i < NF; i++) if ($i == "src") { print "address " $(i + 1); exit } }'
   if command -v git >/dev/null; then
     echo 'git yes'
   else

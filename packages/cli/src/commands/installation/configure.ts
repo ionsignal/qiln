@@ -11,7 +11,7 @@ import { isEmpty, type InstallAction } from '../../installation/journal/types'
 import { acquireInstallationLock, loadInstallation, registerInstallation } from '../../installation/state'
 import { Configurer, type ConfigureProgress } from '../../installation/configure'
 import { withImageSource, type InstallerImageSelection } from '../../installation/image'
-import type { InstallationInputs } from '../../installation/types'
+import { inputsOf } from '../../installation/types'
 import type { FileSnapshot } from '../../state/files'
 import type { InstallerLock } from '../../state/lock'
 import type { LiveRow, Outcome, Reporter } from '../../terminal/reporter'
@@ -77,11 +77,7 @@ export async function configure(
   await withInspection(target, reporter, retry.configure, async ({ host, incus }) => {
     requireIncusExtensions(incus.extensions, retry.inspect)
     const sourceRoot = await rootOf(host.checkout, options.sourcePath, retry.configure)
-    const inputs: InstallationInputs = {
-      architecture: host.architecture,
-      layout: host.layout,
-      sourceRoot,
-    }
+    const inputs = inputsOf(host, sourceRoot)
     let roster: FileSnapshot | null = null
     if (options.authorizedKeysPath !== undefined) {
       roster = await validateRoster(

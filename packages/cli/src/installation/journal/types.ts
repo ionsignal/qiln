@@ -43,7 +43,9 @@ const text = z.string().min(1).max(256)
  * `pin` says that none is recorded yet. `image.import` uploads the staged
  * content without an alias, and `image.alias` points the managed alias at the
  * selected image. `image.replace` names the previous managed target and every
- * alias attached to it, which is the only destructive step.
+ * alias attached to it, which is the only destructive step. `publish` says that
+ * the published port devices of an existing instance differ from the expected
+ * ones, and the guarded instance update reconciles them like the credentials.
  */
 export const planSchema = z.strictObject({
   kind: z.literal('configure'),
@@ -58,6 +60,7 @@ export const planSchema = z.strictObject({
   network: z.boolean(),
   volume: z.boolean(),
   instance: z.boolean(),
+  publish: z.boolean(),
   credentials: z.enum(['generate', 'roster', 'reuse']),
   deliver: z.boolean(),
 })
@@ -106,6 +109,7 @@ export type ConfigureOperation = ConfigureEvidence['operations'][number]
  * a clone failure never follows a long image upload. The import comes before the
  * destructive deletion, which waits until the new image has been checked, and
  * the alias is created last because deleting the old image removes its aliases.
+ * The guarded instance update delivers the credentials and the published ports.
  */
 export function actionsOf(plan: ConfigurePlan): readonly InstallAction[] {
   const actions: InstallAction[] = []
@@ -130,7 +134,7 @@ export function actionsOf(plan: ConfigurePlan): readonly InstallAction[] {
   if (plan.instance) {
     actions.push('create-instance')
   }
-  if (plan.deliver) {
+  if (plan.deliver || plan.publish) {
     actions.push('update-instance')
   }
   return actions

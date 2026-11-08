@@ -125,7 +125,9 @@ export function requireAssignable(
  * managed checkout that is absent is the one tolerated difference, because the
  * next configure restores it from the recorded restore point and reassignment
  * never clones. A checkout plan that would first record a restore point is not
- * tolerated.
+ * tolerated. Published port devices are tolerated too: `plan.publish` is not
+ * listed below, because they name the host address of the replacement, and the
+ * next configure reconciles them.
  */
 export function requireMatching(
   observation: Observation,

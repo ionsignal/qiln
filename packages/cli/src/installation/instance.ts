@@ -7,6 +7,7 @@ import type { IncusConfigMap, IncusDevicesMap, IncusInstance, IncusInstanceCreat
 
 const STOPPED_STATUS_CODE = 102
 const CONTROL_CHARACTER_PATTERN = /[\u0000-\u001f\u007f]/
+const PUBLISHED_PREFIX = 'tcp-'
 
 function validateSourceRoot(sourceRoot: string, retry: string): void {
   if (
@@ -121,7 +122,7 @@ function deviceDifferences(
   const expectedNames = Object.keys(expected)
   const actualNames = Object.keys(actual)
   const missing = expectedNames.filter(name => actual[name] === undefined)
-  const unexpected = actualNames.filter(name => expected[name] === undefined)
+  const unexpected = actualNames.filter(name => expected[name] === undefined && !isPublishedDevice(name))
   const mismatched = expectedNames.filter(name => {
     const actualDevice = actual[name]
     const expectedDevice = expected[name]
@@ -132,6 +133,48 @@ function deviceDifferences(
     mismatched,
     unexpected,
   }
+}
+
+export function isPublishedDevice(name: string): boolean {
+  return name.startsWith(PUBLISHED_PREFIX)
+}
+
+/**
+ * One NAT proxy device per published port, listening on the host address and
+ * connecting to the same port of the orchestrator's static address. NAT keeps
+ * the client address visible to the orchestrator.
+ */
+export function publishedDevices({ layout, publish }: InstallationInputs): IncusDevicesMap {
+  const devices: IncusDevicesMap = {}
+  if (publish === null) {
+    return devices
+  }
+  for (const port of publish.ports) {
+    devices[`${PUBLISHED_PREFIX}${port}`] = {
+      type: 'proxy',
+      listen: `tcp:${publish.address}:${port}`,
+      connect: `tcp:${layout.orchestrator.ipv4Address}:${port}`,
+      nat: 'true',
+    }
+  }
+  return devices
+}
+
+/**
+ * Whether the published port devices are exactly the expected ones. It is
+ * deliberately separate from `instanceFits`, so drift here is reconciled by the
+ * guarded update and never makes the instance incompatible.
+ */
+export function publishedFits(instance: IncusInstance, inputs: InstallationInputs): boolean {
+  const expected = publishedDevices(inputs)
+  const actual = Object.entries(instance.devices).filter(([name]) => isPublishedDevice(name))
+  return (
+    actual.length === Object.keys(expected).length &&
+    actual.every(([name, device]) => {
+      const expectedDevice = expected[name]
+      return expectedDevice !== undefined && sameDevice(device, expectedDevice)
+    })
+  )
 }
 
 /**
@@ -207,7 +250,7 @@ export function instanceInput(fingerprint: string, inputs: InstallationInputs, r
     stateful: INSTALLER_SPEC.orchestrator.stateful,
     profiles: [...INSTALLER_SPEC.orchestrator.profileNames],
     config: expectedConfig(inputs.layout),
-    devices: expectedDevices(inputs, retry),
+    devices: { ...expectedDevices(inputs, retry), ...publishedDevices(inputs) },
     source: {
       type: 'image',
       fingerprint,

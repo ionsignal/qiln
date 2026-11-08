@@ -2,7 +2,7 @@ import { isImageFingerprint, validateContainerImage } from './preflight/image'
 import { InstallerError } from '../diagnostic/error'
 import { checkoutPlanOf } from './checkout/judge'
 import { hasManagedCredentials, matchesCredentials, requireNoCollision } from './credentials'
-import { assertInstance } from './instance'
+import { assertInstance, publishedFits } from './instance'
 import { assertNetwork } from './network'
 import { assertVolume } from './storage'
 import type { IncusImage, IncusImageAlias } from '../transport/incus/types'
@@ -139,6 +139,7 @@ function credentialsPlan(
  * Pure decision over one observation. Every incompatibility with retained
  * state throws before a plan exists, so nothing is deleted for a plan that
  * could not complete. An empty plan means the installation already matches.
+ * Published port drift is not an incompatibility: it only sets `publish`.
  */
 export function planOf(observation: Observation, request: PlanRequest): ConfigurePlan {
   const { inputs, roster, retry } = request
@@ -164,6 +165,7 @@ export function planOf(observation: Observation, request: PlanRequest): Configur
     network: network === null,
     volume: volume === null,
     instance: instance === null,
+    publish: instance !== null && !publishedFits(instance.value, inputs),
     credentials: mode,
     deliver:
       instance === null ||
@@ -192,6 +194,7 @@ export function firstGate(plan: ConfigurePlan): ConfigurePlan | null {
     network: false,
     volume: false,
     instance: false,
+    publish: false,
     credentials: 'reuse',
     deliver: false,
   }

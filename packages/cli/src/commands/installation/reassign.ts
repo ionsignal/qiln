@@ -5,6 +5,7 @@ import { reportApproval } from '../../terminal/approval'
 import { rootOf } from '../../installation/checkout/judge'
 import { requireIncusExtensions } from '../../installation/preflight/incus'
 import { refusal, requireAssignable, requireMatching } from '../../installation/assignment'
+import { inputsOf } from '../../installation/types'
 import { invalidRecord, requireInputs, sameHost, type AwsBinding, type InstallationRecord } from '../../installation/records'
 import {
   acquireInstallationLock,
@@ -14,7 +15,6 @@ import {
   type InstallationState,
 } from '../../installation/state'
 import * as journal from '../../installation/journal/records'
-import type { InstallationInputs } from '../../installation/types'
 import type { AwsHost } from '../../installation/target/aws/host'
 import type { InstallationTarget } from '../../installation/target/types'
 import type { Reporter } from '../../terminal/reporter'
@@ -39,7 +39,7 @@ function reportProposal(reporter: Reporter, installation: InstallationState, hos
     {
       label: 'Validated',
       detail:
-        'volume handoff, Incus release, ZFS export, and removal of every earlier deployment · the same Incus server identity, retained preseed, and ZFS pool · a live installation that needs no change (the managed checkout may be absent)',
+        'volume handoff, Incus release, ZFS export, and removal of every earlier deployment · the same Incus server identity, retained preseed, and ZFS pool · a live installation that needs no change (the managed checkout may be absent, and published port devices are reconciled by the next configure)',
     },
   )
 }
@@ -75,11 +75,7 @@ export async function reassign(target: InstallationTarget, aws: AwsHost, reporte
         await aws.links(),
         retry.reassign,
       )
-      const inputs: InstallationInputs = {
-        architecture: host.architecture,
-        layout: host.layout,
-        sourceRoot: await rootOf(host.checkout, record.checkoutPath, retry.reassign),
-      }
+      const inputs = inputsOf(host, await rootOf(host.checkout, record.checkoutPath, retry.reassign))
       requireInputs(record, inputs, retry.reassign)
       await host.withIncus(async incus => {
         requireIncusExtensions(incus.extensions, retry.inspect)

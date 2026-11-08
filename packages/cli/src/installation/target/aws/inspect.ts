@@ -26,11 +26,12 @@ function failure(reason: string): InstallerError {
 const { fields, sections, succeeded, yesNo } = outputOf(failure)
 
 const systemSchema = z.object({
+  address: z.ipv4(),
   kernel: z.string().min(1),
   machine: z.string().min(1),
+  git: z.enum(['yes', 'no']),
   packageArchitecture: z.string().min(1),
   memTotalKiB: z.coerce.number().int().positive(),
-  git: z.enum(['yes', 'no']),
 })
 
 function checkoutOf(section: Section): CheckoutObservation | null {
@@ -81,6 +82,7 @@ export async function inspectHost(remote: Remote, checkoutPath: string | null): 
     packageArchitecture: system.data.packageArchitecture,
     machine: system.data.machine,
     memoryBytes: system.data.memTotalKiB * 1_024,
+    address: system.data.address,
     git: system.data.git === 'yes',
     checkout: checkoutPath === null ? null : checkoutOf(succeeded(found, 'checkout')),
   }

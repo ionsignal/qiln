@@ -5,6 +5,7 @@ import type { Architecture } from '../architecture'
 import type { Layout } from '../layout'
 import type { HostBinding } from '../records'
 import type { Retry } from '../retry'
+import type { Publish } from '../types'
 import type { Reporter } from '../../terminal/reporter'
 
 /**
@@ -49,12 +50,14 @@ export type CheckoutAccess =
 
 /**
  * A validated target host. It is reachable only while the callback of
- * `InstallationTarget.withHost` runs.
+ * `InstallationTarget.withHost` runs. `publish` is the host address and ports
+ * that the orchestrator publishes, or null when the target publishes none.
  */
 export interface HostAccess {
   binding: HostBinding
   architecture: Architecture
   layout: Layout
+  publish: Publish | null
   sshKeygen: string
   checkout: CheckoutAccess
   withIncus<T>(use: (incus: IncusAccess) => Promise<T>): Promise<T>

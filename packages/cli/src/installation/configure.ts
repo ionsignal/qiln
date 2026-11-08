@@ -67,7 +67,7 @@ const OPERATIONS: Record<IncusAction, string> = {
   'create-network': 'create the managed bridge network',
   'create-volume': 'create the Qiln PostgreSQL custom volume',
   'create-instance': 'create the stopped orchestrator instance',
-  'update-instance': 'deliver the credentials to the stopped orchestrator instance',
+  'update-instance': 'deliver the credentials and published ports to the stopped orchestrator instance',
 }
 
 /**

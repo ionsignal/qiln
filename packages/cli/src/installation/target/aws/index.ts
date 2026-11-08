@@ -1,14 +1,14 @@
+import { PUBLISHED_PORTS, withAwsHost, type AwsHost } from './host'
+import { managedCheckout } from './checkout'
+import { inspectHost } from './inspect'
 import { requireTool } from '../../preflight/host'
-import { createIncusClient, readIncusServer, validateIncusServer } from '../../preflight/incus'
 import { validateIncusNetwork } from '../../preflight/network'
 import { validateIncusStorage } from '../../preflight/storage'
 import { architectureOf } from '../../architecture'
-import { withAwsHost, type AwsHost } from './host'
-import { managedCheckout } from './checkout'
-import { requireCapacity, requireGit, requireSupportedRelease } from '../../host'
-import { inspectHost } from './inspect'
 import { installationRetry, type Retry } from '../../retry'
 import { reportNetwork, reportStorage } from '../report'
+import { createIncusClient, readIncusServer, validateIncusServer } from '../../preflight/incus'
+import { requireCapacity, requireGit, requireSupportedRelease } from '../../host'
 import type { DeploymentSelector } from '../../../aws/deployment/volume/alias'
 import type { InstallationTarget } from '../types'
 
@@ -41,10 +41,11 @@ function awsTarget(aws: AwsHost, signal: AbortSignal, commands: Retry): Installa
         `Ubuntu ${observation.distributionVersion} · ${architecture.package} · kernel ${observation.kernelRelease} · ${(observation.memoryBytes / GiB).toFixed(1)} GiB memory`,
       )
       return await use({
-        binding: aws.host,
-        architecture,
-        layout: aws.layout,
         sshKeygen,
+        architecture,
+        binding: aws.host,
+        layout: aws.layout,
+        publish: { address: observation.address, ports: PUBLISHED_PORTS },
         checkout: managedCheckout(aws.record, retry, run => aws.shell(signal, run)),
         withIncus: useIncus =>
           aws.relay(async connection => {

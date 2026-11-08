@@ -1,14 +1,15 @@
+import { join } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { chmod, rm } from 'node:fs/promises'
-import { join } from 'node:path'
 import { TextDecoder, TextEncoder } from 'node:util'
 import { INSTALLER_SPEC } from './spec'
 import { validateRoster } from './roster'
+import { isPublishedDevice } from './instance'
 import { InstallerError } from '../diagnostic/error'
 import { runProcess } from '../transport/process'
 import { currentUserId } from '../state/user'
-import type { FileSnapshot } from '../state/files'
 import { Dir, FileValidationError, read, readChild, withDir, withTemp, writeChild } from '../state/files'
+import type { FileSnapshot } from '../state/files'
 import type { IncusConfigMap, IncusDevicesMap, IncusInstance, IncusInstancePut } from '../transport/incus/types'
 
 const UNSUPPORTED_CONTROL_PATTERN = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/
@@ -334,8 +335,8 @@ export async function createCredentials(
     host: snapshot(new TextEncoder().encode(hostEnvironment(natsToken, cookieSecret))),
     gatewayKey: await gatewayKey(sshKeygen, retry),
   }
-  await validate(generated, sshKeygen, retry)
   const names = INSTALLER_SPEC.credentials.files
+  await validate(generated, sshKeygen, retry)
   await writeChild(directory, names.authorizedKeys, generated.authorizedKeys.bytes, 0o600)
   await writeChild(directory, names.nats, generated.nats.bytes, 0o600)
   await writeChild(directory, names.host, generated.host.bytes, 0o600)
@@ -371,15 +372,28 @@ export async function replaceRoster(
 
 /**
  * The complete guarded update body: the instance as read, with only the
- * managed credential values replaced and every other writable field kept.
+ * managed credential values and the published port devices replaced, and every
+ * other writable field kept.
  */
-export function instancePut(instance: IncusInstance, values: Readonly<IncusConfigMap>): IncusInstancePut {
+export function instancePut(
+  instance: IncusInstance,
+  values: Readonly<IncusConfigMap>,
+  published: Readonly<IncusDevicesMap>,
+): IncusInstancePut {
   const config: IncusConfigMap = {
     ...instance.config,
     ...values,
   }
   const devices: IncusDevicesMap = {}
   for (const [name, device] of Object.entries(instance.devices)) {
+    if (isPublishedDevice(name)) {
+      continue
+    }
+    devices[name] = {
+      ...device,
+    }
+  }
+  for (const [name, device] of Object.entries(published)) {
     devices[name] = {
       ...device,
     }

@@ -58,6 +58,13 @@ function installationName(originId: string): string {
 }
 
 /**
+ * Proposed AWS policy: the TCP ports that the orchestrator publishes on the
+ * host address through NAT proxy devices, each connecting to the same port of
+ * the orchestrator. Opening them in the cloud firewall is not part of this.
+ */
+export const PUBLISHED_PORTS: readonly number[] = Object.freeze([80, 443, 2222])
+
+/**
  * Everything an installation needs from one deployment, taken from retained
  * evidence alone. The host binding is the deployment's own identity, and the
  * layout comes from its verified ZFS pool and retained Incus preseed. `links`

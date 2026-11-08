@@ -3,10 +3,10 @@ import { requireNoCollision } from '../../installation/credentials'
 import { assertInstance } from '../../installation/instance'
 import { inspectInstallation } from '../../installation/state'
 import { toInstallerError } from '../../transport/incus/errors'
+import { inputsOf } from '../../installation/types'
 import { requireBound, type InstallationRecord } from '../../installation/records'
 import type { Reporter } from '../../terminal/reporter'
 import type { IncusInstance } from '../../transport/incus/types'
-import type { InstallationInputs } from '../../installation/types'
 import type { HostAccess, IncusAccess, InstallationTarget } from '../../installation/target/types'
 
 /**
@@ -62,13 +62,9 @@ async function verifyRecord(
   reporter: Reporter,
   retry: string,
 ): Promise<void> {
-  const inputs: InstallationInputs = {
-    architecture: host.architecture,
-    layout: host.layout,
-    sourceRoot: record.checkoutPath,
-  }
-  requireBound(record, host.binding, inputs, retry)
+  const inputs = inputsOf(host, record.checkoutPath)
   const { checkout } = host
+  requireBound(record, host.binding, inputs, retry)
   if (checkout.kind === 'operator') {
     await checkout.root(record.checkoutPath)
   }

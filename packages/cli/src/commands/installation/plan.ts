@@ -26,6 +26,8 @@ type Details = Partial<Record<InstallAction, string>>
 const BEFORE_PIN: readonly InstallAction[] = ['materialize-checkout', 'import-image', 'delete-image', 'create-alias']
 const AUTHORITY = 'The invoking developer’s Incus socket access is root-equivalent authority on the host.'
 const IMPORT_NOTE = 'A rejected import stays in the image store without an alias, and Qiln never deletes it.'
+const PUBLISH_NOTE =
+  'Published ports are forwarded to the orchestrator through NAT proxy devices on the host address, so it sees client addresses. Qiln opens no cloud firewall port, and reachability from outside is not established.'
 const TRUSTED =
   'The selected image and the checkout are trusted guest code, and Qiln has not established their provenance or compatibility.'
 
@@ -48,10 +50,14 @@ export function approvalLabel(plan: ConfigurePlan, held: ImageReplacement | null
 }
 
 function detailsOf(plan: ConfigurePlan, inputs: InstallationInputs): Details {
-  const { layout, architecture, sourceRoot } = inputs
+  const { layout, architecture, sourceRoot, publish } = inputs
   const { checkout, image } = plan
   const { name, imageAlias } = INSTALLER_SPEC.orchestrator
   const { repository } = INSTALLER_SPEC.checkout
+  const published =
+    publish === null
+      ? ''
+      : ` · publishes TCP ${publish.ports.join(', ')} on ${publish.address} through NAT proxy devices`
   return {
     ...(checkout === null
       ? {}
@@ -67,8 +73,8 @@ function detailsOf(plan: ConfigurePlan, inputs: InstallationInputs): Details {
     'create-alias': `${imageAlias} points at the selected image`,
     'create-network': `${layout.network.name} · ${layout.network.ipv4Subnet} · managed bridge`,
     'create-volume': `${layout.postgres.volumeName} · ${layout.postgres.config.size} · in pool ${layout.pool.name}`,
-    'create-instance': `${name} · ${architecture.incus} container · created stopped`,
-    'update-instance': 'the four credentials in one guarded complete instance update',
+    'create-instance': `${name} · ${architecture.incus} container · created stopped${published}`,
+    'update-instance': `the four credentials${publish === null ? '' : ' and the published port devices'} in one guarded complete instance update${published}`,
   }
 }
 
@@ -98,12 +104,13 @@ function screenOf({ plan, held, inputs, source }: PlanPreview): ApprovalScreen {
       notEstablished: TRUSTED,
     }
   }
+  const publishes = inputs.publish !== null && (plan.instance || plan.publish)
   return {
     title: 'Proposed installation changes',
     steps,
     covers,
     stays: 'The orchestrator is never started, and persistent PostgreSQL data is kept.',
-    lasting: `${AUTHORITY} The instance mounts ${inputs.sourceRoot} writable, so it can modify the host checkout.${plan.image.import ? ` ${IMPORT_NOTE}` : ''}`,
+    lasting: `${AUTHORITY} The instance mounts ${inputs.sourceRoot} writable, so it can modify the host checkout.${plan.image.import ? ` ${IMPORT_NOTE}` : ''}${publishes ? ` ${PUBLISH_NOTE}` : ''}`,
     notEstablished: TRUSTED,
   }
 }
