@@ -81,6 +81,7 @@ const INCUS_PROXY_DEVICE = Object.freeze({
 export const INSTALLER_SPEC = Object.freeze({
   stateVersion: 1,
   evidenceVersion: 1,
+  domainVersion: 1,
   projectName: 'default',
   supportedHost: {
     distributionId: 'ubuntu',
@@ -219,14 +220,19 @@ export const INSTALLER_SPEC = Object.freeze({
     requiredExtensions: ['operation_wait', 'instance_systemd_credentials', 'container_disk_shift'] as const,
   },
   state: {
+    localName: 'dev',
     directory: 'installations',
+    tlsKeyFileName: 'tls.key',
+    lockFileName: 'installation.lock',
     registryLockFileName: 'registry.lock',
     installationFileName: 'installation.json',
+    domainFileName: 'domain.json',
+    domainAttemptFileName: 'domain-attempt.json',
     configureFileName: 'configure.json',
-    lockFileName: 'installation.lock',
-    localName: 'dev',
   },
   limits: {
+    domain: 65_536,
+    tlsKey: 4_096,
     evidence: 131_072,
   },
 })

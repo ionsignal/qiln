@@ -1,12 +1,15 @@
-import type { IncusClient } from '../../transport/incus/client'
-import type { DeploymentSelector } from '../../aws/deployment/volume/alias'
+import type { Retry } from '../retry'
+import type { Layout } from '../layout'
+import type { Publish } from '../types'
+import type { HostBinding } from '../records'
+import type { Window } from '../domain/cert'
+import type { Subject } from '../domain/plan'
 import type { StepOutcome } from '../../host/step'
 import type { Architecture } from '../architecture'
-import type { Layout } from '../layout'
-import type { HostBinding } from '../records'
-import type { Retry } from '../retry'
-import type { Publish } from '../types'
+import type { DomainRecord } from '../domain/records'
 import type { Reporter } from '../../terminal/reporter'
+import type { IncusClient } from '../../transport/incus/client'
+import type { DeploymentSelector } from '../../aws/deployment/volume/alias'
 
 /**
  * The target of a named installation command: this machine, or one AWS
@@ -49,15 +52,31 @@ export type CheckoutAccess =
     }
 
 /**
+ * The registration service for the stable public name and wildcard certificate
+ * of a target's installation. `service` names the service for the operator,
+ * and `subject` is what retained evidence says the allocation is for. Each call
+ * is one bounded request whose failures are already diagnostics, so the caller
+ * never sees provider or process errors.
+ */
+export interface DomainAccess {
+  service: string
+  subject: Subject
+  register(signal: AbortSignal): Promise<Pick<DomainRecord, 'label' | 'zone' | 'address'>>
+  issue(csr: string, signal: AbortSignal): Promise<Window & { chain: string }>
+}
+
+/**
  * A validated target host. It is reachable only while the callback of
  * `InstallationTarget.withHost` runs. `publish` is the host address and ports
  * that the orchestrator publishes, or null when the target publishes none.
+ * `domain` is null when the target owns no public name.
  */
 export interface HostAccess {
   binding: HostBinding
   architecture: Architecture
   layout: Layout
   publish: Publish | null
+  domain: DomainAccess | null
   sshKeygen: string
   checkout: CheckoutAccess
   withIncus<T>(use: (incus: IncusAccess) => Promise<T>): Promise<T>

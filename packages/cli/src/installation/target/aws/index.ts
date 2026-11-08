@@ -1,14 +1,15 @@
 import { PUBLISHED_PORTS, withAwsHost, type AwsHost } from './host'
+import { awsDomain } from './domain'
 import { managedCheckout } from './checkout'
 import { inspectHost } from './inspect'
+import { reportNetwork, reportStorage } from '../report'
 import { requireTool } from '../../preflight/host'
-import { validateIncusNetwork } from '../../preflight/network'
-import { validateIncusStorage } from '../../preflight/storage'
 import { architectureOf } from '../../architecture'
 import { installationRetry, type Retry } from '../../retry'
-import { reportNetwork, reportStorage } from '../report'
-import { createIncusClient, readIncusServer, validateIncusServer } from '../../preflight/incus'
+import { validateIncusNetwork } from '../../preflight/network'
+import { validateIncusStorage } from '../../preflight/storage'
 import { requireCapacity, requireGit, requireSupportedRelease } from '../../host'
+import { createIncusClient, readIncusServer, validateIncusServer } from '../../preflight/incus'
 import type { DeploymentSelector } from '../../../aws/deployment/volume/alias'
 import type { InstallationTarget } from '../types'
 
@@ -19,9 +20,11 @@ const GiB = 1_073_741_824
  * the pinned SSH connection of the retained deployment: one session for each
  * host inspection and checkout request, and a new one for the Incus socket
  * relay. Nothing about the operator's machine is observed except `ssh-keygen`.
- * The AWS lock held by `withAwsHost` outlives the target, so the target is only
- * valid inside that scope. The signal bounds the inspection sessions, while the
- * relay session ignores it and the Incus client observes it instead.
+ * The one operation that uses the saved operator login is the domain request,
+ * which runs in an isolated credential process. The AWS lock held by
+ * `withAwsHost` outlives the target, so the target is only valid inside that
+ * scope. The signal bounds the inspection sessions, while the relay session
+ * ignores it and the Incus client observes it instead.
  */
 function awsTarget(aws: AwsHost, signal: AbortSignal, commands: Retry): InstallationTarget {
   return {
@@ -46,6 +49,7 @@ function awsTarget(aws: AwsHost, signal: AbortSignal, commands: Retry): Installa
         binding: aws.host,
         layout: aws.layout,
         publish: { address: observation.address, ports: PUBLISHED_PORTS },
+        domain: awsDomain(aws, retry),
         checkout: managedCheckout(aws.record, retry, run => aws.shell(signal, run)),
         withIncus: useIncus =>
           aws.relay(async connection => {

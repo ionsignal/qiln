@@ -2,8 +2,10 @@ import { INSTALLER_SPEC } from '../../installation/spec'
 import { INSTALL_STEPS } from './steps'
 import { withInspection } from './inspect'
 import { approvalLabel, reportPlan } from './plan'
+import { domainApproval, domainProgress, reportAcquisition, reportDomain } from './domain'
 import { approve } from '../../terminal/approval'
 import { Prompts } from '../../terminal/prompts'
+import { acquire } from '../../installation/domain/acquire'
 import { rootOf } from '../../installation/checkout/judge'
 import { requireIncusExtensions } from '../../installation/preflight/incus'
 import { readRoster, validateRoster } from '../../installation/roster'
@@ -63,10 +65,15 @@ function progressSink(reporter: Reporter): (event: ConfigureProgress) => void {
 }
 
 /**
- * Observes the target first, then displays the installation plan and applies it
- * only after an explicit approval. A plan that replaces the managed image is
- * approved in two gates. Registration, locking and image-source handling are
- * shared by every target. Cancellation is owned by the target.
+ * Observes the target first. Once the image source is staged and the
+ * configurer is open, the plan is derived a single time, so every refusal that
+ * local and Incus state already determine comes before any external effect. A
+ * target that owns a public name then acquires its domain and certificate under
+ * its own approval, before Incus is changed. The installation plan is displayed
+ * next and applied only after an explicit approval. A plan that replaces the
+ * managed image is approved in two gates. Registration, locking and
+ * image-source handling are shared by every target. Cancellation is owned by
+ * the target.
  */
 export async function configure(
   target: InstallationTarget,
@@ -103,8 +110,9 @@ export async function configure(
     try {
       lock = await acquireInstallationLock(directory, retry.inspect)
       const installation = await loadInstallation(directory, host.binding, inputs, retry.inspect)
+      const prompts = new Prompts(signal, retry.configure, reporter)
+      const { domain } = host
       const { plan } = await withImageSource(options.image, async imageSource => {
-        const prompts = new Prompts(signal, retry.configure, reporter)
         const configurer = await Configurer.open({
           directory,
           installation,
@@ -121,6 +129,24 @@ export async function configure(
           },
           retry,
         })
+        if (domain !== null) {
+          await configurer.check()
+          reportDomain(
+            reporter,
+            await acquire({
+              directory,
+              name: target.name,
+              access: domain,
+              retry: retry.configure,
+              signal,
+              hooks: {
+                show: acquisition => reportAcquisition(reporter, { plan: acquisition, name: target.name, access: domain }),
+                approve: acquisition => approve(prompts, reporter, domainApproval(acquisition)),
+                progress: domainProgress(reporter),
+              },
+            }),
+          )
+        }
         return await configurer.run(signal)
       })
       reporter.section('Result')

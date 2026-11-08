@@ -1,26 +1,45 @@
 import { INSTALLER_SPEC } from '../../spec'
 import { InstallerError } from '../../../diagnostic/error'
-import { notFound, type DeploymentSelector } from '../../../aws/deployment/volume/alias'
-import { optionsOf, requireReady } from '../../../aws/deployment/ssh/access'
-import { chain, originOf } from '../../../aws/deployment/lineage/chain'
-import { evidence as incusEvidence } from '../../../aws/deployment/incus/evidence'
+import { devLayout, type Layout } from '../../layout'
 import { bindingOf } from '../../../aws/deployment/journal/binding'
-import { withConfirmedOperation } from '../../../aws/operation'
+import { requireBound } from '../../../aws/deployment/binding'
+import { Session } from '../../../aws/auth/session'
 import { openAwsRoot } from '../../../aws/root'
 import { readPrivateKey } from '../../../aws/ssh/private'
 import { datasetNamesOf } from '../../../host/zfs/spec'
-import { withSsh, type Remote } from '../../../transport/ssh/connections'
 import { withSocket } from '../../../transport/ssh/socket'
-import { devLayout, type Layout } from '../../layout'
+import { withConfirmedOperation } from '../../../aws/operation'
+import { withSsh, type Remote } from '../../../transport/ssh/connections'
+import { chain, originOf } from '../../../aws/deployment/lineage/chain'
+import { optionsOf, requireReady } from '../../../aws/deployment/ssh/access'
+import { evidence as incusEvidence } from '../../../aws/deployment/incus/evidence'
+import { notFound, type DeploymentSelector } from '../../../aws/deployment/volume/alias'
+import { installationName, subjectOf, type Subject } from '../../../aws/domain/subject'
 import { requireSettled as requireZfsSettled } from '../../../aws/deployment/zfs/facts'
 import { requireSettled as requireIncusSettled, retainedPreseed, storageHeld } from '../../../aws/deployment/incus/facts'
+import * as connections from '../../../aws/connections'
 import * as deployments from '../../../aws/deployment/records'
 import * as lineage from '../../../aws/deployment/lineage/zfs'
+import type { Link } from '../../assignment'
+import type { AwsBinding } from '../../records'
 import type { Deployment } from '../../../aws/deployment/types'
 import type { IncusConnection } from '../../../transport/incus/connection'
 import type { IncusConfigMap } from '../../../transport/incus/types'
-import type { Link } from '../../assignment'
-import type { AwsBinding } from '../../records'
+
+/**
+ * The relay session never observes the command signal. Cancellation reaches the
+ * Incus requests through the client instead, so a request that is allowed to
+ * finish keeps its connection, exactly as it does on a local socket. The
+ * session closes when the work that uses it unwinds.
+ */
+const RELAY_SIGNAL = new AbortController().signal
+
+/**
+ * Proposed AWS policy: the TCP ports that the orchestrator publishes on the
+ * host address through NAT proxy devices, each connecting to the same port of
+ * the orchestrator. Opening them in the cloud firewall is not part of this.
+ */
+export const PUBLISHED_PORTS: readonly number[] = Object.freeze([80, 443, 2222])
 
 /**
  * Proposed AWS policy: a memory limit and no CPU limit. The installation
@@ -40,46 +59,27 @@ const CONFIG: Readonly<IncusConfigMap> = Object.freeze({
 })
 
 /**
- * The relay session never observes the command signal. Cancellation reaches the
- * Incus requests through the client instead, so a request that is allowed to
- * finish keeps its connection, exactly as it does on a local socket. The
- * session closes when the work that uses it unwinds.
- */
-const RELAY_SIGNAL = new AbortController().signal
-
-/**
- * Derived from the immutable ID of the deployment that created the retained
- * data volume, never from an alias or operator input, and within the
- * installation name rule. Every later deployment of the same volume chain keeps
- * the name, so a host replacement keeps the installation directory.
- */
-function installationName(originId: string): string {
-  return `aws-${originId}`
-}
-
-/**
- * Proposed AWS policy: the TCP ports that the orchestrator publishes on the
- * host address through NAT proxy devices, each connecting to the same port of
- * the orchestrator. Opening them in the cloud firewall is not part of this.
- */
-export const PUBLISHED_PORTS: readonly number[] = Object.freeze([80, 443, 2222])
-
-/**
  * Everything an installation needs from one deployment, taken from retained
  * evidence alone. The host binding is the deployment's own identity, and the
- * layout comes from its verified ZFS pool and retained Incus preseed. `links`
- * reads the preparation evidence of the whole volume chain, newest first, for
- * the host reassignment. `shell` and `relay` open one pinned, key-authenticated
- * connection for the duration of `use`: the administrative private key is read
- * for that connection only and zeroed afterwards, so it never leaves this
- * module. Architecture is not known here: it is observed on the target.
+ * layout comes from its verified ZFS pool and retained Incus preseed. `subject`
+ * is what the domain registration needs, from the same evidence, and `session`
+ * opens the saved login of the connection that the deployment is bound to, for
+ * the isolated credential process of a domain request: it never authenticates
+ * by itself. `links` reads the preparation evidence of the whole volume chain,
+ * newest first, for the host reassignment. `shell` and `relay` open one pinned,
+ * key-authenticated connection for the duration of `use`: the administrative
+ * private key is read for that connection only and zeroed afterwards, so it
+ * never leaves this module. Architecture is not known here: it is observed on
+ * the target.
  */
 export interface AwsHost {
   name: string
   host: AwsBinding
   layout: Layout
   record: Deployment
+  subject: Subject
   links(): Promise<Link[]>
+  session(): Promise<Session>
   shell<T>(signal: AbortSignal, use: (remote: Remote) => Promise<T>): Promise<T>
   relay<T>(use: (connection: IncusConnection) => Promise<T>): Promise<T>
 }
@@ -122,7 +122,7 @@ export async function withAwsHost<T>(
   selector: DeploymentSelector,
   run: (host: AwsHost) => Promise<T>,
 ): Promise<T> {
-  return await withConfirmedOperation(false, async ({ root }) => {
+  return await withConfirmedOperation(false, async ({ root, connections: store }) => {
     const record = await deployments.select(root, selector)
     requireReady(record)
     requireZfsSettled(await lineage.evidence(root, record), record.id)
@@ -159,8 +159,9 @@ export async function withAwsHost<T>(
         key.fill(0)
       }
     }
+    const subject = await subjectOf(root, record)
     return await run({
-      name: installationName(await originOf(root, record)),
+      name: subject.installation,
       host: { kind: 'aws', ...identity },
       layout: {
         pool: { name: pool.name, source: datasetNamesOf(pool.name).incus },
@@ -169,6 +170,7 @@ export async function withAwsHost<T>(
         orchestrator: { ipv4Address: `${prefix}.10`, limits: LIMITS, config: CONFIG },
       },
       record,
+      subject,
       links: async () => {
         const links: Link[] = []
         for await (const deployment of chain(root, record)) {
@@ -179,6 +181,11 @@ export async function withAwsHost<T>(
           })
         }
         return links
+      },
+      session: async () => {
+        const directory = await connections.open(store, record.connection)
+        const connection = requireBound(await connections.read(directory, record.connection), record)
+        return await Session.open(directory, connection.region)
       },
       shell: (signal, use) => withKey(key => withSsh(ssh, key, signal, use)),
       relay: use =>

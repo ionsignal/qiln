@@ -202,6 +202,16 @@ export class Configurer {
   }
 
   /**
+   * Derives the plan from one fresh observation and discards it. Every refusal
+   * that local and Incus state already determine surfaces here, so a caller can
+   * run it before an external effect, such as domain acquisition, that a later
+   * refusal in `run` would otherwise follow.
+   */
+  public async check(): Promise<void> {
+    planOf(await this.fresh(), this.planRequest)
+  }
+
+  /**
    * Verifies a step left returned by an earlier run, then plans from fresh
    * evidence. An installation that already matches needs no approval. A plan
    * that replaces the managed image is approved in two gates (see `firstGate`),

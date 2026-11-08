@@ -14,7 +14,7 @@ import type { InstallationTarget } from './types'
  * This machine: the operator-side host checks, the local Incus socket, and the
  * development layout. `commands` names the workflow that diagnostics tell the
  * operator to run again, and `signal` is the cancellation of the invocation.
- * The local orchestrator publishes no ports.
+ * The local orchestrator publishes no ports and owns no public name.
  */
 export const localTarget = (commands: Retry, signal: AbortSignal): InstallationTarget => ({
   name: INSTALLER_SPEC.state.localName,
@@ -38,6 +38,7 @@ export const localTarget = (commands: Retry, signal: AbortSignal): InstallationT
       architecture: preflight.architecture,
       layout,
       publish: null,
+      domain: null,
       sshKeygen: preflight.commandPaths['ssh-keygen'],
       checkout: {
         kind: 'operator',
