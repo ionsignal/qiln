@@ -3,19 +3,23 @@ import { INSTALL_STEPS } from './steps'
 import { actionsOf, isEmpty, type ConfigurePlan, type InstallAction } from '../../installation/journal/types'
 import { reportApproval, stepsOf, type ApprovalScreen, type ApprovalStep } from '../../terminal/approval'
 import type { ImageSource } from '../../installation/image'
+import type { Ingress } from '../../installation/ingress'
 import type { ImageReplacement } from '../../installation/plan'
 import type { InstallationInputs } from '../../installation/types'
 import type { Reporter } from '../../terminal/reporter'
 
 /**
  * `held` is the image deletion that the first gate of a replacement leaves for
- * its own approval, and null for every other plan.
+ * its own approval, and null for every other plan. `ingress` is the generated
+ * configuration that the instance update would deliver, or null while none is
+ * derivable.
  */
 export interface PlanPreview {
   plan: ConfigurePlan
   held: ImageReplacement | null
   inputs: InstallationInputs
   source: ImageSource
+  ingress: Ingress | null
 }
 
 type Details = Partial<Record<InstallAction, string>>
@@ -28,8 +32,14 @@ const AUTHORITY = 'The invoking developer’s Incus socket access is root-equiva
 const IMPORT_NOTE = 'A rejected import stays in the image store without an alias, and Qiln never deletes it.'
 const PUBLISH_NOTE =
   'Published ports are forwarded to the orchestrator through NAT proxy devices on the host address, so it sees client addresses. Qiln opens no cloud firewall port, and reachability from outside is not established.'
+const INGRESS_NOTE =
+  'The ingress configuration, and for a domain target the retained TLS private key, are stored in the instance configuration beside the credentials.'
 const TRUSTED =
   'The selected image and the checkout are trusted guest code, and Qiln has not established their provenance or compatibility.'
+const DELIVERY_NOT_ESTABLISHED =
+  'Delivery to the stopped instance does not establish that services started, that DNS is correct, that the certificate is publicly trusted, or that any port is reachable.'
+
+const LIST_FORMAT = new Intl.ListFormat('en')
 
 const CREDENTIALS = {
   generate: 'generate four protected credential files from the validated roster; values are never shown',
@@ -49,7 +59,16 @@ export function approvalLabel(plan: ConfigurePlan, held: ImageReplacement | null
     : 'Delete the previous image and apply the plan'
 }
 
-function detailsOf(plan: ConfigurePlan, inputs: InstallationInputs): Details {
+/**
+ * The public origin, the advertised SSH endpoint, and the leaf certificate
+ * fingerprint of a generated ingress. A target without TLS has no certificate.
+ */
+export function describeIngress({ origin, host, fingerprint }: Ingress): string {
+  const tls = fingerprint === null ? 'plain HTTP, no TLS' : `certificate SHA-256 ${fingerprint}`
+  return `${origin} · SSH ${host}:${INSTALLER_SPEC.ingress.ports.gateway} · ${tls}`
+}
+
+function detailsOf(plan: ConfigurePlan, inputs: InstallationInputs, ingress: Ingress | null): Details {
   const { layout, architecture, sourceRoot, publish } = inputs
   const { checkout, image } = plan
   const { name, imageAlias } = INSTALLER_SPEC.orchestrator
@@ -58,6 +77,11 @@ function detailsOf(plan: ConfigurePlan, inputs: InstallationInputs): Details {
     publish === null
       ? ''
       : ` · publishes TCP ${publish.ports.join(', ')} on ${publish.address} through NAT proxy devices`
+  const delivered = LIST_FORMAT.format([
+    'the four credentials',
+    ...(ingress === null ? [] : [`the ingress configuration (${describeIngress(ingress)})`]),
+    ...(publish === null ? [] : ['the published port devices']),
+  ])
   return {
     ...(checkout === null
       ? {}
@@ -74,12 +98,12 @@ function detailsOf(plan: ConfigurePlan, inputs: InstallationInputs): Details {
     'create-network': `${layout.network.name} · ${layout.network.ipv4Subnet} · managed bridge`,
     'create-volume': `${layout.postgres.volumeName} · ${layout.postgres.config.size} · in pool ${layout.pool.name}`,
     'create-instance': `${name} · ${architecture.incus} container · created stopped${published}`,
-    'update-instance': `the four credentials${publish === null ? '' : ' and the published port devices'} in one guarded complete instance update${published}`,
+    'update-instance': `${delivered} in one guarded complete instance update${published}`,
   }
 }
 
-function screenOf({ plan, held, inputs, source }: PlanPreview): ApprovalScreen {
-  const details = detailsOf(plan, inputs)
+function screenOf({ plan, held, inputs, source, ingress }: PlanPreview): ApprovalScreen {
+  const details = detailsOf(plan, inputs, ingress)
   const fenced = (actions: readonly InstallAction[]): ApprovalStep[] => stepsOf(actions, INSTALL_STEPS, details)
   const actions = actionsOf(plan)
   const steps: ApprovalStep[] = [
@@ -105,13 +129,14 @@ function screenOf({ plan, held, inputs, source }: PlanPreview): ApprovalScreen {
     }
   }
   const publishes = inputs.publish !== null && (plan.instance || plan.publish)
+  const delivers = plan.deliver && plan.ingress !== null
   return {
     title: 'Proposed installation changes',
     steps,
     covers,
     stays: 'The orchestrator is never started, and persistent PostgreSQL data is kept.',
-    lasting: `${AUTHORITY} The instance mounts ${inputs.sourceRoot} writable, so it can modify the host checkout.${plan.image.import ? ` ${IMPORT_NOTE}` : ''}${publishes ? ` ${PUBLISH_NOTE}` : ''}`,
-    notEstablished: TRUSTED,
+    lasting: `${AUTHORITY} The instance mounts ${inputs.sourceRoot} writable, so it can modify the host checkout.${plan.image.import ? ` ${IMPORT_NOTE}` : ''}${publishes ? ` ${PUBLISH_NOTE}` : ''}${delivers ? ` ${INGRESS_NOTE}` : ''}`,
+    notEstablished: delivers ? `${TRUSTED} ${DELIVERY_NOT_ESTABLISHED}` : TRUSTED,
   }
 }
 

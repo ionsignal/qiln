@@ -1,16 +1,16 @@
-import { isImageFingerprint, validateContainerImage } from './preflight/image'
-import { InstallerError } from '../diagnostic/error'
-import { checkoutPlanOf } from './checkout/judge'
-import { hasManagedCredentials, matchesCredentials, requireNoCollision } from './credentials'
-import { assertInstance, publishedFits } from './instance'
-import { assertNetwork } from './network'
 import { assertVolume } from './storage'
-import type { IncusImage, IncusImageAlias } from '../transport/incus/types'
+import { assertNetwork } from './network'
+import { delivery, type Observation } from './observe'
+import { assertInstance, publishedFits } from './instance'
+import { checkoutPlanOf } from './checkout/judge'
+import { InstallerError } from '../diagnostic/error'
+import { hasManagedCredentials, matchesValues, requireNoCollision } from './credentials'
+import { isImageFingerprint, validateContainerImage } from './preflight/image'
 import type { Retry } from './retry'
+import type { InstallationInputs } from './types'
 import type { FileSnapshot } from '../state/files'
 import type { ConfigurePlan } from './journal/types'
-import type { Observation } from './observe'
-import type { InstallationInputs } from './types'
+import type { IncusImage, IncusImageAlias } from '../transport/incus/types'
 
 export type ImageReplacement = NonNullable<ConfigurePlan['image']['replace']>
 
@@ -139,12 +139,14 @@ function credentialsPlan(
  * Pure decision over one observation. Every incompatibility with retained
  * state throws before a plan exists, so nothing is deleted for a plan that
  * could not complete. An empty plan means the installation already matches.
- * Published port drift is not an incompatibility: it only sets `publish`.
+ * Published port drift is not an incompatibility: it only sets `publish`. The
+ * ingress digest binds the approval to the generated configuration, and an
+ * ingress that is not derivable yet only sets `deliver`.
  */
 export function planOf(observation: Observation, request: PlanRequest): ConfigurePlan {
   const { inputs, roster, retry } = request
   const { layout } = inputs
-  const { fingerprint, pin, network, volume, instance, credentials } = observation
+  const { fingerprint, pin, network, volume, instance } = observation
   if (network !== null) {
     assertNetwork(network, layout, retry.inspect)
   }
@@ -156,6 +158,7 @@ export function planOf(observation: Observation, request: PlanRequest): Configur
     assertInstance(instance.value, fingerprint, inputs, retry.configure)
   }
   const mode = credentialsPlan(observation, roster, retry.configure)
+  const values = delivery(observation)
   return {
     kind: 'configure',
     fingerprint,
@@ -167,11 +170,8 @@ export function planOf(observation: Observation, request: PlanRequest): Configur
     instance: instance === null,
     publish: instance !== null && !publishedFits(instance.value, inputs),
     credentials: mode,
-    deliver:
-      instance === null ||
-      credentials === 'absent' ||
-      mode !== 'reuse' ||
-      !matchesCredentials(instance.value.config, credentials.values),
+    ingress: observation.ingress?.digest ?? null,
+    deliver: instance === null || values === null || mode !== 'reuse' || !matchesValues(instance.value.config, values),
   }
 }
 
@@ -196,6 +196,7 @@ export function firstGate(plan: ConfigurePlan): ConfigurePlan | null {
     instance: false,
     publish: false,
     credentials: 'reuse',
+    ingress: null,
     deliver: false,
   }
 }

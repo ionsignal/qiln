@@ -147,7 +147,7 @@ export function requireMatching(
     [plan.volume, 'the PostgreSQL volume'],
     [plan.instance, 'the orchestrator instance'],
     [plan.credentials !== 'reuse', 'the local credential set'],
-    [plan.deliver, 'the instance credentials'],
+    [plan.deliver, 'the instance credentials and ingress configuration'],
   ]
   const pending = changes.filter(([needed]) => needed).map(([, label]) => label)
   if (pending.length > 0) {

@@ -67,7 +67,7 @@ const OPERATIONS: Record<IncusAction, string> = {
   'create-network': 'create the managed bridge network',
   'create-volume': 'create the Qiln PostgreSQL custom volume',
   'create-instance': 'create the stopped orchestrator instance',
-  'update-instance': 'deliver the credentials and published ports to the stopped orchestrator instance',
+  'update-instance': 'deliver the credentials, published ports, and ingress configuration to the stopped orchestrator instance',
 }
 
 /**
@@ -194,31 +194,31 @@ export class Configurer {
     private evidence: ConfigureEvidence,
   ) {}
 
+  /**
+   * Establishes readiness before the caller may change anything that an earlier
+   * approval depended on. A step left returned is verified from a fresh
+   * observation, which still carries the ingress that step was approved with,
+   * and the plan derived from that observation surfaces every refusal that local
+   * and Incus state already determine. Domain evidence may be acquired
+   * afterwards, because `run` observes again.
+   */
   public static async open(context: ConfigureContext): Promise<Configurer> {
     const { directory, installation, retry } = context
     const evidence = (await records.read(directory, installation, retry.inspect)) ?? records.blank()
     requireNotStuck(evidence, installation.name, retry.inspect)
-    return new Configurer(context, installation, evidence)
+    const configurer = new Configurer(context, installation, evidence)
+    planOf((await configurer.settleReturned()) ?? (await configurer.fresh()), configurer.planRequest)
+    return configurer
   }
 
   /**
-   * Derives the plan from one fresh observation and discards it. Every refusal
-   * that local and Incus state already determine surfaces here, so a caller can
-   * run it before an external effect, such as domain acquisition, that a later
-   * refusal in `run` would otherwise follow.
-   */
-  public async check(): Promise<void> {
-    planOf(await this.fresh(), this.planRequest)
-  }
-
-  /**
-   * Verifies a step left returned by an earlier run, then plans from fresh
-   * evidence. An installation that already matches needs no approval. A plan
+   * Plans from a fresh observation, which includes any domain evidence acquired
+   * since `open`. An installation that already matches needs no approval. A plan
    * that replaces the managed image is approved in two gates (see `firstGate`),
    * and the result keeps the full plan.
    */
   public async run(signal: AbortSignal): Promise<ConfigureResult> {
-    const observed = (await this.settleReturned()) ?? (await this.fresh())
+    const observed = await this.fresh()
     const full = planOf(observed, this.planRequest)
     if (isEmpty(full)) {
       return { plan: full, observation: observed }

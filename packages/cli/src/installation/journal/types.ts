@@ -46,6 +46,10 @@ const text = z.string().min(1).max(256)
  * alias attached to it, which is the only destructive step. `publish` says that
  * the published port devices of an existing instance differ from the expected
  * ones, and the guarded instance update reconciles them like the credentials.
+ * `ingress` is the key-free digest of the generated ingress configuration, so a
+ * renewed certificate or a changed endpoint is a different plan. It is null
+ * while no certificate is available and in the first gate of an image
+ * replacement.
  */
 export const planSchema = z.strictObject({
   kind: z.literal('configure'),
@@ -62,6 +66,7 @@ export const planSchema = z.strictObject({
   instance: z.boolean(),
   publish: z.boolean(),
   credentials: z.enum(['generate', 'roster', 'reuse']),
+  ingress: sha256.nullable(),
   deliver: z.boolean(),
 })
 

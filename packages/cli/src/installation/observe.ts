@@ -2,10 +2,12 @@ import { INSTALLER_SPEC } from './spec'
 import { validateImagePreflight } from './preflight/image'
 import { toInstallerError } from '../transport/incus/errors'
 import { loadCredentials, type Credentials } from './credentials'
+import { loadIngress, type Ingress } from './ingress'
 import type { CheckoutState } from './checkout/judge'
 import type { ImageSource } from './image'
 import type { IncusClient } from '../transport/incus/client'
 import type {
+  IncusConfigMap,
   IncusImage,
   IncusImageAlias,
   IncusInstance,
@@ -36,9 +38,10 @@ export interface ObservationRequest {
  * the selected content, `alias` is the managed orchestrator alias, and
  * `aliased` is the image that alias currently targets. A reference selection
  * never touches the managed alias. Absent resources are null, and the local
- * credential set is `absent` only when none of its files exist. `checkout` is
- * the managed checkout of an AWS target. Origin is resolved only when the
- * checkout is absent and no restore point is recorded.
+ * credential set is `absent` only when none of its files exist. `ingress` is
+ * derived from retained evidence and is null until a domain target holds a
+ * certificate. `checkout` is the managed checkout of an AWS target. Origin is
+ * resolved only when the checkout is absent and no restore point is recorded.
  */
 export interface Observation {
   kind: ImageSource['kind']
@@ -51,10 +54,19 @@ export interface Observation {
   volume: IncusStorageVolume | null
   instance: IncusRead<IncusInstance> | null
   credentials: Credentials | 'absent'
+  ingress: Ingress | null
   checkout: CheckoutState
 }
 
 type Images = Pick<Observation, 'fingerprint' | 'image' | 'alias' | 'aliased'>
+
+/**
+ * Everything the stopped instance must hold: the retained credentials and the
+ * generated ingress. Null while either is missing.
+ */
+export function delivery({ credentials, ingress }: Observation): IncusConfigMap | null {
+  return credentials === 'absent' || ingress === null ? null : { ...credentials.values, ...ingress.values }
+}
 
 async function read<T>(retry: string, operation: string, run: () => Promise<T>): Promise<T> {
   try {
@@ -120,6 +132,7 @@ export async function observe(request: ObservationRequest): Promise<Observation>
       client.getInstanceWithEtagOrNull(INSTALLER_SPEC.orchestrator.name),
     ),
     credentials: await loadCredentials(directory, sshKeygen, retry.configure),
+    ingress: await loadIngress(directory, inputs, retry.configure),
     checkout: await checkoutOf(checkout, checkoutCommit),
   }
 }

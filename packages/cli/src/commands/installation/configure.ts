@@ -1,33 +1,26 @@
 import { INSTALLER_SPEC } from '../../installation/spec'
 import { INSTALL_STEPS } from './steps'
 import { withInspection } from './inspect'
-import { approvalLabel, reportPlan } from './plan'
+import { approvalLabel, describeIngress, reportPlan } from './plan'
 import { domainApproval, domainProgress, reportAcquisition, reportDomain } from './domain'
 import { approve } from '../../terminal/approval'
 import { Prompts } from '../../terminal/prompts'
 import { acquire } from '../../installation/domain/acquire'
 import { rootOf } from '../../installation/checkout/judge'
-import { requireIncusExtensions } from '../../installation/preflight/incus'
+import { loadIngress, type Ingress } from '../../installation/ingress'
 import { readRoster, validateRoster } from '../../installation/roster'
+import { requireIncusExtensions } from '../../installation/preflight/incus'
 import { isEmpty, type InstallAction } from '../../installation/journal/types'
-import { acquireInstallationLock, loadInstallation, registerInstallation } from '../../installation/state'
 import { Configurer, type ConfigureProgress } from '../../installation/configure'
 import { withImageSource, type InstallerImageSelection } from '../../installation/image'
+import { acquireInstallationLock, loadInstallation, registerInstallation } from '../../installation/state'
 import { inputsOf } from '../../installation/types'
 import type { FileSnapshot } from '../../state/files'
 import type { InstallerLock } from '../../state/lock'
 import type { LiveRow, Outcome, Reporter } from '../../terminal/reporter'
 import type { InstallationTarget } from '../../installation/target/types'
 
-/**
- * `sourcePath` is the operator's checkout of a local target. It is null for an
- * AWS target, whose checkout is managed by Qiln.
- */
-export interface ConfigureOptions {
-  sourcePath: string | null
-  authorizedKeysPath?: string
-  image: InstallerImageSelection
-}
+const VERIFIED_DETAIL = 'fresh observation agrees'
 
 const OUTCOMES: Record<InstallAction, Outcome> = {
   'materialize-checkout': 'created',
@@ -40,7 +33,15 @@ const OUTCOMES: Record<InstallAction, Outcome> = {
   'update-instance': 'transferred',
 }
 
-const VERIFIED_DETAIL = 'fresh observation agrees'
+/**
+ * `sourcePath` is the operator's checkout of a local target. It is null for an
+ * AWS target, whose checkout is managed by Qiln.
+ */
+export interface ConfigureOptions {
+  sourcePath: string | null
+  authorizedKeysPath?: string
+  image: InstallerImageSelection
+}
 
 /**
  * `working` starts a live row and `verified` finishes it, so a row is only
@@ -65,15 +66,18 @@ function progressSink(reporter: Reporter): (event: ConfigureProgress) => void {
 }
 
 /**
- * Observes the target first. Once the image source is staged and the
- * configurer is open, the plan is derived a single time, so every refusal that
- * local and Incus state already determine comes before any external effect. A
- * target that owns a public name then acquires its domain and certificate under
- * its own approval, before Incus is changed. The installation plan is displayed
- * next and applied only after an explicit approval. A plan that replaces the
- * managed image is approved in two gates. Registration, locking and
- * image-source handling are shared by every target. Cancellation is owned by
- * the target.
+ * Observes the target first. Once the image source is staged, opening the
+ * configurer settles any step that an earlier run left returned and derives a
+ * preflight plan. Settling first verifies that step against the ingress it was
+ * approved with, before acquisition can replace it, and the preflight surfaces
+ * every refusal that local and Incus state already determine before any
+ * external effect. A target that owns a public name then acquires its domain and
+ * certificate under its own approval, before Incus is changed. The installation
+ * plan is derived from a fresh observation, so it delivers what was acquired,
+ * and is displayed and applied only after an explicit approval. A plan that
+ * replaces the managed image is approved in two gates. Registration, locking
+ * and image-source handling are shared by every target. Cancellation is owned
+ * by the target.
  */
 export async function configure(
   target: InstallationTarget,
@@ -112,7 +116,8 @@ export async function configure(
       const installation = await loadInstallation(directory, host.binding, inputs, retry.inspect)
       const prompts = new Prompts(signal, retry.configure, reporter)
       const { domain } = host
-      const { plan } = await withImageSource(options.image, async imageSource => {
+      const { plan, observation } = await withImageSource(options.image, async imageSource => {
+        let ingress: Ingress | null = null
         const configurer = await Configurer.open({
           directory,
           installation,
@@ -123,14 +128,13 @@ export async function configure(
           sshKeygen: host.sshKeygen,
           roster,
           hooks: {
-            show: (gate, held) => reportPlan(reporter, { plan: gate, held, inputs, source: imageSource }),
+            show: (gate, held) => reportPlan(reporter, { plan: gate, held, inputs, source: imageSource, ingress }),
             approve: (gate, held) => approve(prompts, reporter, approvalLabel(gate, held)),
             progress: progressSink(reporter),
           },
           retry,
         })
         if (domain !== null) {
-          await configurer.check()
           reportDomain(
             reporter,
             await acquire({
@@ -147,13 +151,15 @@ export async function configure(
             }),
           )
         }
+        ingress = await loadIngress(directory, inputs, retry.configure)
         return await configurer.run(signal)
       })
+      const delivered = observation.ingress === null ? '' : ` · ingress configuration ${describeIngress(observation.ingress)}`
       reporter.section('Result')
       reporter.row(
         'verified',
         'Final state',
-        `${INSTALLER_SPEC.orchestrator.name} · configured · stopped · image ${plan.fingerprint.slice(0, 12)} · ${VERIFIED_DETAIL}`,
+        `${INSTALLER_SPEC.orchestrator.name} · configured · stopped · image ${plan.fingerprint.slice(0, 12)}${delivered} · ${VERIFIED_DETAIL}`,
       )
       reporter.summary(
         isEmpty(plan)

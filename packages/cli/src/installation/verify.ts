@@ -1,9 +1,9 @@
-import { hasCollision, matchesCredentials } from './credentials'
+import { hasCollision, matchesValues } from './credentials'
 import { instanceFits, publishedFits } from './instance'
-import type { IncusInstance } from '../transport/incus/types'
-import type { InstallAction, ConfigurePlan } from './journal/types'
-import type { Observation } from './observe'
+import { delivery, type Observation } from './observe'
 import type { InstallationInputs } from './types'
+import type { InstallAction, ConfigurePlan } from './journal/types'
+import type { IncusInstance } from '../transport/incus/types'
 
 /**
  * An instance step is verified only when the instance is compatible and holds
@@ -29,8 +29,10 @@ function compatible(
  * are judged by `requireContainer` right after the import, before any alias,
  * pin, or deletion. A materialized checkout is only present here: its identity
  * was judged by the observation itself, and its HEAD is never compared with
- * anything. Compatibility of the whole installation is judged by planning again
- * after the last step.
+ * anything. An instance update is verified against the ingress its approval
+ * named, so a later certificate or endpoint never verifies an earlier update.
+ * Compatibility of the whole installation is judged by planning again after the
+ * last step.
  */
 export function verify(
   action: InstallAction,
@@ -39,7 +41,7 @@ export function verify(
   inputs: InstallationInputs,
   retry: string,
 ): boolean {
-  const { image, alias, network, volume, instance, credentials, checkout } = observation
+  const { image, alias, network, volume, instance, checkout, ingress } = observation
   switch (action) {
     case 'materialize-checkout':
       return checkout.kind === 'present'
@@ -55,12 +57,15 @@ export function verify(
       return volume !== null
     case 'create-instance':
       return instance !== null && compatible(instance.value, plan.fingerprint, inputs, retry)
-    case 'update-instance':
+    case 'update-instance': {
+      const values = delivery(observation)
       return (
         instance !== null &&
         compatible(instance.value, plan.fingerprint, inputs, retry) &&
-        credentials !== 'absent' &&
-        matchesCredentials(instance.value.config, credentials.values)
+        ingress?.digest === plan.ingress &&
+        values !== null &&
+        matchesValues(instance.value.config, values)
       )
+    }
   }
 }

@@ -60,7 +60,7 @@ export function reportAcquisition(reporter: Reporter, { plan, name, access }: Ac
     lasting:
       'The allocation and its DNS records outlive this run, and a label is never recycled. Caps apply, and the service counts attempts of every status. Qiln sends the service a signed AWS identity proof that includes the session token, once, and never writes it. A later failure does not roll back DNS records or a certificate.',
     notEstablished:
-      'Public reachability, client trust beyond Qiln’s local chain checks, and delivery of the name and certificate to the orchestrator, which this run does not do. After a host replacement the name keeps its previous address until a configure run registers the new one.',
+      'Public reachability and client trust beyond Qiln’s local chain checks. Delivery of the name and certificate to the stopped orchestrator is a separate approval later in this run, and declining it does not undo the allocation or the certificate. After a host replacement the name keeps its previous address until a configure run registers the new one.',
   })
 }
 

@@ -1,16 +1,16 @@
 import { INSTALLER_SPEC } from './spec'
-import { instancePut, requireNoCollision } from './credentials'
 import { networkInput } from './network'
 import { volumeInput } from './storage'
+import { delivery, type Observation } from './observe'
+import { instancePut, requireNoCollision } from './credentials'
 import { assertInstance, instanceInput, publishedDevices } from './instance'
 import { InstallerError } from '../diagnostic/error'
-import type { IncusClient } from '../transport/incus/client'
-import type { IncusOperationRef } from '../transport/incus/types'
 import type { Retry } from './retry'
 import type { ImageSource } from './image'
-import type { ConfigurePlan, IncusAction } from './journal/types'
-import type { Observation } from './observe'
 import type { InstallationInputs } from './types'
+import type { ConfigurePlan, IncusAction } from './journal/types'
+import type { IncusClient } from '../transport/incus/client'
+import type { IncusOperationRef } from '../transport/incus/types'
 
 export interface ApplyContext {
   client: IncusClient
@@ -44,7 +44,8 @@ async function wait(context: ApplyContext, operation: IncusOperationRef): Promis
  * reconciliation of a conflict. Incus failures propagate unclassified: whether
  * one was a refusal or an uncertain effect depends on whether the request was
  * accepted, which the caller knows from `accepted`. `observation` supplies the
- * instance and its ETag for the guarded update, and the local credential set.
+ * instance and its ETag for the guarded update, the local credential set, and
+ * the generated ingress, which must be the one that the plan approved.
  */
 export async function apply(
   action: IncusAction,
@@ -89,7 +90,7 @@ export async function apply(
       await wait(context, await client.createInstance(instanceInput(plan.fingerprint, inputs, retry.configure)))
       return
     case 'update-instance': {
-      const { instance, credentials } = observation
+      const { instance, credentials, ingress } = observation
       if (instance === null) {
         return defect()
       }
@@ -100,13 +101,17 @@ export async function apply(
           retry: retry.configure,
         })
       }
+      const values = delivery(observation)
+      if (values === null || ingress?.digest !== plan.ingress) {
+        return defect()
+      }
       requireNoCollision(instance.value.config, retry.configure)
       assertInstance(instance.value, plan.fingerprint, inputs, retry.configure)
       await wait(
         context,
         await client.updateInstance(
           INSTALLER_SPEC.orchestrator.name,
-          instancePut(instance.value, credentials.values, publishedDevices(inputs)),
+          instancePut(instance.value, values, publishedDevices(inputs)),
           instance.etag,
         ),
       )

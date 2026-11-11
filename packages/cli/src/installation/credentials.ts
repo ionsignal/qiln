@@ -22,8 +22,8 @@ export interface LocalFiles {
 }
 
 /**
- * A validated local credential set. `values` is exactly what the instance must
- * hold, so it is the one source for comparison and delivery.
+ * A validated local credential set. `values` is its projection into instance
+ * configuration, which delivery combines with the generated ingress.
  */
 export interface Credentials extends LocalFiles {
   values: IncusConfigMap
@@ -410,8 +410,8 @@ export function instancePut(
 }
 
 /**
- * Whether an instance configuration already holds every given credential value.
+ * Whether an instance configuration already holds every given managed value.
  */
-export function matchesCredentials(config: Readonly<IncusConfigMap>, values: Readonly<IncusConfigMap>): boolean {
+export function matchesValues(config: Readonly<IncusConfigMap>, values: Readonly<IncusConfigMap>): boolean {
   return Object.entries(values).every(([key, value]) => config[key] === value)
 }
