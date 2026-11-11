@@ -33,9 +33,9 @@ function certificatesOf(text: string): X509Certificate[] | null {
   }
 }
 
-// TODO(tls-chain-trust): A single certificate, including a self-signed one, passes vacuously, and the last
-// certificate is never checked against a trust root or for CA constraints. Validate the path to a public
-// root before a chain is delivered to a public listener.
+// TODO(tls-chain-trust): Public trust validation is deferred to a future slice.
+// Single certificates skip signature checks; chains are not validated to a
+// public trust root or checked for CA constraints.
 function signedInOrder(certificates: readonly X509Certificate[]): boolean {
   return certificates.every((certificate, index) => {
     const issuer = certificates.at(index + 1)
