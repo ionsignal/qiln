@@ -82,7 +82,6 @@
     "@fastify/cookie": "11.1.5",
     "@fastify/middie": "9.3.6",
     "@fastify/multipart": "10.1.8",
-    "@fastify/rate-limit": "11.2.2",
     "@fastify/static": "10.1.10",
     "@fastify/websocket": "11.3.7",
     "@mdi/js": "7.4.47",

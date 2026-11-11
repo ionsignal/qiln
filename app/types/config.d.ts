@@ -21,12 +21,6 @@ type MultipartConfig = {
   maxHeaderPairs: number
 }
 
-type LimitConfig = {
-  global: boolean
-  max: number
-  timeWindow: number
-}
-
 type CookiesConfig = {
   name: string
   secret: string | undefined
@@ -72,7 +66,6 @@ type Server = {
 
 type Config = WorkerHostConfig & {
   dev: boolean
-  listen: boolean
   host: string
   port: number
   path: string
@@ -82,7 +75,6 @@ type Config = WorkerHostConfig & {
   observability: ObservabilityConfig
   cookies: CookiesConfig
   multipart: MultipartConfig
-  limit: LimitConfig
   mailgun: MailgunConfig
 }
 

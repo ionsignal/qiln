@@ -1,29 +1,14 @@
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { EnvironmentConfig, MultipartConfig } from '@/types'
+import type { EnvironmentConfig } from '@/types'
 
 const mode = process.env.NODE_ENV
 const dev = mode !== 'production'
 const host = (dev ? process.env.VITE_HOST_DEV : process.env.VITE_HOST_PROD) ?? 'localhost'
 
-const defaultMultipartLimits: MultipartConfig = {
-  directory: 'data/projects',
-  maxFieldSizeBytes: 1024,
-  maxFileSizeBytes: 5 * 1024 * 1024,
-  maxFiles: 1,
-  maxParts: 10,
-  maxHeaderPairs: 50,
-}
-
-const defaultRateLimitConfig = {
-  global: true,
-  max: 10,
-  timeWindow: 250,
-}
-
+const defaultCaddyServer = 'qiln'
 const defaultIncusEndpoint = 'unix:///run/qiln-incus.sock'
 const defaultCaddyEndpoint = 'unix:///run/qiln-caddy/admin.sock'
-const defaultCaddyServer = 'qiln'
 const defaultCaddyFallbackId = 'qiln-route-fallback-experimental'
 const defaultRouteBaseDomain = 'edge.qiln.com'
 const defaultRoutingPublicOrigin = 'https://edge.qiln.com'
@@ -36,10 +21,22 @@ const appPath = path.resolve(configuredAppPath || defaultAppPath)
 
 // Helper to safely decode Base64 strings for mTLS certificates
 const decodeBase64 = (value?: string) => (value ? Buffer.from(value, 'base64').toString('utf-8') : undefined)
+
+// A malformed number fails startup instead of silently becoming a NaN limit.
+function envInteger(name: string, fallback: number): number {
+  const value = process.env[name]
+  if (value === undefined) {
+    return fallback
+  }
+  if (!/^\d+$/.test(value)) {
+    throw new Error(`${name} must be a non-negative integer.`)
+  }
+  return Number(value)
+}
+
 export default {
   dev,
   host,
-  listen: !dev,
   port: 3002,
   ssl: process.env.VITE_ENABLE_SSL ?? 'false',
   path: appPath,
@@ -63,23 +60,12 @@ export default {
     maxAge: 60 * 60 * 24,
   },
   multipart: {
-    directory: process.env.UPLOAD_DIRECTORY ?? defaultMultipartLimits.directory,
-    maxFieldSizeBytes: parseInt(
-      process.env.UPLOAD_MAX_FIELD_SIZE_BYTES ?? String(defaultMultipartLimits.maxFieldSizeBytes),
-      10,
-    ),
-    maxFileSizeBytes: parseInt(
-      process.env.UPLOAD_MAX_FILE_SIZE_BYTES ?? String(defaultMultipartLimits.maxFileSizeBytes),
-      10,
-    ),
-    maxFiles: parseInt(process.env.UPLOAD_MAX_FILES ?? String(defaultMultipartLimits.maxFiles), 10),
-    maxParts: parseInt(process.env.UPLOAD_MAX_PARTS ?? String(defaultMultipartLimits.maxParts), 10),
-    maxHeaderPairs: parseInt(process.env.UPLOAD_MAX_HEADER_PAIRS ?? String(defaultMultipartLimits.maxHeaderPairs), 10),
-  },
-  limit: {
-    global: Boolean(process.env.RATE_LIMIT_GLOBAL) || defaultRateLimitConfig.global,
-    max: parseInt(process.env.RATE_LIMIT_MAX ?? String(defaultRateLimitConfig.max), 10),
-    timeWindow: parseInt(process.env.RATE_LIMIT_TIME_WINDOW_MS ?? String(defaultRateLimitConfig.timeWindow), 10),
+    directory: process.env.UPLOAD_DIRECTORY ?? 'data/projects',
+    maxFieldSizeBytes: envInteger('UPLOAD_MAX_FIELD_SIZE_BYTES', 1024),
+    maxFileSizeBytes: envInteger('UPLOAD_MAX_FILE_SIZE_BYTES', 5 * 1024 * 1024),
+    maxFiles: envInteger('UPLOAD_MAX_FILES', 1),
+    maxParts: envInteger('UPLOAD_MAX_PARTS', 10),
+    maxHeaderPairs: envInteger('UPLOAD_MAX_HEADER_PAIRS', 50),
   },
   mailgun: {
     apiKey: process.env.MAILGUN_API_KEY ?? '',
@@ -109,13 +95,13 @@ export default {
     endpoint: process.env.QILN_CADDY_ENDPOINT || defaultCaddyEndpoint,
     server: process.env.QILN_CADDY_SERVER || defaultCaddyServer,
     fallbackId: process.env.QILN_CADDY_FALLBACK_ID || defaultCaddyFallbackId,
-    timeoutMs: parseInt(process.env.QILN_CADDY_REQUEST_TIMEOUT_MS ?? '15000', 10),
+    timeoutMs: envInteger('QILN_CADDY_REQUEST_TIMEOUT_MS', 15_000),
   },
   routing: {
     baseDomain: process.env.QILN_ROUTE_BASE_DOMAIN || defaultRouteBaseDomain,
     publicOrigin: process.env.QILN_ROUTING_PUBLIC_ORIGIN ?? defaultRoutingPublicOrigin,
     ingressEndpoint: process.env.QILN_ROUTING_INGRESS_ENDPOINT || defaultRoutingIngressEndpoint,
-    reconcileIntervalMs: parseInt(process.env.QILN_PREVIEW_RECONCILE_INTERVAL_MS ?? '15000', 10),
-    verificationTimeoutMs: parseInt(process.env.QILN_PREVIEW_VERIFICATION_TIMEOUT_MS ?? '10000', 10),
+    reconcileIntervalMs: envInteger('QILN_PREVIEW_RECONCILE_INTERVAL_MS', 15_000),
+    verificationTimeoutMs: envInteger('QILN_PREVIEW_VERIFICATION_TIMEOUT_MS', 10_000),
   },
 } satisfies EnvironmentConfig
