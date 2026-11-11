@@ -67,8 +67,8 @@ export const RELEASES: Readonly<Record<TargetId, Release>> = Object.freeze({
     artifact: Object.freeze({
       url: artifactUrl('linux-x64'),
       format: 'zip',
-      bytes: 74061592,
-      sha256: '6b3a6a3d7bb3997928f0bdf7b866914224abf242c2e54e1dcebbe84bee64f356',
+      bytes: 74874980,
+      sha256: '707a900fde102f486d92e79f979493c747f475b9e2b94f2a42687d5d95129fb7',
     }),
     executable: 'bin/aws',
     roots: Object.freeze(['aws-cli', 'bin']),
@@ -105,8 +105,8 @@ export const RELEASES: Readonly<Record<TargetId, Release>> = Object.freeze({
     artifact: Object.freeze({
       url: artifactUrl('darwin-universal'),
       format: 'pkg',
-      bytes: 60623265,
-      sha256: 'a2fae32b07ca81c4327e3858ea810b1042bdfc91745a97ca30f9d5297e21834c',
+      bytes: 61120704,
+      sha256: 'a6d419ec5ce460101499246c9ee8a8a6020e43b7cf6355a388274f5127f2e99f',
     }),
     executable: 'aws-cli/aws',
     roots: Object.freeze(['aws-cli']),

@@ -19,16 +19,16 @@
     "@qiln/core": "*",
     "drizzle-orm": "1.0.0-rc.4",
     "postgres": "3.4.9",
-    "undici": "8.12.3",
-    "ws": "8.22.0",
+    "undici": "8.12.4",
+    "ws": "8.22.2",
     "yaml": "2.9.1",
     "zod": "4.6.7"
   },
   "devDependencies": {
-    "@types/node": "22.20.3",
+    "@types/node": "22.20.4",
     "@types/ws": "8.18.2",
     "typescript": "6.0.3",
-    "vite": "8.3.5",
+    "vite": "8.3.7",
     "vite-plugin-dts": "5.1.2"
   }
 }
