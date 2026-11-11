@@ -12,6 +12,10 @@ import { logger } from '@server/utils/logger'
 import type { FastifyRequest, FastifyReply } from 'fastify'
 import type { EnvironmentConfig } from '@/types'
 
+// Caddy is the only public listener. The tRPC context trusts forwarded client
+// addresses solely from a loopback peer, so Web must never bind elsewhere.
+const loopbackHost = '127.0.0.1'
+
 interface DevelopmentTransport {
   close(): Promise<void>
 }
@@ -21,14 +25,11 @@ async function createFastifyServer(config: EnvironmentConfig) {
     loggerInstance: logger,
     disableRequestLogging: true,
   })
-
-  server.decorate('config', config)
-
   const upgrades = new UpgradeRouter(server.server, config.dev)
+  server.decorate('config', config)
   server.decorate('upgrades', upgrades)
 
   let development: DevelopmentTransport | undefined
-  // Stop upgrade admission before either WebSocket integration begins closing.
   server.addHook('preClose', async () => {
     upgrades.stop()
     await development?.close()
@@ -100,9 +101,7 @@ async function createFastifyServer(config: EnvironmentConfig) {
   })
 
   async function start() {
-    const port = server.config.port
-    const host = server.config.listen ? '0.0.0.0' : '127.0.0.1'
-    await server.listen({ port, host })
+    await server.listen({ port: config.port, host: loopbackHost })
   }
 
   async function stop() {
