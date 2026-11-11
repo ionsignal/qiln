@@ -16,7 +16,7 @@ export function useCapsuleEventStream(onConnected: () => Promise<void>) {
   const pageContext = usePageContext()
   const trpc = useTRPC(pageContext.value)
   const handlers = new Set<EventHandler>()
-  let subscription: ReturnType<typeof trpc.stream.events.subscribe> | null = null
+  let subscription: CapsuleEventStreamSubscription | null = null
   let disposed = false
 
   function onEventStream(handler: EventHandler): CapsuleEventStreamSubscription {
