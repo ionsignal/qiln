@@ -7,7 +7,6 @@ import { z } from 'zod'
 const EnabledSchema = z.enum(['true', 'false']).transform(value => value === 'true')
 const PortSchema = z.int().min(1).max(65_535)
 const TimerSchema = z.int().min(1).max(2_147_483_647)
-
 const SshConfigSchema = z
   .object({
     database: z.object({
@@ -45,22 +44,22 @@ const SshConfigSchema = z
 export type SshConfig = z.infer<typeof SshConfigSchema>
 
 /**
- * Development retains the shared service credential file. Only its NATS token
- * enters SSH configuration; cookie and Incus credentials are not propagated
- * into configuration or process.env.
+ * SSH receives a credential file that carries only its NATS token, delivered by
+ * systemd. Cookie and Incus credentials never reach this process, and the token
+ * is not copied into process.env.
  */
 async function loadNatsToken(): Promise<string | undefined> {
-  const credentialPath = process.env.QILN_HOST_CREDENTIAL_PATH?.trim()
+  const credentialPath = process.env.QILN_SSH_CREDENTIAL_PATH?.trim()
   if (!credentialPath) {
     return process.env.NATS_TOKEN || undefined
   }
   if (!isAbsolute(credentialPath)) {
-    throw new Error('QILN_HOST_CREDENTIAL_PATH must be an absolute credential-file path.')
+    throw new Error('QILN_SSH_CREDENTIAL_PATH must be an absolute credential-file path.')
   }
   try {
     await access(credentialPath, constants.R_OK)
   } catch {
-    throw new Error('The configured SSH NATS credential file is not readable.')
+    throw new Error('The configured SSH credential file is not readable.')
   }
   const environment = Object.create(null) as NodeJS.ProcessEnv
   const credentials = await loadDotenv({

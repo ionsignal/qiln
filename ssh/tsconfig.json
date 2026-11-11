@@ -9,6 +9,6 @@
     "noEmit": true,
     "customConditions": ["source"]
   },
-  "include": ["./*.ts", "../app/server/ssh/client.ts"],
+  "include": ["./*.ts"],
   "exclude": ["node_modules", "dist"]
 }

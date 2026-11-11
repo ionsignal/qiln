@@ -24,9 +24,10 @@ async function reset() {
     console.log('[Reset] Recreating public schema...')
     await sql`CREATE SCHEMA public`
     // Restore Standard Permissions
-    // This makes the new 'public' schema behave exactly like the default Postgres one
+    // Matches the PostgreSQL 15+ default: PUBLIC can use the schema but not create objects in it.
+    // Table grants for other roles are lost with the dropped schema; `npm run db:grant` re-applies them.
     console.log('[Reset] Restoring permissions...')
-    await sql`GRANT ALL ON SCHEMA public TO public`
+    await sql`GRANT USAGE ON SCHEMA public TO public`
     await sql`COMMENT ON SCHEMA public IS 'standard public schema'`
     // Verification Step
     const check = await sql`

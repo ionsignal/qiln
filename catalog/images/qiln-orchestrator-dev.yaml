@@ -95,7 +95,7 @@ actions:
         --output /etc/apt/keyrings/postgresql.asc
       chmod 0644 /etc/apt/keyrings/postgresql.asc
 
-  # Control-plane user, locale, SSH identity hygiene, and Qiln runtime paths.
+  # Control-plane users, locale, SSH identity hygiene, and Qiln runtime paths.
   - trigger: post-packages
     action: |-
       #!/bin/sh
@@ -105,7 +105,9 @@ actions:
       update-locale LANG=en_US.UTF-8
 
       groupadd -g 1000 qiln
+      groupadd -g 1001 qiln-ssh
       useradd -u 1000 -g 1000 -m -s /bin/bash -d /home/qiln qiln
+      useradd -u 1001 -g 1001 -m -s /usr/sbin/nologin -d /home/qiln-ssh qiln-ssh
 
       cat >> /home/qiln/.bashrc <<'EOF'
       # Qiln interactive shell conveniences.
@@ -135,7 +137,7 @@ actions:
       rm -rf /var/lib/postgresql/18/main
 
       # Update npm to an approved modern version
-      npm install --global npm@12.0.2
+      npm install --global npm@12.2.2
 
   # Validate generated configuration while removing temporary validation host
   # keys so deployed instances still generate their own SSH identities.
@@ -204,7 +206,7 @@ files:
       Manual development (from /opt/qiln, in separate terminals)
         Load ingress   set -a; . /run/qiln/ingress.env; set +a
         Web + Worker   npm run server:dev
-        SSH authority  npm run ssh:dev
+        SSH build      npm run ssh:dev (qiln-ssh-dev runs the output)
 
       Development only image
 
@@ -280,8 +282,10 @@ files:
       password_encryption = 'scram-sha-256'
 
   # PostgreSQL administration and Qiln application access use local peer
-  # authentication. TCP clients must use SCRAM credentials explicitly created
-  # outside this image.
+  # authentication. The Web and SSH roles each match the operating-system user
+  # of the same name, and the SSH role's privileges are limited by
+  # app/server/db/grants.ts. TCP clients must use SCRAM credentials explicitly
+  # created outside this image.
   - path: /etc/postgresql/18/main/pg_hba.conf
     generator: dump
     uid: 0
@@ -289,7 +293,7 @@ files:
     mode: '0640'
     content: |-
       local   all             postgres                                peer
-      local   qiln            qiln                                    peer
+      local   qiln            qiln,qiln-ssh                           peer
       local   all             all                                     reject
       host    all             all             127.0.0.1/32            scram-sha-256
       host    all             all             ::1/128                 scram-sha-256
@@ -418,9 +422,10 @@ files:
       Requires=qiln-postgres-volume-init.service
       After=qiln-postgres-volume-init.service
 
-  # The bootstrap script creates only the local application role/database. It
-  # intentionally does not run Qiln migrations because migrations belong to the
-  # deployed application revision, not the reusable operating-system image.
+  # The bootstrap script creates only the local application roles and database.
+  # It intentionally does not run Qiln migrations or grant table privileges,
+  # because both belong to the deployed application revision, not the reusable
+  # operating-system image.
   - path: /usr/local/sbin/qiln-postgres-bootstrap
     generator: dump
     uid: 0
@@ -438,19 +443,27 @@ files:
         exit 1
       fi
 
-      role_attributes="$(${POSTGRES_RUNUSER} ${PSQL} --command "SELECT rolsuper::text || '|' || rolcreatedb::text || '|' || rolcreaterole::text || '|' || rolreplication::text || '|' || rolbypassrls::text || '|' || rolcanlogin::text || '|' || rolinherit::text FROM pg_roles WHERE rolname = 'qiln'")"
+      # Both application roles are unprivileged and have no password. Local peer
+      # authentication binds each one to the operating-system user of the same name.
+      ensure_role() {
+        role_name=$1
+        role_attributes="$(${POSTGRES_RUNUSER} ${PSQL} --command "SELECT rolsuper::text || '|' || rolcreatedb::text || '|' || rolcreaterole::text || '|' || rolreplication::text || '|' || rolbypassrls::text || '|' || rolcanlogin::text || '|' || rolinherit::text FROM pg_roles WHERE rolname = '${role_name}'")"
 
-      case "${role_attributes}" in
-        '')
-          ${POSTGRES_RUNUSER} ${PSQL} --command "CREATE ROLE qiln LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT"
-          ;;
-        'false|false|false|false|false|true|false')
-          ;;
-        *)
-          echo 'Existing PostgreSQL role qiln has unexpected privileges or login attributes' >&2
-          exit 1
-          ;;
-      esac
+        case "${role_attributes}" in
+          '')
+            ${POSTGRES_RUNUSER} ${PSQL} --command "CREATE ROLE \"${role_name}\" LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS NOINHERIT"
+            ;;
+          'false|false|false|false|false|true|false')
+            ;;
+          *)
+            echo "Existing PostgreSQL role ${role_name} has unexpected privileges or login attributes" >&2
+            exit 1
+            ;;
+        esac
+      }
+
+      ensure_role qiln
+      ensure_role qiln-ssh
 
       database_owner="$(${POSTGRES_RUNUSER} ${PSQL} --command "SELECT pg_get_userbyid(datdba) FROM pg_database WHERE datname = 'qiln'")"
 
@@ -477,7 +490,7 @@ files:
     mode: '0644'
     content: |-
       [Unit]
-      Description=Initialize the local Qiln PostgreSQL role and database
+      Description=Initialize the local Qiln PostgreSQL roles and database
       Requires=postgresql@18-main.service
       After=postgresql@18-main.service
 
@@ -491,9 +504,14 @@ files:
 
   # One root-owned prerequisite owns this concrete orchestrator's SSH host
   # identity and administrator roster. It also materializes the development
-  # shell Host credential and the non-secret ingress overlay; systemd services
-  # import their own private copies of the Host credential and read the shared
-  # overlay.
+  # shell Host credential, the non-secret ingress overlay, and a root-only,
+  # NATS-only credential for the SSH authority. The SSH credential is derived
+  # from the Host credential so the installer's credential set stays unchanged.
+  # systemd services import their own private copies of their credentials and
+  # read the shared overlay.
+  #
+  # TODO(ssh-credential): Delete the derivation once the installer delivers an
+  # SSH-only credential directly.
   - path: /usr/local/sbin/qiln-instance-bootstrap
     generator: dump
     uid: 0
@@ -508,6 +526,7 @@ files:
       readonly runtime_directory='/run/qiln'
       readonly host_environment_path='/run/qiln/qiln-host.env'
       readonly ingress_environment_path='/run/qiln/ingress.env'
+      readonly ssh_environment_path='/run/qiln/qiln-ssh.env'
       readonly home_directory='/home/qiln'
       readonly ssh_directory='/home/qiln/.ssh'
       readonly authorized_keys_path='/home/qiln/.ssh/authorized_keys'
@@ -755,6 +774,16 @@ files:
         environment_temporary_path=''
       }
 
+      write_ssh_environment() {
+        validate_materialized_destination "${ssh_environment_path}" 'Materialized Qiln SSH credential dotenv'
+
+        environment_temporary_path="$(mktemp "${runtime_directory}/.qiln-environment.XXXXXX")"
+        grep '^NATS_TOKEN=' "${host_environment_credential_path}" > "${environment_temporary_path}"
+
+        mv -f -- "${environment_temporary_path}" "${ssh_environment_path}"
+        environment_temporary_path=''
+      }
+
       write_authorized_keys() {
         validate_materialized_destination "${authorized_keys_path}" 'Materialized orchestrator authorized-key roster'
 
@@ -789,6 +818,7 @@ files:
       ensure_ssh_directory
       write_environment "${host_environment_credential_path}" "${host_environment_path}" 'Qiln Host credential dotenv'
       write_environment "${ingress_environment_credential_path}" "${ingress_environment_path}" 'Qiln ingress credential dotenv'
+      write_ssh_environment
       write_authorized_keys
 
   - path: /etc/systemd/system/qiln-instance-bootstrap.service
@@ -921,14 +951,7 @@ files:
       qiln ALL=(ALL) NOPASSWD: ALL
 
   # Non-secret Web and embedded Worker configuration. Manual development runs
-  # export these values before starting the Host. server:watch supplies the
-  # development shell credential fallback; systemd supplies a private path.
-  # SSH settings live separately. The public identity (origins and the capsule
-  # hostname base) is deliberately absent: installation configuration delivers
-  # it in /run/qiln/ingress.env, and server:watch sources this file, so a
-  # duplicate here would override the delivered value. The QILN_CADDY_* values
-  # and QILN_ROUTING_INGRESS_ENDPOINT must match the loopback router server that
-  # installation renders (INSTALLER_SPEC.ingress.router in qiln-cli).
+  # export these values before starting the Host.
   - path: /etc/qiln/runtime.env
     generator: dump
     uid: 0
@@ -958,9 +981,8 @@ files:
       INCUS_REJECT_UNAUTHORIZED=true
       INCUS_PROJECT=default
 
-  # SSH remains a separate process while sharing development database and NATS
-  # credentials. This separation does not establish a production privilege
-  # boundary because both development services still run as the same OS user.
+  # The SSH authority runs as its own operating-system user and PostgreSQL role,
+  # with table privileges limited by app/server/db/grants.ts.
   - path: /etc/qiln/ssh.env
     generator: dump
     uid: 0
@@ -972,7 +994,7 @@ files:
 
       PGHOST=/var/run/postgresql
       PGPORT=5432
-      PGUSER=qiln
+      PGUSER=qiln-ssh
       DATABASE_URL=postgresql:///qiln
       NATS_SERVERS=nats://127.0.0.1:4222
 
@@ -993,13 +1015,12 @@ files:
       QILN_SSH_GATEWAY_CHANNEL_OPEN_TIMEOUT_MS=10000
       QILN_SSH_GATEWAY_BRANCH_DIAL_TIMEOUT_MS=10000
 
-  # The standalone SSH service imports its own private Host and gateway
-  # credentials and owns its independent build/watch process. Web restarts
-  # neither rebuild nor restart SSH. The non-secret ingress overlay is read
-  # from the shared /run/qiln copy.
-  #
-  # Like the Web development service, this remains disabled until the operator
-  # prepares the source checkout, installs dependencies, and applies migrations.
+  # The standalone SSH authority runs as its own unprivileged user and executes
+  # only the built output of /opt/qiln/ssh. The developer builds with
+  # `npm run ssh:dev`, and this unit restarts after each completed build. Its
+  # credentials are a NATS-only dotenv, loaded from a root-only file, and the
+  # gateway host key. It never sees the Host credential. The non-secret ingress
+  # overlay is read from the shared /run/qiln copy.
   - path: /etc/systemd/system/qiln-ssh-dev.service
     generator: dump
     uid: 0
@@ -1014,18 +1035,18 @@ files:
 
       [Service]
       Type=simple
-      User=qiln
-      Group=qiln
+      User=qiln-ssh
+      Group=qiln-ssh
       WorkingDirectory=/opt/qiln
       EnvironmentFile=/etc/qiln/ssh.env
       EnvironmentFile=/run/qiln/ingress.env
-      ImportCredential=qiln-host.env
-      Environment=QILN_HOST_CREDENTIAL_PATH=%d/qiln-host.env
+      LoadCredential=qiln-ssh.env:/run/qiln/qiln-ssh.env
+      Environment=QILN_SSH_CREDENTIAL_PATH=%d/qiln-ssh.env
       ImportCredential=qiln-ssh-gateway-host-key
       Environment=QILN_SSH_GATEWAY_HOST_KEY_PATH=%d/qiln-ssh-gateway-host-key
-      ExecStartPre=/usr/bin/test -r %d/qiln-host.env
+      ExecStartPre=/usr/bin/test -r %d/qiln-ssh.env
       ExecStartPre=/usr/bin/test -r %d/qiln-ssh-gateway-host-key
-      ExecStart=/usr/bin/npm run ssh:dev
+      ExecStart=/usr/bin/npm run ssh:run
       TimeoutStopSec=40s
       UMask=0077
       NoNewPrivileges=true
@@ -1056,14 +1077,6 @@ files:
   # this tradeoff is intentional for developer velocity and is not an immutable
   # runtime deployment. Dependency installation, build outputs, and database
   # migrations remain separate explicit developer or operator actions.
-  #
-  # The service is intentionally not enabled by the image. Enabling it remains
-  # an explicit operator action after the source and writable build strategy
-  # have been prepared and migrations have been applied.
-  #
-  # Its private Host credential is imported directly; the shared /run/qiln
-  # credential remains only a development shell fallback. The non-secret
-  # ingress overlay is read from the shared /run/qiln copy.
   - path: /etc/systemd/system/qiln-dev.service
     generator: dump
     uid: 0
@@ -1072,9 +1085,9 @@ files:
     content: |-
       [Unit]
       Description=Qiln development server with embedded Worker
-      Requires=postgresql@18-main.service qiln-postgres-bootstrap.service nats-server.service qiln-instance-bootstrap.service qiln-ssh-dev.service
+      Requires=postgresql@18-main.service qiln-postgres-bootstrap.service nats-server.service qiln-instance-bootstrap.service
       After=network-online.target postgresql@18-main.service qiln-postgres-bootstrap.service nats-server.service qiln-instance-bootstrap.service qiln-ssh-dev.service
-      Wants=network-online.target
+      Wants=network-online.target qiln-ssh-dev.service
 
       [Service]
       Type=simple
