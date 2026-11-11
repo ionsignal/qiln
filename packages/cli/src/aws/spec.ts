@@ -8,7 +8,7 @@ export const AWS_RECORD_VERSION = Object.freeze({
 
 export const AWS_SPEC = Object.freeze({
   cliVersion: '2.39.7',
-  sdkVersion: '3.1165.0',
+  sdkVersion: '3.1166.0',
   defaultName: 'default',
   defaultRegion: 'us-west-2',
   profile: 'qiln',
