@@ -27,26 +27,11 @@ import type { IncusConnection } from '../../../transport/incus/connection'
 import type { IncusConfigMap } from '../../../transport/incus/types'
 
 /**
- * The relay session never observes the command signal. Cancellation reaches the
- * Incus requests through the client instead, so a request that is allowed to
- * finish keeps its connection, exactly as it does on a local socket. The
- * session closes when the work that uses it unwinds.
- */
-const RELAY_SIGNAL = new AbortController().signal
-
-/**
- * Proposed AWS policy: the TCP ports that the orchestrator publishes on the
- * host address through NAT proxy devices, each connecting to the same port of
- * the orchestrator. Opening them in the cloud firewall is not part of this.
- */
-export const PUBLISHED_PORTS: readonly number[] = Object.freeze([80, 443, 2222])
-
-/**
  * Proposed AWS policy: a memory limit and no CPU limit. The installation
  * workflow compares the limit with the memory the target reports.
  */
 const LIMITS: Readonly<IncusConfigMap> = Object.freeze({
-  'limits.memory': '2GiB',
+  'limits.memory': '8GiB',
 })
 
 /**
@@ -57,6 +42,23 @@ const LIMITS: Readonly<IncusConfigMap> = Object.freeze({
 const CONFIG: Readonly<IncusConfigMap> = Object.freeze({
   'boot.autostart': 'false',
 })
+
+/**
+ * The relay session never observes the command signal. Cancellation reaches the
+ * Incus requests through the client instead, so a request that is allowed to
+ * finish keeps its connection, exactly as it does on a local socket. The
+ * session closes when the work that uses it unwinds.
+ */
+const RELAY_SIGNAL = new AbortController().signal
+
+/**
+ * Proposed AWS policy: the TCP ports that the orchestrator publishes on the
+ * host address through NAT proxy devices, each connecting to the same port of
+ * the orchestrator. The ingress spec owns the ports, because the generated
+ * configuration listens on them. Opening them in the cloud firewall is not part
+ * of this.
+ */
+export const PUBLISHED_PORTS: readonly number[] = Object.freeze(Object.values(INSTALLER_SPEC.ingress.ports))
 
 /**
  * Everything an installation needs from one deployment, taken from retained
