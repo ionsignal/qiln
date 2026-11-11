@@ -6,7 +6,6 @@ dist
 lib
 data
 credentials
-server/db/migrations
 
 # AI Helpers
 CREDENTIALS.md
