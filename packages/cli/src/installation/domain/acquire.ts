@@ -2,8 +2,8 @@ import { INSTALLER_SPEC } from '../spec'
 import { csrOf } from './csr'
 import { planOf, type DomainPlan } from './plan'
 import { matches, readChain, type Chain, type Window } from './cert'
-import { InstallerError } from '../../diagnostic/error'
 import { checkCancellation } from '../../terminal/prompts'
+import { InstallerError, type DiagnosticFact } from '../../diagnostic/error'
 import * as records from './records'
 import type { KeyObject } from 'node:crypto'
 import type { Dir } from '../../state/files'
@@ -67,10 +67,10 @@ function invalidState(retry: string): InstallerError {
   })
 }
 
-function invalidReply(reason: string, retry: string): InstallerError {
+function invalidReply(reason: string, retry: string, facts: readonly DiagnosticFact[] = []): InstallerError {
   return new InstallerError({
     code: 'DOMAIN_RESPONSE_INVALID',
-    facts: [['Reason', reason]],
+    facts: [['Reason', reason], ...facts],
     retry,
   })
 }
@@ -108,8 +108,10 @@ async function load(directory: Dir, retry: string): Promise<Domain> {
 /**
  * Cancellation is honored only after a received reply was persisted, so the
  * reply of a request that already took effect is never lost. A reply that names
- * another address than the one registered is rejected without being retained,
- * and the attempt marker stays as evidence.
+ * another address than the one requested, or another label or zone than the
+ * retained allocation, is rejected without being retained, and the attempt
+ * marker stays as evidence. The address may differ from the retained one,
+ * because a host replacement moves it.
  */
 async function register(context: DomainContext, previous: records.DomainRecord | null): Promise<void> {
   const { directory, name, access, hooks, retry, signal } = context
@@ -118,6 +120,13 @@ async function register(context: DomainContext, previous: records.DomainRecord |
   const { label, zone, address } = await access.register(signal)
   if (address !== access.subject.address) {
     throw invalidReply('The service registered a different address than the one requested.', retry)
+  }
+  if (previous !== null && (label !== previous.label || zone !== previous.zone)) {
+    throw invalidReply('The service reported a different allocation than the retained one.', retry, [
+      ['Field', label === previous.label ? 'zone' : 'label'],
+      ['Retained allocation', records.baseOf(previous)],
+      ['Reported allocation', records.baseOf({ label, zone })],
+    ])
   }
   await records.save(
     directory,

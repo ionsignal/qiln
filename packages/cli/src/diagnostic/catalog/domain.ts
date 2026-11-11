@@ -43,7 +43,7 @@ export const domainDiagnostics = Object.freeze({
   ),
   DOMAIN_RESPONSE_INVALID: entry(
     'The registration service response was not accepted',
-    'The reply did not match the strict response contract, or it failed the local checks: a registration must name the host address that was sent, and a certificate chain must match the retained TLS key and exactly the allocated apex and wildcard names, be signed link by link, carry the validity window the service reported, and not already be expired. These checks are not path validation to a trust root. Nothing from the reply was retained, but the service may already have completed the operation.',
+    'The reply did not match the strict response contract, or it failed the local checks: a registration must name the host address that was sent and, when the installation already holds an allocation, that same label and zone, and a certificate chain must match the retained TLS key and exactly the allocated apex and wildcard names, be signed link by link, carry the validity window the service reported, and not already be expired. These checks are not path validation to a trust root. Nothing from the reply was retained, but the service may already have completed the operation.',
     'Inspect the displayed details.',
     'Run configure again. The service returns a stored certificate for the same key when one exists, though repeated failures may count against issuance caps.',
     'If the failure repeats, report the response to the service maintainers. Qiln does not relax validation.',
