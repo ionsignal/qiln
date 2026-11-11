@@ -124,6 +124,9 @@ actions:
       install -d -o qiln -g qiln -m 0755 /opt/qiln
       install -d -o root -g root -m 0755 /etc/qiln
 
+      # The installer's Incus proxy device creates this root-owned directory.
+      install -d -o root -g root -m 0755 /var/lib/incus
+
       # Host keys identify this orchestrator instance and must not be inherited
       # by every container created from this image.
       rm -f /etc/ssh/ssh_host_*
@@ -141,7 +144,6 @@ actions:
       #!/bin/sh
       set -eux
 
-      caddy validate --config /etc/caddy/qiln.json
       visudo -cf /etc/sudoers.d/90-qiln-orchestrator-admin
 
       chown root:postgres /etc/postgresql/18/main/pg_hba.conf
@@ -193,12 +195,14 @@ files:
         Checkout       /opt/qiln
         Web config     /etc/qiln/runtime.env
         SSH config     /etc/qiln/ssh.env
+        Ingress env    /run/qiln/ingress.env
 
       Services
         Status         systemctl status qiln-dev qiln-ssh-dev
         Logs           journalctl -u qiln-dev -u qiln-ssh-dev -f
 
       Manual development (from /opt/qiln, in separate terminals)
+        Load ingress   set -a; . /run/qiln/ingress.env; set +a
         Web + Worker   npm run server:dev
         SSH authority  npm run ssh:dev
 
@@ -487,7 +491,9 @@ files:
 
   # One root-owned prerequisite owns this concrete orchestrator's SSH host
   # identity and administrator roster. It also materializes the development
-  # shell Host credential; systemd services import their own private copies.
+  # shell Host credential and the non-secret ingress overlay; systemd services
+  # import their own private copies of the Host credential and read the shared
+  # overlay.
   - path: /usr/local/sbin/qiln-instance-bootstrap
     generator: dump
     uid: 0
@@ -501,16 +507,20 @@ files:
 
       readonly runtime_directory='/run/qiln'
       readonly host_environment_path='/run/qiln/qiln-host.env'
+      readonly ingress_environment_path='/run/qiln/ingress.env'
       readonly home_directory='/home/qiln'
       readonly ssh_directory='/home/qiln/.ssh'
       readonly authorized_keys_path='/home/qiln/.ssh/authorized_keys'
 
+      # The ingress keys must stay in step with the overlay that
+      # `qiln installation configure` generates.
+      readonly host_environment_keys='NATS_TOKEN FASTIFY_COOKIE_SECRET'
+      readonly ingress_environment_keys='QILN_DEV_PUBLIC_ORIGIN QILN_ROUTING_PUBLIC_ORIGIN QILN_ROUTE_BASE_DOMAIN QILN_SSH_PUBLIC_HOST QILN_SSH_PUBLIC_PORT'
+
       credential_directory="${CREDENTIALS_DIRECTORY:-}"
-      host_environment_temporary_path=''
+      environment_temporary_path=''
       authorized_keys_temporary_path=''
       roster_validation_path=''
-      host_nats_token=''
-      host_cookie_secret=''
       carriage_return="$(printf '\r')"
       ssh_keygen_output=''
 
@@ -520,8 +530,8 @@ files:
       }
 
       cleanup() {
-        if [ -n "${host_environment_temporary_path}" ]; then
-          rm -f -- "${host_environment_temporary_path}" || true
+        if [ -n "${environment_temporary_path}" ]; then
+          rm -f -- "${environment_temporary_path}" || true
         fi
         if [ -n "${authorized_keys_temporary_path}" ]; then
           rm -f -- "${authorized_keys_temporary_path}" || true
@@ -574,53 +584,69 @@ files:
 
       validate_safe_dotenv_value() {
         dotenv_value=$1
-        credential_name=$2
+        dotenv_name=$2
 
         case "${dotenv_value}" in
           ''|*[!A-Za-z0-9._+/@:=%-]*)
-            fail "Host credential ${credential_name} contains unsupported dotenv characters."
+            fail "Dotenv value ${dotenv_name} is empty or contains unsupported characters."
             ;;
         esac
       }
 
-      validate_host_environment() {
-        host_environment_source_path=$1
-        host_environment_line=''
+      # Accepts exactly one assignment of every expected key and nothing else.
+      validate_environment() {
+        environment_source_path=$1
+        environment_description=$2
+        expected_keys=$3
+        seen_keys=' '
+        environment_line=''
+        environment_key=''
+        environment_value=''
 
-        while IFS= read -r host_environment_line || [ -n "${host_environment_line}" ]; do
-          case "${host_environment_line}" in
+        validate_regular_file "${environment_source_path}" "${environment_description}"
+
+        while IFS= read -r environment_line || [ -n "${environment_line}" ]; do
+          case "${environment_line}" in
             *"${carriage_return}"*)
-              fail 'Host credential dotenv must not contain carriage returns.'
+              fail "${environment_description} must not contain carriage returns."
               ;;
-          esac
-
-          case "${host_environment_line}" in
             ''|'#'*)
               continue
               ;;
-            NATS_TOKEN=*)
-              if [ -n "${host_nats_token}" ]; then
-                fail 'Host credential dotenv must not define NATS_TOKEN more than once.'
-              fi
-              host_nats_token=${host_environment_line#NATS_TOKEN=}
-              validate_safe_dotenv_value "${host_nats_token}" 'NATS_TOKEN'
-              ;;
-            FASTIFY_COOKIE_SECRET=*)
-              if [ -n "${host_cookie_secret}" ]; then
-                fail 'Host credential dotenv must not define FASTIFY_COOKIE_SECRET more than once.'
-              fi
-              host_cookie_secret=${host_environment_line#FASTIFY_COOKIE_SECRET=}
-              validate_safe_dotenv_value "${host_cookie_secret}" 'FASTIFY_COOKIE_SECRET'
-              ;;
-            *)
-              fail 'Host credential dotenv may contain only NATS_TOKEN and FASTIFY_COOKIE_SECRET assignments.'
+          esac
+
+          environment_key=''
+          for expected_key in ${expected_keys}; do
+            case "${environment_line}" in
+              "${expected_key}="*)
+                environment_key=${expected_key}
+                ;;
+            esac
+          done
+          if [ -z "${environment_key}" ]; then
+            fail "${environment_description} may contain only ${expected_keys} assignments."
+          fi
+
+          case "${seen_keys}" in
+            *" ${environment_key} "*)
+              fail "${environment_description} must not define ${environment_key} more than once."
               ;;
           esac
-        done < "${host_environment_source_path}"
 
-        if [ -z "${host_nats_token}" ] || [ -z "${host_cookie_secret}" ]; then
-          fail 'Host credential dotenv must contain non-empty NATS_TOKEN and FASTIFY_COOKIE_SECRET values.'
-        fi
+          environment_value=${environment_line#"${environment_key}="}
+          validate_safe_dotenv_value "${environment_value}" "${environment_key}"
+          seen_keys="${seen_keys}${environment_key} "
+        done < "${environment_source_path}"
+
+        for expected_key in ${expected_keys}; do
+          case "${seen_keys}" in
+            *" ${expected_key} "*)
+              ;;
+            *)
+              fail "${environment_description} must contain ${expected_key}."
+              ;;
+          esac
+        done
       }
 
       validate_authorized_keys_roster() {
@@ -708,23 +734,25 @@ files:
         fi
       }
 
-      write_host_environment() {
-        host_environment_source_path=$1
+      write_environment() {
+        environment_source_path=$1
+        environment_destination_path=$2
+        environment_description=$3
 
-        validate_materialized_destination "${host_environment_path}" 'Materialized Qiln Host credential'
+        validate_materialized_destination "${environment_destination_path}" "Materialized ${environment_description}"
 
-        host_environment_temporary_path="$(mktemp "${runtime_directory}/.qiln-host.env.XXXXXX")"
-        cat "${host_environment_source_path}" > "${host_environment_temporary_path}"
+        environment_temporary_path="$(mktemp "${runtime_directory}/.qiln-environment.XXXXXX")"
+        cat "${environment_source_path}" > "${environment_temporary_path}"
 
-        chown root:qiln "${host_environment_temporary_path}"
-        chmod 0640 "${host_environment_temporary_path}"
+        chown root:qiln "${environment_temporary_path}"
+        chmod 0640 "${environment_temporary_path}"
 
-        if [ "$(stat --format='%u:%g:%a' "${host_environment_temporary_path}")" != '0:1000:640' ]; then
-          fail 'Materialized Qiln Host credential must be owned by root:qiln with mode 0640.'
+        if [ "$(stat --format='%u:%g:%a' "${environment_temporary_path}")" != '0:1000:640' ]; then
+          fail "Materialized ${environment_description} must be owned by root:qiln with mode 0640."
         fi
 
-        mv -f -- "${host_environment_temporary_path}" "${host_environment_path}"
-        host_environment_temporary_path=''
+        mv -f -- "${environment_temporary_path}" "${environment_destination_path}"
+        environment_temporary_path=''
       }
 
       write_authorized_keys() {
@@ -750,15 +778,17 @@ files:
       validate_credential_directory
 
       readonly host_environment_credential_path="${credential_directory}/qiln-host.env"
+      readonly ingress_environment_credential_path="${credential_directory}/qiln-ingress.env"
       readonly orchestrator_authorized_keys_credential_path="${credential_directory}/qiln-orchestrator-authorized-keys"
 
-      validate_regular_file "${host_environment_credential_path}" 'Qiln Host credential dotenv'
       validate_regular_file "${orchestrator_authorized_keys_credential_path}" 'Orchestrator SSH authorized-key credential'
-      validate_host_environment "${host_environment_credential_path}"
+      validate_environment "${host_environment_credential_path}" 'Qiln Host credential dotenv' "${host_environment_keys}"
+      validate_environment "${ingress_environment_credential_path}" 'Qiln ingress credential dotenv' "${ingress_environment_keys}"
       validate_authorized_keys_roster "${orchestrator_authorized_keys_credential_path}"
       ensure_runtime_directory
       ensure_ssh_directory
-      write_host_environment "${host_environment_credential_path}"
+      write_environment "${host_environment_credential_path}" "${host_environment_path}" 'Qiln Host credential dotenv'
+      write_environment "${ingress_environment_credential_path}" "${ingress_environment_path}" 'Qiln ingress credential dotenv'
       write_authorized_keys
 
   - path: /etc/systemd/system/qiln-instance-bootstrap.service
@@ -775,8 +805,10 @@ files:
       [Service]
       Type=oneshot
       ImportCredential=qiln-host.env
+      ImportCredential=qiln-ingress.env
       ImportCredential=qiln-orchestrator-authorized-keys
       ExecStartPre=/usr/bin/test -r %d/qiln-host.env
+      ExecStartPre=/usr/bin/test -r %d/qiln-ingress.env
       ExecStartPre=/usr/bin/test -r %d/qiln-orchestrator-authorized-keys
       ExecStart=/usr/local/sbin/qiln-instance-bootstrap
       RemainAfterExit=yes
@@ -891,7 +923,12 @@ files:
   # Non-secret Web and embedded Worker configuration. Manual development runs
   # export these values before starting the Host. server:watch supplies the
   # development shell credential fallback; systemd supplies a private path.
-  # SSH settings live separately.
+  # SSH settings live separately. The public identity (origins and the capsule
+  # hostname base) is deliberately absent: installation configuration delivers
+  # it in /run/qiln/ingress.env, and server:watch sources this file, so a
+  # duplicate here would override the delivered value. The QILN_CADDY_* values
+  # and QILN_ROUTING_INGRESS_ENDPOINT must match the loopback router server that
+  # installation renders (INSTALLER_SPEC.ingress.router in qiln-cli).
   - path: /etc/qiln/runtime.env
     generator: dump
     uid: 0
@@ -903,7 +940,6 @@ files:
       APP_DEFINITIONS_PATH=/opt/qiln/catalog/blueprints
       VITE_HOST_DEV=localhost
       QILN_LOAD_DOTENV=false
-      QILN_DEV_PUBLIC_ORIGIN=https://qiln.edge.ionsignal.com
 
       PGHOST=/var/run/postgresql
       PGPORT=5432
@@ -915,12 +951,10 @@ files:
       QILN_CADDY_ENDPOINT=http://127.0.0.1:2019
       QILN_CADDY_SERVER=qiln
       QILN_CADDY_FALLBACK_ID=qiln-route-fallback-experimental
-      QILN_ROUTE_BASE_DOMAIN=edge.qiln.com
-      QILN_ROUTING_PUBLIC_ORIGIN=https://edge.qiln.com
       QILN_ROUTING_INGRESS_ENDPOINT=http://127.0.0.1:8080
       QILN_EMBEDDED_WORKER_ENABLED=true
 
-      INCUS_ENDPOINT=unix:///run/qiln-incus.sock
+      INCUS_ENDPOINT=unix:///var/lib/incus/unix.socket
       INCUS_REJECT_UNAUTHORIZED=true
       INCUS_PROJECT=default
 
@@ -945,8 +979,6 @@ files:
       QILN_SSH_ENABLED=true
       QILN_SSH_TICKET_TTL_MS=30000
       QILN_SSH_RELAY_CLOSURE_TIMEOUT_MS=15000
-      QILN_SSH_PUBLIC_HOST=qiln.edge.ionsignal.com
-      QILN_SSH_PUBLIC_PORT=2224
       QILN_SSH_GATEWAY_HOST_ALIAS=qiln-gateway
       QILN_SSH_BRANCH_HOST_ALIAS_PREFIX=qiln
       QILN_SSH_DEFAULT_IDENTITY_FILE=~/.ssh/id_ed25519_qiln
@@ -963,7 +995,8 @@ files:
 
   # The standalone SSH service imports its own private Host and gateway
   # credentials and owns its independent build/watch process. Web restarts
-  # neither rebuild nor restart SSH.
+  # neither rebuild nor restart SSH. The non-secret ingress overlay is read
+  # from the shared /run/qiln copy.
   #
   # Like the Web development service, this remains disabled until the operator
   # prepares the source checkout, installs dependencies, and applies migrations.
@@ -985,6 +1018,7 @@ files:
       Group=qiln
       WorkingDirectory=/opt/qiln
       EnvironmentFile=/etc/qiln/ssh.env
+      EnvironmentFile=/run/qiln/ingress.env
       ImportCredential=qiln-host.env
       Environment=QILN_HOST_CREDENTIAL_PATH=%d/qiln-host.env
       ImportCredential=qiln-ssh-gateway-host-key
@@ -1028,7 +1062,8 @@ files:
   # have been prepared and migrations have been applied.
   #
   # Its private Host credential is imported directly; the shared /run/qiln
-  # credential remains only a development shell fallback.
+  # credential remains only a development shell fallback. The non-secret
+  # ingress overlay is read from the shared /run/qiln copy.
   - path: /etc/systemd/system/qiln-dev.service
     generator: dump
     uid: 0
@@ -1047,6 +1082,7 @@ files:
       Group=qiln
       WorkingDirectory=/opt/qiln
       EnvironmentFile=/etc/qiln/runtime.env
+      EnvironmentFile=/run/qiln/ingress.env
       ImportCredential=qiln-host.env
       Environment=QILN_HOST_CREDENTIAL_PATH=%d/qiln-host.env
       ExecStartPre=/usr/bin/test -r %d/qiln-host.env
@@ -1075,89 +1111,44 @@ files:
       NoNewPrivileges=no
       PrivateNetwork=no
 
-  # Qiln Caddy doesn't use the default Caddyfile.
+  # Qiln Caddy runs only from the configuration that installation delivers, so
+  # the default Caddyfile is never used.
   - path: /etc/caddy/Caddyfile
     generator: remove
 
-  # Qiln Caddy starts from this exact native JSON route-array boundary.
-  - path: /etc/caddy/qiln.json
-    generator: dump
-    uid: 0
-    gid: 0
-    mode: '0644'
-    content: |-
-      {
-        "admin": {
-          "listen": "127.0.0.1:2019"
-        },
-        "apps": {
-          "http": {
-            "servers": {
-              "qiln": {
-                "listen": [":8080"],
-                "automatic_https": {
-                  "disable": true
-                },
-                "routes": [
-                  {
-                    "@id": "qiln-route-fallback-experimental",
-                    "handle": [
-                      {
-                        "handler": "static_response",
-                        "status_code": 404
-                      }
-                    ],
-                    "terminal": true
-                  }
-                ]
-              },
-              "qiln-web": {
-                "listen": [":8081"],
-                "automatic_https": {
-                  "disable": true
-                },
-                "routes": [
-                  {
-                    "match": [
-                      {
-                        "host": ["qiln.edge.ionsignal.com"]
-                      }
-                    ],
-                    "handle": [
-                      {
-                        "handler": "reverse_proxy",
-                        "upstreams": [
-                          {
-                            "dial": "127.0.0.1:3002"
-                          }
-                        ]
-                      }
-                    ],
-                    "terminal": true
-                  },
-                  {
-                    "handle": [
-                      {
-                        "handler": "static_response",
-                        "status_code": 404
-                      }
-                    ],
-                    "terminal": true
-                  }
-                ]
-              }
-            }
-          }
-        }
-      }
-
-  - path: /etc/systemd/system/caddy.service.d/qiln-json.conf
+  # Caddy starts from the complete native JSON that installation delivers as a
+  # per-instance Incus system credential. The TLS pair is imported by Caddy
+  # alone and is not delivered to a target without TLS, which then imports
+  # nothing. ExecReload is cleared rather than replaced: a reload from the
+  # delivered file would discard the routes that the Worker manages through the
+  # admin API. --environ is dropped because it prints the process environment.
+  - path: /etc/systemd/system/caddy.service.d/qiln-credentials.conf
     generator: dump
     uid: 0
     gid: 0
     mode: '0644'
     content: |-
       [Service]
+      ImportCredential=qiln-caddy.json
+      ImportCredential=qiln-tls.pem
+      ImportCredential=qiln-tls.key
+      ExecStartPre=/usr/bin/test -r %d/qiln-caddy.json
       ExecStart=
-      ExecStart=/usr/bin/caddy run --environ --config /etc/caddy/qiln.json
-      ExecReload=/usr/bin/caddy reload --address 127.0.0.1:2019 --config /etc/caddy/qiln.json
+      ExecStart=/usr/bin/caddy run --config %d/qiln-caddy.json
+      ExecReload=
+
+  # Shadow the generated LXC credential resets only for this unit while
+  # preserving its six non-credential LXC settings.
+  - path: /etc/systemd/system/caddy.service.d/zzz-lxc-service.conf
+    generator: dump
+    uid: 0
+    gid: 0
+    mode: '0644'
+    content: |-
+      [Service]
+      ProcSubset=all
+      ProtectProc=default
+      ProtectControlGroups=no
+      ProtectKernelTunables=no
+      NoNewPrivileges=no
+      PrivateNetwork=no

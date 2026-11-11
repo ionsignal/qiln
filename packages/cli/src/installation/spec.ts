@@ -47,6 +47,20 @@ const MANAGED_CREDENTIAL_SUFFIXES = Object.freeze([
   CREDENTIAL_SUFFIXES.gatewayKey,
 ] as const)
 
+const INGRESS_SUFFIXES = Object.freeze({
+  environment: 'qiln-ingress.env',
+  caddy: 'qiln-caddy.json',
+  certificate: 'qiln-tls.pem',
+  key: 'qiln-tls.key',
+} as const)
+
+const INGRESS_KEYS = Object.freeze({
+  environment: `${CREDENTIAL_PREFIXES.text}${INGRESS_SUFFIXES.environment}`,
+  caddy: `${CREDENTIAL_PREFIXES.text}${INGRESS_SUFFIXES.caddy}`,
+  certificate: `${CREDENTIAL_PREFIXES.text}${INGRESS_SUFFIXES.certificate}`,
+  key: `${CREDENTIAL_PREFIXES.text}${INGRESS_SUFFIXES.key}`,
+} as const)
+
 /**
  * Settings shared by every layout. Resource limits belong to the layout.
  */
@@ -68,11 +82,19 @@ const ORCHESTRATOR_CONFIG = Object.freeze({
   ].join('\n'),
 } as const)
 
+/**
+ * Exposes the host Incus daemon to the orchestrator. `listen` is outside /run,
+ * which guest systemd mounts during boot and can hide a socket created earlier.
+ * The image creates its directory, and `INCUS_ENDPOINT` in
+ * catalog/images/qiln-orchestrator-dev.yaml must name the same path.
+ * `assertInstance` verifies this device, so changing `listen` needs a new image
+ * and a new instance.
+ */
 const INCUS_PROXY_DEVICE = Object.freeze({
   type: 'proxy',
   bind: 'instance',
-  listen: 'unix:/run/qiln-incus.sock',
-  connect: 'unix:/var/lib/incus/unix.socket',
+  connect: `unix:/var/lib/incus/unix.socket`,
+  listen: 'unix:/var/lib/incus/unix.socket',
   uid: '1000',
   gid: '1000',
   mode: '0600',
@@ -142,7 +164,7 @@ export const INSTALLER_SPEC = Object.freeze({
     profileNames: [] as const,
     config: ORCHESTRATOR_CONFIG,
     incusDevice: INCUS_PROXY_DEVICE,
-    credentialKeys: INSTANCE_CREDENTIAL_KEY_LIST,
+    credentialKeys: Object.freeze([...INSTANCE_CREDENTIAL_KEY_LIST, ...Object.values(INGRESS_KEYS)]),
     sourceDeviceName: 'source',
     sourceMountPath: '/opt/qiln',
   },
@@ -163,6 +185,23 @@ export const INSTALLER_SPEC = Object.freeze({
       host: '127.0.0.1',
       port: 4222,
     },
+  },
+  ingress: {
+    keys: INGRESS_KEYS,
+    suffixes: INGRESS_SUFFIXES,
+    ports: {
+      http: 80,
+      https: 443,
+      gateway: 2222,
+    },
+    web: '127.0.0.1:3002',
+    admin: '127.0.0.1:2019',
+    router: {
+      server: 'qiln',
+      listen: '127.0.0.1:8080',
+      fallbackId: 'qiln-route-fallback-experimental',
+    },
+    credentialDirectory: '/run/credentials/caddy.service',
   },
   checkout: {
     repository: 'https://github.com/ionsignal/qiln.git',
