@@ -1,11 +1,10 @@
 import { randomUUID } from 'node:crypto'
-import { userId } from '../../host'
-import { checkCancellation } from '../../../terminal/prompts'
-import { returned, type JournalStep } from '../../../journal/step'
-import { stepFailure, type StepOutcome } from '../../../host/step'
-import { notify, type ProgressSink, type ProgressTask } from '../observe/progress'
-import { InstallerError, type InstallerErrorCode } from '../../../diagnostic/error'
-import type { JournalAuthorization } from '../../../journal/history'
+import { checkCancellation } from '../terminal/prompts'
+import { currentUserId } from '../state/user'
+import { returned, type JournalStep } from './step'
+import { stepFailure, type StepOutcome } from '../host/step'
+import { InstallerError, type InstallerErrorCode } from '../diagnostic/error'
+import type { JournalAuthorization } from './history'
 
 export interface Evidence<Plan, Action extends string> {
   authorizations: readonly JournalAuthorization<Plan>[]
@@ -22,10 +21,9 @@ export interface StepJournalOptions<Rec, Plan, Action extends string> {
   recipe: { revision: number; digest: string }
   failureCode: InstallerErrorCode
   retry: string
-  task(action: Action): ProgressTask
   run(plan: Plan, action: Action, record: Rec): Promise<StepOutcome>
   approve(plan: Plan): Promise<void>
-  progress: ProgressSink | undefined
+  progress?(phase: 'working' | 'verified', action: Action): void
 }
 
 export interface AuthorizeOptions {
@@ -36,10 +34,10 @@ export interface AuthorizeOptions {
 type StepProgress = Partial<Pick<JournalStep, 'completion' | 'refusedAt' | 'verifiedAt'>>
 
 /**
- * The one fenced-step skeleton shared by the ZFS and Incus preparers: persist
- * the authorization, fence the step, run the remote call, record its outcome,
- * then let the owner verify against a fresh observation. Owners supply the
- * domain `verify`, so nothing here knows what a pool or a daemon is.
+ * The one fenced-step skeleton shared by every journaled workflow: persist the
+ * authorization, fence the step, run the remote call, record its outcome, then
+ * let the owner verify against a fresh observation. Owners supply the domain
+ * `verify`, so nothing here knows what a pool or a daemon is.
  */
 export class StepJournal<Rec extends Evidence<Plan, Action>, Plan, Action extends string> {
   private current: Rec
@@ -58,6 +56,17 @@ export class StepJournal<Rec extends Evidence<Plan, Action>, Plan, Action extend
   private async commit(next: Rec): Promise<void> {
     await this.options.save(next)
     this.current = next
+  }
+
+  /**
+   * Presentation cannot decide whether a step completed or verified.
+   */
+  private report(phase: 'working' | 'verified', action: Action): void {
+    try {
+      this.options.progress?.(phase, action)
+    } catch {
+      // Intentionally ignored.
+    }
   }
 
   public async amend(change: StepProgress, extras: Partial<Rec> = {}): Promise<void> {
@@ -87,7 +96,7 @@ export class StepJournal<Rec extends Evidence<Plan, Action>, Plan, Action extend
         {
           id,
           approvedAt: approvedAt ?? new Date().toISOString(),
-          approvedBy: { method: 'local-interactive', userId: userId() },
+          approvedBy: { method: 'local-interactive', userId: currentUserId() },
           recipe: { revision, digest },
           plan,
         },
@@ -103,10 +112,8 @@ export class StepJournal<Rec extends Evidence<Plan, Action>, Plan, Action extend
     signal: AbortSignal,
     verify: () => Promise<Observed>,
   ): Promise<Observed> {
-    const { progress } = this.options
     checkCancellation(signal)
-    const task = this.options.task(action)
-    notify(progress, { phase: 'working', task })
+    this.report('working', action)
     await this.commit({
       ...this.current,
       steps: [
@@ -124,7 +131,7 @@ export class StepJournal<Rec extends Evidence<Plan, Action>, Plan, Action extend
     })
     await this.conclude(action, await this.options.run(plan, action, this.current))
     const observed = await verify()
-    notify(progress, { phase: 'verified', task })
+    this.report('verified', action)
     return observed
   }
 

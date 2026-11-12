@@ -16,7 +16,7 @@ import {
   type ZfsTarget,
 } from '../../../host/zfs/types'
 import { verify } from '../../../host/zfs/verify'
-import { StepJournal } from '../journal/runner'
+import { StepJournal } from '../../../journal/runner'
 import { prepareRetry } from '../retry'
 import { poolState, prepared, requireNotStuck, staged, zfsFacts } from './facts'
 import { actionsOf, establishesPool, nextApproved, type ZfsRecord } from './types'
@@ -107,10 +107,9 @@ export class ZfsPreparer {
       recipe: RECIPE,
       failureCode: 'ZFS_STEP_FAILED',
       retry: prepareRetry(deployment.id),
-      task: action => ({ kind: 'zfs', action }),
       run: (plan, action, current) => apply(remote, plan, action, current.pool),
       approve: plan => hooks.approve(plan),
-      progress: hooks.progress,
+      progress: (phase, action) => hooks.progress?.({ phase, task: { kind: 'zfs', action } }),
     })
     return new ZfsPreparer(context, journal)
   }

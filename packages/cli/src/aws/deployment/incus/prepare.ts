@@ -35,7 +35,7 @@ import {
   type SelectPlan,
   type SoftwareTarget,
 } from '../../../host/incus/types'
-import { StepJournal, type AuthorizeOptions } from '../journal/runner'
+import { StepJournal, type AuthorizeOptions } from '../../../journal/runner'
 import { prepareRetry } from '../retry'
 import * as deployments from '../records'
 import * as records from './records'
@@ -114,10 +114,9 @@ export class IncusPreparer {
       recipe: RECIPE,
       failureCode: 'AWS_INCUS_STEP_FAILED',
       retry: prepareRetry(deployment.id),
-      task: action => ({ kind: 'incus', action }),
       run: (plan, action) => apply(remote, plan, action),
       approve: plan => hooks.approve(plan),
-      progress: hooks.progress,
+      progress: (phase, action) => hooks.progress?.({ phase, task: { kind: 'incus', action } }),
     })
     return new IncusPreparer(context, journal)
   }
