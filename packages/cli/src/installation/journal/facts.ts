@@ -1,12 +1,16 @@
 import * as journal from '../../journal/step'
 import { InstallerError } from '../../diagnostic/error'
-import type { ConfigureEvidence, ConfigureStep } from './types'
+
+/**
+ * The shared shape of configuration and startup evidence.
+ */
+type Evidence<Step extends journal.JournalStep = journal.JournalStep> = { steps: readonly Step[] } | null
 
 /**
  * Steps whose effect is unknown and which only an operator can resolve: open
  * or uncertain. Nothing clears them, and they are never replayed or resumed.
  */
-export function stuck(evidence: ConfigureEvidence | null): ConfigureStep[] {
+export function stuck<Step extends journal.JournalStep>(evidence: Evidence<Step>): Step[] {
   return journal.stuck(evidence?.steps ?? [])
 }
 
@@ -14,18 +18,18 @@ export function stuck(evidence: ConfigureEvidence | null): ConfigureStep[] {
  * Steps that exited zero but were not verified yet. A fresh observation can
  * verify them, which is accounting and not replay.
  */
-export function returned(evidence: ConfigureEvidence | null): ConfigureStep[] {
+export function returned<Step extends journal.JournalStep>(evidence: Evidence<Step>): Step[] {
   return journal.returned(evidence?.steps ?? [])
 }
 
 /**
  * Stuck plus returned steps.
  */
-export function unsettled(evidence: ConfigureEvidence | null): ConfigureStep[] {
+export function unsettled<Step extends journal.JournalStep>(evidence: Evidence<Step>): Step[] {
   return journal.unsettled(evidence?.steps ?? [])
 }
 
-function unresolved(steps: readonly ConfigureStep[], installation: string, retry: string): InstallerError {
+function unresolved(steps: readonly journal.JournalStep[], installation: string, retry: string): InstallerError {
   return new InstallerError({
     code: 'INSTALLATION_UNRESOLVED',
     facts: [
@@ -37,10 +41,10 @@ function unresolved(steps: readonly ConfigureStep[], installation: string, retry
 }
 
 /**
- * An open or uncertain step blocks configuration, because its effect on the
- * Incus daemon is unknown and nothing here replays or resumes it.
+ * An open or uncertain step blocks configuration and startup, because its
+ * effect on the target is unknown and nothing here replays or resumes it.
  */
-export function requireNotStuck(evidence: ConfigureEvidence | null, installation: string, retry: string): void {
+export function requireNotStuck(evidence: Evidence, installation: string, retry: string): void {
   const blocking = stuck(evidence)
   if (blocking.length > 0) {
     throw unresolved(blocking, installation, retry)
@@ -51,7 +55,7 @@ export function requireNotStuck(evidence: ConfigureEvidence | null, installation
  * Any unsettled step blocks reassignment, because a returned step has not yet
  * been verified by a fresh observation.
  */
-export function requireSettled(evidence: ConfigureEvidence | null, installation: string, retry: string): void {
+export function requireSettled(evidence: Evidence, installation: string, retry: string): void {
   const open = unsettled(evidence)
   if (open.length > 0) {
     throw unresolved(open, installation, retry)

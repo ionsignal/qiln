@@ -203,6 +203,28 @@ export const INSTALLER_SPEC = Object.freeze({
     },
     credentialDirectory: '/run/credentials/caddy.service',
   },
+  startup: {
+    unit: 'qiln-startup',
+    user: 'qiln',
+    group: 'qiln',
+    uid: 1000,
+    gid: 1000,
+    environmentFiles: ['/etc/qiln/runtime.env', '/run/qiln/ingress.env'],
+    hostCredentialPath: '/run/qiln/qiln-host.env',
+    adminFile: '/home/qiln/.qiln-admin.json',
+    services: ['qiln-ssh-dev', 'qiln-dev'],
+    waitSeconds: {
+      prerequisites: 180,
+      ready: 900,
+    },
+    commands: {
+      install: ['/usr/bin/npm', 'ci'],
+      build: ['/usr/bin/npm', 'run', 'build:dev'],
+      migrate: ['/usr/bin/npm', 'run', 'db:migrate'],
+      grant: ['/usr/bin/npm', 'run', 'db:grant'],
+      'create-admin': ['/usr/bin/npm', 'run', 'db:bootstrap'],
+    },
+  },
   checkout: {
     repository: 'https://github.com/ionsignal/qiln.git',
     ref: 'refs/heads/main',
@@ -268,10 +290,12 @@ export const INSTALLER_SPEC = Object.freeze({
     domainFileName: 'domain.json',
     domainAttemptFileName: 'domain-attempt.json',
     configureFileName: 'configure.json',
+    startupFileName: 'startup.json',
   },
   limits: {
     domain: 65_536,
     tlsKey: 4_096,
     evidence: 131_072,
+    startup: 262_144,
   },
 })

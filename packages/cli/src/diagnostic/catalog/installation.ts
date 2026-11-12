@@ -241,6 +241,12 @@ export const installationDiagnostics = Object.freeze({
     preservePostgresStep,
     'Re-run with the intended source checkout and image.',
   ),
+  INSTALLATION_INSTANCE_RUNNING: entry(
+    'Orchestrator is running',
+    'Qiln changes only a stopped orchestrator and never stops, replaces, or reconfigures a running one, so nothing was changed.',
+    'Stop the orchestrator outside Qiln after review, then run configure again.',
+    preservePostgresStep,
+  ),
   INVALID_INSTALLATION_STATE: entry(
     'Installation state is invalid or incompatible',
     'The record must match the supported schema exactly, and a permitted write changes only the image pin or checkout restore point or appends one host reassignment.',
@@ -263,16 +269,23 @@ export const installationDiagnostics = Object.freeze({
     'Inspect the images, network, volume, instance, and source checkout named in the diagnostic facts before retrying.',
     preservePostgresStep,
   ),
+  STARTUP_STEP_FAILED: entry(
+    'Installation startup step did not complete',
+    'An Incus request or a guest command was refused, which had no effect, or is uncertain, which may have changed the orchestrator in part or in full and is never replayed, so the step blocks later startups until it is resolved.',
+    'Inspect the transient unit qiln-startup in the orchestrator journal (journalctl -u qiln-startup), the orchestrator state, and the startup step named in the diagnostic facts before retrying.',
+    'A pushed administrator file is removed only when its script reads it, so check /home/qiln/.qiln-admin.json in the orchestrator.',
+    preservePostgresStep,
+  ),
   INSTALLATION_UNRESOLVED: entry(
     'Installation has an unresolved step',
-    'A previous configuration step has an unknown or unverified effect, and Qiln never replays, resumes, or clears it.',
-    'Inspect the Incus daemon, images, network, and source checkout named in the diagnostic facts manually.',
+    'A previous configuration or startup step has an unknown or unverified effect, and Qiln never replays, resumes, or clears it.',
+    'Inspect the Incus daemon, images, network, source checkout, and orchestrator startup unit named in the diagnostic facts manually.',
     preservePostgresStep,
   ),
   INSTALLATION_EVIDENCE_INVALID: entry(
     'Installation evidence is invalid or incompatible',
-    'Configuration evidence must match its installation record, the approved plan shape, and its step and operation history, with every authorization naming the installation’s current host or one of its earlier hosts, and it is never repaired or rebound.',
-    'Review configure.json in the installation directory before any recovery.',
+    'Configuration and startup evidence must match its installation record, the approved plan shape, and its step and operation history, with every configuration authorization naming the installation’s current host or one of its earlier hosts, and it is never repaired or rebound.',
+    'Review configure.json and startup.json in the installation directory before any recovery.',
     preservePostgresStep,
   ),
   INSTALLATION_NOT_VERIFIED: entry(

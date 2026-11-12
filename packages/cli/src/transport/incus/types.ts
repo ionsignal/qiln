@@ -133,6 +133,12 @@ export interface IncusInstancePut {
   stateful: boolean
 }
 
+export interface IncusFileAttributes {
+  uid: number
+  gid: number
+  mode: string
+}
+
 export interface IncusOperationRef {
   id: string
   path: string
@@ -143,6 +149,7 @@ export interface IncusOperation {
   status: string
   statusCode: number
   error: string
+  exitCode: number | null
 }
 
 export interface IncusSplitImageImport {

@@ -6,6 +6,7 @@ import { isRecord } from '../../guards'
 import type {
   IncusConfigMap,
   IncusDevicesMap,
+  IncusFileAttributes,
   IncusImage,
   IncusImageAlias,
   IncusInstance,
@@ -366,11 +367,13 @@ function parseInstance(value: unknown): IncusInstance {
 
 function parseOperation(value: unknown): IncusOperation {
   const operation = resourceRecord(value, 'operation')
+  const exitCode = isRecord(operation.metadata) ? operation.metadata.return : undefined
   return {
     id: requiredString(operation, 'id', 'operation'),
     status: requiredString(operation, 'status', 'operation'),
     statusCode: requiredInteger(operation, 'status_code', 'operation'),
     error: requiredString(operation, 'err', 'operation'),
+    exitCode: typeof exitCode === 'number' && Number.isSafeInteger(exitCode) ? exitCode : null,
   }
 }
 
@@ -750,6 +753,69 @@ export class IncusClient {
       },
     })
     return operationRef(result.operation)
+  }
+
+  public async startInstance(name: string): Promise<IncusOperationRef> {
+    const result = await this.json({
+      method: 'PUT',
+      path: `/1.0/instances/${escapedPathPart(name)}/state`,
+      expectedStatus: 202,
+      expectedType: 'async',
+      timeoutMs: this.requestTimeoutMs,
+      data: { action: 'start' },
+    })
+    return operationRef(result.operation)
+  }
+
+  /**
+   * Runs one command as root in the instance, with no shell and no websocket, so
+   * the operation ends with the command and reports its exit code. Output is not
+   * recorded.
+   */
+  public async execInstance(name: string, command: readonly string[]): Promise<IncusOperationRef> {
+    const result = await this.json({
+      method: 'POST',
+      path: `/1.0/instances/${escapedPathPart(name)}/exec`,
+      expectedStatus: 202,
+      expectedType: 'async',
+      timeoutMs: this.requestTimeoutMs,
+      data: {
+        command,
+        'wait-for-websocket': false,
+        interactive: false,
+        'record-output': false,
+      },
+    })
+    return operationRef(result.operation)
+  }
+
+  /**
+   * Replaces one regular file of a running instance with exactly these bytes.
+   */
+  public async writeInstanceFile(
+    name: string,
+    path: string,
+    bytes: Uint8Array,
+    attributes: IncusFileAttributes,
+  ): Promise<void> {
+    await this.request({
+      method: 'POST',
+      path: `/1.0/instances/${escapedPathPart(name)}/files?path=${escapedPathPart(path)}`,
+      expectedStatus: 200,
+      expectedType: 'sync',
+      timeoutMs: this.requestTimeoutMs,
+      interruptible: false,
+      headers: {
+        'Content-Type': 'application/octet-stream',
+        'Content-Length': String(bytes.byteLength),
+        'X-Incus-type': 'file',
+        'X-Incus-write': 'overwrite',
+        'X-Incus-uid': String(attributes.uid),
+        'X-Incus-gid': String(attributes.gid),
+        'X-Incus-mode': attributes.mode,
+      },
+      write: (request, signal) => writeChunk(request, bytes, signal),
+    })
   }
 
   private projectPath(path: string): string {
