@@ -218,7 +218,7 @@ export const INSTALLER_SPEC = Object.freeze({
       ready: 900,
     },
     commands: {
-      install: ['/usr/bin/npm', 'ci'],
+      install: ['/usr/bin/npm', 'install'],
       build: ['/usr/bin/npm', 'run', 'build:dev'],
       migrate: ['/usr/bin/npm', 'run', 'db:migrate'],
       grant: ['/usr/bin/npm', 'run', 'db:grant'],

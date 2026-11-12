@@ -44,7 +44,7 @@ const RESULTS: Record<StartupAction, StepResult> = {
 }
 
 const DETAILS: Partial<Record<StartupAction, string>> = {
-  install: 'npm ci with lifecycle scripts and network access; replaces node_modules in the checkout',
+  install: 'npm install with lifecycle scripts and network access; replaces node_modules in the checkout',
   build: 'writes packages/*/dist, ssh/dist, and app/dist in the writable checkout',
   migrate: 'changes the persistent PostgreSQL volume; applied migrations are never rolled back',
   grant: 'applies the SSH role privileges in one transaction',
