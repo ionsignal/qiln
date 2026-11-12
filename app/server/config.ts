@@ -1,6 +1,6 @@
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import type { EnvironmentConfig } from '@/types'
+import type { EnvironmentDefaults } from '@/types'
 
 const mode = process.env.NODE_ENV
 const dev = mode !== 'production'
@@ -18,9 +18,6 @@ const defaultRoutingIngressEndpoint = 'http://127.0.0.1:8080'
 const defaultAppPath = path.resolve(fileURLToPath(new URL('../..', import.meta.url)))
 const configuredAppPath = process.env.FASTIFY_APP_PATH?.trim()
 const appPath = path.resolve(configuredAppPath || defaultAppPath)
-
-// Helper to safely decode Base64 strings for mTLS certificates
-const decodeBase64 = (value?: string) => (value ? Buffer.from(value, 'base64').toString('utf-8') : undefined)
 
 // A malformed number fails startup instead of silently becoming a NaN limit.
 function envInteger(name: string, fallback: number): number {
@@ -53,7 +50,6 @@ export default {
   },
   cookies: {
     name: process.env.COOKIE_NAME ?? 'runemind_session',
-    secret: process.env.FASTIFY_COOKIE_SECRET,
     path: '/',
     domain: host === 'localhost' ? undefined : host,
     sameSite: 'lax',
@@ -81,12 +77,9 @@ export default {
   },
   nats: {
     servers: process.env.NATS_SERVERS ? process.env.NATS_SERVERS.split(',') : ['nats://localhost:4222'],
-    token: process.env.NATS_TOKEN || undefined,
   },
   incus: {
     endpoint: process.env.INCUS_ENDPOINT || defaultIncusEndpoint,
-    cert: decodeBase64(process.env.INCUS_CLIENT_CERT_B64),
-    key: decodeBase64(process.env.INCUS_CLIENT_KEY_B64),
     basicAuth: process.env.INCUS_BASIC_AUTH,
     rejectUnauthorized: process.env.INCUS_REJECT_UNAUTHORIZED !== 'false',
     project: process.env.INCUS_PROJECT || undefined,
@@ -104,4 +97,4 @@ export default {
     reconcileIntervalMs: envInteger('QILN_PREVIEW_RECONCILE_INTERVAL_MS', 15_000),
     verificationTimeoutMs: envInteger('QILN_PREVIEW_VERIFICATION_TIMEOUT_MS', 10_000),
   },
-} satisfies EnvironmentConfig
+} satisfies EnvironmentDefaults

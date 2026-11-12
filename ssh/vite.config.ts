@@ -22,8 +22,6 @@ export default defineConfig({
   root: import.meta.dirname,
   plugins: [readiness()],
   resolve: {
-    // Bundle package sources into an isolated executable. SSH development must
-    // neither depend on Web's package watchers nor overwrite their dist files.
     alias: {
       '@qiln/core/server': resolve(import.meta.dirname, '../packages/core/src/server.ts'),
       '@qiln/ssh/server': resolve(import.meta.dirname, '../packages/ssh/src/server.ts'),
@@ -47,7 +45,6 @@ export default defineConfig({
         /^node:/,
         /^drizzle-orm(?:\/|$)/,
         '@nats-io/transport-node',
-        'c12',
         'close-with-grace',
         'pino',
         'postgres',

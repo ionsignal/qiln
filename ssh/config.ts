@@ -1,8 +1,5 @@
-import { constants } from 'node:fs'
-import { access } from 'node:fs/promises'
-import { isAbsolute } from 'node:path'
-import { loadDotenv } from 'c12'
 import { z } from 'zod'
+import { parseNatsToken, readCredentialSource } from '@qiln/core/server'
 
 const EnabledSchema = z.enum(['true', 'false']).transform(value => value === 'true')
 const PortSchema = z.int().min(1).max(65_535)
@@ -13,8 +10,8 @@ const SshConfigSchema = z
       url: z.string().trim().min(1),
     }),
     nats: z.object({
+      token: z.string().min(1),
       servers: z.array(z.string().trim().min(1)).min(1),
-      token: z.string().min(1).optional(),
     }),
     policy: z.object({
       enabled: z.boolean(),
@@ -44,53 +41,18 @@ const SshConfigSchema = z
 export type SshConfig = z.infer<typeof SshConfigSchema>
 
 /**
- * SSH receives a credential file that carries only its NATS token, delivered by
- * systemd. Cookie and Incus credentials never reach this process, and the token
- * is not copied into process.env.
- */
-async function loadNatsToken(): Promise<string | undefined> {
-  const credentialPath = process.env.QILN_SSH_CREDENTIAL_PATH?.trim()
-  if (!credentialPath) {
-    return process.env.NATS_TOKEN || undefined
-  }
-  if (!isAbsolute(credentialPath)) {
-    throw new Error('QILN_SSH_CREDENTIAL_PATH must be an absolute credential-file path.')
-  }
-  try {
-    await access(credentialPath, constants.R_OK)
-  } catch {
-    throw new Error('The configured SSH credential file is not readable.')
-  }
-  const environment = Object.create(null) as NodeJS.ProcessEnv
-  const credentials = await loadDotenv({
-    cwd: '/',
-    fileName: credentialPath,
-    env: environment,
-    interpolate: false,
-  })
-  const parsed = z.object({ NATS_TOKEN: z.string().min(1) }).safeParse(credentials)
-  if (!parsed.success) {
-    throw new Error('The SSH credential file must contain a non-empty NATS_TOKEN.')
-  }
-  return parsed.data.NATS_TOKEN
-}
-
-/**
  * Loads only standalone SSH dependencies. Web configuration, authentication
  * configuration, and privileged Worker configuration are never imported.
  */
 export async function loadSshConfig(): Promise<SshConfig> {
-  if (process.env.QILN_LOAD_DOTENV !== 'false') {
-    await loadDotenv({ cwd: process.cwd() })
-  }
-  const token = await loadNatsToken()
+  const natsToken = parseNatsToken(await readCredentialSource(process.env.QILN_SSH_CREDENTIAL_PATH))
   return SshConfigSchema.parse({
     database: {
       url: process.env.DATABASE_URL ?? '',
     },
     nats: {
+      token: natsToken,
       servers: process.env.NATS_SERVERS ? process.env.NATS_SERVERS.split(',') : ['nats://localhost:4222'],
-      ...(token === undefined ? {} : { token }),
     },
     policy: {
       enabled: EnabledSchema.parse(process.env.QILN_SSH_ENABLED ?? 'false'),

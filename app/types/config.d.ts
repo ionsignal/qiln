@@ -23,7 +23,7 @@ type MultipartConfig = {
 
 type CookiesConfig = {
   name: string
-  secret: string | undefined
+  secret: string
   path: string
   domain: string | undefined
   sameSite: boolean | 'lax' | 'strict' | 'none'
@@ -80,6 +80,10 @@ type Config = WorkerHostConfig & {
 
 type EnvironmentConfig = Config
 
+type EnvironmentDefaults = Omit<Config, 'cookies'> & {
+  cookies: Omit<CookiesConfig, 'secret'>
+}
+
 declare module 'http' {
   interface IncomingMessage {
     session?: Session | null
@@ -105,6 +109,7 @@ declare module 'fastify' {
 
 export type {
   EnvironmentConfig,
+  EnvironmentDefaults,
   Config,
   Server,
   CookiesConfig,
