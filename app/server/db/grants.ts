@@ -8,9 +8,9 @@ import { users } from '@/db/users'
 import type { SQL } from 'drizzle-orm'
 import type { AnyPgTable } from 'drizzle-orm/pg-core'
 
-const role = sql.identifier('qiln-ssh')
-const database = sql.identifier('qiln')
 const schemaName = 'public'
+const database = sql.identifier('qiln')
+const role = sql.identifier('qiln-ssh')
 
 type TableColumn<TTable extends AnyPgTable> = TTable['_']['columns'][keyof TTable['_']['columns']]
 type ColumnList<TTable extends AnyPgTable> = readonly [TableColumn<TTable>, ...TableColumn<TTable>[]]
@@ -55,23 +55,13 @@ function tableGrants<TTable extends AnyPgTable>({ table, select, insert, update 
 }
 
 /**
- * Complete privilege set of the standalone SSH authority (PostgreSQL role
- * "qiln-ssh", created by the image's qiln-postgres-bootstrap). Run it with
- * `npm run db:grant` after every migration or schema reset. The REVOKE makes
- * each run converge on exactly this set, and the single transaction rolls back
- * if any statement fails.
- *
- * Foreign-key checks run as the table owner and need no grant. Schema USAGE
- * comes from the PostgreSQL 15+ default on PUBLIC, and CREATE is not granted.
- * Nothing here grants TRUNCATE, sequence or function privileges, reads of
- * users.password, sessions, or agent_credentials, or any write to identity or
- * audit columns.
+ * This is the complete privilege set of the standalone SSH authority that must run
+ * after every migration or schema reset. The REVOKE makes each run converge on 
+ * exactly this set, and the single transaction rolls back if any statement fails.
  *
  * The matrix lives in the application because the role is deployment identity,
  * not package policy. The runner connects as the table owner "qiln" through the
- * Host configuration. It is compiled apart from the Web project, which must not
- * import SSH composition, and needs the package declarations `build:server`
- * needs plus `packages/ssh/dist`.
+ * Host configuration.
  */
 const statements = [
   sql`REVOKE ALL ON ALL TABLES IN SCHEMA ${sql.identifier(schemaName)} FROM ${role}`,
