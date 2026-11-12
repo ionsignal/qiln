@@ -140,6 +140,15 @@ export function isPublishedDevice(name: string): boolean {
 }
 
 /**
+ * Lifecycle status is deliberately not part of compatibility, so a running
+ * orchestrator that matches its configuration stays compatible. Steps that
+ * change the instance require it to be stopped.
+ */
+export function isStopped(instance: IncusInstance): boolean {
+  return instance.status === 'Stopped' && instance.statusCode === STOPPED_STATUS_CODE
+}
+
+/**
  * One NAT proxy device per published port, listening on the host address and
  * connecting to the same port of the orchestrator's static address. NAT keeps
  * the client address visible to the orchestrator.
@@ -189,8 +198,6 @@ function compatibility(instance: IncusInstance, imageFingerprint: string, inputs
     instance.architecture === inputs.architecture.incus &&
     instance.description === INSTALLER_SPEC.orchestrator.description &&
     instance.type === INSTALLER_SPEC.orchestrator.type &&
-    instance.status === 'Stopped' &&
-    instance.statusCode === STOPPED_STATUS_CODE &&
     (instance.project === '' || instance.project === INSTALLER_SPEC.projectName) &&
     instance.ephemeral === INSTALLER_SPEC.orchestrator.ephemeral &&
     instance.stateful === INSTALLER_SPEC.orchestrator.stateful &&

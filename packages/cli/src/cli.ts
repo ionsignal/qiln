@@ -96,7 +96,7 @@ export async function run(argumentsList: readonly string[]): Promise<number> {
           await installation.configure(
             selector,
             options,
-            begin('installation', color, 'installation configure', 'stopped installation convergence'),
+            begin('installation', color, 'installation configure', 'installation configuration and startup'),
           )
         },
         async reassign(selector, color) {

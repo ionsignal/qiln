@@ -1,3 +1,4 @@
+import { Writable } from 'node:stream'
 import { createInterface } from 'node:readline/promises'
 import { InstallerError } from '../diagnostic/error'
 import type { PromptTone, Reporter } from './reporter'
@@ -8,6 +9,10 @@ export function checkCancellation(signal: AbortSignal): void {
       code: 'COMMAND_CANCELLED',
     })
   }
+}
+
+export function isInteractive(): boolean {
+  return process.stdin.isTTY === true && process.stdout.isTTY === true
 }
 
 export async function withCancellation<T>(run: (signal: AbortSignal) => Promise<T>): Promise<T> {
@@ -37,6 +42,13 @@ export class Prompts {
 
   public async text(label: string, defaultValue?: string): Promise<string> {
     return await this.ask(label, defaultValue)
+  }
+
+  /**
+   * The answer is never echoed and is returned exactly as typed.
+   */
+  public async secret(label: string): Promise<string> {
+    return await this.ask(label, undefined, 'input', true)
   }
 
   public async select(label: string, choices: readonly string[]): Promise<number> {
@@ -79,9 +91,9 @@ export class Prompts {
    * The reporter spaces the prompt from the output before it, and the next block
    * is spaced from the prompt.
    */
-  private async ask(label: string, defaultValue?: string, tone: PromptTone = 'input'): Promise<string> {
+  private async ask(label: string, defaultValue?: string, tone: PromptTone = 'input', hidden = false): Promise<string> {
     checkCancellation(this.signal)
-    if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    if (!isInteractive()) {
       throw new InstallerError({
         code: 'INTERACTIVE_TERMINAL_REQUIRED',
         retry: this.retry,
@@ -91,7 +103,7 @@ export class Prompts {
     const questionSignal = AbortSignal.any([this.signal, promptController.signal])
     const readline = createInterface({
       input: process.stdin,
-      output: process.stdout,
+      output: hidden ? new Writable({ write: (_chunk, _encoding, done) => done() }) : process.stdout,
       terminal: true,
     })
     const cancelPrompt = () => promptController.abort()
@@ -99,11 +111,14 @@ export class Prompts {
     readline.once('close', cancelPrompt)
     try {
       const question = this.reporter.promptQuestion(label, defaultValue, tone)
-      const answer = await readline.question(question, {
+      if (hidden) {
+        process.stdout.write(question)
+      }
+      const answer = await readline.question(hidden ? '' : question, {
         signal: questionSignal,
       })
       checkCancellation(questionSignal)
-      return answer.trim() || defaultValue || ''
+      return hidden ? answer : answer.trim() || defaultValue || ''
     } catch (error: unknown) {
       if (questionSignal.aborted) {
         throw new InstallerError({
@@ -112,6 +127,9 @@ export class Prompts {
       }
       throw error
     } finally {
+      if (hidden) {
+        process.stdout.write('\n')
+      }
       readline.off('SIGINT', cancelPrompt)
       readline.off('close', cancelPrompt)
       readline.close()

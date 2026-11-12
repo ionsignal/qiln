@@ -1,9 +1,10 @@
 import { assertVolume } from './storage'
 import { assertNetwork } from './network'
 import { delivery, type Observation } from './observe'
-import { assertInstance, publishedFits } from './instance'
+import { assertInstance, isStopped, publishedFits } from './instance'
 import { checkoutPlanOf } from './checkout/judge'
 import { InstallerError } from '../diagnostic/error'
+import { isEmpty } from './journal/types'
 import { hasManagedCredentials, matchesValues, requireNoCollision } from './credentials'
 import { isImageFingerprint, validateContainerImage } from './preflight/image'
 import type { Retry } from './retry'
@@ -141,7 +142,8 @@ function credentialsPlan(
  * could not complete. An empty plan means the installation already matches.
  * Published port drift is not an incompatibility: it only sets `publish`. The
  * ingress digest binds the approval to the generated configuration, and an
- * ingress that is not derivable yet only sets `deliver`.
+ * ingress that is not derivable yet only sets `deliver`. A running orchestrator
+ * is never changed, so a plan that would change it is refused.
  */
 export function planOf(observation: Observation, request: PlanRequest): ConfigurePlan {
   const { inputs, roster, retry } = request
@@ -159,7 +161,7 @@ export function planOf(observation: Observation, request: PlanRequest): Configur
   }
   const mode = credentialsPlan(observation, roster, retry.configure)
   const values = delivery(observation)
-  return {
+  const plan: ConfigurePlan = {
     kind: 'configure',
     fingerprint,
     checkout: checkoutPlanOf(observation.checkout, retry.configure),
@@ -173,6 +175,14 @@ export function planOf(observation: Observation, request: PlanRequest): Configur
     ingress: observation.ingress?.digest ?? null,
     deliver: instance === null || values === null || mode !== 'reuse' || !matchesValues(instance.value.config, values),
   }
+  if (instance !== null && !isStopped(instance.value) && !isEmpty(plan)) {
+    throw new InstallerError({
+      code: 'INSTALLATION_INSTANCE_RUNNING',
+      facts: [['Observed', `The orchestrator reports status '${instance.value.status}' and the plan would change the installation.`]],
+      retry: retry.configure,
+    })
+  }
+  return plan
 }
 
 /**

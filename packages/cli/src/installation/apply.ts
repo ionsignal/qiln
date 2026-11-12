@@ -3,7 +3,7 @@ import { networkInput } from './network'
 import { volumeInput } from './storage'
 import { delivery, type Observation } from './observe'
 import { instancePut, requireNoCollision } from './credentials'
-import { assertInstance, instanceInput, publishedDevices } from './instance'
+import { assertInstance, instanceInput, isStopped, publishedDevices } from './instance'
 import { InstallerError } from '../diagnostic/error'
 import type { Retry } from './retry'
 import type { ImageSource } from './image'
@@ -91,7 +91,7 @@ export async function apply(
       return
     case 'update-instance': {
       const { instance, credentials, ingress } = observation
-      if (instance === null) {
+      if (instance === null || !isStopped(instance.value)) {
         return defect()
       }
       if (credentials === 'absent') {

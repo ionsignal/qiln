@@ -107,7 +107,11 @@ async function verifyRecord(
   }
   requireNoCollision(instance.config, retry)
   assertInstance(instance, record.imageFingerprint, inputs, retry)
-  reporter.row('verified', 'Orchestrator', `${name} · compatible with the pinned image and installation inputs`)
+  reporter.row(
+    'verified',
+    'Orchestrator',
+    `${name} · ${instance.status.toLowerCase()} · compatible with the pinned image and installation inputs`,
+  )
 }
 
 export async function inspect(target: InstallationTarget, reporter: Reporter): Promise<void> {

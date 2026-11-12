@@ -197,8 +197,8 @@ export function createProgram(handlers: ProgramHandlers, output: ProgramOutput):
   )
   const installationConfigure = installation
     .command('configure')
-    .description('Configure and verify the Qiln installation on the selected target, leaving the orchestrator stopped.')
-    .summary('Configure the stopped installation.')
+    .description('Configure and verify the Qiln installation on the selected target, then, after a separate approval, start the orchestrator.')
+    .summary('Configure and start the installation.')
   addTargetOptions(installationConfigure)
   addInstallOptions(installationConfigure)
   describeHelp(installationConfigure, installationHelp.configure)

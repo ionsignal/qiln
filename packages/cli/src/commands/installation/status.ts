@@ -1,14 +1,19 @@
 import { INSTALLER_SPEC } from '../../installation/spec'
 import { describeHost } from './host'
 import { domainFacts } from './domain'
-import { stateOf } from '../../journal/step'
+import { stateOf, type JournalStep } from '../../journal/step'
 import { unsettled } from '../../installation/journal/facts'
 import { listInstallations } from '../../installation/state'
 import { selectorFlags } from '../../installation/retry'
 import { awsInstallationName } from '../../installation/target/aws/host'
 import * as journal from '../../installation/journal/records'
+import * as startup from '../../installation/startup/records'
 import type { Reporter } from '../../terminal/reporter'
 import type { InstallationSelector } from '../../installation/target/types'
+
+function describeSteps(steps: readonly JournalStep[]): string {
+  return steps.length === 0 ? 'none' : steps.map(step => `${step.action} (${stateOf(step)})`).join(', ')
+}
 
 /**
  * Reports retained evidence only. It connects to no target, authenticates to
@@ -26,7 +31,9 @@ export async function status(selector: InstallationSelector, reporter: Reporter)
   }
   const { record } = entry
   const evidence = await journal.read(entry.directory, record, retry)
+  const started = await startup.read(entry.directory, retry)
   const open = unsettled(evidence)
+  const startOpen = unsettled(started)
   const domain = record.host.kind === 'aws' ? await domainFacts(entry.directory, retry) : []
   reporter.facts([
     ['Installation', record.name],
@@ -48,12 +55,14 @@ export async function status(selector: InstallationSelector, reporter: Reporter)
     ['Image pin', record.imageFingerprint ?? 'none'],
     ['Authorizations', String(evidence?.authorizations.length ?? 0)],
     ['Recorded steps', String(evidence?.steps.length ?? 0)],
-    ['Unresolved steps', open.length === 0 ? 'none' : open.map(step => `${step.action} (${stateOf(step)})`).join(', ')],
+    ['Unresolved steps', describeSteps(open)],
+    ['Startup steps', String(started?.steps.length ?? 0)],
+    ['Unresolved startup steps', describeSteps(startOpen)],
     ...domain,
   ])
-  if (open.length > 0) {
+  if (open.length + startOpen.length > 0) {
     reporter.notice(
-      'An unresolved step blocks configuration. Interrupted work may already have completed, and nothing was replayed, resumed, or rolled back.',
+      'An unresolved step blocks configuration or startup. Interrupted work may already have completed, and nothing was replayed, resumed, or rolled back.',
     )
   }
   reporter.info('This status reads local evidence only. It did not contact the target, authenticate to AWS, or take a lock.')

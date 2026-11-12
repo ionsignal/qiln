@@ -1,13 +1,13 @@
 import { hasCollision, matchesValues } from './credentials'
-import { instanceFits, publishedFits } from './instance'
+import { instanceFits, isStopped, publishedFits } from './instance'
 import { delivery, type Observation } from './observe'
 import type { InstallationInputs } from './types'
 import type { InstallAction, ConfigurePlan } from './journal/types'
 import type { IncusInstance } from '../transport/incus/types'
 
 /**
- * An instance step is verified only when the instance is compatible and holds
- * the expected published ports, not merely present.
+ * An instance step is verified only when the instance is stopped, compatible,
+ * and holds the expected published ports, not merely present.
  */
 function compatible(
   instance: IncusInstance,
@@ -16,6 +16,7 @@ function compatible(
   retry: string,
 ): boolean {
   return (
+    isStopped(instance) &&
     !hasCollision(instance.config) &&
     instanceFits(instance, fingerprint, inputs, retry) &&
     publishedFits(instance, inputs)

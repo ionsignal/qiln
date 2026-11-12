@@ -134,7 +134,7 @@ function screenOf({ plan, held, inputs, source, ingress }: PlanPreview): Approva
     title: 'Proposed installation changes',
     steps,
     covers,
-    stays: 'The orchestrator is never started, and persistent PostgreSQL data is kept.',
+    stays: 'This approval never starts the orchestrator, and persistent PostgreSQL data is kept. Startup asks for its own approval afterwards.',
     lasting: `${AUTHORITY} The instance mounts ${inputs.sourceRoot} writable, so it can modify the host checkout.${plan.image.import ? ` ${IMPORT_NOTE}` : ''}${publishes ? ` ${PUBLISH_NOTE}` : ''}${delivers ? ` ${INGRESS_NOTE}` : ''}`,
     notEstablished: delivers ? `${TRUSTED} ${DELIVERY_NOT_ESTABLISHED}` : TRUSTED,
   }
