@@ -95,6 +95,22 @@ actions:
         --output /etc/apt/keyrings/postgresql.asc
       chmod 0644 /etc/apt/keyrings/postgresql.asc
 
+  # The PostgreSQL cluster lives on a persistent volume, so its owner must be the
+  # same numeric identity in every image build. Debian allocates system IDs
+  # dynamically, so the account is created with fixed IDs before the package
+  # installs. The PostgreSQL package then finds the account and creates nothing.
+  # The attributes match what that package requests, and every other system
+  # account stays dynamic.
+  - trigger: post-unpack
+    action: |-
+      #!/bin/sh
+      set -eux
+
+      groupadd --system --gid 105 postgres
+      useradd --system --uid 102 --gid 105 \
+        --home-dir /var/lib/postgresql --no-create-home \
+        --shell /bin/bash --comment 'PostgreSQL administrator' postgres
+
   # Control-plane users, locale, SSH identity hygiene, and Qiln runtime paths.
   - trigger: post-packages
     action: |-
@@ -530,10 +546,6 @@ files:
       readonly home_directory='/home/qiln'
       readonly ssh_directory='/home/qiln/.ssh'
       readonly authorized_keys_path='/home/qiln/.ssh/authorized_keys'
-
-      # The ingress keys must stay in step with the overlay that
-      # `qiln installation configure` generates.
-      readonly host_environment_keys='NATS_TOKEN FASTIFY_COOKIE_SECRET'
       readonly ingress_environment_keys='QILN_DEV_PUBLIC_ORIGIN QILN_ROUTING_PUBLIC_ORIGIN QILN_ROUTE_BASE_DOMAIN QILN_SSH_PUBLIC_HOST QILN_SSH_PUBLIC_PORT'
 
       credential_directory="${CREDENTIALS_DIRECTORY:-}"
@@ -778,7 +790,8 @@ files:
         validate_materialized_destination "${ssh_environment_path}" 'Materialized Qiln SSH credential dotenv'
 
         environment_temporary_path="$(mktemp "${runtime_directory}/.qiln-environment.XXXXXX")"
-        grep '^NATS_TOKEN=' "${host_environment_credential_path}" > "${environment_temporary_path}"
+        grep '^NATS_TOKEN=' "${host_environment_credential_path}" > "${environment_temporary_path}" ||
+          fail 'Qiln Host credential dotenv must contain NATS_TOKEN.'
 
         mv -f -- "${environment_temporary_path}" "${ssh_environment_path}"
         environment_temporary_path=''
@@ -811,7 +824,7 @@ files:
       readonly orchestrator_authorized_keys_credential_path="${credential_directory}/qiln-orchestrator-authorized-keys"
 
       validate_regular_file "${orchestrator_authorized_keys_credential_path}" 'Orchestrator SSH authorized-key credential'
-      validate_environment "${host_environment_credential_path}" 'Qiln Host credential dotenv' "${host_environment_keys}"
+      validate_regular_file "${host_environment_credential_path}" 'Qiln Host credential dotenv'
       validate_environment "${ingress_environment_credential_path}" 'Qiln ingress credential dotenv' "${ingress_environment_keys}"
       validate_authorized_keys_roster "${orchestrator_authorized_keys_credential_path}"
       ensure_runtime_directory
@@ -848,7 +861,9 @@ files:
 
   # The identical filename shadows Resolute's generated type-wide LXC drop-in
   # for this unit without modifying /run. Preserve all six non-credential
-  # settings, omitting only the empty LoadCredential and ImportCredential resets.
+  # settings, omitting only the empty LoadCredential and ImportCredential
+  # resets. Unlike the services sharing the anchored definition below, this
+  # root bootstrap deliberately keeps NoNewPrivileges=no.
   - path: /etc/systemd/system/qiln-instance-bootstrap.service.d/zzz-lxc-service.conf
     generator: dump
     uid: 0
@@ -879,12 +894,18 @@ files:
       ExecStartPre=/usr/bin/test -r %d/nats-server.conf
       ExecStart=
       ExecStart=/usr/sbin/nats-server -c %d/nats-server.conf
-      NoNewPrivileges=true
       PrivateTmp=true
 
-  # Shadow the generated LXC credential resets only for this unit while
-  # preserving its six non-credential LXC settings.
-  - path: /etc/systemd/system/nats-server.service.d/zzz-lxc-service.conf
+  # Shared LXC compatibility drop-in for nats-server, qiln-ssh-dev, qiln-dev, and
+  # caddy. The identical filename shadows Resolute's generated type-wide LXC
+  # drop-in for each unit without modifying /run. It preserves the five
+  # non-credential settings that must stay relaxed inside the container and
+  # omits the empty LoadCredential and ImportCredential resets that would clear
+  # the credentials these units import. NoNewPrivileges=true deliberately
+  # replaces the generated "no": this drop-in sorts after every other drop-in,
+  # so it is the single authority for that hardening on these four units.
+  - &lxc-service-compat
+    path: /etc/systemd/system/nats-server.service.d/zzz-lxc-service.conf
     generator: dump
     uid: 0
     gid: 0
@@ -895,7 +916,7 @@ files:
       ProtectProc=default
       ProtectControlGroups=no
       ProtectKernelTunables=no
-      NoNewPrivileges=no
+      NoNewPrivileges=true
       PrivateNetwork=no
 
   # The reusable image contains no administrator key. The root-owned instance
@@ -990,7 +1011,6 @@ files:
     mode: '0644'
     content: |-
       NODE_ENV=development
-      QILN_LOAD_DOTENV=false
 
       PGHOST=/var/run/postgresql
       PGPORT=5432
@@ -1049,27 +1069,13 @@ files:
       ExecStart=/usr/bin/npm run ssh:run
       TimeoutStopSec=40s
       UMask=0077
-      NoNewPrivileges=true
       PrivateTmp=true
 
       [Install]
       WantedBy=multi-user.target
 
-  # Shadow the generated LXC credential resets only for this unit while
-  # preserving its six non-credential LXC settings.
-  - path: /etc/systemd/system/qiln-ssh-dev.service.d/zzz-lxc-service.conf
-    generator: dump
-    uid: 0
-    gid: 0
-    mode: '0644'
-    content: |-
-      [Service]
-      ProcSubset=all
-      ProtectProc=default
-      ProtectControlGroups=no
-      ProtectKernelTunables=no
-      NoNewPrivileges=no
-      PrivateNetwork=no
+  - <<: *lxc-service-compat
+    path: /etc/systemd/system/qiln-ssh-dev.service.d/zzz-lxc-service.conf
 
   # This development-only service runs the Qiln Host and embedded Worker in one
   # process. The installer must supply the validated host checkout at /opt/qiln
@@ -1102,27 +1108,13 @@ files:
       ExecStart=/usr/bin/npm run server:dev
       TimeoutStopSec=30s
       UMask=0077
-      NoNewPrivileges=true
       PrivateTmp=true
 
       [Install]
       WantedBy=multi-user.target
 
-  # Shadow the generated LXC credential resets only for this unit while
-  # preserving its six non-credential LXC settings.
-  - path: /etc/systemd/system/qiln-dev.service.d/zzz-lxc-service.conf
-    generator: dump
-    uid: 0
-    gid: 0
-    mode: '0644'
-    content: |-
-      [Service]
-      ProcSubset=all
-      ProtectProc=default
-      ProtectControlGroups=no
-      ProtectKernelTunables=no
-      NoNewPrivileges=no
-      PrivateNetwork=no
+  - <<: *lxc-service-compat
+    path: /etc/systemd/system/qiln-dev.service.d/zzz-lxc-service.conf
 
   # Qiln Caddy runs only from the configuration that installation delivers, so
   # the default Caddyfile is never used.
@@ -1150,18 +1142,5 @@ files:
       ExecStart=/usr/bin/caddy run --config %d/qiln-caddy.json
       ExecReload=
 
-  # Shadow the generated LXC credential resets only for this unit while
-  # preserving its six non-credential LXC settings.
-  - path: /etc/systemd/system/caddy.service.d/zzz-lxc-service.conf
-    generator: dump
-    uid: 0
-    gid: 0
-    mode: '0644'
-    content: |-
-      [Service]
-      ProcSubset=all
-      ProtectProc=default
-      ProtectControlGroups=no
-      ProtectKernelTunables=no
-      NoNewPrivileges=no
-      PrivateNetwork=no
+  - <<: *lxc-service-compat
+    path: /etc/systemd/system/caddy.service.d/zzz-lxc-service.conf
