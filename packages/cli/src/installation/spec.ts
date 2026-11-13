@@ -65,6 +65,7 @@ const INGRESS_KEYS = Object.freeze({
  * Settings shared by every layout. Resource limits belong to the layout.
  */
 const ORCHESTRATOR_CONFIG = Object.freeze({
+  'boot.autostart': 'false',
   'security.idmap.isolated': 'true',
   'security.nesting': 'false',
   'security.privileged': 'false',

@@ -5,9 +5,8 @@ import type { IncusConfigMap } from '../transport/incus/types'
  * carries data only: every other installation setting is fixed in
  * `INSTALLER_SPEC`. A limit that is omitted is not applied. `pool.source` is
  * the dataset that backs the Incus pool when it is not the whole zpool of the
- * same name, and `orchestrator.config` holds instance settings beyond the
- * limits. Both are omitted, never undefined, by a layout that does not use them,
- * so their absence leaves the layout digest unchanged.
+ * same name. It is omitted, never undefined, by a layout that does not use it,
+ * so its absence leaves the layout digest unchanged.
  */
 export interface Layout {
   pool: {
@@ -26,7 +25,6 @@ export interface Layout {
   orchestrator: {
     ipv4Address: string
     limits: Readonly<IncusConfigMap>
-    config?: Readonly<IncusConfigMap>
   }
 }
 

@@ -97,7 +97,7 @@ function detailsOf(plan: ConfigurePlan, inputs: InstallationInputs, ingress: Ing
     'create-alias': `${imageAlias} points at the selected image`,
     'create-network': `${layout.network.name} · ${layout.network.ipv4Subnet} · managed bridge`,
     'create-volume': `${layout.postgres.volumeName} · ${layout.postgres.config.size} · in pool ${layout.pool.name}`,
-    'create-instance': `${name} · ${architecture.incus} container · created stopped${published}`,
+    'create-instance': `${name} · ${architecture.incus} container · created stopped with autostart disabled${published}`,
     'update-instance': `${delivered} in one guarded complete instance update${published}`,
   }
 }

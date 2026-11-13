@@ -35,15 +35,6 @@ const LIMITS: Readonly<IncusConfigMap> = Object.freeze({
 })
 
 /**
- * Instance settings beyond the limits. An unset `boot.autostart` restores an
- * instance's previous state when the daemon starts, so a retained orchestrator
- * must never resume by itself when Incus is reopened.
- */
-const CONFIG: Readonly<IncusConfigMap> = Object.freeze({
-  'boot.autostart': 'false',
-})
-
-/**
  * The relay session never observes the command signal. Cancellation reaches the
  * Incus requests through the client instead, so a request that is allowed to
  * finish keeps its connection, exactly as it does on a local socket. The
@@ -169,7 +160,7 @@ export async function withAwsHost<T>(
         pool: { name: pool.name, source: datasetNamesOf(pool.name).incus },
         network: { name: network.name, ipv4Subnet: `${prefix}.0/24`, config: network.config },
         postgres: devLayout.postgres,
-        orchestrator: { ipv4Address: `${prefix}.10`, limits: LIMITS, config: CONFIG },
+        orchestrator: { ipv4Address: `${prefix}.10`, limits: LIMITS },
       },
       record,
       subject,
