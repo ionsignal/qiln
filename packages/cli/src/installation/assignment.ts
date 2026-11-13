@@ -11,6 +11,7 @@ import type { Deployment } from '../aws/deployment/types'
 import type { IncusRecord } from '../aws/deployment/incus/types'
 import type { ZfsRecord } from '../aws/deployment/zfs/types'
 import type { ConfigureEvidence } from './journal/types'
+import type { StartupEvidence } from './startup/types'
 import type { Observation } from './observe'
 import type { InstallationRecord } from './records'
 
@@ -84,14 +85,15 @@ function sameStorage(left: Link, right: Link): boolean {
 
 /**
  * Judges retained evidence only: the installation is a configured AWS one with
- * no unsettled step, its assigned host is an earlier deployment of the
- * selected deployment's volume chain, every hop released and handed off the
- * volume, and the selected deployment holds the same preserved installation.
- * The live target is judged separately by `requireMatching`.
+ * no unsettled configuration or startup step, its assigned host is an earlier
+ * deployment of the selected deployment's volume chain, every hop released and
+ * handed off the volume, and the selected deployment holds the same preserved
+ * installation. The live target is judged separately by `requireMatching`.
  */
 export function requireAssignable(
   record: InstallationRecord,
-  evidence: ConfigureEvidence | null,
+  configuration: ConfigureEvidence | null,
+  startup: StartupEvidence | null,
   links: readonly Link[],
   retry: string,
 ): InstallationState {
@@ -107,7 +109,8 @@ export function requireAssignable(
   if (assigned < 1) {
     throw refusal(name, 'The assigned deployment is not an earlier deployment of the selected deployment’s volume chain.', retry)
   }
-  requireSettled(evidence, name, retry)
+  requireSettled(configuration, name, retry)
+  requireSettled(startup, name, retry)
   requireHandoffs(links, assigned, name, retry)
   if (!sameStorage(links[assigned], links[0])) {
     throw refusal(

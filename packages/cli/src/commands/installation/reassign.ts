@@ -15,6 +15,7 @@ import {
   type InstallationState,
 } from '../../installation/state'
 import * as journal from '../../installation/journal/records'
+import * as startup from '../../installation/startup/records'
 import type { AwsHost } from '../../installation/target/aws/host'
 import type { InstallationTarget } from '../../installation/target/types'
 import type { Reporter } from '../../terminal/reporter'
@@ -72,6 +73,7 @@ export async function reassign(target: InstallationTarget, aws: AwsHost, reporte
       const installation = requireAssignable(
         record,
         await journal.read(directory, record, retry.inspect),
+        await startup.read(directory, retry.inspect),
         await aws.links(),
         retry.reassign,
       )

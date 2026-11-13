@@ -36,7 +36,7 @@ export interface Checkpoint {
   pin(): Promise<void>
 }
 
-function assignedTo(entry: InstalledEntry, record: Deployment): boolean {
+export function assignedTo(entry: InstalledEntry, record: Deployment): boolean {
   const { host } = entry.record
   return host.kind === 'aws' && host.deployment === record.id
 }

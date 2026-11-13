@@ -1,7 +1,7 @@
 import { ACTION_LABELS, progressSink } from './progress'
 import { resolveAccess, withRemote } from './access'
 import { requireBaseline } from './baseline'
-import { confirmCheckpoint, installationOf, planCheckpoint } from './checkpoint'
+import { assignedTo, confirmCheckpoint, installationOf, planCheckpoint } from './checkpoint'
 import { observationSummary, reportDeployment, reportResources } from './report'
 import { authenticateDeployer, openTarget, type Target } from './shared'
 import { withConfirmedOperation } from '../../../aws/operation'
@@ -22,8 +22,7 @@ import {
 import { ZfsPreparer } from '../../../aws/deployment/zfs/prepare'
 import { targetOf } from '../../../aws/deployment/zfs/target'
 import { requireAwsHost } from '../../../aws/host'
-import { unsettled as installationUnsettled } from '../../../installation/journal/facts'
-import { stateOf } from '../../../journal/step'
+import { requireSettled } from '../../../installation/journal/facts'
 import { Prompts, withCancellation } from '../../../terminal/prompts'
 import { approve, reportApproval, type ApprovalScreen, type ApprovalStep } from '../../../terminal/approval'
 import {
@@ -40,6 +39,7 @@ import {
   storageTouched,
 } from '../../../aws/deployment/incus/facts'
 import * as configureJournal from '../../../installation/journal/records'
+import * as startupJournal from '../../../installation/startup/records'
 import * as lineage from '../../../aws/deployment/lineage/zfs'
 import type { Action } from '../../../aws/deployment/graph'
 import type { Deployer } from '../../../aws/deployment/deployer'
@@ -84,42 +84,34 @@ async function holdsOf(root: Dir, record: Deployment): Promise<Holds> {
 }
 
 /**
- * Stopping the workloads of an installation that is still being configured
- * could interleave with its Incus changes, so an unsettled configuration step
- * refuses the release. The journal is read without a lock, like status does.
+ * Stopping the workloads or terminating the instance would strand a
+ * configuration or startup step that is still unresolved on it, so both
+ * journals of the installation assigned to this deployment must be settled. An
+ * installation assigned to another deployment belongs to that host and is not
+ * judged here. Neither journal is settled or cleared by removal: `configure`
+ * verifies a returned step. The journals are read without a lock, like status
+ * does.
  */
 async function requireInstallationSettled(record: Deployment): Promise<void> {
   const retry = `qiln installation status --id ${record.id}`
   const entry = await installationOf(record)
-  if (entry === null) {
+  if (entry === null || !assignedTo(entry, record)) {
     return
   }
-  const open = installationUnsettled(await configureJournal.read(entry.directory, entry.record, retry))
-  if (open.length > 0) {
-    throw new InstallerError({
-      code: 'INSTALLATION_UNRESOLVED',
-      facts: [
-        ['Installation', entry.name],
-        ['Unresolved steps', open.map(step => `${step.action} (${stateOf(step)})`).join(', ')],
-      ],
-      retry,
-    })
-  }
+  requireSettled(await configureJournal.read(entry.directory, entry.record, retry), entry.name, retry)
+  requireSettled(await startupJournal.read(entry.directory, retry), entry.name, retry)
 }
 
 /**
  * Releasing the host writes to the ZFS journal, and to the Incus journal once
  * Incus was initialized. Neither journal accepts new work after an unresolved
  * step, whatever its action, so such a step refuses removal here, before any
- * connection or AWS call, instead of after the host was reached. The same holds
- * for an unsettled installation configuration, which the release must not
- * interleave with.
+ * connection or AWS call, instead of after the host was reached.
  */
 async function requireReleaseJournals(root: Dir, record: Deployment, holds: Holds): Promise<void> {
   requireZfsNotStuck(await lineage.evidence(root, record), record.id)
   if (holds.incus) {
     requireIncusNotStuck(await incusEvidence(root, record), record.id)
-    await requireInstallationSettled(record)
   }
 }
 
@@ -333,6 +325,9 @@ export async function remove(options: AwsDeploymentOptions, reporter: Reporter):
         return retained(target.record).length === 0
           ? 'Nothing to remove: no recorded resource remains.'
           : 'No removable resource remains. Retained resources are not removed by Qiln and keep incurring charges until they are deleted outside Qiln.'
+      }
+      if (terminationPending(target.record)) {
+        await requireInstallationSettled(target.record)
       }
       const holds = await holdsOf(root, target.record)
       if ((holds.returned || holds.incus || holds.pool) && sshReady(target.record)) {
