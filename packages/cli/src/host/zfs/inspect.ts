@@ -14,32 +14,25 @@ const { fields, required, sections, succeeded, yesNo } = outputOf(inspectionFail
 
 /**
  * Pool-level keys under which `zpool status -j` reports the classes that the
- * supported layout never has. Their mere presence is reported, because an
- * unsupported class must refuse rather than disappear in the schema.
+ * supported layout never has. In OpenZFS 2.4.1's default nested JSON they are
+ * siblings of `vdevs`, not children of the root vdev, and the flat form
+ * (`--json-flat-vdevs`) is not used.
  */
 const AUXILIARY_CLASSES = ['logs', 'l2cache', 'spares', 'special', 'dedup'] as const
+const STATUS_FIELDS: readonly string[] = ['output_version', 'command', 'vers_major', 'pools', 'vdevs', 'vdev_type']
 
 interface RawVdev {
-  path?: string | undefined
-  name?: string | undefined
   vdevs?: Record<string, RawVdev> | undefined
   vdev_type: string
 }
 
 const vdevSchema: z.ZodType<RawVdev> = z.lazy(() =>
   z.object({
-    path: z.string().optional(),
-    name: z.string().optional(),
     vdevs: z.record(z.string(), vdevSchema).optional(),
     vdev_type: z.string(),
   }),
 )
 
-/**
- * Only the fields that verification reads, and only the output version that was
- * reviewed. Any other shape stops the command. A pool entry keeps its other
- * keys so the auxiliary classes can be detected.
- */
 const statusSchema = z.object({
   output_version: z.object({
     command: z.literal('zpool status'),
@@ -47,6 +40,10 @@ const statusSchema = z.object({
   }),
   pools: z.record(z.string(), z.looseObject({ vdevs: z.record(z.string(), vdevSchema) })),
 })
+
+function statusField(path: readonly PropertyKey[]): string {
+  return path.map(segment => (STATUS_FIELDS.includes(String(segment)) ? String(segment) : '*')).join('.')
+}
 
 function runningLimit(value: string): number {
   if (!/^[0-9]+$/.test(value)) {
@@ -73,10 +70,6 @@ function systemOf(section: Section) {
   }
 }
 
-/**
- * A failed section means no module metadata, which is a prerequisite outcome
- * rather than an inspection failure.
- */
 function moduleOf(section: Section) {
   if (section.status !== 0) {
     return null
@@ -98,6 +91,16 @@ function packagesOf(section: Section) {
       const [name, version, architecture, state] = line.split(' ')
       return { name, version, architecture, installed: state === 'installed' }
     })
+}
+
+function linksOf(section: Section) {
+  return tagged(section.lines).map(([tag, value]) => {
+    const [link, target, ...extra] = value.split(' ')
+    if (tag !== 'link' || extra.length > 0) {
+      throw inspectionFailure('The link inspection reported an unrecognized line.')
+    }
+    return { link, target }
+  })
 }
 
 function signaturesOf(section: Section) {
@@ -179,7 +182,7 @@ function poolsOf(section: Section) {
   return { tools, moduleLoaded, imported }
 }
 
-function detailOf(status: Section, properties: Section, name: string) {
+function vdevsOf(status: Section, name: string) {
   let json: unknown
   try {
     json = JSON.parse(status.lines.join('\n'))
@@ -187,27 +190,37 @@ function detailOf(status: Section, properties: Section, name: string) {
     throw inspectionFailure('The pool status was not valid JSON.')
   }
   const parsed = statusSchema.safeParse(json)
-  const entry = parsed.success ? Object.entries(parsed.data.pools).find(([key]) => key === name)?.[1] : undefined
+  if (!parsed.success) {
+    throw inspectionFailure(
+      `The pool status field ${statusField(parsed.error.issues[0]?.path ?? [])} was missing or invalid.`,
+    )
+  }
+  const entry = Object.entries(parsed.data.pools).find(([key]) => key === name)?.[1]
   if (entry === undefined) {
-    throw inspectionFailure('The pool status was not in the expected form.')
+    throw inspectionFailure('The pool status did not describe the inspected pool.')
   }
   const [only, ...rest] = Object.entries(entry.vdevs)
   const root = only !== undefined && rest.length === 0 ? only[1] : undefined
   if (root === undefined) {
     throw inspectionFailure('The pool status did not describe exactly one root vdev.')
   }
-  const data = Object.entries(root.vdevs ?? {}).map(([key, vdev]) => ({
-    type: vdev.vdev_type,
-    path: vdev.path ?? vdev.name ?? key,
-    children: Object.keys(vdev.vdevs ?? {}).length,
-  }))
-  const auxiliary = AUXILIARY_CLASSES.filter(auxiliaryClass => Object.hasOwn(entry, auxiliaryClass))
+  return {
+    data: Object.entries(root.vdevs ?? {}).map(([path, vdev]) => ({
+      type: vdev.vdev_type,
+      path,
+      children: Object.keys(vdev.vdevs ?? {}).length,
+    })),
+    auxiliary: AUXILIARY_CLASSES.filter(auxiliaryClass => Object.hasOwn(entry, auxiliaryClass)),
+  }
+}
+
+function propertiesOf(section: Section) {
   const pool: Record<string, string> = {}
   const dataset: Record<string, string> = {}
   const ashifts: number[] = []
   const mounted: string[] = []
   const entries: string[] = []
-  for (const [tag, value] of tagged(properties.lines)) {
+  for (const [tag, value] of tagged(section.lines)) {
     if (tag === 'ashift') {
       ashifts.push(ashiftOf(value))
       continue
@@ -224,10 +237,10 @@ function detailOf(status: Section, properties: Section, name: string) {
     if ((tag !== 'pool' && tag !== 'dataset') || separator < 1) {
       throw inspectionFailure('The pool inspection reported an unrecognized property line.')
     }
-    const properties = tag === 'pool' ? pool : dataset
-    properties[value.slice(0, separator)] = value.slice(separator + 1)
+    const target = tag === 'pool' ? pool : dataset
+    target[value.slice(0, separator)] = value.slice(separator + 1)
   }
-  return { data, auxiliary, ashifts, mounted, topLevel: datasetsOf(entries, inspectionFailure), pool, dataset }
+  return { ashifts, mounted, topLevel: datasetsOf(entries, inspectionFailure), pool, dataset }
 }
 
 function timerOf(section: Section) {
@@ -280,11 +293,14 @@ export async function inspectHost(
     packages: packagesOf(succeeded(found, 'packages')),
     transaction: transactionOf(required(found, 'simulation'), inspectionFailure),
     disks: blockDevices(succeeded(found, 'disks').lines.join('\n')),
+    links: linksOf(succeeded(found, 'links')),
     signatures: signaturesOf(succeeded(found, 'signatures')),
     arc: arcOf(succeeded(found, 'arc')),
     pools: {
       ...pools,
-      detail: imported ? detailOf(succeeded(found, 'poolstatus'), succeeded(found, 'poolprops'), poolName) : null,
+      detail: imported
+        ? { ...vdevsOf(succeeded(found, 'poolstatus'), poolName), ...propertiesOf(succeeded(found, 'poolprops')) }
+        : null,
     },
     timer: timerOf(succeeded(found, 'timer')),
     stateMount: mountOf(succeeded(found, 'mount'), inspectionFailure),

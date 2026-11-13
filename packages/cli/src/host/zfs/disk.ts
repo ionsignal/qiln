@@ -1,4 +1,4 @@
-import type { BlockDevice } from './types'
+import type { BlockDevice, Observation } from './types'
 
 const EBS_SERIAL = /^vol-?([0-9a-f]+)$/i
 
@@ -26,6 +26,16 @@ export function diskOf(disks: readonly BlockDevice[], volumeId: string): BlockDe
  */
 export function layers(device: BlockDevice): BlockDevice[] {
   return [device, ...device.children.flatMap(layers)]
+}
+
+/**
+ * Whether a vdev path, as ZFS stored it, names the disk or a layer on it. A
+ * symbolic link counts only through the target observed for it, and a path that
+ * is neither a layer nor an observed link never matches.
+ */
+export function onDisk(disk: BlockDevice, links: Observation['links'], path: string): boolean {
+  const kernelPath = links.find(entry => entry.link === path)?.target ?? path
+  return layers(disk).some(layer => layer.path === kernelPath)
 }
 
 /**

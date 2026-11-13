@@ -7,6 +7,7 @@ PATH=/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 DEBIAN_FRONTEND=noninteractive
 export DEBIAN_FRONTEND
+unset ZPOOL_VDEV_NAME_FOLLOW_LINKS ZPOOL_VDEV_NAME_GUID
 exec 2>/dev/null
 
 # Arguments: the pool name to report on, the owned ARC file, the state
@@ -64,8 +65,6 @@ package_info() {
   return 0
 }
 
-# A simulation only: it resolves against the current package lists, never
-# refreshes them, and never changes the host.
 simulation_info() {
   need=
   for name in $PACKAGES; do
@@ -80,8 +79,14 @@ disk_info() {
   lsblk --json --bytes --paths --exclude 7 --output NAME,TYPE,SIZE,SERIAL,MODEL,LOG-SEC,PHY-SEC,FSTYPE,MOUNTPOINTS
 }
 
-# The disk listing is captured first, so a failed lsblk fails the section
-# instead of vanishing inside the pipeline.
+link_info() {
+  links=$(find /dev/disk -type l) || return 1
+  printf '%s\n' "$links" | while IFS= read -r link; do
+    target=$(readlink -e "$link") && printf 'link %s %s\n' "$link" "$target"
+  done
+  return 0
+}
+
 signature_info() {
   disks=$(lsblk --nodeps --noheadings --paths --exclude 7 --output NAME,TYPE) || return 1
   printf '%s\n' "$disks" | while read -r name type; do
@@ -137,21 +142,15 @@ pool_info() {
   printf '%s\n' "$pools" | awk 'NF == 2 { print "pool " $1 " " $2 }'
 }
 
-# Whether the pool named by the first argument is imported. Detail sections are
-# empty when it is not, and fail when it is imported but cannot be read.
 pool_imported() {
   test -n "$POOL" && command -v zpool >/dev/null && test -d /sys/module/zfs && zpool list -H -o name "$POOL" >/dev/null
 }
 
 status_info() {
   pool_imported || return 0
-  zpool status -j -L -P -p "$POOL"
+  zpool status -j -P -p "$POOL"
 }
 
-# The `properties` lines describe the pool dataset and its direct children only,
-# as `properties <dataset> <property> <source> <value>`. The source is reduced
-# to its first word, because `inherited from X` contains spaces. The value comes
-# last, so it may.
 property_info() {
   pool_imported || return 0
   out=$(zpool get -H -p -o property,value autotrim,cachefile,health "$POOL") || return 1
@@ -166,8 +165,6 @@ property_info() {
   printf '%s\n' "$out" | awk -F'\t' 'NF == 4 { source = $4; sub(/ .*/, "", source); print "properties " $1 " " $2 " " source " " $3 }'
 }
 
-# Enablement and activation are reported separately, because each command exits
-# nonzero for its negative answer while still printing the state.
 timer_info() {
   test -n "$POOL" || return 0
   enabled=$(systemctl is-enabled "zfs-scrub-monthly@$POOL.timer")
@@ -177,20 +174,12 @@ timer_info() {
   return 0
 }
 
-# The kernel mount table entry at the state directory. --mountpoint matches only
-# an exact mountpoint, because --target could return the containing root
-# filesystem. findmnt exits 1 both when nothing is mounted there and on failure,
-# so its status is ignored and an empty section is only a missing observation.
 mount_info() {
   command -v findmnt >/dev/null || return 1
   findmnt --kernel --json --mountpoint "$STATE" --output SOURCE,FSTYPE,TARGET,FSROOT,OPTIONS
   return 0
 }
 
-# A filtered systemctl listing can exit nonzero when no unit matches, which is
-# expected before the ZFS prerequisite packages are installed. Enumerate the
-# full inventory first and require success, then filter it, so missing ZFS units
-# produce an empty successful section without hiding a failed enumeration.
 unit_info() {
   out=$(systemctl list-unit-files --no-legend --no-pager) || return 1
   printf '%s\n' "$out" | awk '$1 ~ /^zfs/ { print }'
@@ -201,6 +190,7 @@ section module module_info
 section packages package_info
 section simulation simulation_info
 section disks disk_info
+section links link_info
 section signatures signature_info
 section arc arc_info
 section pools pool_info

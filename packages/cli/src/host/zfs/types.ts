@@ -131,7 +131,9 @@ export type Dataset = z.infer<typeof datasetSchema>
  * dataset and its direct children. `timer` reports the scrub timer's
  * enablement and activation as observed. `stateMount` is the kernel
  * mount-table entry at the Incus state directory, or null when none was
- * reported.
+ * reported. `links` lists the symbolic links under /dev/disk with the kernel
+ * path that each resolves to, so a vdev path that ZFS stored as an alias can be
+ * matched to a disk. A link that does not resolve is omitted.
  */
 export const observationSchema = z.strictObject({
   observedAt: z.iso.datetime(),
@@ -170,6 +172,7 @@ export const observationSchema = z.strictObject({
     })
     .nullable(),
   disks: z.array(blockDevice).max(64),
+  links: z.array(z.strictObject({ link: text, target: text })).max(1_024),
   signatures: z.array(signatureSchema).max(64),
   arc: z.strictObject({
     ownedLines: z.array(text).max(64).nullable(),

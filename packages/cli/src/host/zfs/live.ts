@@ -1,12 +1,8 @@
 import { STATE_MOUNTPOINT } from '../mount'
-import { diskOf, layers } from './disk'
+import { diskOf, onDisk } from './disk'
 import { datasetNamesOf } from './spec'
 import type { Observation, PoolDatasets } from './types'
 
-/**
- * `guid` is null only while a pool is being created, because ZFS assigns the
- * GUID. Every later check passes the recorded one.
- */
 export interface ExpectedPool {
   name: string
   guid: string | null
@@ -23,8 +19,9 @@ export type StateMount = 'mounted' | 'unmounted' | 'unexpected'
 
 /**
  * The one definition of a pool in the supported state: imported under the
- * expected identity, ONLINE, and made of exactly one plain disk vdev that is
- * the recorded data disk or a partition on it, with no auxiliary vdevs. Create,
+ * expected identity, ONLINE, and made of exactly one plain disk vdev whose
+ * stored path resolves to the recorded data disk or a partition on it, in
+ * whatever spelling the last import stored, with no auxiliary vdevs. Create,
  * import, scrub verification, and `ready` all share it. Missing or malformed
  * detail never passes.
  */
@@ -44,7 +41,7 @@ export function isLivePool(observation: Observation, expected: ExpectedPool): bo
     others.length === 0 &&
     vdev.type === 'disk' &&
     vdev.children === 0 &&
-    layers(disk).some(layer => layer.path === vdev.path)
+    onDisk(disk, observation.links, vdev.path)
   )
 }
 
