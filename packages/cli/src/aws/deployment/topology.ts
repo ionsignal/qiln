@@ -162,6 +162,16 @@ export function hostKeyDue(record: Deployment): boolean {
 }
 
 /**
+ * The recorded instance was released: its termination was verified, or it was
+ * observed absent after being seen present. The retained data volume does not
+ * count, and absence alone does not show who removed the host.
+ */
+export function hostRemoved(record: Deployment): boolean {
+  const instance = resources(record).find(resource => resource.kind === 'instance')
+  return instance !== undefined && released(record, instance)
+}
+
+/**
  * Removal order, derived from the ledger alone: only resources whose creation
  * response was retained, and only those not yet verified removed. Declaration
  * order of the removal table is the plan order.

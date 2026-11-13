@@ -2,7 +2,7 @@ import { localTarget } from '../../installation/target/local'
 import { withAwsTarget } from '../../installation/target/aws'
 import { installationRetry } from '../../installation/retry'
 import { withCancellation } from '../../terminal/prompts'
-import { inspect as inspectTarget } from './inspect'
+import { inspect as inspectTarget, reportRemovedHost } from './inspect'
 import { configure as configureTarget, type ConfigureOptions } from './configure'
 import { reassign as reassignTarget } from './reassign'
 import type { Reporter } from '../../terminal/reporter'
@@ -26,7 +26,14 @@ async function withTarget<T>(
   )
 }
 
+/**
+ * A removed AWS host has nothing to observe, so it is judged from retained
+ * evidence before the target is resolved. Every other target is inspected live.
+ */
 export async function inspect(selector: InstallationSelector, reporter: Reporter): Promise<void> {
+  if (selector.kind !== 'local' && (await reportRemovedHost(selector, reporter))) {
+    return
+  }
   await withTarget(selector, target => inspectTarget(target, reporter))
 }
 

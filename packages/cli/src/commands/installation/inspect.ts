@@ -4,7 +4,11 @@ import { assertInstance } from '../../installation/instance'
 import { inspectInstallation } from '../../installation/state'
 import { toInstallerError } from '../../transport/incus/errors'
 import { inputsOf } from '../../installation/types'
+import { hostRemoved } from '../../aws/deployment/topology'
+import { requireConfirmedTermination } from '../../aws/operation'
 import { requireBound, type InstallationRecord } from '../../installation/records'
+import * as deployments from '../../aws/deployment/records'
+import type { DeploymentSelector } from '../../aws/deployment/volume/alias'
 import type { Reporter } from '../../terminal/reporter'
 import type { IncusInstance } from '../../transport/incus/types'
 import type { HostAccess, IncusAccess, InstallationTarget } from '../../installation/target/types'
@@ -122,4 +126,28 @@ export async function inspect(target: InstallationTarget, reporter: Reporter): P
     }
   })
   reporter.summary('Inspection completed without changing host, installer, or Incus state.')
+}
+
+/**
+ * An installation needs its host, so a removed AWS host leaves nothing to
+ * observe. This reads retained evidence only: no lock, AWS call, or SSH
+ * connection. The refusal of unconfirmed child termination still applies.
+ * Returns whether the host was removed, and reports nothing otherwise.
+ */
+export async function reportRemovedHost(selector: DeploymentSelector, reporter: Reporter): Promise<boolean> {
+  const { root, record } = await deployments.selectLocal(selector)
+  if (!hostRemoved(record)) {
+    return false
+  }
+  await requireConfirmedTermination(root)
+  reporter.section('Preflight')
+  reporter.row(
+    'pending',
+    'Target',
+    `the host of deployment ${record.id} was removed or observed absent; nothing was contacted`,
+  )
+  reporter.summary(
+    `Nothing to observe: the host of deployment ${record.id} was removed or observed absent. Retained evidence: qiln installation status --id ${record.id}`,
+  )
+  return true
 }

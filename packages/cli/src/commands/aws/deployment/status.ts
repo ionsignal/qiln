@@ -1,6 +1,4 @@
 import { requireAwsHost } from '../../../aws/host'
-import { openAwsRoot } from '../../../aws/root'
-import { notFound } from '../../../aws/deployment/volume/alias'
 import { stageOf } from '../../../aws/deployment/handoff/stage'
 import {
   recordedState,
@@ -55,11 +53,7 @@ async function reportPreparation(reporter: Reporter, root: Dir, record: Deployme
 
 export async function status(options: AwsDeploymentOptions, reporter: Reporter): Promise<void> {
   requireAwsHost()
-  const root = await openAwsRoot()
-  if (root === null) {
-    throw notFound(options.selector)
-  }
-  const record = await deployments.select(root, options.selector)
+  const { root, record } = await deployments.selectLocal(options.selector)
   reportDeployment(reporter, record)
   await reportHandoffs(reporter, root, record)
   await reportPreparation(reporter, root, record)

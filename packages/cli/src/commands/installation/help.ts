@@ -22,6 +22,7 @@ export const list: HelpContent = {
   examples: ['qiln installation list'],
   safety: [
     'Reads local installation records only: it contacts no target, uses no credentials, and takes no lock.',
+    'An AWS installation also reads the retained record of its assigned deployment, and is marked orphaned when that record is missing or its host was removed or observed absent.',
     'A record that cannot be read fails the whole listing instead of being skipped.',
   ],
 }
@@ -42,6 +43,7 @@ export const inspect: HelpContent = {
     'It checks the target, the recorded installation state, the Incus daemon, and the layout’s storage and network, and for a registered installation also its binding, checkout, and instance against the pinned image.',
     'A local checkout is judged by its Git root, committed baseline, and package name. A managed checkout is reported as present or absent with its HEAD as information only, and no Git status, hook, or network call runs.',
     'Reading the Incus API of an active socket can start the daemon through socket activation, and Qiln never starts units itself.',
+    'An AWS target whose host was removed or observed absent has nothing to observe: inspect reads retained deployment evidence, takes no lock, makes no AWS call or SSH connection, and exits successfully. It is still refused while any deployment records unconfirmed child termination.',
     'A deployment that holds the retained volume of an installation assigned to an earlier deployment is refused until reassign records it.',
   ],
 }

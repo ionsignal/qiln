@@ -14,12 +14,13 @@ export function requireReady(record: Deployment): void {
   if (sshReady(record)) {
     return
   }
+  const observed =
+    record.removals.length > 0
+      ? 'Removal has begun, so the host is not available for connection.'
+      : 'Creation is not fully verified, or no administrative key is bound.'
   throw new InstallerError({
     code: 'AWS_DEPLOYMENT_ACCESS_REFUSED',
-    facts: [
-      ...deploymentFacts(record),
-      ['Observed', 'Creation is not fully verified, removal has begun, or no administrative key is bound.'],
-    ],
+    facts: [...deploymentFacts(record), ['Observed', observed]],
     retry: `qiln aws deployment status --id ${record.id}`,
   })
 }

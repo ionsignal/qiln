@@ -164,7 +164,7 @@ export const awsDeploymentDiagnostics = Object.freeze({
   ),
   AWS_DEPLOYMENT_ACCESS_REFUSED: entry(
     'SSH access was refused locally',
-    'Before connecting, Qiln requires the protected administrative private key to be present with owner-only permissions and derive exactly the recorded fingerprint, and something did not match, so no connection was attempted and nothing was changed.',
+    'Before connecting, Qiln requires a deployment whose creation is fully verified with no removal started, and a protected administrative private key that is present with owner-only permissions and derives exactly the recorded fingerprint, and one of these did not hold, so no connection was attempted and nothing was changed.',
     'Inspect the displayed deployment evidence with qiln aws deployment status.',
     'Do not replace the administrative key or the retained evidence to bypass this state.',
   ),

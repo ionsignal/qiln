@@ -8,11 +8,11 @@ import { requireTransition } from './ledger/transitions'
 import { requireIntact, reserve } from './handoff/stage'
 import { deploymentSchema, type Deployment } from './types'
 import { notFound, type DeploymentSelector } from './volume/alias'
-import { stateFailure } from '../errors'
 import { userId } from '../host'
+import { stateFailure } from '../errors'
 import { encodeRecord } from '../../json'
 import { accept } from '../primitives'
-import { requireOperationLock } from '../root'
+import { openAwsRoot, requireOperationLock } from '../root'
 import { sameIdentity } from '../auth/identity'
 import { requireStorageReleased } from './incus/facts'
 import { requirePoolReleased } from './zfs/facts'
@@ -224,6 +224,18 @@ export async function select(root: Dir, selector: DeploymentSelector): Promise<D
     throw notFound(selector)
   }
   return record
+}
+
+/**
+ * Lock-free and read-only, so a command can resolve a deployment while another
+ * AWS operation runs. The root is returned for callers that read more evidence.
+ */
+export async function selectLocal(selector: DeploymentSelector): Promise<{ root: Dir; record: Deployment }> {
+  const root = await openAwsRoot()
+  if (root === null) {
+    throw notFound(selector)
+  }
+  return { root, record: await select(root, selector) }
 }
 
 /**
