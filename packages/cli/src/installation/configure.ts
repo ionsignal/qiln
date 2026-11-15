@@ -94,17 +94,21 @@ export interface ConfigureProgress {
 
 /**
  * The command owns presentation and consent. `show` renders the plan the moment
- * it is derived, and `approve` resolves only when the operator approved the
- * plan that was just shown. `held` is the image deletion that the first gate of
- * a replacement postpones to its own approval, and null otherwise. `progress`
- * only observes.
+ * it is derived, together with the observation it was derived from, and
+ * `approve` resolves only when the operator approved the plan that was just
+ * shown. `held` is the image deletion that the first gate of a replacement
+ * postpones to its own approval, and null otherwise. `progress` only observes.
  */
 export interface ConfigureHooks {
-  show(plan: ConfigurePlan, held: ImageReplacement | null): void
+  show(plan: ConfigurePlan, held: ImageReplacement | null, observation: Observation): void
   approve(plan: ConfigurePlan, held: ImageReplacement | null): Promise<void>
   progress(event: ConfigureProgress): void
 }
 
+/**
+ * `publicName` is the operator-supplied name of a local target, and null when
+ * the retained registration supplies it.
+ */
 export interface ConfigureContext {
   directory: Dir
   installation: InstallationRecord
@@ -114,6 +118,7 @@ export interface ConfigureContext {
   source: ImageSource
   sshKeygen: string
   roster: FileSnapshot | null
+  publicName: string | null
   hooks: ConfigureHooks
   retry: Retry
 }
@@ -199,7 +204,7 @@ export class Configurer {
    * approval depended on. A step left returned is verified from a fresh
    * observation, which still carries the ingress that step was approved with,
    * and the plan derived from that observation surfaces every refusal that local
-   * and Incus state already determine. Domain evidence may be acquired
+   * and Incus state already determine. Registration evidence may be acquired
    * afterwards, because `run` observes again.
    */
   public static async open(context: ConfigureContext): Promise<Configurer> {
@@ -212,10 +217,10 @@ export class Configurer {
   }
 
   /**
-   * Plans from a fresh observation, which includes any domain evidence acquired
-   * since `open`. An installation that already matches needs no approval. A plan
-   * that replaces the managed image is approved in two gates (see `firstGate`),
-   * and the result keeps the full plan.
+   * Plans from a fresh observation, which includes any registration evidence
+   * acquired since `open`. An installation that already matches needs no
+   * approval. A plan that replaces the managed image is approved in two gates
+   * (see `firstGate`), and the result keeps the full plan.
    */
   public async run(signal: AbortSignal): Promise<ConfigureResult> {
     const observed = await this.fresh()
@@ -225,10 +230,12 @@ export class Configurer {
     }
     const first = firstGate(full)
     let remaining = full
+    let current = observed
     if (first !== null) {
-      remaining = planOf(await this.applyGate(first, full.image.replace, firstGate, signal), this.planRequest)
+      current = await this.applyGate(first, full.image.replace, firstGate, observed, signal)
+      remaining = planOf(current, this.planRequest)
     }
-    await this.applyGate(remaining, null, wholePlan, signal)
+    await this.applyGate(remaining, null, wholePlan, current, signal)
     return { plan: full, observation: await this.guarded(() => this.verifyComplete(signal)) }
   }
 
@@ -238,17 +245,18 @@ export class Configurer {
   }
 
   private async fresh(): Promise<Observation> {
-    const { client, directory, sshKeygen, source, inputs, checkout, retry } = this.context
+    const { client, directory, sshKeygen, source, inputs, checkout, publicName, retry } = this.context
     return await observe({
       client,
+      source,
+      retry,
+      inputs,
+      checkout,
       directory,
       sshKeygen,
-      source,
+      publicName,
       installation: pinned(this.installation),
       checkoutCommit: this.installation.checkoutCommit,
-      checkout,
-      inputs,
-      retry,
     })
   }
 
@@ -264,16 +272,17 @@ export class Configurer {
   }
 
   /**
-   * Shows one gate, waits for its approval, applies it, and returns the last
-   * observation that verified a step.
+   * Shows one gate with the observation it was planned from, waits for its
+   * approval, applies it, and returns the last observation that verified a step.
    */
   private async applyGate(
     plan: ConfigurePlan,
     held: ImageReplacement | null,
     projection: Projection,
+    observed: Observation,
     signal: AbortSignal,
   ): Promise<Observation> {
-    this.context.hooks.show(plan, held)
+    this.context.hooks.show(plan, held, observed)
     const current = await this.confirm(plan, held, projection)
     return await this.guarded(() => this.applyActions(plan, current, signal))
   }

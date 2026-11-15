@@ -109,6 +109,13 @@ function addInstallOptions(command: Command): void {
   )
   addSingleOption(
     command,
+    new Option(
+      '--domain <name>',
+      'Select the public DNS name that the root edge forwards to the local orchestrator. Required with --local, and refused for an AWS target, which registers its own name.',
+    ),
+  )
+  addSingleOption(
+    command,
     new Option('--image <alias-or-fingerprint>', 'Select an existing local image alias or full lowercase fingerprint.'),
   )
   addSingleOption(

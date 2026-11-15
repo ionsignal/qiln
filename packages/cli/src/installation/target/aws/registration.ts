@@ -1,8 +1,8 @@
 import { request } from '../../../aws/child/request'
-import { replySchema, requestDeadlineMs, type Request, type Result } from '../../../aws/domain/protocol'
+import { replySchema, requestDeadlineMs, type Request, type Result } from '../../../aws/registration/protocol'
 import { AWS_SPEC } from '../../../aws/spec'
 import { InstallerError, type DiagnosticFact } from '../../../diagnostic/error'
-import type { DomainAccess } from '../types'
+import type { RegistrationAccess } from '../types'
 import type { AwsHost } from './host'
 
 const OUTCOMES = {
@@ -27,7 +27,7 @@ function unexpected(retry: string): InstallerError {
  * a process-level failure after dispatch is uncertain. Errors are never wrapped,
  * so unconfirmed termination reaches the lock handling intact.
  */
-export function awsDomain(aws: AwsHost, retry: string): DomainAccess {
+export function awsRegistration(aws: AwsHost, retry: string): RegistrationAccess {
   async function call(input: Request, signal: AbortSignal): Promise<Result> {
     const session = await aws.session()
     const reply = await request(AWS_SPEC.children.domain, session.credentialEnvironment(), input, replySchema, signal, {

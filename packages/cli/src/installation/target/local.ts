@@ -38,7 +38,7 @@ export const localTarget = (commands: Retry, signal: AbortSignal): InstallationT
       architecture: preflight.architecture,
       layout,
       publish: null,
-      domain: null,
+      registration: null,
       sshKeygen: preflight.commandPaths['ssh-keygen'],
       checkout: {
         kind: 'operator',

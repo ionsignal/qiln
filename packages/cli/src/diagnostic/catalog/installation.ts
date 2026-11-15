@@ -122,12 +122,6 @@ export const installationDiagnostics = Object.freeze({
     'The source device requires a canonical absolute non-root path without unsupported characters.',
     'Select the canonical Qiln Git checkout root with --source.',
   ),
-  SOURCE_OPTION_NOT_SUPPORTED: entry(
-    '--source is not supported for an AWS target',
-    'An AWS target manages its own checkout at a derived path, so --source belongs only to the local target, and nothing was observed or changed.',
-    'Remove --source from the command.',
-    'Use --local with --source to configure the installation on this machine.',
-  ),
   SOURCE_GIT_MISSING: entry(
     'Git is missing on the target',
     'The managed checkout is cloned, read, and proven restorable with git on the target, and Qiln installs no packages, so a target without git is refused before any state is written.',

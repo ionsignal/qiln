@@ -1,25 +1,27 @@
 import { INSTALLER_SPEC } from '../../installation/spec'
 import { INSTALL_STEPS } from './steps'
+import { deliveredOrigin, type Ingress } from '../../installation/ingress'
 import { actionsOf, isEmpty, type ConfigurePlan, type InstallAction } from '../../installation/journal/types'
 import { reportApproval, stepsOf, type ApprovalScreen, type ApprovalStep } from '../../terminal/approval'
 import type { ImageSource } from '../../installation/image'
-import type { Ingress } from '../../installation/ingress'
+import type { Observation } from '../../installation/observe'
 import type { ImageReplacement } from '../../installation/plan'
 import type { InstallationInputs } from '../../installation/types'
 import type { Reporter } from '../../terminal/reporter'
 
 /**
  * `held` is the image deletion that the first gate of a replacement leaves for
- * its own approval, and null for every other plan. `ingress` is the generated
- * configuration that the instance update would deliver, or null while none is
- * derivable.
+ * its own approval, and null for every other plan. `observation` is the fresh
+ * observation that the plan was derived from. It carries the generated ingress
+ * that the instance update would deliver, and the instance that may already
+ * hold an earlier one.
  */
 export interface PlanPreview {
   plan: ConfigurePlan
   held: ImageReplacement | null
   inputs: InstallationInputs
   source: ImageSource
-  ingress: Ingress | null
+  observation: Observation
 }
 
 type Details = Partial<Record<InstallAction, string>>
@@ -33,7 +35,7 @@ const IMPORT_NOTE = 'A rejected import stays in the image store without an alias
 const PUBLISH_NOTE =
   'Published ports are forwarded to the orchestrator through NAT proxy devices on the host address, so it sees client addresses. Qiln opens no cloud firewall port, and reachability from outside is not established.'
 const INGRESS_NOTE =
-  'The ingress configuration, and for a domain target the retained TLS private key, are stored in the instance configuration beside the credentials.'
+  'The ingress configuration, and for a registered name the retained TLS private key, are stored in the instance configuration beside the credentials.'
 const TRUSTED =
   'The selected image and the checkout are trusted guest code, and Qiln has not established their provenance or compatibility.'
 const DELIVERY_NOT_ESTABLISHED =
@@ -61,25 +63,29 @@ export function approvalLabel(plan: ConfigurePlan, held: ImageReplacement | null
 
 /**
  * The public origin, the advertised SSH endpoint, and the leaf certificate
- * fingerprint of a generated ingress. A target without TLS has no certificate.
+ * fingerprint of a generated ingress. A name without a certificate is served
+ * behind an edge that terminates TLS.
  */
-export function describeIngress({ origin, host, fingerprint }: Ingress): string {
-  const tls = fingerprint === null ? 'plain HTTP, no TLS' : `certificate SHA-256 ${fingerprint}`
-  return `${origin} · SSH ${host}:${INSTALLER_SPEC.ingress.ports.gateway} · ${tls}`
+export function describeIngress({ origin, name, fingerprint }: Ingress): string {
+  const tls = fingerprint === null ? 'TLS terminated at the public edge, not by Qiln' : `certificate SHA-256 ${fingerprint}`
+  return `${origin} · SSH ${name}:${INSTALLER_SPEC.ingress.ports.gateway} · ${tls}`
 }
 
-function detailsOf(plan: ConfigurePlan, inputs: InstallationInputs, ingress: Ingress | null): Details {
+function detailsOf(plan: ConfigurePlan, inputs: InstallationInputs, observation: Observation): Details {
   const { layout, architecture, sourceRoot, publish } = inputs
   const { checkout, image } = plan
+  const { ingress, instance } = observation
   const { name, imageAlias } = INSTALLER_SPEC.orchestrator
   const { repository } = INSTALLER_SPEC.checkout
+  const previous = instance === null ? null : deliveredOrigin(instance.value.config)
+  const replacing = ingress !== null && previous !== null && previous !== ingress.origin ? `, replacing ${previous}` : ''
   const published =
     publish === null
       ? ''
       : ` · publishes TCP ${publish.ports.join(', ')} on ${publish.address} through NAT proxy devices`
   const delivered = LIST_FORMAT.format([
     'the four credentials',
-    ...(ingress === null ? [] : [`the ingress configuration (${describeIngress(ingress)})`]),
+    ...(ingress === null ? [] : [`the ingress configuration (${describeIngress(ingress)}${replacing})`]),
     ...(publish === null ? [] : ['the published port devices']),
   ])
   return {
@@ -102,8 +108,8 @@ function detailsOf(plan: ConfigurePlan, inputs: InstallationInputs, ingress: Ing
   }
 }
 
-function screenOf({ plan, held, inputs, source, ingress }: PlanPreview): ApprovalScreen {
-  const details = detailsOf(plan, inputs, ingress)
+function screenOf({ plan, held, inputs, source, observation }: PlanPreview): ApprovalScreen {
+  const details = detailsOf(plan, inputs, observation)
   const fenced = (actions: readonly InstallAction[]): ApprovalStep[] => stepsOf(actions, INSTALL_STEPS, details)
   const actions = actionsOf(plan)
   const steps: ApprovalStep[] = [

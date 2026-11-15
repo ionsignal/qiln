@@ -83,15 +83,16 @@ export async function reassign(target: InstallationTarget, aws: AwsHost, reporte
         requireIncusExtensions(incus.extensions, retry.inspect)
         await incus.verifyLayout()
         const observation = await observe({
-          client: incus.client,
-          directory,
-          sshKeygen: host.sshKeygen,
-          source: { kind: 'reference', selector: installation.imageFingerprint },
-          installation,
-          checkoutCommit: installation.checkoutCommit,
-          checkout: host.checkout,
           inputs,
           retry,
+          directory,
+          installation,
+          publicName: null,
+          client: incus.client,
+          sshKeygen: host.sshKeygen,
+          checkout: host.checkout,
+          checkoutCommit: installation.checkoutCommit,
+          source: { kind: 'reference', selector: installation.imageFingerprint },
         })
         requireMatching(observation, { inputs, roster: null, retry }, name, retry.reassign)
       })

@@ -2,6 +2,7 @@ import { basename } from 'node:path'
 import { rm } from 'node:fs/promises'
 import { z } from 'zod'
 import { INSTALLER_SPEC } from '../spec'
+import { dnsName } from '../dns'
 import { readChain, type Chain } from './cert'
 import { generateKey, keyPem, parseKey } from './csr'
 import { requireInstallationLock } from '../state'
@@ -15,7 +16,6 @@ import type { KeyObject } from 'node:crypto'
 
 const NAME = /^[a-z0-9][a-z0-9_-]{0,47}$/
 const LABEL = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/
-const ZONE = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/
 
 /**
  * The allocation that the registration service made for one installation, with
@@ -25,12 +25,12 @@ const ZONE = /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/
  * release, changing any literal or format rule resets local development state.
  * After it, a change needs a version bump and a versioned reader.
  */
-export const domainSchema = z.strictObject({
+export const recordSchema = z.strictObject({
   version: z.literal(INSTALLER_SPEC.domainVersion),
   installation: z.string().regex(NAME),
   principal: z.string().min(1).max(256),
   label: z.string().regex(LABEL),
-  zone: z.string().regex(ZONE),
+  zone: dnsName,
   address: z.ipv4(),
   chain: z.string().min(1).max(INSTALLER_SPEC.limits.domain).nullable(),
 })
@@ -46,7 +46,7 @@ const attemptSchema = z.strictObject({
   at: timestamp,
 })
 
-export type DomainRecord = z.infer<typeof domainSchema>
+export type RegistrationRecord = z.infer<typeof recordSchema>
 export type Attempt = z.infer<typeof attemptSchema>
 
 /**
@@ -54,14 +54,14 @@ export type Attempt = z.infer<typeof attemptSchema>
  * the allocated names.
  */
 export interface Evidence {
-  record: DomainRecord
+  record: RegistrationRecord
   chain: Chain | null
 }
 
 /**
  * The apex name. The wildcard is `*.` followed by it.
  */
-export function baseOf({ label, zone }: Pick<DomainRecord, 'label' | 'zone'>): string {
+export function baseOf({ label, zone }: Pick<RegistrationRecord, 'label' | 'zone'>): string {
   return `${label}.${zone}`
 }
 
@@ -98,7 +98,7 @@ function parseJson(text: string, retry: string): unknown {
 }
 
 function parse(value: unknown, directory: Dir, key: KeyObject | null, retry: string): Evidence {
-  const parsed = domainSchema.safeParse(value)
+  const parsed = recordSchema.safeParse(value)
   if (!parsed.success || parsed.data.installation !== basename(directory.path)) {
     return invalid(retry)
   }
@@ -114,7 +114,7 @@ function parse(value: unknown, directory: Dir, key: KeyObject | null, retry: str
  * The allocation is fixed once recorded, apart from the address its name points
  * at, and a retained chain is replaced but never dropped.
  */
-function requireTransition(before: DomainRecord, after: DomainRecord, retry: string): void {
+function requireTransition(before: RegistrationRecord, after: RegistrationRecord, retry: string): void {
   const fixed =
     before.installation === after.installation &&
     before.principal === after.principal &&
@@ -168,7 +168,7 @@ export async function ensureKey(directory: Dir, retry: string): Promise<KeyObjec
  * Replaces the record only through a permitted transition, under the
  * installation lock held by this process.
  */
-export async function save(directory: Dir, record: DomainRecord, retry: string): Promise<void> {
+export async function save(directory: Dir, record: RegistrationRecord, retry: string): Promise<void> {
   await requireInstallationLock(directory, retry)
   const next = parse(record, directory, await readKey(directory, retry), retry)
   const current = await read(directory, retry)

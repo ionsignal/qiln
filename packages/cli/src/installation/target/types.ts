@@ -2,11 +2,11 @@ import type { Retry } from '../retry'
 import type { Layout } from '../layout'
 import type { Publish } from '../types'
 import type { HostBinding } from '../records'
-import type { Window } from '../domain/cert'
-import type { Subject } from '../domain/plan'
+import type { Window } from '../registration/cert'
+import type { Subject } from '../registration/plan'
 import type { StepOutcome } from '../../host/step'
 import type { Architecture } from '../architecture'
-import type { DomainRecord } from '../domain/records'
+import type { RegistrationRecord } from '../registration/records'
 import type { Reporter } from '../../terminal/reporter'
 import type { IncusClient } from '../../transport/incus/client'
 import type { DeploymentSelector } from '../../aws/deployment/volume/alias'
@@ -58,10 +58,10 @@ export type CheckoutAccess =
  * is one bounded request whose failures are already diagnostics, so the caller
  * never sees provider or process errors.
  */
-export interface DomainAccess {
+export interface RegistrationAccess {
   service: string
   subject: Subject
-  register(signal: AbortSignal): Promise<Pick<DomainRecord, 'label' | 'zone' | 'address'>>
+  register(signal: AbortSignal): Promise<Pick<RegistrationRecord, 'label' | 'zone' | 'address'>>
   issue(csr: string, signal: AbortSignal): Promise<Window & { chain: string }>
 }
 
@@ -69,14 +69,14 @@ export interface DomainAccess {
  * A validated target host. It is reachable only while the callback of
  * `InstallationTarget.withHost` runs. `publish` is the host address and ports
  * that the orchestrator publishes, or null when the target publishes none.
- * `domain` is null when the target owns no public name.
+ * `registration` is null when the target owns no registered public name.
  */
 export interface HostAccess {
   binding: HostBinding
   architecture: Architecture
   layout: Layout
   publish: Publish | null
-  domain: DomainAccess | null
+  registration: RegistrationAccess | null
   sshKeygen: string
   checkout: CheckoutAccess
   withIncus<T>(use: (incus: IncusAccess) => Promise<T>): Promise<T>

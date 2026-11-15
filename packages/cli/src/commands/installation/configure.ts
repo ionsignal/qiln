@@ -2,14 +2,18 @@ import { INSTALLER_SPEC } from '../../installation/spec'
 import { INSTALL_STEPS } from './steps'
 import { withInspection } from './inspect'
 import { approvalLabel, describeIngress, reportPlan } from './plan'
-import { domainApproval, domainProgress, reportAcquisition, reportDomain } from './domain'
+import {
+  registrationApproval,
+  registrationProgress,
+  reportAcquisition,
+  reportRegistration,
+} from './registration'
 import { stepSink, type StepResult } from './progress'
 import { start } from './start'
 import { approve } from '../../terminal/approval'
 import { Prompts } from '../../terminal/prompts'
-import { acquire } from '../../installation/domain/acquire'
+import { acquire } from '../../installation/registration/acquire'
 import { rootOf } from '../../installation/checkout/judge'
-import { loadIngress, type Ingress } from '../../installation/ingress'
 import { readRoster, validateRoster } from '../../installation/roster'
 import { requireIncusExtensions } from '../../installation/preflight/incus'
 import { isEmpty, type InstallAction } from '../../installation/journal/types'
@@ -41,10 +45,13 @@ const RESULTS: Record<InstallAction, StepResult> = {
 
 /**
  * `sourcePath` is the operator's checkout of a local target. It is null for an
- * AWS target, whose checkout is managed by Qiln.
+ * AWS target, whose checkout is managed by Qiln. `publicName` is the DNS name
+ * that the root edge forwards to a local orchestrator, and it is null for an AWS
+ * target, whose name comes from its registration.
  */
 export interface ConfigureOptions {
   sourcePath: string | null
+  publicName: string | null
   authorizedKeysPath?: string
   image: InstallerImageSelection
 }
@@ -55,11 +62,11 @@ export interface ConfigureOptions {
  * preflight plan. Settling first verifies that step against the ingress it was
  * approved with, before acquisition can replace it, and the preflight surfaces
  * every refusal that local and Incus state already determine before any
- * external effect. A target that owns a public name then acquires its domain and
- * certificate under its own approval, before Incus is changed. The installation
- * plan is derived from a fresh observation, so it delivers what was acquired,
- * and is displayed and applied only after an explicit approval. A plan that
- * replaces the managed image is approved in two gates. Once the stopped
+ * external effect. A target that owns a registered name then acquires its domain
+ * and certificate under its own approval, before Incus is changed. The
+ * installation plan is derived from a fresh observation, so it delivers what was
+ * acquired, and is displayed and applied only after an explicit approval. A plan
+ * that replaces the managed image is approved in two gates. Once the stopped
  * installation is verified, startup is offered under its own separate approval,
  * still inside the installation lock. Registration, locking and image-source
  * handling are shared by every target. Cancellation is owned by the target.
@@ -100,9 +107,8 @@ export async function configure(
       lock = await acquireInstallationLock(directory, retry.inspect)
       const installation = await loadInstallation(directory, host.binding, inputs, retry.inspect)
       const prompts = new Prompts(signal, retry.configure, reporter)
-      const { domain } = host
+      const { registration } = host
       const { plan, observation } = await withImageSource(options.image, async imageSource => {
-        let ingress: Ingress | null = null
         const configurer = await Configurer.open({
           directory,
           installation,
@@ -112,31 +118,32 @@ export async function configure(
           source: imageSource,
           sshKeygen: host.sshKeygen,
           roster,
+          publicName: options.publicName,
           hooks: {
-            show: (gate, held) => reportPlan(reporter, { plan: gate, held, inputs, source: imageSource, ingress }),
+            show: (gate, held, current) =>
+              reportPlan(reporter, { plan: gate, held, inputs, source: imageSource, observation: current }),
             approve: (gate, held) => approve(prompts, reporter, approvalLabel(gate, held)),
             progress: stepSink(reporter, INSTALL_STEPS, RESULTS),
           },
           retry,
         })
-        if (domain !== null) {
-          reportDomain(
+        if (registration !== null) {
+          reportRegistration(
             reporter,
             await acquire({
               directory,
               name: target.name,
-              access: domain,
+              access: registration,
               retry: retry.configure,
               signal,
               hooks: {
-                show: acquisition => reportAcquisition(reporter, { plan: acquisition, name: target.name, access: domain }),
-                approve: acquisition => approve(prompts, reporter, domainApproval(acquisition)),
-                progress: domainProgress(reporter),
+                show: acquisition => reportAcquisition(reporter, { plan: acquisition, name: target.name, access: registration }),
+                approve: acquisition => approve(prompts, reporter, registrationApproval(acquisition)),
+                progress: registrationProgress(reporter),
               },
             }),
           )
         }
-        ingress = await loadIngress(directory, inputs, retry.configure)
         return await configurer.run(signal)
       })
       const delivered = observation.ingress === null ? '' : ` · ingress configuration ${describeIngress(observation.ingress)}`

@@ -3,6 +3,7 @@ import { AWS_SPEC } from './aws/spec'
 import { InstallerError } from './diagnostic/error'
 import { isOperationId } from './guards'
 import { validName, validRegion } from './aws/types'
+import { dnsName } from './installation/dns'
 import type { DeploymentSelector } from './aws/deployment/volume/alias'
 import type { ConfigureOptions } from './commands/installation/configure'
 import type { InstallationSelector } from './installation/target/types'
@@ -110,6 +111,7 @@ export function validateAwsRegion(region: string): string {
 
 export interface ConfigureInput {
   source?: string
+  domain?: string
   image?: string
   imageMeta?: string
   imageRootfs?: string
@@ -128,43 +130,65 @@ function validateValue(value: string | undefined, option: string): void {
 }
 
 /**
- * Only a local target names its checkout, because an AWS target manages its
- * own. Null means that the target owns the checkout.
+ * Only a local target takes its own checkout and public name, because an AWS
+ * target manages its checkout and registers its name. Null means that the
+ * target owns the value.
  */
-function sourceOf(source: string | undefined, selector: InstallationSelector, retry: string): string | null {
+function localOnly(
+  value: string | undefined,
+  option: string,
+  selector: InstallationSelector,
+  retry: string,
+): string | null {
   if (selector.kind === 'local') {
-    if (source === undefined) {
+    if (value === undefined) {
       throw new InstallerError({
-        code: 'SOURCE_REQUIRED',
-        facts: [['Observed', 'No host Qiln checkout was selected.']],
+        code: 'LOCAL_OPTION_REQUIRED',
+        facts: [['Option', option]],
         retry,
       })
     }
-    return source
+    return value
   }
-  if (source !== undefined) {
+  if (value !== undefined) {
     throw new InstallerError({
-      code: 'SOURCE_OPTION_NOT_SUPPORTED',
-      facts: [['Option', '--source']],
+      code: 'LOCAL_OPTION_NOT_SUPPORTED',
+      facts: [['Option', option]],
       retry,
     })
   }
   return null
 }
 
+function publicNameOf(name: string | null): string | null {
+  if (name === null || dnsName.safeParse(name).success) {
+    return name
+  }
+  throw new InstallerError({
+    code: 'INVALID_ARGUMENT',
+    facts: [['Option', '--domain']],
+    retry: 'qiln --help',
+  })
+}
+
 /**
  * Converts parsed options without accessing installer state or performing any
- * local or provider work. The selected target decides whether a checkout is
- * named, and its workflow supplies the commands that diagnostics show.
+ * local or provider work. The selected target decides whether a checkout and a
+ * public name are named, and its workflow supplies the commands that
+ * diagnostics show.
  */
 export function convertConfigureOptions(input: ConfigureInput, selector: InstallationSelector): ConfigureOptions {
   const retry = installationRetry(selector)
   validateValue(input.source, '--source')
+  validateValue(input.domain, '--domain')
   validateValue(input.image, '--image')
   validateValue(input.imageMeta, '--image-meta')
   validateValue(input.imageRootfs, '--image-rootfs')
   validateValue(input.authorizedKeys, '--authorized-keys')
-  const sourcePath = sourceOf(input.source, selector, retry.configure)
+  const local = {
+    sourcePath: localOnly(input.source, '--source', selector, retry.configure),
+    publicName: publicNameOf(localOnly(input.domain, '--domain', selector, retry.configure)),
+  }
   const hasMetadata = input.imageMeta !== undefined
   const hasRootfs = input.imageRootfs !== undefined
   if (hasMetadata !== hasRootfs) {
@@ -182,7 +206,7 @@ export function convertConfigureOptions(input: ConfigureInput, selector: Install
         }
   if (input.image !== undefined && !hasMetadata) {
     return {
-      sourcePath,
+      ...local,
       image: {
         kind: 'reference',
         value: input.image,
@@ -192,7 +216,7 @@ export function convertConfigureOptions(input: ConfigureInput, selector: Install
   }
   if (input.image === undefined && input.imageMeta !== undefined && input.imageRootfs !== undefined) {
     return {
-      sourcePath,
+      ...local,
       image: {
         kind: 'split',
         metadataPath: input.imageMeta,

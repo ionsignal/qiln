@@ -1,8 +1,14 @@
-import { actionsOf, type Acquisition, type Domain, type DomainProgress, type DomainStep } from '../../installation/domain/acquire'
+import {
+  actionsOf,
+  type Acquired,
+  type Acquisition,
+  type RegistrationProgress,
+  type RegistrationStep,
+} from '../../installation/registration/acquire'
 import { reportApproval, stepsOf } from '../../terminal/approval'
-import * as records from '../../installation/domain/records'
+import * as records from '../../installation/registration/records'
 import type { DiagnosticFact } from '../../diagnostic/error'
-import type { DomainAccess } from '../../installation/target/types'
+import type { RegistrationAccess } from '../../installation/target/types'
 import type { Dir } from '../../state/files'
 import type { LiveRow, Reporter } from '../../terminal/reporter'
 import type { StepText } from '../aws/deployment/prepare/steps'
@@ -11,7 +17,7 @@ import type { StepText } from '../aws/deployment/prepare/steps'
  * `short` names the progress row and must fit the row label column (26
  * characters). `label` is the sentence that an approval screen lists.
  */
-const DOMAIN_STEPS: Record<DomainStep, StepText> = {
+const REGISTRATION_STEPS: Record<RegistrationStep, StepText> = {
   register: {
     short: 'Register domain',
     label: 'Register the installation name and host address with the registration service',
@@ -22,7 +28,7 @@ const DOMAIN_STEPS: Record<DomainStep, StepText> = {
   },
 }
 
-const RESULTS: Record<DomainStep, string> = {
+const RESULTS: Record<RegistrationStep, string> = {
   register: 'allocation recorded locally',
   issue: 'chain checked against the retained key and names, then recorded locally',
 }
@@ -30,13 +36,13 @@ const RESULTS: Record<DomainStep, string> = {
 export interface AcquisitionPreview {
   plan: Acquisition
   name: string
-  access: DomainAccess
+  access: RegistrationAccess
 }
 
 /**
  * The wording of the default-no approval that goes with the displayed plan.
  */
-export function domainApproval(plan: Acquisition): string {
+export function registrationApproval(plan: Acquisition): string {
   if (plan.register && plan.issue) {
     return 'Register the installation domain and request its certificate'
   }
@@ -51,7 +57,7 @@ export function reportAcquisition(reporter: Reporter, { plan, name, access }: Ac
   const { service, subject } = access
   reportApproval(reporter, {
     title: 'Proposed domain acquisition',
-    steps: stepsOf(actionsOf(plan), DOMAIN_STEPS, {
+    steps: stepsOf(actionsOf(plan), REGISTRATION_STEPS, {
       register: `${service} allocates the stable name for installation ${name}, or confirms the existing one, and points it at ${subject.address}`,
       issue: `request one certificate for the allocated name and its wildcard from ${service}; a P-256 TLS key is generated and retained on this machine first if none exists, and only the public request leaves it`,
     }),
@@ -69,11 +75,11 @@ export function reportAcquisition(reporter: Reporter, { plan, name, access }: Ac
  * permanent once the reply was judged and persisted. A failure leaves the live
  * row to the diagnostic, which clears it.
  */
-export function domainProgress(reporter: Reporter): (event: DomainProgress) => void {
+export function registrationProgress(reporter: Reporter): (event: RegistrationProgress) => void {
   let live: LiveRow | null = null
   return ({ phase, step }) => {
     if (phase === 'working') {
-      live = reporter.live(DOMAIN_STEPS[step].short, DOMAIN_STEPS[step].label)
+      live = reporter.live(REGISTRATION_STEPS[step].short, REGISTRATION_STEPS[step].label)
       return
     }
     live?.finish('verified', RESULTS[step])
@@ -81,7 +87,7 @@ export function domainProgress(reporter: Reporter): (event: DomainProgress) => v
   }
 }
 
-export function reportDomain(reporter: Reporter, { record, chain }: Domain): void {
+export function reportRegistration(reporter: Reporter, { record, chain }: Acquired): void {
   const apex = records.baseOf(record)
   reporter.row(
     'verified',
@@ -94,7 +100,7 @@ export function reportDomain(reporter: Reporter, { record, chain }: Domain): voi
  * Offline facts from retained evidence only: the allocation and certificate,
  * and an attempt whose outcome was never recorded. Nothing is contacted.
  */
-export async function domainFacts(directory: Dir, retry: string): Promise<DiagnosticFact[]> {
+export async function registrationFacts(directory: Dir, retry: string): Promise<DiagnosticFact[]> {
   const evidence = await records.read(directory, retry)
   const attempt = await records.readAttempt(directory, retry)
   const facts: DiagnosticFact[] = []

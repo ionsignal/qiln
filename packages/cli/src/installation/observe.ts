@@ -21,6 +21,10 @@ import type { InstallationState } from './state'
 import type { CheckoutAccess } from './target/types'
 import type { InstallationInputs } from './types'
 
+/**
+ * `publicName` is the operator-supplied name of a local target. Null means the
+ * retained registration supplies the name.
+ */
 export interface ObservationRequest {
   client: IncusClient
   directory: Dir
@@ -30,6 +34,7 @@ export interface ObservationRequest {
   checkoutCommit: string | null
   checkout: CheckoutAccess
   inputs: InstallationInputs
+  publicName: string | null
   retry: Retry
 }
 
@@ -39,9 +44,10 @@ export interface ObservationRequest {
  * `aliased` is the image that alias currently targets. A reference selection
  * never touches the managed alias. Absent resources are null, and the local
  * credential set is `absent` only when none of its files exist. `ingress` is
- * derived from retained evidence and is null until a domain target holds a
- * certificate. `checkout` is the managed checkout of an AWS target. Origin is
- * resolved only when the checkout is absent and no restore point is recorded.
+ * derived from the public name or retained registration evidence and is null
+ * until a registered target holds a certificate. `checkout` is the managed
+ * checkout of an AWS target. Origin is resolved only when the checkout is
+ * absent and no restore point is recorded.
  */
 export interface Observation {
   kind: ImageSource['kind']
@@ -116,7 +122,8 @@ async function checkoutOf(access: CheckoutAccess, pin: string | null): Promise<C
 }
 
 export async function observe(request: ObservationRequest): Promise<Observation> {
-  const { client, directory, sshKeygen, source, installation, checkout, checkoutCommit, inputs, retry } = request
+  const { client, directory, sshKeygen, source, installation, checkout, checkoutCommit, inputs, publicName, retry } =
+    request
   const { layout } = inputs
   return {
     kind: source.kind,
@@ -132,7 +139,7 @@ export async function observe(request: ObservationRequest): Promise<Observation>
       client.getInstanceWithEtagOrNull(INSTALLER_SPEC.orchestrator.name),
     ),
     credentials: await loadCredentials(directory, sshKeygen, retry.configure),
-    ingress: await loadIngress(directory, inputs, retry.configure),
+    ingress: await loadIngress(directory, publicName, retry.configure),
     checkout: await checkoutOf(checkout, checkoutCommit),
   }
 }

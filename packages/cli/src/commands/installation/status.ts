@@ -1,6 +1,6 @@
 import { INSTALLER_SPEC } from '../../installation/spec'
 import { describeHost } from './host'
-import { domainFacts } from './domain'
+import { registrationFacts } from './registration'
 import { stateOf, type JournalStep } from '../../journal/step'
 import { unsettled } from '../../installation/journal/facts'
 import { listInstallations } from '../../installation/state'
@@ -34,7 +34,7 @@ export async function status(selector: InstallationSelector, reporter: Reporter)
   const started = await startup.read(entry.directory, retry)
   const open = unsettled(evidence)
   const startOpen = unsettled(started)
-  const domain = record.host.kind === 'aws' ? await domainFacts(entry.directory, retry) : []
+  const registration = record.host.kind === 'aws' ? await registrationFacts(entry.directory, retry) : []
   reporter.facts([
     ['Installation', record.name],
     ['Host', describeHost(record.host)],
@@ -58,7 +58,7 @@ export async function status(selector: InstallationSelector, reporter: Reporter)
     ['Unresolved steps', describeSteps(open)],
     ['Startup steps', String(started?.steps.length ?? 0)],
     ['Unresolved startup steps', describeSteps(startOpen)],
-    ...domain,
+    ...registration,
   ])
   if (open.length + startOpen.length > 0) {
     reporter.notice(

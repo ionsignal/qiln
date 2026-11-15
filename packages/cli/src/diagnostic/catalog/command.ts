@@ -26,6 +26,17 @@ export const commandDiagnostics = Object.freeze({
     'The local host monorepo remains the canonical development working copy.',
     'Pass the Qiln Git checkout root with --source.',
   ),
+  LOCAL_OPTION_REQUIRED: entry(
+    'A local-target option is required',
+    'A local installation is configured from the operator’s own checkout and public name, which Qiln neither infers nor stores, so nothing was observed or changed.',
+    'Supply the named option with --local: --source with the Qiln Git checkout root, and --domain with the public DNS name that the root edge forwards to the orchestrator.',
+  ),
+  LOCAL_OPTION_NOT_SUPPORTED: entry(
+    'Option is not supported for an AWS target',
+    'An AWS target manages its own checkout and registers its own public name, so --source and --domain belong only to the local target, and nothing was observed or changed.',
+    'Remove the option from the command.',
+    'Use --local to configure the installation on this machine.',
+  ),
   SPLIT_IMAGE_PAIR_REQUIRED: entry(
     'Both split-image artifacts are required',
     'The image fingerprint and multipart import require the ordered metadata and rootfs pair.',

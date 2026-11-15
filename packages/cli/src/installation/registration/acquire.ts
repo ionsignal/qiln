@@ -1,29 +1,29 @@
 import { INSTALLER_SPEC } from '../spec'
 import { csrOf } from './csr'
-import { planOf, type DomainPlan } from './plan'
+import { planOf, type RegistrationPlan } from './plan'
 import { matches, readChain, type Chain, type Window } from './cert'
 import { checkCancellation } from '../../terminal/prompts'
 import { InstallerError, type DiagnosticFact } from '../../diagnostic/error'
 import * as records from './records'
 import type { KeyObject } from 'node:crypto'
 import type { Dir } from '../../state/files'
-import type { DomainAccess } from '../target/types'
+import type { RegistrationAccess } from '../target/types'
 
-export type Acquisition = Extract<DomainPlan, { kind: 'acquire' }>
-export type DomainStep = records.Attempt['kind']
+export type Acquisition = Extract<RegistrationPlan, { kind: 'acquire' }>
+export type RegistrationStep = records.Attempt['kind']
 
 /**
  * `working` follows the start of a step, and `verified` follows only once the
  * reply was judged and persisted. A failed step emits nothing further, so the
  * failure diagnostic owns what the operator sees.
  */
-export interface DomainProgress {
+export interface RegistrationProgress {
   phase: 'working' | 'verified'
-  step: DomainStep
+  step: RegistrationStep
 }
 
-export interface Domain {
-  record: records.DomainRecord
+export interface Acquired {
+  record: records.RegistrationRecord
   chain: Chain
 }
 
@@ -31,17 +31,17 @@ export interface Domain {
  * The command owns presentation and consent. `approve` resolves only when the
  * operator approved the plan that `show` just displayed.
  */
-export interface DomainHooks {
+export interface RegistrationHooks {
   show(plan: Acquisition): void
   approve(plan: Acquisition): Promise<void>
-  progress(event: DomainProgress): void
+  progress(event: RegistrationProgress): void
 }
 
-export interface DomainContext {
+export interface RegistrationContext {
   directory: Dir
   name: string
-  access: DomainAccess
-  hooks: DomainHooks
+  access: RegistrationAccess
+  hooks: RegistrationHooks
   retry: string
   signal: AbortSignal
 }
@@ -49,8 +49,8 @@ export interface DomainContext {
 /**
  * The steps one approved plan allows, in the order they run.
  */
-export function actionsOf(plan: Acquisition): DomainStep[] {
-  const actions: DomainStep[] = []
+export function actionsOf(plan: Acquisition): RegistrationStep[] {
+  const actions: RegistrationStep[] = []
   if (plan.register) {
     actions.push('register')
   }
@@ -97,7 +97,7 @@ function requireChain(issued: Window & { chain: string }, key: KeyObject, base: 
  * The evidence as retained on disk. Acquisition always ends with a certificate,
  * so a record without one at this point is invalid.
  */
-async function load(directory: Dir, retry: string): Promise<Domain> {
+async function load(directory: Dir, retry: string): Promise<Acquired> {
   const evidence = await records.read(directory, retry)
   if (evidence === null || evidence.chain === null) {
     throw invalidState(retry)
@@ -113,7 +113,7 @@ async function load(directory: Dir, retry: string): Promise<Domain> {
  * marker stays as evidence. The address may differ from the retained one,
  * because a host replacement moves it.
  */
-async function register(context: DomainContext, previous: records.DomainRecord | null): Promise<void> {
+async function register(context: RegistrationContext, previous: records.RegistrationRecord | null): Promise<void> {
   const { directory, name, access, hooks, retry, signal } = context
   hooks.progress({ phase: 'working', step: 'register' })
   await records.markAttempt(directory, 'register', retry)
@@ -152,7 +152,7 @@ async function register(context: DomainContext, previous: records.DomainRecord |
  * the CSR is rebuilt every time because ECDSA signatures are not deterministic
  * and the service recognizes the public key, not the CSR bytes.
  */
-async function issue(context: DomainContext): Promise<void> {
+async function issue(context: RegistrationContext): Promise<void> {
   const { directory, access, hooks, retry, signal } = context
   const evidence = await records.read(directory, retry)
   if (evidence === null) {
@@ -172,16 +172,16 @@ async function issue(context: DomainContext): Promise<void> {
 }
 
 /**
- * Brings the retained domain evidence of one installation up to date, under the
- * installation lock held by the command. The plan comes from retained evidence
- * alone, and one default-no approval covers it. Each step marks its attempt
- * before dispatch and clears the marker only after the reply was judged and
- * persisted, so an interrupted or uncertain attempt stays visible as evidence.
- * Nothing here resumes or replays it: the service is idempotent, and the
- * operator runs configure again. Errors propagate unwrapped, so unconfirmed
+ * Brings the retained registration evidence of one installation up to date,
+ * under the installation lock held by the command. The plan comes from retained
+ * evidence alone, and one default-no approval covers it. Each step marks its
+ * attempt before dispatch and clears the marker only after the reply was judged
+ * and persisted, so an interrupted or uncertain attempt stays visible as
+ * evidence. Nothing here resumes or replays it: the service is idempotent, and
+ * the operator runs configure again. Errors propagate unwrapped, so unconfirmed
  * child termination keeps its lock.
  */
-export async function acquire(context: DomainContext): Promise<Domain> {
+export async function acquire(context: RegistrationContext): Promise<Acquired> {
   const { directory, access, hooks, retry } = context
   const evidence = await records.read(directory, retry)
   const plan = planOf(evidence, access.subject, new Date(), retry)

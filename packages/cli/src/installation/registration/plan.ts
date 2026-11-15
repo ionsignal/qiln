@@ -15,7 +15,7 @@ export interface Subject {
  * `register` makes the service record the allocation and its address, and
  * `issue` requests a certificate for the retained key.
  */
-export type DomainPlan = { kind: 'current' } | { kind: 'acquire'; register: boolean; issue: boolean }
+export type RegistrationPlan = { kind: 'current' } | { kind: 'acquire'; register: boolean; issue: boolean }
 
 /**
  * Pure decision from retained evidence alone. Without evidence nothing exists,
@@ -25,7 +25,7 @@ export type DomainPlan = { kind: 'current' } | { kind: 'acquire'; register: bool
  * operator is never replaced, because a second allocation would strand the
  * first.
  */
-export function planOf(evidence: Evidence | null, subject: Subject, now: Date, retry: string): DomainPlan {
+export function planOf(evidence: Evidence | null, subject: Subject, now: Date, retry: string): RegistrationPlan {
   if (evidence === null) {
     return { kind: 'acquire', register: true, issue: true }
   }
