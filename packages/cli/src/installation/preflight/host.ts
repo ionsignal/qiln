@@ -112,24 +112,52 @@ export async function requireTool(name: RequiredTool, retry: string): Promise<st
   return await tools.require(tool, retry)
 }
 
+function packageQueryFailure(observed: string, retry: string): InstallerError {
+  return new InstallerError({
+    code: 'PACKAGE_QUERY_FAILED',
+    facts: [['Observed', observed]],
+    retry,
+  })
+}
+
 const deb = {
-  async package(dpkgQuery: string, name: string, retry: string): Promise<InstalledPackage | null> {
-    const result = await runProcess(dpkgQuery, ['-W', '-f=${binary:Package}\t${db:Status-Abbrev}\t${Version}\n', name])
+  /**
+   * Selection, state, and error flag are separate dpkg fields. A hold is an
+   * operator choice, not an incomplete installation, so it is accepted beside a
+   * normal install selection. Null means the package is genuinely absent. Any
+   * other state is refused instead of being reported as missing.
+   */
+  async installed(dpkgQuery: string, name: string, retry: string): Promise<InstalledPackage | null> {
+    const result = await runProcess(dpkgQuery, [
+      '-W',
+      '-f=${binary:Package}\t${db:Status-Want}\t${db:Status-Status}\t${db:Status-Eflag}\t${Version}\n',
+      name,
+    ])
     if (result.exitCode === 1) {
       return null
     }
     if (result.exitCode !== 0) {
-      throw new InstallerError({
-        code: 'PACKAGE_QUERY_FAILED',
-        facts: [
-          ['Observed', `dpkg-query returned exit code ${result.exitCode ?? 'unknown'} while inspecting '${name}'.`],
-        ],
+      throw packageQueryFailure(
+        `dpkg-query returned exit code ${result.exitCode ?? 'unknown'} while inspecting '${name}'.`,
         retry,
-      })
+      )
     }
-    const [packageName, status, version] = result.stdout.trim().split('\t')
-    if (!packageName || status !== 'ii ' || !version) {
+    const [record, ...extra] = result.stdout.trim().split('\n')
+    const fields = record.split('\t')
+    if (extra.length > 0 || fields.length !== 5) {
+      throw packageQueryFailure(`dpkg-query returned an unrecognized record while inspecting '${name}'.`, retry)
+    }
+    const [packageName, selection, state, flag, version] = fields
+    if (state === 'not-installed' || state === 'config-files') {
       return null
+    }
+    const usable =
+      state === 'installed' && flag === 'ok' && (selection === 'install' || selection === 'hold') && version !== ''
+    if (!usable) {
+      throw packageQueryFailure(
+        `Package '${name}' reports selection '${selection}', state '${state}', and error flag '${flag}'.`,
+        retry,
+      )
     }
     return {
       name: packageName,
@@ -171,7 +199,7 @@ const deb = {
 
   async incus(dpkg: string, dpkgQuery: string, retry: string): Promise<InstalledPackage> {
     const candidates = (
-      await Promise.all([deb.package(dpkgQuery, 'incus', retry), deb.package(dpkgQuery, 'incus-base', retry)])
+      await Promise.all([deb.installed(dpkgQuery, 'incus', retry), deb.installed(dpkgQuery, 'incus-base', retry)])
     ).filter((candidate): candidate is InstalledPackage => candidate !== null)
     if (candidates.length === 0) {
       throw new InstallerError({
