@@ -20,12 +20,12 @@
     "ssh2": "1.17.0"
   },
   "peerDependencies": {
-    "drizzle-orm": "1.0.0-rc.4"
+    "drizzle-orm": "1.0.0-rc.5"
   },
   "devDependencies": {
     "@types/node": "22.20.4",
     "@types/ssh2": "1.15.6",
-    "drizzle-orm": "1.0.0-rc.4",
+    "drizzle-orm": "1.0.0-rc.5",
     "typescript": "6.0.3",
     "vite": "8.3.8",
     "vite-plugin-dts": "5.1.2"

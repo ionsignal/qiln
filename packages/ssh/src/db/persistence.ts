@@ -31,6 +31,7 @@ export type SshUsersTable = PgTableWithColumns<{
     isAdmin: UserAdminColumn
   }
   dialect: 'pg'
+  isAlias: false
 }>
 
 export type SshPersistenceTables = SshTables &
