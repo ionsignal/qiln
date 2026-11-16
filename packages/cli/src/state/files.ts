@@ -5,11 +5,11 @@ import { tmpdir } from 'node:os'
 import { basename, dirname, join } from 'node:path'
 import { isErrorCode } from '../guards'
 
+const COPY_BUFFER_SIZE = 1_024 * 1_024
 const FILE_FLAGS = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
 const DIRECTORY_FLAGS = constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW | constants.O_NONBLOCK
 const INSPECT_FLAGS = constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
 const TEMP_FLAGS = constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW
-const COPY_BUFFER_SIZE = 1_024 * 1_024
 
 export type FileKind = 'file' | 'directory'
 export type FileValidationKind = 'type' | 'owner' | 'mode' | 'size' | 'changed'
