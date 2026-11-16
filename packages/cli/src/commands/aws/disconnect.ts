@@ -9,7 +9,7 @@ import { withAwsOperation } from '../../aws/root'
 import { requireAwsHost } from '../../aws/host'
 import { resolveAwsName, type AwsCommandOptions } from '../../input'
 import { checkCancellation, Prompts, withCancellation } from '../../terminal/prompts'
-import { pendingFailure, reportPermissionMetadata, requireSettledDeployments } from './shared'
+import { pendingFailure, reportAuthority, requireSettledDeployments } from './shared'
 import * as connections from '../../aws/connections'
 import type { Reporter, TableCell } from '../../terminal/reporter'
 
@@ -40,7 +40,7 @@ export async function disconnect(options: AwsCommandOptions, reporter: Reporter)
       reporter.section('AWS connection')
       reporter.facts(recorded)
       if (connection) {
-        reportPermissionMetadata(reporter, connection)
+        reportAuthority(reporter, connection)
       }
       if (pending) {
         reporter.section('Pending IAM evidence')
@@ -65,7 +65,7 @@ export async function disconnect(options: AwsCommandOptions, reporter: Reporter)
           'Qiln never deletes these resources. They are retained by design and keep incurring charges until they are deleted outside Qiln. Once this connection is removed, Qiln can no longer authenticate to observe them, so keep the deployment ID and these identifiers.',
         )
       }
-      if (connection?.managed || pending) {
+      if (connection?.authority.kind === 'created' || pending) {
         reporter.notice(
           'Local removal discards resource bindings, approval, and recovery evidence. Inspect or retain that evidence before approving removal.',
         )

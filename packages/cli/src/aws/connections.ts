@@ -11,7 +11,7 @@ import { isPending, type Pending } from './iam/types'
 import { encodeRecord, sameJson } from '../json'
 import { accept } from './primitives'
 import { inspectChild, openChildDir, readChild, writeChild, type Dir } from '../state/files'
-import { connectionSchema, validName, type AwsConnection, type PolicyBinding } from './types'
+import { connectionSchema, validName, type AwsConnection, type ConnectionAuthority, type PolicyBinding } from './types'
 import { POLICY_KEYS, bindingEntries, type PolicyBindings, type PolicyKey } from './permission/keys'
 
 export async function names(directory: Dir): Promise<string[]> {
@@ -89,6 +89,21 @@ function keepsBindings(previous: PolicyBindings<PolicyBinding>, next: PolicyBind
   })
 }
 
+/**
+ * The authority kind and its deployment region never change after the first save.
+ */
+function keepsAuthority(previous: ConnectionAuthority, next: ConnectionAuthority): boolean {
+  if (previous.kind === 'created') {
+    return (
+      next.kind === 'created' &&
+      previous.creationId === next.creationId &&
+      previous.deploymentRegion === next.deploymentRegion &&
+      keepsBindings(previous.policies, next.policies)
+    )
+  }
+  return next.kind === 'existing' && previous.deploymentRegion === next.deploymentRegion
+}
+
 function requireBindings(connection: AwsConnection | null, operation: Pending): void {
   if (connection === null) {
     if (operation.kind === 'maintain') {
@@ -98,25 +113,25 @@ function requireBindings(connection: AwsConnection | null, operation: Pending): 
     }
     return
   }
-  const managed = connection.managed
+  const authority = connection.authority
   if (
     operation.operator === null ||
     !sameIdentity(connection.identity, operation.operator) ||
-    managed === null ||
-    managed.creationId !== operation.creationId ||
-    managed.deploymentRegion !== operation.region
+    authority.kind !== 'created' ||
+    authority.creationId !== operation.creationId ||
+    authority.deploymentRegion !== operation.region
   ) {
     throw new InstallerError({
       code: 'AWS_PERMISSION_STATE_INVALID',
     })
   }
   const approved = operation.approval?.inspection.before?.policies
-  if (approved && POLICY_KEYS.some(key => contradicts(managed.policies, key, approved[key].policy))) {
+  if (approved && POLICY_KEYS.some(key => contradicts(authority.policies, key, approved[key].policy))) {
     throw new InstallerError({
       code: 'AWS_PERMISSION_STATE_INVALID',
     })
   }
-  if (POLICY_KEYS.some(key => contradicts(managed.policies, key, operation.policies[key]))) {
+  if (POLICY_KEYS.some(key => contradicts(authority.policies, key, operation.policies[key]))) {
     throw new InstallerError({
       code: 'AWS_PERMISSION_STATE_INVALID',
     })
@@ -126,10 +141,10 @@ function requireBindings(connection: AwsConnection | null, operation: Pending): 
     (operation.verified === null ||
       POLICY_KEYS.some(key => {
         const policy = operation.policies[key]
-        const bound = managed.policies[key]
+        const bound = authority.policies[key]
         return policy === null || bound === undefined || !sameBinding(bound, policy)
       }) ||
-      !sameJson(managed.verified, operation.verified))
+      !sameJson(authority.verified, operation.verified))
   ) {
     throw new InstallerError({
       code: 'AWS_PERMISSION_STATE_INVALID',
@@ -236,12 +251,7 @@ export async function save(directory: Dir, connection: AwsConnection): Promise<v
     previous &&
     (!sameIdentity(previous.identity, connection.identity) ||
       previous.createdAt !== connection.createdAt ||
-      (previous.managed === null) !== (connection.managed === null) ||
-      (previous.managed !== null &&
-        connection.managed !== null &&
-        (previous.managed.creationId !== connection.managed.creationId ||
-          previous.managed.deploymentRegion !== connection.managed.deploymentRegion ||
-          !keepsBindings(previous.managed.policies, connection.managed.policies))))
+      !keepsAuthority(previous.authority, connection.authority))
   ) {
     throw new InstallerError({
       code: 'AWS_IDENTITY_MISMATCH',

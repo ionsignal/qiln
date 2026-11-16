@@ -7,7 +7,7 @@ import { terminationConfirmed } from '../../aws/recovery'
 import { Bootstrap } from '../../aws/iam/bootstrap'
 import { operatorName } from '../../aws/operator'
 import { modesOf, policyLabel, reportPermissionChange } from './review'
-import { currentRequirement, reviewRequired } from '../../aws/permission/spec'
+import { reviewRequired } from '../../aws/permission/spec'
 import { requireIdentity } from '../../aws/auth/identity'
 import { removeAuth, Session } from '../../aws/auth/session'
 import { openExistingConnections } from '../../aws/root'
@@ -16,7 +16,7 @@ import { withConfirmedOperation } from '../../aws/operation'
 import { checkCancellation, Prompts, withCancellation } from '../../terminal/prompts'
 import { resolveAwsName, validateAwsRegion, type AwsCommandOptions } from '../../input'
 import { ready, type MutationProgress, type Proposal, type Readiness } from '../../aws/iam/types'
-import { authenticate, failAuthentication, reportAuthentication, requireAvailable } from './shared'
+import { authenticate, failAuthentication, reportAuthentication, reportAuthority, requireAvailable } from './shared'
 import * as awsLogin from '../../aws/auth/login'
 import * as tools from '../../aws/tools'
 import * as connections from '../../aws/connections'
@@ -26,7 +26,7 @@ import type { AwsAuthentication, AwsConnection, LoginFlow } from '../../aws/type
 
 const WRONG_IDENTITY_CODES = ['AWS_ROOT_REFUSED', 'AWS_IDENTITY_MISMATCH']
 
-type PermissionOutcome = 'not-applicable' | 'recorded' | 'declined' | 'changed' | 'unchanged'
+type PermissionOutcome = 'existing' | 'recorded' | 'declined' | 'changed' | 'unchanged'
 
 async function inspectConnection(name: string, reporter: Reporter): Promise<boolean> {
   const store = await openExistingConnections()
@@ -282,10 +282,9 @@ async function maintain(
   reporter: Reporter,
 ): Promise<PermissionOutcome> {
   reporter.section('Permission review')
-  const requirement = currentRequirement(saved)
-  if (!requirement) {
-    reporter.info('This connection is authentication-only. No Qiln-managed IAM ownership is inferred from its name.')
-    return 'not-applicable'
+  if (saved.authority.kind === 'existing') {
+    reportAuthority(reporter, saved)
+    return 'existing'
   }
   if (!reviewRequired(saved)) {
     reporter.info('Recorded metadata matches current requirements; live IAM was not freshly inspected.')
@@ -361,8 +360,14 @@ async function connectOperator(
 ): Promise<AwsConnection> {
   await requireAvailable(directory)
   const saved = await connections.read(directory, name)
+  if (saved === null) {
+    reporter.info('The deployment region is fixed for this connection and is also the initial default login region.')
+  }
   const region = validateAwsRegion(
-    await prompts.text('Default AWS region', saved?.region ?? AWS_SPEC.defaultRegion),
+    await prompts.text(
+      saved === null ? 'Deployment region (fixed once created)' : 'Default AWS region',
+      saved?.region ?? AWS_SPEC.defaultRegion,
+    ),
   )
   const flow = await selectFlow(prompts)
   checkCancellation(signal)
@@ -381,7 +386,7 @@ async function connectOperator(
       version: AWS_RECORD_VERSION.connection,
       identity: authentication.identity,
       createdAt: saved?.createdAt ?? new Date().toISOString(),
-      managed: saved?.managed ?? null,
+      authority: saved?.authority ?? { kind: 'existing', deploymentRegion: region },
     }
     await connections.save(directory, connection)
     const persisted = await connections.read(directory, name)
@@ -588,8 +593,8 @@ export async function connect(options: AwsCommandOptions, reporter: Reporter): P
     case 'recorded':
       reporter.info('Authentication is saved. Matching last-verified metadata is retained; live IAM was not freshly inspected.')
       break
-    case 'not-applicable':
-      reporter.info('The existing IAM user remains an authentication-only connection. IAM configuration was not modified.')
+    case 'existing':
+      reporter.info('Authentication and the deployment region are saved. IAM was not inspected or modified, and the permissions of this existing IAM user are not verified by Qiln.')
       break
   }
   reporter.info(

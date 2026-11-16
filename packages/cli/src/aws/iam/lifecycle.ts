@@ -35,7 +35,8 @@ async function begin(directory: Dir, name: string, region: string, saved: AwsCon
       code: 'AWS_BOOTSTRAP_CONFLICT',
     })
   }
-  if (saved !== null && saved.managed === null) {
+  const authority = saved?.authority ?? null
+  if (authority !== null && authority.kind !== 'created') {
     return invalidPermission()
   }
   const id = randomUUID()
@@ -46,7 +47,7 @@ async function begin(directory: Dir, name: string, region: string, saved: AwsCon
     version: AWS_RECORD_VERSION.pending,
     kind: saved === null ? 'onboard' : 'maintain',
     accountId: saved?.identity.accountId ?? null,
-    creationId: saved?.managed?.creationId ?? id,
+    creationId: authority?.creationId ?? id,
     operator: saved === null ? null : { ...saved.identity },
     policies: policyMap(() => null),
     approval: null,
@@ -67,10 +68,7 @@ export async function onboard(directory: Dir, name: string, region: string): Pro
 }
 
 export async function maintain(directory: Dir, saved: AwsConnection): Promise<Pending> {
-  if (!saved.managed) {
-    return invalidPermission()
-  }
-  return await begin(directory, saved.name, saved.managed.deploymentRegion, saved)
+  return await begin(directory, saved.name, saved.authority.deploymentRegion, saved)
 }
 
 export async function cleanRoot(directory: Dir, operationId: string): Promise<void> {
@@ -136,13 +134,15 @@ export async function publish(directory: Dir, record: Pending): Promise<AwsConne
     return invalidPermission()
   }
   const saved = await connections.read(directory, record.name)
+  const prior = saved?.authority
   if (
     record.kind === 'maintain' &&
     (!saved ||
+      prior?.kind !== 'created' ||
       !sameIdentity(saved.identity, record.operator) ||
-      saved.managed?.creationId !== record.creationId ||
-      saved.managed.deploymentRegion !== record.region ||
-      !keepsBindings(saved.managed.policies, record.policies))
+      prior.creationId !== record.creationId ||
+      prior.deploymentRegion !== record.region ||
+      !keepsBindings(prior.policies, record.policies))
   ) {
     return invalidPermission()
   }
@@ -152,7 +152,8 @@ export async function publish(directory: Dir, record: Pending): Promise<AwsConne
     region: saved?.region ?? record.region,
     identity: { ...record.operator },
     createdAt: saved?.createdAt ?? record.startedAt,
-    managed: {
+    authority: {
+      kind: 'created',
       creationId: record.creationId,
       deploymentRegion: record.region,
       policies: bindings(record.policies),
@@ -181,16 +182,18 @@ export async function removePending(directory: Dir, record: Pending): Promise<vo
   }
   if (record.approval !== null) {
     const saved = await connections.read(directory, record.name)
+    const authority = saved?.authority
     if (
       record.failureCode !== null ||
       !record.verified ||
       !record.operator ||
       !saved ||
+      authority?.kind !== 'created' ||
       !sameIdentity(saved.identity, record.operator) ||
-      saved.managed?.creationId !== record.creationId ||
-      saved.managed.deploymentRegion !== record.region ||
-      !sameJson(saved.managed.policies, bindings(record.policies)) ||
-      !sameJson(saved.managed.verified, record.verified)
+      authority.creationId !== record.creationId ||
+      authority.deploymentRegion !== record.region ||
+      !sameJson(authority.policies, bindings(record.policies)) ||
+      !sameJson(authority.verified, record.verified)
     ) {
       return invalidPermission()
     }

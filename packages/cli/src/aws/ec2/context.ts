@@ -69,11 +69,11 @@ function requireAuthority(record: Deployment, request: DeploymentRequest): void 
 export async function authorizePreparation(signal: AbortSignal): Promise<Authority> {
   const { name, directory } = await locate(notAttempted)
   const connection = await connections.read(directory, name)
-  if (!connection?.managed) {
+  if (!connection) {
     return notAttempted()
   }
   return {
-    region: connection.managed.deploymentRegion,
+    region: connection.authority.deploymentRegion,
     credentials: await authenticate(connection.region, connection.identity, signal, notAttempted),
   }
 }

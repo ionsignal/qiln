@@ -73,21 +73,29 @@ export const permissionMetadataSchema = z.strictObject({
   verifiedAt: timestamp,
 })
 
-export const managedOperatorSchema = z
-  .strictObject({
-    creationId: operationId,
-    deploymentRegion: regionSchema,
-    policies: policyBindingsSchemaOf(policyBindingSchema),
-    verified: permissionMetadataSchema,
-  })
-  .refine(
-    ({ policies, verified }) => enrolledKeys(policies).join() === enrolledKeys(verified.policies).join(),
-    'Expected the verification to cover the enrolled policies.',
-  )
+export const managedAuthoritySchema = z.strictObject({
+  kind: z.literal('created'),
+  creationId: operationId,
+  deploymentRegion: regionSchema,
+  policies: policyBindingsSchemaOf(policyBindingSchema),
+  verified: permissionMetadataSchema,
+})
 
 /**
- * The ARN checks apply only to managed connections, so an unmanaged connection
- * keeps its identity unchecked here.
+ * An existing IAM user is bound to its deployment region only. Qiln neither
+ * verifies its permissions nor makes IAM calls for it, so AWS enforces
+ * whatever the user's own policies allow.
+ */
+const existingAuthoritySchema = z.strictObject({
+  kind: z.literal('existing'),
+  deploymentRegion: regionSchema,
+})
+
+export const authoritySchema = z.discriminatedUnion('kind', [managedAuthoritySchema, existingAuthoritySchema])
+
+/**
+ * The ARN checks apply only to created authority, so an existing user keeps
+ * its identity as AWS reported it.
  */
 export const connectionSchema = z
   .strictObject({
@@ -96,20 +104,26 @@ export const connectionSchema = z
     region: regionSchema,
     identity: identitySchema,
     createdAt: timestamp,
-    managed: managedOperatorSchema.nullable(),
+    authority: authoritySchema,
   })
-  .refine(({ name, identity, managed }) => {
-    if (managed === null) {
+  .refine(({ name, identity, authority }) => {
+    if (authority.kind !== 'created') {
       return true
     }
     const operatorName = `qiln-${name}`
     return (
       identity.arn === `arn:aws:iam::${identity.accountId}:user/qiln/operators/${operatorName}` &&
-      bindingEntries(managed.policies).every(
+      bindingEntries(authority.policies).every(
         ([key, policy]) => policy.arn === `arn:aws:iam::${identity.accountId}:policy${POLICY_PATH}${operatorName}-${key}`,
       )
     )
   }, 'Expected Qiln-owned operator and policy ARNs.')
+  .refine(
+    ({ authority }) =>
+      authority.kind !== 'created' ||
+      enrolledKeys(authority.policies).join() === enrolledKeys(authority.verified.policies).join(),
+    'Expected the verification to cover the enrolled policies.',
+  )
 
 export type AwsIdentity = z.infer<typeof identitySchema>
 export type AwsAuthentication = z.infer<typeof authenticationSchema>
@@ -124,8 +138,10 @@ export type PolicyVerification = z.infer<typeof policyVerificationSchema>
 export type PermissionMetadata = z.infer<typeof permissionMetadataSchema>
 
 /**
- * `deploymentRegion` is the immutable concrete deployment target. It is
- * independent of the editable login default in `AwsConnection.region`.
+ * `deploymentRegion` is the immutable concrete deployment target of either
+ * kind. It is independent of the editable login default in
+ * `AwsConnection.region`.
  */
-export type ManagedOperator = z.infer<typeof managedOperatorSchema>
+export type ManagedAuthority = z.infer<typeof managedAuthoritySchema>
+export type ConnectionAuthority = z.infer<typeof authoritySchema>
 export type AwsConnection = z.infer<typeof connectionSchema>

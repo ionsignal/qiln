@@ -21,6 +21,7 @@ import { removalOutcome } from '../../../aws/deployment/observe/outcome'
 import { refusals } from '../../../aws/deployment/ledger/step'
 import { prepared, unsettled, zfsFacts } from '../../../aws/deployment/zfs/facts'
 import { released, resourceId, resources, retained, unreleased, type Resource } from '../../../aws/deployment/topology'
+import { AUTHORITY_TEXT } from '../shared'
 import type { Stage } from '../../../aws/deployment/handoff/stage'
 import type { IncusRecord } from '../../../aws/deployment/incus/types'
 import type { ZfsRecord } from '../../../aws/deployment/zfs/types'
@@ -190,6 +191,7 @@ export function reportDeployment(reporter: Reporter, record: Deployment): void {
     ['Connection', record.connection],
     ['Account', record.binding.accountId],
     ['Operator', record.binding.operator.arn],
+    ['Authority', AUTHORITY_TEXT[record.binding.authority.kind]],
     ['Deployment region', record.binding.region],
     ['Approved CIDR', record.approval.cidr],
     ['Zones', record.approval.zones.map(zone => zone.name).join(', ')],

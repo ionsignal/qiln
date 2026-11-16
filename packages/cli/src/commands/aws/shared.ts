@@ -16,9 +16,16 @@ import * as deployments from '../../aws/deployment/records'
 import * as lineage from '../../aws/deployment/lineage/zfs'
 import type { Pending } from '../../aws/iam/types'
 import type { Deployment } from '../../aws/deployment/types'
-import type { AwsAuthentication, AwsConnection, AwsIdentity } from '../../aws/types'
+import type { AwsAuthentication, AwsConnection, AwsIdentity, ConnectionAuthority } from '../../aws/types'
 import type { Dir } from '../../state/files'
 import type { Reporter } from '../../terminal/reporter'
+
+export type AuthorityKind = ConnectionAuthority['kind']
+
+export const AUTHORITY_TEXT: Record<AuthorityKind, string> = {
+  created: 'Qiln-created operator · reviewed policies, last verified at connect',
+  existing: 'existing IAM user · permissions not verified by Qiln',
+}
 
 export function reportAuthentication(reporter: Reporter, authentication: AwsAuthentication): void {
   reporter.row('verified', 'AWS account', authentication.identity.accountId)
@@ -122,16 +129,22 @@ export async function failAuthentication(directory: Dir, name: string, cause: un
   )
 }
 
-export function reportPermissionMetadata(reporter: Reporter, connection: AwsConnection): void {
-  const managed = connection.managed
-  if (!managed) {
-    reporter.info('This connection is authentication-only. No Qiln-managed IAM ownership is inferred from its name.')
+export function reportAuthority(reporter: Reporter, connection: AwsConnection): void {
+  const { authority } = connection
+  const facts: DiagnosticFact[] = [
+    ['Authority', AUTHORITY_TEXT[authority.kind]],
+    ['Deployment region', authority.deploymentRegion],
+  ]
+  if (authority.kind === 'existing') {
+    reporter.facts(facts)
+    reporter.info(
+      'Qiln makes no IAM calls for this connection. AWS enforces the permissions that you attached, and the ownership-tag fences of the reviewed policy documents hold only if you attached them.',
+    )
     return
   }
-  const verified = managed.verified
-  const facts: DiagnosticFact[] = [['Deployment region', managed.deploymentRegion]]
+  const verified = authority.verified
   for (const key of POLICY_KEYS) {
-    const policy = managed.policies[key]
+    const policy = authority.policies[key]
     facts.push([`${key} policy`, policy === undefined ? 'not enrolled; review required' : `${policy.arn} (ID ${policy.id})`])
   }
   facts.push(['Recorded requirement', String(verified.version)], ['Recorded SHA-256', verified.sha256])

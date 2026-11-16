@@ -36,7 +36,7 @@ export type {
   AwsConnection,
   AwsIdentity,
   LoginFlow,
-  ManagedOperator,
+  ManagedAuthority,
   PermissionMetadata,
   PolicyBinding,
 } from './aws/types'

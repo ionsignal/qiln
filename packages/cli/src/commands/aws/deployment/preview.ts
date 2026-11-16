@@ -1,6 +1,7 @@
 import { AWS_SPEC } from '../../../aws/spec'
 import { deploymentName } from '../../../aws/deployment/volume/alias'
 import { reportApproval } from '../../../terminal/approval'
+import { AUTHORITY_TEXT, type AuthorityKind } from '../shared'
 import type { ImagePin } from '../../../aws/ami'
 import type { AwsIdentity } from '../../../aws/types'
 import type { Reporter } from '../../../terminal/reporter'
@@ -18,6 +19,7 @@ const { compute } = AWS_SPEC
 export interface PreviewTarget {
   alias: string
   identity: AwsIdentity
+  authority: AuthorityKind
   previous: string | null
   retained: string | null
 }
@@ -296,6 +298,7 @@ export function reportProposal(reporter: Reporter, proposal: HostProposal, targe
   reporter.facts([
     ['Account', target.identity.accountId],
     ['Operator', target.identity.arn],
+    ['Authority', AUTHORITY_TEXT[target.authority]],
     [
       'Local alias',
       target.previous === null

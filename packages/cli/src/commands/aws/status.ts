@@ -10,7 +10,7 @@ import {
   failAuthentication,
   pendingFailure,
   reportAuthentication,
-  reportPermissionMetadata,
+  reportAuthority,
 } from './shared'
 import * as connections from '../../aws/connections'
 import type { Reporter } from '../../terminal/reporter'
@@ -56,7 +56,7 @@ export async function status(options: AwsCommandOptions, reporter: Reporter): Pr
         }
         reportAuthentication(reporter, authentication)
         reporter.facts([['Login region', connection.region]])
-        reportPermissionMetadata(reporter, connection)
+        reportAuthority(reporter, connection)
         if (reviewRequired(connection)) {
           reporter.notice('Current permission requirements need a renewed root review. Reconnect to offer that review.')
         }

@@ -82,14 +82,12 @@ async function inspect(
       },
     }
   }
-  if (!connection?.managed) {
+  const authority = connection?.authority
+  if (authority?.kind !== 'created') {
     return invalidPermission()
   }
-  const bound = connection.managed.policies
+  const bound = authority.policies
   const before = await iam.inspect(operatorBinding(record), bound)
-  // A bound policy that is detached is an inconsistency, not something to
-  // silently approve and later report as verified. A key the connection has
-  // not enrolled is already required to be absent from IAM by the inspection.
   if (POLICY_KEYS.some(key => bound[key] !== undefined && !before.policies[key].attached)) {
     throw new InstallerError({
       code: 'AWS_BOOTSTRAP_CONFLICT',

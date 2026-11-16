@@ -93,8 +93,9 @@ function outcomeOf(error: InstallerError): FailureOutcome {
  * `previous` is the immutable ID of the deployment whose alias this one takes
  * over. A `reuse` attaches that deployment's retained data volume by identity,
  * with its original tags, instead of creating a new one; it must come from
- * `previous`. Callers gate on managed permission state first. Deployments bind
- * only the foundation policy, which every managed connection has enrolled.
+ * `previous`. A created operator binds its creation and foundation policy,
+ * which every created connection has enrolled; an existing user binds its
+ * immutable identity alone.
  */
 export function propose(
   connection: AwsConnection,
@@ -114,8 +115,8 @@ export function propose(
       retry: `qiln aws deployment create --name ${connection.name} --alias ${alias}`,
     })
   }
-  const managed = connection.managed
-  if (!managed || plan.region !== managed.deploymentRegion) {
+  const { authority } = connection
+  if (plan.region !== authority.deploymentRegion) {
     return invalidDeployment()
   }
   const id = randomUUID()
@@ -129,9 +130,16 @@ export function propose(
     binding: {
       accountId: connection.identity.accountId,
       operator: { ...connection.identity },
-      creationId: managed.creationId,
-      foundation: { ...managed.policies.foundation },
-      region: managed.deploymentRegion,
+      authority:
+        authority.kind === 'created'
+          ? {
+              kind: 'created',
+              creationId: authority.creationId,
+              foundation: { ...authority.policies.foundation },
+              permission: structuredClone(authority.verified),
+            }
+          : { kind: 'existing' },
+      region: authority.deploymentRegion,
     },
     approval: {
       approvedAt: now,
@@ -141,7 +149,6 @@ export function propose(
       zones: structuredClone(plan.zones),
       ingress: structuredClone(plan.ingress),
       tags: requiredTags(connection.identity.arn, id),
-      permission: structuredClone(managed.verified),
       host: {
         plan: structuredClone(plan),
         keyName: hostKeyName(id),

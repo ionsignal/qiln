@@ -96,27 +96,20 @@ export function reconciliation(prior: PolicyMap<PolicySnapshot> | null, desired:
   return policyMap(key => reconciliationMode(prior?.[key] ?? emptySnapshot(), desired.policies[key]))
 }
 
-export function currentRequirement(connection: AwsConnection): PermissionSpec | null {
-  if (!connection.managed) {
-    return null
-  }
-  return specification(connection.identity.accountId, connection.name)
-}
-
 /**
- * A recorded verification covers only the keys that existed when it was made,
- * so a current key without a binding or verification also requires review.
+ * Only a Qiln-created operator has recorded verification to compare. A recorded
+ * verification covers only the keys that existed when it was made, so a current
+ * key without a binding or verification also requires review.
  */
-export function reviewRequired(connection: AwsConnection): boolean {
-  const desired = currentRequirement(connection)
-  const managed = connection.managed
-  if (desired === null || managed === null) {
+export function reviewRequired({ identity, name, authority }: AwsConnection): boolean {
+  if (authority.kind !== 'created') {
     return false
   }
-  const verified = managed.verified
+  const desired = specification(identity.accountId, name)
+  const { verified } = authority
   return (
     verified.version !== desired.version ||
     verified.sha256 !== desired.sha256 ||
-    POLICY_KEYS.some(key => managed.policies[key] === undefined || verified.policies[key] === undefined)
+    POLICY_KEYS.some(key => authority.policies[key] === undefined || verified.policies[key] === undefined)
   )
 }

@@ -26,12 +26,11 @@ export const awsDeploymentDiagnostics = Object.freeze({
     'Remove the deployment that uses the alias with qiln aws deployment remove, or choose another alias with --alias.',
     'If the newest deployment reserved a retained data volume that it never attached, run qiln aws deployment abandon for it.',
   ),
-  AWS_DEPLOYMENT_PERMISSION_REQUIRED: entry(
-    'AWS deployment requires current verified permissions',
-    'Creating a deployment requires a Qiln-created operator with enrolled foundation and compute policies and a current recorded verification, and the all-region EC2 authority they grant can be exercised outside Qiln because the deployment record is only a Qiln execution gate.',
+  AWS_DEPLOYMENT_PERMISSION_REVIEW_REQUIRED: entry(
+    'AWS deployment requires a current permission review',
+    'The connection is a Qiln-created operator whose recorded verification predates the current policy requirements or lacks an enrolled policy, and the all-region EC2 authority those policies grant can be exercised outside Qiln because the deployment record is only a Qiln execution gate.',
     'Run qiln aws connect with the same connection name. Connect signs in as root only to review, displays the exact policy changes, and modifies IAM only after you approve those displayed changes.',
     'A connection verified under an earlier requirement needs a policy update before it can create a deployment.',
-    'Arbitrary existing IAM users remain authentication-only and cannot create deployments.',
   ),
   AWS_DEPLOYMENT_IMAGE_NOT_INDEXED: entry(
     'No reviewed AMI is indexed for this region',

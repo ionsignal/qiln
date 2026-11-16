@@ -246,7 +246,6 @@ const approvalSchema = z
     zones: z.array(zoneSchema).min(1).max(AWS_SPEC.deployment.maximumZones),
     ingress: z.array(ingressSchema).min(1),
     tags: tagsSchema,
-    permission: permissionMetadataSchema,
     host: hostIntentSchema,
   })
   .refine(
@@ -259,11 +258,27 @@ const approvalSchema = z
     'Expected zones, ingress, and the host plan to agree.',
   )
 
+/**
+ * The authority the connection held at approval. A created operator binds its
+ * creation, foundation policy, and last verification. An existing user binds
+ * its immutable identity alone, and AWS enforces its permissions.
+ */
+const authorityBindingSchema = z.discriminatedUnion('kind', [
+  z.strictObject({
+    kind: z.literal('created'),
+    creationId: operationId,
+    foundation: policyBindingSchema,
+    permission: permissionMetadataSchema,
+  }),
+  z.strictObject({
+    kind: z.literal('existing'),
+  }),
+])
+
 const deploymentBindingSchema = z.strictObject({
   accountId: accountIdSchema,
   operator: identitySchema,
-  creationId: operationId,
-  foundation: policyBindingSchema,
+  authority: authorityBindingSchema,
   region: regionSchema,
 })
 
@@ -320,10 +335,12 @@ export const deploymentSchema = z
   })
   .refine(({ id, previous, connection, binding, approval }) => {
     const { host } = approval
+    const { authority } = binding
     return (
       binding.operator.accountId === binding.accountId &&
-      binding.operator.arn === operatorArn(binding.accountId, connection) &&
-      binding.foundation.arn === policyArn(binding.accountId, connection, 'foundation') &&
+      (authority.kind !== 'created' ||
+        (binding.operator.arn === operatorArn(binding.accountId, connection) &&
+          authority.foundation.arn === policyArn(binding.accountId, connection, 'foundation'))) &&
       sameJson(approval.approvedBy, binding.operator) &&
       sameJson(approval.tags, requiredTags(binding.operator.arn, id)) &&
       host.keyName === hostKeyName(id) &&

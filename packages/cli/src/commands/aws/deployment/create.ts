@@ -32,27 +32,30 @@ import * as incusLineage from '../../../aws/deployment/lineage/incus'
 import * as lineage from '../../../aws/deployment/lineage/zfs'
 import type { Dir } from '../../../state/files'
 import type { Deployment } from '../../../aws/deployment/types'
-import type { AwsConnection, ManagedOperator } from '../../../aws/types'
+import type { AwsConnection } from '../../../aws/types'
 import type { Reporter } from '../../../terminal/reporter'
 
-function requireCurrentPermissions(connection: AwsConnection): ManagedOperator {
-  const managed = connection.managed
-  if (!managed || reviewRequired(connection)) {
-    const enrolled = managed ? enrolledKeys(managed.policies) : []
-    const missing = POLICY_KEYS.filter(key => !enrolled.includes(key))
-    throw new InstallerError({
-      code: 'AWS_DEPLOYMENT_PERMISSION_REQUIRED',
-      facts: [
-        ['Connection', connection.name],
-        ['Managed operator', managed ? 'qiln-created' : 'authentication-only'],
-        ['Enrolled policies', enrolled.join(', ') || 'none'],
-        ['Missing policies', missing.join(', ') || 'none'],
-        ['Last verification', managed?.verified.verifiedAt ?? 'none recorded'],
-      ],
-      retry: `qiln aws connect --name ${connection.name}`,
-    })
+/**
+ * Only a Qiln-created operator has recorded verification to go stale. An
+ * existing IAM user is used as is, and AWS enforces its permissions.
+ */
+function requireCurrentPermissions(connection: AwsConnection): void {
+  const { authority } = connection
+  if (authority.kind !== 'created' || !reviewRequired(connection)) {
+    return
   }
-  return managed
+  const enrolled = enrolledKeys(authority.policies)
+  const missing = POLICY_KEYS.filter(key => !enrolled.includes(key))
+  throw new InstallerError({
+    code: 'AWS_DEPLOYMENT_PERMISSION_REVIEW_REQUIRED',
+    facts: [
+      ['Connection', connection.name],
+      ['Enrolled policies', enrolled.join(', ') || 'none'],
+      ['Missing policies', missing.join(', ') || 'none'],
+      ['Last verification', authority.verified.verifiedAt],
+    ],
+    retry: `qiln aws connect --name ${connection.name}`,
+  })
 }
 
 /**
@@ -125,13 +128,14 @@ export async function create(options: AwsDeploymentCreateOptions, reporter: Repo
           retry: `qiln aws connect --name ${name}`,
         })
       }
-      const managed = requireCurrentPermissions(connection)
-      const pin = findPin(managed.deploymentRegion)
+      requireCurrentPermissions(connection)
+      const { deploymentRegion } = connection.authority
+      const pin = findPin(deploymentRegion)
       if (pin === null) {
         throw new InstallerError({
           code: 'AWS_DEPLOYMENT_IMAGE_NOT_INDEXED',
           facts: [
-            ['Deployment region', managed.deploymentRegion],
+            ['Deployment region', deploymentRegion],
             ['Reviewed release', AWS_SPEC.compute.image.name],
           ],
         })
@@ -179,7 +183,7 @@ export async function create(options: AwsDeploymentCreateOptions, reporter: Repo
       }
       const discovery = await prepare(session, signal)
       const proposal = evaluate(discovery, {
-        region: managed.deploymentRegion,
+        region: deploymentRegion,
         administrator,
         pin,
         reuse,
@@ -188,6 +192,7 @@ export async function create(options: AwsDeploymentCreateOptions, reporter: Repo
       reportProposal(reporter, proposal, {
         alias: options.alias,
         identity: connection.identity,
+        authority: connection.authority.kind,
         previous: previous?.id ?? null,
         retained,
       })
