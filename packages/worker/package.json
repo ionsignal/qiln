@@ -15,7 +15,7 @@
     }
   },
   "dependencies": {
-    "@nats-io/transport-node": "3.4.0",
+    "@nats-io/transport-node": "3.5.0",
     "@qiln/core": "*",
     "drizzle-orm": "1.0.0-rc.5",
     "postgres": "3.4.9",

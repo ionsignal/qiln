@@ -77,7 +77,7 @@
   },
   "dependencies": {
     "@css-render/vue3-ssr": "0.15.14",
-    "@fastify/autoload": "6.5.1",
+    "@fastify/autoload": "6.6.0",
     "@fastify/compress": "9.3.0",
     "@fastify/cookie": "11.1.5",
     "@fastify/middie": "9.3.6",
@@ -85,13 +85,13 @@
     "@fastify/static": "10.1.11",
     "@fastify/websocket": "11.3.7",
     "@mdi/js": "7.4.47",
-    "@nats-io/transport-node": "3.4.0",
+    "@nats-io/transport-node": "3.5.0",
     "@qiln/core": "*",
     "@qiln/engine": "*",
     "@qiln/ssh": "*",
     "@qiln/worker": "*",
-    "@trpc/client": "11.28.3",
-    "@trpc/server": "11.28.3",
+    "@trpc/client": "11.29.4",
+    "@trpc/server": "11.29.4",
     "@vue-flow/core": "1.48.2",
     "bcrypt": "6.0.0",
     "c12": "4.0.0-rc.4",
@@ -126,7 +126,7 @@
     "rimraf": "6.1.4",
     "tsc-alias": "1.9.10",
     "typescript": "6.0.3",
-    "vitest": "5.1.0",
+    "vitest": "5.1.1",
     "vue-tsc": "3.3.14"
   }
 }

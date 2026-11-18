@@ -20,9 +20,9 @@
     "type:check": "vue-tsc --project tsconfig.source.json"
   },
   "peerDependencies": {
-    "@nats-io/transport-node": "3.4.0",
-    "@trpc/server": "11.28.3",
-    "@trpc/client": "11.28.3",
+    "@nats-io/transport-node": "3.5.0",
+    "@trpc/server": "11.29.4",
+    "@trpc/client": "11.29.4",
     "drizzle-orm": "1.0.0-rc.5",
     "fastify": "5.12.8",
     "fastify-plugin": "6.0.1",
@@ -31,9 +31,9 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
-    "@nats-io/transport-node": "3.4.0",
-    "@trpc/server": "11.28.3",
-    "@trpc/client": "11.28.3",
+    "@nats-io/transport-node": "3.5.0",
+    "@trpc/server": "11.29.4",
+    "@trpc/client": "11.29.4",
     "@types/node": "22.20.4",
     "@vitejs/plugin-vue": "6.0.11",
     "drizzle-orm": "1.0.0-rc.5",
