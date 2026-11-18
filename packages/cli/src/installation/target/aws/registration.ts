@@ -30,7 +30,7 @@ function unexpected(retry: string): InstallerError {
 export function awsRegistration(aws: AwsHost, retry: string): RegistrationAccess {
   async function call(input: Request, signal: AbortSignal): Promise<Result> {
     const session = await aws.session()
-    const reply = await request(AWS_SPEC.children.domain, session.credentialEnvironment(), input, replySchema, signal, {
+    const reply = await request(AWS_SPEC.children.registration, session.credentialEnvironment(), input, replySchema, signal, {
       timeoutMs: requestDeadlineMs(input),
       keepReply: true,
       failure: error =>

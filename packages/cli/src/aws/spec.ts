@@ -16,7 +16,7 @@ export const AWS_SPEC = Object.freeze({
     auth: 'aws.js',
     iam: 'iam.js',
     ec2: 'ec2.js',
-    domain: 'domain.js',
+    registration: 'registration.js',
   }),
   loginTimeoutMs: 15 * 60 * 1_000,
   requestTimeoutMs: 30_000,
